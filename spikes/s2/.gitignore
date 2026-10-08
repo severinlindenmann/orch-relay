@@ -1,0 +1,6 @@
+out/
+.build/
+*.xcodeproj
+.swiftpm/
+DerivedData*/
+App/demo_material.json
