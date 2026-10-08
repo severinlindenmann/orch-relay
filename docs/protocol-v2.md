@@ -64,7 +64,8 @@ What changes:
     secret (epoch 0).
   - v1's MAC is gone: the AEAD tag proves the secret.
   - The fingerprint is a 6-character code bound to a host nonce, the `cert_pending` state is new, and so is
-    the request to the primary device (§8.3, §8.4).
+    the request to the primary device. The primary answers that request with a `PK`-signed challenge that
+    the phone checks against its own keys (§8.3, §8.4).
 - **Refusals.**
   - `not_paired` becomes `not_member`.
   - New codes: `stale_epoch`, `other_person`, `cert_invalid`, `cert_expired`, `already_answered` and
@@ -207,7 +208,7 @@ A signed object travels as `{"o": <object>, "sig": <b64u>}`, with exactly those 
   - the signature.
 - Each kind then has an **exact field set**: an object with an extra or a missing field is refused.
 
-The card (§7.1) is the one exception to this shape: it has two signatures and a sealed part.
+The card (§7.1) is the one exception to this shape: it carries a delegation and a sealed part beside `o` and `sig`.
 
 ### 2.5 Text that a person reads
 
@@ -261,8 +262,11 @@ Every derivation, signature, AEAD associated data, hash and MAC has its own labe
 | `aad_drop_meta` | `orch/v2/drop-meta-aad\|` | AAD | | §10.2 |
 | `sig_device_cert` | `orch/v2/sig/device-cert\|` | signature | `PK` | device certificate |
 | `sig_revocation` | `orch/v2/sig/revocation\|` | signature | `PK` | revocation |
-| `sig_card_wsk` | `orch/v2/sig/card-wsk\|` | signature | `WSK` | card |
-| `sig_card_pk` | `orch/v2/sig/card-pk\|` | signature | owner's `PK` | card |
+| `sig_card_wsk` | `orch/v2/sig/card-wsk\|` | signature | `WSK` | card (every `card_seq`) |
+| `sig_ws_delegation` | `orch/v2/sig/ws-delegation\|` | signature | owner's `PK` | the one-time workspace delegation (§7.1) |
+| `sig_cert_challenge` | `orch/v2/sig/cert-challenge\|` | signature | owner's `PK` | the primary's challenge (§8.4) |
+| `sig_push` | `orch/v2/sig/push\|` | signature | `WSK` | push payload (§9) |
+| `sig_decision` | `orch/v2/sig/decision\|` | signature | `dk_sig` | detached signature of a decision (§13) |
 | `sig_member_list` | `orch/v2/sig/member-list\|` | signature | `WSK` | member list |
 | `sig_wk_grant` | `orch/v2/sig/wk-grant\|` | signature | `WSK` | a `WK_e` sealed to one device |
 | `sig_sk_grant` | `orch/v2/sig/sk-grant\|` | signature | the space owner | an `SK_e` sealed to one device |
@@ -281,7 +285,10 @@ Every derivation, signature, AEAD associated data, hash and MAC has its own labe
 | `h_pin_person` | `orch/v2/pin/person\|` | hash | | `pk_pin` |
 | `h_pin_workspace` | `orch/v2/pin/workspace\|` | hash | | `wsk_pin` |
 | `h_sas` | `orch/v2/sas\|` | hash | | the 6-character pairing code |
+| `h_sas_cert` | `orch/v2/sas-cert\|` | hash | | the 6-character code of the primary's challenge |
 | `h_dek_commit` | `orch/v2/dek-commit\|` | hash | | key commitment for a DEK |
+| `h_card_key_commit` | `orch/v2/card-key-commit\|` | hash | | key commitment for a card key `CK` |
+| `h_drop_parent` | `orch/v2/drop-parent\|` | hash | | a document version's parent link |
 | `h_ws_envelope` | `orch/v2/ws-envelope-hash\|` | hash | | what a co-signature covers |
 | `h_question` | `orch/v2/question\|` | hash | | a question's `content_hash` |
 | `h_assert` | `orch/v2/assert\|` | hash | | WebAuthn assertion challenge |
@@ -303,10 +310,10 @@ wsk_pin    = H("orch/v2/pin/workspace|" || suite || wsk_pub)             (32 byt
 workspace_id, offer_id, rid, object_id, request_id, envelope id: 16 CSPRNG bytes
 ```
 
-**Ids derived from keys.** **DECIDED HERE:** `person_id` and `device_id` are derived from the key, so an id
-cannot be claimed without the key, and every holder can recompute it. The cost is that one device has one
-id in every workspace. v1 avoided this, but v2's relay must enforce a revocation across all of a person's
-workspaces anyway (spec §5.2), and the spec accepts routing ids as a leak to the relay (spec §4).
+**Ids derived from keys.** `person_id` and `device_id` are derived from the key, so an id cannot be claimed
+without the key, and every holder can recompute it. The cost is that one device has one id in every
+workspace. v1 avoided this, but v2's relay must enforce a revocation across all of a person's workspaces
+anyway (spec §5.2). The owner accepted this in review, and spec §4 is being amended to say so.
 `workspace_id` is random (spec §5.3).
 
 **The pairing code (SAS).**
@@ -324,6 +331,13 @@ sas = base32(H("orch/v2/sas|" || suite || workspace_id || offer_id || lp16(dk_si
 - **DECIDED HERE:** the code binds a host nonce. A plain `H(pub)[…6 chars]` (v1's fingerprint idea,
   shortened to the spec's 6 characters) could be ground in seconds by anyone who saw the honest device's
   key. Vectors: `bridge.sas`, `host_cases.pair_first_time`, `pair_answers.pending_accepted_shows_the_code`.
+- This code protects the link against whoever else holds it. It cannot protect against the **host**,
+  which chooses `sas_nonce`. That is why the primary's confirmation in `cert_pending` uses a second code,
+  over a challenge that the primary signs with a nonce of its own (§8.4):
+
+  ```
+  cert_code = base32(H("orch/v2/sas-cert|" || suite || cj(challenge.o)))[0:6]
+  ```
 
 ## 5. Symmetric constructions and sealing
 
@@ -344,7 +358,7 @@ the salt in its header (§8.2). A sealer MUST draw the salt freshly for every se
 
 | Key | Bytes | Made by | Distributed as | Used through |
 |---|---|---|---|---|
-| `PK` (person) | suite signing key | primary device, once | its public half in the directory account; `pk_pin` in pairing links | signs certificates, revocations, cards |
+| `PK` (person) | suite signing key | primary device, once | its public half in the directory account; `pk_pin` in pairing links | signs certificates, revocations, workspace delegations, cert challenges |
 | `dk_sig`, `dk_kx` (device) | suite keys | each device | the certificate (§6.1) | requests, co-signatures, relay login / sealed-to |
 | `WSK` (workspace) | suite signing key | the host, at workspace creation | the card; `wsk_pin` in pairing links | responses, member lists, grants, claims, ws envelopes, publish |
 | `WXK` (workspace exchange) | suite kx key, versioned | the host, rotated with the 90-day epoch | the card (`wxk_pub`, `wxk_version`) | ws→ws bodies, Drop wraps to the workspace |
@@ -394,7 +408,7 @@ public keys, as HPKE's `kem_context` does. A wrong purpose, recipient, object, e
 
 Sealing authenticates nothing about the sender (HPKE base mode). Wherever the sender matters, the sealed
 blob sits inside something the sender signs: WK grants (§7.3), cert requests (§8.4), ws envelopes (§11),
-and Drop descriptors with their DEK commitment (§10.4).
+Drop descriptors with their DEK commitment (§10.4), and cards with their CK commitment (§7.1).
 
 ### 5.4 Sealed device labels
 
@@ -466,11 +480,24 @@ A signed object, signed by `PK` with `sig_revocation`, of kind `revocation`, wit
   - delete its mailboxes, its WK and SK grants, and its push subscriptions;
   - refuse it on every route (spec §5.2).
 
-**Hosts and devices.** A host that learns of a revocation (through its directory poll, or at startup)
-MUST rotate its epoch (§7.2) before it seals anything new. There is no un-revoke: a device that was
-revoked pairs again with new keys.
+**Pushing a revocation to hosts.** The primary also sends the record to each of the owner's workspaces as
+the bridge op `{"op": "revocation", "record": <signed revocation>}`, so hosts do not wait for their next
+directory poll. The authority is `PK`'s signature, not the sender: any member may relay the record. The
+host checks, in this order:
 
-**DECIDED HERE:** the closed `reason` list, and no un-revoke. Vectors: `revocations`.
+1. the exact meta shape → `malformed`;
+2. the signature with the owner's `PK` → `bad_signature`;
+3. the record's field set and reason → `malformed`;
+4. `person_id` is the owner → `other_person`.
+
+It then records the device as revoked and removes it from its member list. If the device was a member, it
+**rotates** before it seals anything new.
+
+**Hosts and devices.** A host that learns of a revocation (through this op, its directory poll, or at
+startup) MUST rotate its epoch (§7.2) before it seals anything new. There is no un-revoke: a device that
+was revoked pairs again with new keys.
+
+**DECIDED HERE:** the closed `reason` list, and no un-revoke. Vectors: `revocations`, `revocation_op`.
 
 ### 6.3 Removing a device from one workspace
 
@@ -488,9 +515,18 @@ expiry. The agent generates its two keys and posts an `enroll_request` to the re
  "mac": b64u(HMAC-SHA-256(code, "orch/v2/enroll|" || suite || space_id || lp16(dk_sig_pub) || lp16(dk_kx_pub)))}
 ```
 
-The request is self-signed with `sig_enroll_request` as proof of possession. The primary checks the MAC
-with its code, and then signs a certificate with `scopes_max = ["drop:<space_id>"]` and the expiry it
-chose. The relay enforces the drop scope on every route. Vector: `enroll`.
+The request is self-signed with `sig_enroll_request` as proof of possession. **The primary checks, in
+order:**
+
+1. the self-signature with the request's own `dk_sig_pub` → `bad_signature`;
+2. the field set, and that `person_id` is its own → `malformed`;
+3. the code is known → `unknown_code`, unused → `used`, and unexpired → `expired`;
+4. the space and the MAC, compared in constant time → `bad_mac`.
+
+It then marks the code used, and signs a certificate with `scopes_max = ["drop:<space_id>"]` and the
+expiry it chose. A primary never makes a drop-scoped certificate any other way (§8.4). The relay enforces
+the drop scope on every route. Vectors: `enroll` (valid then reused, expired, unknown code, a MAC over
+other keys, a wrong self-signature, another space).
 
 ### 6.5 Recovery kit
 
@@ -502,46 +538,71 @@ is not part of this contract.
 
 ### 7.1 The directory card
 
+The card has two layers (spec §5.3):
+
+- **A one-time delegation**, signed by the owner's `PK` once, when the workspace is created. It never
+  changes.
+- **The card itself**, signed by `WSK` alone. It changes on every `card_seq`, including each 90-day `WXK`
+  rotation, without the owner's primary device.
+
 ```
-{"o": {"v":2, "suite", "kind":"card", "workspace_id", "wsk_pub", "wxk_pub", "wxk_version", "owner_person_id",
-       "relay_url", "card_seq", "issued_ms", "sealed_hash"},
- "sig_wsk": b64u(Sign(WSK, "orch/v2/sig/card-wsk|" || cj(o))),
- "sig_pk":  b64u(Sign(PK_owner, "orch/v2/sig/card-pk|" || cj(o))),
- "sealed":  b64u(sealed part)}
+delegation = {"o": {"v":2, "suite", "kind":"ws_delegation", "workspace_id", "wsk_pub", "owner_person_id",
+                    "client_hosted": bool, "issued_ms"},
+              "sig": b64u(Sign(PK_owner, "orch/v2/sig/ws-delegation|" || cj(o)))}
+
+card = {"delegation": <delegation>,
+        "o": {"v":2, "suite", "kind":"card", "workspace_id", "wsk_pub", "wxk_pub", "wxk_version",
+              "owner_person_id", "relay_url", "card_seq", "issued_ms", "sealed_hash", "ck_commit"},
+        "sig": b64u(Sign(WSK, "orch/v2/sig/card-wsk|" || cj(o))),
+        "sealed": b64u(sealed part)}
 ```
 
-- **The sealed part** (spec §5.3):
-  - It is `AES-256-GCM(HKDF(CK, "", "orch/v2/card|ws|card_seq"), zero nonce,
-    cj({name, description, capabilities, hosted_by}), "orch/v2/card-aad|" || suite || ws || u32(card_seq))`.
-  - `CK` is fresh for every `card_seq` (so the zero nonce is safe), and sealed (purpose `card`) to every
-    device the owner shares the card with.
-  - `sealed_hash = b64u(H(sealed))` puts the sealed part under both signatures.
-  - `hosted_by` is `null`, or the text shown as "hosted by …" (spec D29).
-- **`relay_url`** is `https://<lower-case host>[:port]` with no path and no trailing slash. For
-  development only, it may be `http://localhost`, `http://127.0.0.1` or `http://[::1]`, with an optional
-  port.
+**Why a delegation.** **DECIDED HERE.** The spec has both parts of the card signed by `WSK` and by `PK`.
+Taken literally, every 90-day `WXK` rotation would need the owner's primary device online, and the host
+could not rotate by itself (spec §5.4: "Rotation is automatic"). With the delegation, `PK` vouches once that
+this `WSK` speaks for this workspace of this owner, and `WSK` signs everything that rotates.
 
-**What the relay, orch-publish and peers check:**
+**`client_hosted`** is in the clear (the relay learns that the workspace runs on someone else's machine).
+The text "hosted by …" stays in the sealed part (spec D29).
 
-- the field set;
-- valid keys;
-- the URL form;
-- integers ≥ 1;
-- `sig_wsk` against `wsk_pub`;
-- `owner_person_id == person_id(PK_owner)`, otherwise `other_person`;
-- `sig_pk` against the account's `PK`;
-- `sealed_hash` against the sealed bytes.
+**The sealed part:**
+
+- It is `AES-256-GCM(HKDF(CK, "", "orch/v2/card|ws|card_seq"), zero nonce,
+  cj({name, description, capabilities, hosted_by}), "orch/v2/card-aad|" || suite || ws || u32(card_seq))`.
+- `CK` is fresh for every `card_seq` (so the zero nonce is safe), and sealed (purpose `card`) to every
+  device the owner shares the card with.
+- `sealed_hash = b64u(H(sealed))` puts the sealed part under the signature.
+- `ck_commit = b64u(H("orch/v2/card-key-commit|" || workspace_id || u32(card_seq) || CK))`. A reader that
+  unwrapped `CK` MUST check it against `ck_commit` before decrypting. Sealed wraps are not authenticated
+  to their sender (§5.3), and AES-GCM is not key-committing, so without it a wrap could hand two readers two
+  different `CK`s. **DECIDED HERE.**
+- `hosted_by` is `null`, or the text shown as "hosted by …".
+
+**`relay_url`** is `https://<lower-case host>[:port]` with no path and no trailing slash. For development
+only, it may be `http://localhost`, `http://127.0.0.1` or `http://[::1]`, with an optional port.
+
+**What the relay, orch-publish and peers check, in order:**
+
+1. the field set, valid keys, the URL form, integers ≥ 1;
+2. `owner_person_id == person_id(PK_owner)` → `other_person`;
+3. the delegation: its signature with the account's `PK` → `bad_signature`; its field set → `malformed`;
+4. the delegation's `workspace_id`, `wsk_pub` and `owner_person_id` equal the card's → `delegation_mismatch`;
+5. the card's signature with `wsk_pub` → `bad_signature`;
+6. `sealed_hash` against the sealed bytes → `bad_signature`.
 
 **Update rules (relay).**
 
 - `workspace_id` and `owner_person_id` never change (`other_workspace`).
 - `wsk_pub` never changes (`wsk_changed`).
+- The delegation never changes, byte for byte in its canonical form (`delegation_changed`).
 - `card_seq` strictly increases (`stale_card`).
 - `wxk_version` stays the same with the same key, or rises by exactly 1 with a different key
   (`wxk_changed_without_version`, `bad_wxk_version`).
 
-**DECIDED HERE:** the two-signature labels; `sealed_hash`; `card_seq`; the URL form; and the update rules.
-Vectors: `card.cases`.
+**DECIDED HERE:** the delegation and its labels; `sealed_hash`; `ck_commit`; `card_seq`; the URL form; and
+the update rules. Vectors: `card.cases` (16, including a rotation signed by `WSK` alone, a delegation
+signed by another person, a delegation for another `WSK`, and a changed delegation), and the round trip
+`test_round_trip_card`.
 
 ### 7.2 Member list and epochs
 
@@ -560,15 +621,16 @@ order two lists of one epoch.
 
 1. the signature with the card's `wsk_pub`;
 2. the shape: field set, sorted unique hex ids, `epoch ≥ 1`;
-3. the first list has `epoch = 1` and `list_seq = 1`;
-4. `list_seq` strictly increases (`stale_list`);
-5. `epoch` is the previous one or the previous one + 1 (`bad_epoch`; epochs never skip);
-6. if any previous member is missing, `epoch` MUST be the previous one + 1 (`rotation_required`);
-7. for every member:
+3. `workspace_id` is the card's, **including on the first list** (`other_workspace`);
+4. the first list has `epoch = 1` and `list_seq = 1`;
+5. `list_seq` strictly increases (`stale_list`);
+6. `epoch` is the previous one or the previous one + 1 (`bad_epoch`; epochs never skip);
+7. if any previous member is missing, `epoch` MUST be the previous one + 1 (`rotation_required`);
+8. for every member:
    - not revoked (`revoked`);
    - a valid certificate of the **card owner** (`other_person`; spec D1 C is out of scope);
    - not a scoped agent, and `scopes` a prefix no longer than its `scopes_max` (`scope_exceeded`);
-8. a WK grant exists for **every** member at this list's epoch (`missing_grant`).
+9. a WK grant exists for **every** member at this list's epoch (`missing_grant`).
 
 This is the spec's order: seal, upload, then publish.
 
@@ -604,6 +666,9 @@ Vectors: `member_lists`.
   `WSK` it pinned at pairing before it uses the key.
 - **Where it lives.** The relay stores grants per `(workspace, device, epoch)`. Devices fetch them at
   connect, and whenever they get a `stale_epoch` refusal (§8.5).
+- **The device's current epoch never moves backwards.** A device MUST persist the highest epoch for which
+  it holds a verified grant, per workspace, and use that one. An older grant is kept only to read older
+  content. **DECIDED HERE.**
 
 An SK grant (shared Drop spaces) is the same, with `kind: "sk_grant"`, `space_id` in place of
 `workspace_id`, purpose `sk`, and signed by the space owner's key (`WSK`, or the owning device's `dk_sig`).
@@ -697,6 +762,9 @@ Vectors: `bridge.seal`, `hkdf` (`k_bridge_epoch_1`, `k_bridge_epoch_2`, `k_pair`
    The fragment never reaches a server. The host creates the offer with `S`, `sas_nonce` (32 bytes) and the
    scope.
 
+   **Every answer to an epoch-0 request carries `wsk_pub`:** each `pair_status` state and every refusal.
+   The device checks it against the link's pin before it reads anything else (step 4).
+
 2. **Pair request** (epoch 0, sealed under `K_pair`, header `stream` = `offer_id`, signed by the new
    `dk_sig`; the header `device` is `device_id(dk_sig_pub)`):
 
@@ -738,12 +806,14 @@ Vectors: `bridge.seal`, `hkdf` (`k_bridge_epoch_1`, `k_bridge_epoch_2`, `k_pair`
    4. `wsk_pin(wsk_pub) == link pin`;
    5. the signature with that `wsk_pub`;
    6. the chunk order;
-   7. the window. The one exception: a verified `stale_timestamp` refusal adopts its clock once per
-      pending rid, within 24 h (v1 §5.1).
+   7. the window, **for every answer, refusals included**. The one exception: a verified `stale_timestamp`
+      refusal is exempt from the window and adopts its clock once per pending rid, within 24 h (v1 §5.1).
+      Vector `refusal_outside_the_window`.
 
-   For `pending`, the echoed `dk_sig_pub`/`dk_kx_pub` MUST be its own (`not_my_key`). It then shows
-   `sas(...)` (§4) and pins `wsk_pub`. No answer within 60 s, or `pairing_closed`, shows v1's "this link
-   was used by someone else: reject it on your Mac".
+   For `pending`, the echoed `dk_sig_pub`/`dk_kx_pub` MUST be its own. Otherwise the device drops the
+   answer and **raises the alarm** (`not_my_key`): someone is pairing another key with this link. It then
+   shows `sas(...)` (§4) and pins `wsk_pub`. No answer within 60 s, or `pairing_closed`, shows v1's "this
+   link was used by someone else: reject it on your Mac".
 
 5. **Human confirmation on the host.** The default is Reject. Approve becomes available once the owner has
    compared the code on both screens.
@@ -762,12 +832,19 @@ The device polls with `{"op":"pair_status"}` (epoch 0, signed with its new key, 
 exactly one of:
 
 ```
-{"state":"pending"}
-{"state":"cert_pending", "primary_label": text}
-{"state":"approved", "scopes": [...], "cert": <signed device_cert>, "pk_pub": b64u, "epoch": e}
-{"state":"rejected"}
-{"state":"expired"}                       cert_pending ran 10 minutes without a certificate
+{"state":"pending", "wsk_pub", "sas_nonce", "dk_sig_pub", "dk_kx_pub"}     the same five fields as step 3
+{"state":"cert_pending", "primary_label": text, "pk_pub": b64u, "challenge": <signed cert_challenge> | null,
+ "wsk_pub"}
+{"state":"approved", "scopes": [...], "cert": <signed device_cert>, "pk_pub": b64u, "epoch": e, "wsk_pub"}
+{"state":"rejected", "wsk_pub"}
+{"state":"expired", "wsk_pub"}            cert_pending ran 10 minutes without a certificate
 ```
+
+`pending` repeats the full five-field answer, with the key echo, so a device whose first answer was lost can
+still check the echo and show the code. A device ignores fields it does not know.
+
+On `cert_pending`, the device checks `pk_pin(pk_pub)` against the link. If `challenge` is not `null`, it
+checks the challenge as §8.4 says and shows its `cert_code`.
 
 On `approved`, the device checks:
 
@@ -776,44 +853,96 @@ On `approved`, the device checks:
 - `scopes`.
 
 It then logs in to the relay (§12.2) and fetches its WK grant (§7.3). **DECIDED HERE:** the answer shapes,
-the `expired` state, and that `approved` carries `pk_pub` and the certificate. Vectors: `host_cases`
-`pair_*`, `pair_status_*`, `pair_answers`.
+the `expired` state, that every answer carries `wsk_pub`, and that `approved` carries `pk_pub` and the
+certificate. Vectors: `host_cases` `pair_*`, `pair_status_*`, `pair_answers`, and the round trip
+`test_round_trip_pairing_through_cert_pending`.
 
-### 8.4 `cert_pending` and the request to the primary device
+### 8.4 `cert_pending`: the request to the primary device and its challenge
 
-The host posts a `cert_request` to the relay's queue for `(person_id, primary_device_id)`:
+A first-time phone needs a certificate from the owner's primary device. The host cannot make one, and a
+host must not be able to get one for a key of its choosing. The flow is:
 
-```
-{"o": {"v":2, "suite", "kind":"cert_request", "request_id", "workspace_id", "person_id", "primary_device_id",
-       "created_ms", "expires_ms" (= created + 10 min),
-       "sealed": b64u(seal_to(primary dk_kx, "cert-request", object = request_id, epoch 0, cj(inner)))},
- "sig": b64u(Sign(WSK, "orch/v2/sig/cert-request|" || cj(o)))}
-inner = {"device_id", "dk_sig_pub", "dk_kx_pub", "label", "scopes_max", "offer_id", "sas_nonce"}
-```
+1. **The host's request.** The host posts a `cert_request` to the relay's queue for
+   `(person_id, primary_device_id)`:
 
-**The primary checks:**
+   ```
+   {"o": {"v":2, "suite", "kind":"cert_request", "request_id", "workspace_id", "person_id", "primary_device_id",
+          "created_ms", "expires_ms" (= created + 10 min),
+          "sealed": b64u(seal_to(primary dk_kx, "cert-request", object = request_id, epoch 0, cj(inner)))},
+    "sig": b64u(Sign(WSK, "orch/v2/sig/cert-request|" || cj(o)))}
+   inner = {"device_id", "dk_sig_pub", "dk_kx_pub", "label", "scopes_max", "offer_id"}       exactly these
+   ```
 
-1. the card is its own person's (`other_person`);
-2. **the card's sealed `hosted_by` is `null`** (`client_hosted`, see below);
-3. `sig` against the card's `WSK`;
-4. it is the addressee;
-5. `created − 300 s ≤ now < expires`, with `expires − created ≤ 10 min`;
-6. the inner `device_id` derives from the key, and the scopes are valid.
+   `inner` carries **no host nonce**. Anything the host chooses could be ground against a 30-bit code.
 
-It then shows **the same 6-character code** as the phone and the host (spec §7 step 4), with the label, and
-needs its own confirmation. On confirmation, it signs the certificate (§6.1) and uploads it to the
-directory. The host polls the directory for it, then continues with §8.3 step 6. Both screens say "Open
-orch on <primary>" while waiting.
+2. **The primary checks, in order:**
+   1. the card is its own person's → `other_person`;
+   2. `sig` against the card's `WSK` (the card's delegation already verified) → `bad_signature`;
+   3. it is the addressee, for its own person → `not_for_this_device`;
+   4. `created − 300 s ≤ now < expires`, with `expires − created ≤ 10 min` → `expired`;
+   5. the `request_id` was never seen before → `replayed`;
+   6. no other request of this workspace is open → `request_open` (at most one open request per
+      workspace);
+   7. the inner field set is exact, the keys are valid, `device_id` derives from `dk_sig_pub`, and the
+      scopes are valid → `malformed`;
+   8. `scopes_max` is not a `drop:` scope → `scope_exceeded` (scoped agents enrol only through §6.4).
 
-**Why a client-hosted workspace may not ask for a certificate.** **DECIDED HERE:** a primary refuses cert
-requests from a workspace whose card says `hosted_by` (spec D29). With a 30-bit code, a *malicious host*
-can choose a nonce and a key of its own whose code matches the code the honest phone shows (2^30 work).
-The threat model trusts the host, except on a machine someone else administers. On such a machine, a forged
-certificate would make the admin's key one of the owner's devices for every peer that checks co-signatures
-(§11.3). A phone pairs with a client-hosted workspace by presenting a certificate it got elsewhere. See
-§18 for the stronger fix.
+   If the card's delegation says `client_hosted`, the primary goes on, but shows a **warning**: "this
+   workspace runs on a machine that someone else administers".
 
-Vectors: `cert_request` (valid with its code, expired, signed by another workspace, client-hosted).
+3. **The primary's challenge.** The primary now draws `primary_nonce`, 32 CSPRNG bytes, **after** the keys
+   reached it. It keeps the challenge as the only thing it will ever certify for this request, and posts it
+   to the relay's queue for `(workspace_id, request_id)`:
+
+   ```
+   {"o": {"v":2, "suite", "kind":"cert_challenge", "request_id", "workspace_id", "person_id", "device_id",
+          "dk_sig_pub", "dk_kx_pub", "primary_nonce", "expires_ms" (= the request's)},
+    "sig": b64u(Sign(PK, "orch/v2/sig/cert-challenge|" || cj(o)))}
+   cert_code = base32(H("orch/v2/sas-cert|" || suite || cj(challenge.o)))[0:6]
+   ```
+
+   The primary shows `cert_code` with the label and asks for a confirmation.
+
+4. **The host relays the challenge** unchanged, in its `cert_pending` answer (§8.3). Until it arrives,
+   `challenge` is `null`, and both screens say "Open orch on <primary>".
+
+5. **The phone checks the challenge** before it shows anything:
+   1. `pk_pin(pk_pub)` against the link;
+   2. the signature with that `pk_pub`, and the exact field set → `challenge_signature`;
+   3. `workspace_id` is the link's, and `person_id` is `person_id(pk_pub)` → `not_for_this_workspace`;
+   4. `device_id`, `dk_sig_pub` and `dk_kx_pub` are **its own** → otherwise drop and **raise the alarm**
+      (`not_my_key`): someone asked the primary to certify another key for this pairing;
+   5. `now < expires_ms` → `challenge_expired`.
+
+   Then it shows `cert_code`.
+
+6. **The human compares the code on the primary and the phone, and confirms on the primary.** The primary
+   signs a certificate (§6.1) **for exactly the two keys of its own stored challenge**, once per request
+   (`already_signed` afterwards), and uploads it to the directory. The host polls the directory for it,
+   then continues with §8.3 step 6.
+
+**Why this closes R1.** **DECIDED HERE:** the challenge. The host never chooses anything the code depends
+on. `PK` signs the keys, and the nonce is drawn after the keys are fixed. Only the primary holds `PK`, so the
+host cannot forge a challenge for the phone's keys.
+
+A host that sends the primary a request for a key of its own gets a challenge that names that key. The
+honest phone refuses that challenge with the alarm, so it shows no code, and the human has nothing to
+match. The primary allows one open request per workspace, so the host cannot run a second request beside
+the honest one.
+
+This replaces the first draft's rule that a client-hosted workspace may not ask for a certificate; that
+rule is now a warning.
+
+**What the spec said.** Spec §7 says the primary shows "the same fingerprint" as the host step. With this
+fix it shows the challenge's code instead, which the phone also shows. The owner accepted this in review.
+
+Vectors: `cert_request.cases` (valid; expired; signed by another workspace; client-hosted with a warning;
+not for this device; the card of another person; a drop scope; a replayed request id; a second open
+request; an inner object with a host nonce), `cert_request.challenge`, `cert_code`, `signed_cert`,
+`sign_again`, `attack_challenge`, and `pair_answers` (`cert_pending_with_the_primarys_challenge_shows_its_code`,
+`r1_attack_challenge_for_another_key_raises_the_alarm`, `challenge_signed_by_the_host_not_pk`,
+`challenge_for_another_workspace`, `challenge_expired`, `cert_pending_with_a_pk_not_of_the_pin`). Round
+trips: `test_round_trip_pairing_through_cert_pending`, `test_round_trip_r1_attack_fails`.
 
 ### 8.5 Epochs on the bridge
 
@@ -826,6 +955,9 @@ Vectors: `cert_request` (valid with its code, expired, signed by another workspa
 - **The device** answers `stale_epoch` by fetching its grant and sending the request again as a new
   request (new rid, new seq). The refused seq is consumed (vector
   `stale_epoch_consumes_its_seq_then_a_new_request_runs`).
+- A device MUST drop a `stale_epoch` refusal whose `epoch` is not higher than its request's epoch
+  (vector `stale_epoch_refusal_not_higher_than_the_request`). Its current epoch never moves backwards
+  (§7.3).
 - A response chunk MUST carry the epoch of its request. The device drops anything else
   (`response_in_another_epoch_than_the_request`).
 - **On rotation, the host:**
@@ -874,14 +1006,15 @@ verified.**
     (v1 §9), and the op.
 
 Every refusal after step 4 is recorded before it is sent (v1 §5.3). Vectors: `bridge.host_cases`
-(46 per suite, including chains).
+(47 per suite, including chains).
 
 ### 8.7 Ops, meta and WebAuthn
 
-**Request ops.** These are v1's, plus four:
+**Request ops.** These are v1's, plus five:
 
 - v1's: `http`, `cancel`, `pair`, `pair_status`, `credential_begin`, `credential_finish`, `assert`;
 - `member_remove` (§6.3);
+- `revocation` (§6.2);
 - `drop_rewrap` (§7.5);
 - `decision` (§13);
 - `new_ticket`: a sealed request the host applies (spec §7). Its fields are the host's ticket API
@@ -915,8 +1048,9 @@ This is v1 §7, with the v2 changes in bold. Drop unless, in order:
 9. seq is the next index;
 10. the window holds, with the `stale_timestamp` exception.
 
-The pin-failure counting and "pair again" after 3 failures are v1's. A `stale_epoch` refusal makes the
-device fetch grants (`fetch_grants`). Vectors: `bridge.device_cases`.
+The pin-failure counting and "pair again" after 3 failures are v1's. A `stale_epoch` refusal with a higher
+epoch makes the device fetch grants (`fetch_grants`); any other is dropped (§8.5). Vectors:
+`bridge.device_cases`.
 
 ### 8.9 What the relay checks on the bridge
 
@@ -939,7 +1073,8 @@ The relay sees only the outer object, and forwards it as the Web Push payload (s
 
 ```
 {"v":2, "ws": hex, "epoch": e, "c": b64u(SALTED-AEAD(K_push(e), "orch/v2/push-msg",
-                                              "orch/v2/push-aad|" || suite || ws || u32(e), cj(payload)))}
+                                              "orch/v2/push-aad|" || suite || ws || u32(e), cj(inner)))}
+inner   = {"p": payload, "sig": b64u(Sign(WSK, "orch/v2/sig/push|" || suite || ws || u32(e) || cj(payload)))}
 payload = {"kind", "id", "label", "ts_ms"}                         exactly these four
 ```
 
@@ -947,23 +1082,28 @@ payload = {"kind", "id", "label", "ts_ms"}                         exactly these
 - `label` is at most 80 code points.
 - The whole outer object is at most 3,072 bytes.
 
-**The service worker drops the payload if:**
+**The service worker** keeps, per workspace, the pinned `wsk_pub`, the `WK`s it holds, and the highest
+`ts_ms` it showed per `(ws, id)`. It drops the payload if:
 
-- it is too large, or its outer shape is wrong;
-- it holds no key for `(ws, epoch)`;
-- the tag fails;
-- the payload shape is wrong, or the kind unknown;
-- `ts_ms` is outside `[now − 24 h, now + 300 s]`.
+1. it is too large, or its outer shape is wrong;
+2. it holds no key for `(ws, epoch)`;
+3. the tag fails, or `inner` is not exactly `{p, sig}`;
+4. **the signature does not verify with the workspace's `WSK`**;
+5. the payload shape is wrong, or the kind unknown;
+6. `ts_ms` is outside `[now − 24 h, now + 300 s]`;
+7. **`ts_ms` is not higher than the last one it showed for `(ws, id)`** (a replay).
 
-Otherwise it shows `label` with `tag = id`.
+Otherwise it shows `label` with `tag = id`, and records `ts_ms`.
 
-**DECIDED HERE:** `ts_ms` is in the payload. The spec's `{kind, id, label}` would let the relay replay a
-months-old notification forever.
+**DECIDED HERE:**
 
-**Known limit.** The payload is not signed. Any member device of that epoch could forge a notification
-(never an action). Accepted: members are the owner's own devices.
+- `ts_ms` in the payload: the spec's `{kind, id, label}` would let the relay replay a months-old
+  notification forever.
+- A `WSK` signature inside the sealed payload: a member device holds `K_push` too, and without the
+  signature it could forge a notification in the host's name. That was R3; it is now closed.
 
-Vectors: `push.cases`.
+Vectors: `push.cases` (including `forged_by_a_member_device`, `replayed`, and
+`older_after_newer_for_the_same_id`).
 
 ## 10. Drop
 
@@ -1017,7 +1157,8 @@ A signed object, kind `drop_object`, signed by its author: `dk_sig` of a device 
 the workspace's `WSK` (`"workspace"`). Exactly these fields:
 
 ```
-object_id, space_id, space_kind, object_kind, version, parent (= version − 1), author_kind, author_id,
+object_id, space_id, space_kind, object_kind, version, parent (= version − 1),
+parent_hash (null at version 1, else §10.6), author_kind, author_id,
 content_hash (b64u H(blob)), content_len, dek_commit (b64u H("orch/v2/dek-commit|" || object_id
 || u32(version) || DEK)), meta (b64u, §10.2), recipients ("inbox" or a sorted unique list of ids),
 origin ("human" | "agent"), created_ms, expires_ms (integer | null)
@@ -1049,7 +1190,9 @@ give two recipients two `DEK`s that open one blob to two different plaintexts.
 The relay, in **one transaction**:
 
 1. verifies the signature with the claimer's card → 401 `bad_signature`;
-2. checks the shape → 400 `malformed`;
+2. checks the shape → 400 `malformed`. The wrap's `version` MUST be the object's version, and its
+   `key_version` MUST be the claimer's current epoch from its accepted member list (§7.2): a claim cannot
+   leave behind a wrap that no current member can open;
 3. if the object is already claimed:
    - by the same workspace → 200 (idempotent);
    - otherwise → 409 `already_claimed`, with `claimed_by`;
@@ -1057,21 +1200,35 @@ The relay, in **one transaction**:
 5. stores the new wrap, sets `claimed_by`, and **deletes every other wrap**.
 
 **DECIDED HERE:** claims are idempotent, and the loser learns the winner's workspace id (a routing id).
-Vectors: `drop.claims` (a race won by B, idempotency, a wrong signer, a wrap for another workspace).
+Vectors: `drop.claims` (a race won by B, idempotency, a wrong signer, a wrap for another workspace, another
+version, another epoch), and the round trip `test_round_trip_drop_claim`.
 
 ### 10.6 Documents
 
+- **Parent hash.** Every version descriptor carries `parent_hash`. It is `null` at version 1, and
+  otherwise `b64u(H("orch/v2/drop-parent|" || cj(parent descriptor o)))`.
 - `PUT /drop/{id}/versions` carries the new descriptor, its wraps and its blob, with `If-Match: <current
   version>`.
 - `If-Match` is a decimal without leading zeros; missing or malformed is 428 `precondition_required`.
-- The relay accepts only if `If-Match == current`, `parent == current` and `version == current + 1`.
+- **The relay accepts only if all hold:**
+  - `If-Match == current`;
+  - `parent == current` and `version == current + 1`;
+  - `parent_hash` is the hash of the current head descriptor.
+
   Otherwise it answers 409 `version_conflict` with `current` ("fetch first").
 - There is no merge.
 - `POST /drop/{id}/lease` (10 min by default) is advisory and is not checked on `PUT` (spec §6.4).
-- A client keeps the highest version it has seen per document, and treats a lower "latest" from the relay
-  as an error. This is the defence against rollback.
+- **Readers check the chain.** A reader MUST check that each version's `parent_hash` is the hash of the
+  version before it, from version 1 up (`fork` otherwise). It MUST also persist the highest version it
+  has seen per document, and treat a lower "latest" as an error.
 
-Vectors: `drop.documents`.
+**DECIDED HERE:** `parent_hash`. Without it, a relay could serve two writers two different histories with
+the same version numbers (a fork), and neither would notice. With it, the history every reader sees is one
+hash chain, signed version by version by its authors; a fork shows up at the first diverging version. That
+was R6 for documents; it is now closed.
+
+Vectors: `drop.documents` (including `fork_parent_hash_of_another_version_3` and `first_version`),
+`drop.document_chains` (`valid`, `fork_served_by_the_relay`, `version_missing`).
 
 ## 11. ws→ws envelopes (spec §9)
 
@@ -1084,6 +1241,7 @@ header   = "ORWX" || u8(2) || u8(suite) || u8(flags) || u8(0) || id (16) || from
 ```
 
 - `flags` bit 0x01 is `COSIGNED`, and the co-signature block is present exactly when it is set.
+- `flags` bit 0x02 is `REFUSAL`: the envelope is a refusal (§11.5) and is never answered.
 - Unknown flag bits and a non-zero reserved byte are dropped.
 - The envelope is at most 1 MiB; larger attachments go through Drop.
 
@@ -1153,42 +1311,67 @@ Vectors: `cosigned_by_device_key`, `cosigned_by_webauthn`, `cosigned_by_a_revoke
 
 ### 11.4 What the receiver does (normative order)
 
-1. **Shape.** Size, magic, version, the reserved byte and flags → drop. The suite → drop. `to_ws` is
-   itself → drop.
+1. **Shape.** Size, magic, version, the reserved byte and unknown flags → drop. The suite → drop.
+   `to_ws` is itself → drop.
 2. **Pin.** `from_ws` is in the address book → otherwise drop (an unpinned sender is never answered).
 3. **Signature** with the pinned `wsk_pub` → drop.
-4. **Duplicate.** An `id` seen before from the same sender with the same `H(header || body)` returns the
-   stored outcome and does nothing new. Other bytes under a seen id → drop.
+4. **Duplicate.** Seen ids are keyed by **`(from_ws, id)`**. A pair seen before with the same
+   `H(header || body)` returns the stored outcome and does nothing new. Other bytes under a seen pair →
+   drop. The same `id` from another sender is a different envelope (vector `same_id_from_two_senders`).
 5. **Co-signature**, if flagged → `bad_cosignature`. Trailing bytes without the flag → drop.
 6. **WXK version.** Current, or previous with `now < retired_ms + 14 d` → otherwise `stale_wxk` with the
    current `wxk_version`.
-7. **Open and parse** strictly, with the exact field set and a known kind → `malformed`.
+7. **Open and parse** strictly → `malformed`. This needs:
+   - the exact field set and a known kind;
+   - the `REFUSAL` flag set exactly when `kind` is `refusal`;
+   - for a refusal, a known code.
 8. **For `ticket`:**
+   - `in_reply_to` not `null` → `malformed`;
    - `depth > 1` → `depth_exceeded`;
    - `deadline_ms > now + 30 d` → `malformed`;
    - `deadline_ms + 300 s < now` → `deadline_passed`;
    - otherwise the inbox, marked `from-peer` (spec D13).
-9. **For the other kinds:** `in_reply_to` MUST name an envelope this workspace sent to `from_ws` →
-   `unknown_reply`. A result past its deadline is delivered, marked `late`.
+9. **For the replies** (`result`, `refusal`, `question.closed`): `in_reply_to` MUST name an envelope this
+   workspace sent to `from_ws`, whose reply of that kind has **not been taken yet** → otherwise
+   `unknown_reply`.
+   - `result` and `refusal` are final, and each takes both: after a result, a refusal or a second result
+     for the same envelope is refused, and the other way round. A late replay of an answer can therefore
+     never be delivered.
+   - `question.closed` is taken once on its own.
+   - A result past its deadline is delivered, marked `late`.
 
-From step 5 on, the outcome is stored with the id until `max(now, deadline) + 7 d`. Vectors:
-`ws_envelopes.cases`.
+**When the envelope carries `REFUSAL`, every "refuse" above becomes a drop** (§11.5).
+
+From step 5 on, the outcome is stored with `(from_ws, id)` until `max(now, deadline) + 7 d`. The sender
+keeps `sent[id] = {to, consumed kinds}` until the ticket's deadline plus 7 d. **DECIDED HERE:** the
+`(from_ws, id)` key and the consumption of replies.
+
+Vectors: `ws_envelopes.cases` (33 per suite), and the round trip
+`test_round_trip_ws_ticket_refusal_and_result`.
 
 ### 11.5 Refusals
 
-A refusal is itself an envelope to the sender, sealed to the sender's `WXK`:
+A refusal is itself an envelope to the sender, sealed to the sender's `WXK`, with **flag `0x02 REFUSAL`**
+set in its signed header:
 
 ```
-b = {"kind":"refusal", "in_reply_to": <refused id>, "refusal": {"code", "wxk_version"?}, ...}
+b = {"kind":"refusal", "in_reply_to": <refused id>, "depth": 0, "deadline_ms": now, "ticket": null,
+     "result": null, "refusal": {"code", "wxk_version"?}, "attachments": []}
 ```
 
 The codes are `stale_wxk` (with `wxk_version`), `depth_exceeded`, `deadline_passed`, `bad_cosignature`,
 `unknown_reply` and `malformed`.
 
-- A refusal is never answered with a refusal.
-- Drops (steps 1–4) are never answered.
+- **An envelope with `REFUSAL` is never answered.** Whatever is wrong with it, the receiver drops it. The
+  flag is in the signed header, so neither the relay nor a peer can remove it to start a refusal loop.
+- A body of kind `refusal` without the flag, or the flag on another kind, is `malformed` (dropped when the
+  flag is set).
+- Drops (steps 1–4 of §11.4) are never answered.
 
-**DECIDED HERE:** refusals are sealed envelopes, so the relay does not learn the refusal code.
+**DECIDED HERE:** refusals are sealed envelopes, so the relay does not learn the refusal code; and the
+`REFUSAL` flag. Vectors: `refusal_for_a_ticket_we_sent`, `refusal_after_a_result_refused_silently`,
+`refusal_for_a_ticket_we_never_sent_is_dropped_not_answered`, `refusal_flag_on_a_result_body_is_dropped`,
+`refusal_body_without_the_flag_is_malformed`.
 
 ## 12. Publish request signing and relay authentication
 
@@ -1236,14 +1419,37 @@ It signs this with `dk_sig` (the relay checks the certificate and revocations) o
 checks the card). The session is an opaque bearer token, valid for 15 minutes. Agents never see it (spec
 §5.5).
 
-**DECIDED HERE:** the layout, a single-use challenge of 60 s, and 15-minute sessions. Vector: `relay_auth`.
+**The relay checks, in order:**
+
+1. the challenge is one it issued. It is **removed whatever happens next** → 401 `unknown_challenge`;
+2. `now < expires_ms` → 401 `expired`;
+3. `kind` is `device` or `workspace` → 400 `malformed`;
+4. the signature over the bytes above, built with **the relay's own origin**, never one the client names →
+   401 `bad_signature`.
+
+**DECIDED HERE:** the layout, a single-use challenge of 60 s, the check order, and 15-minute sessions.
+Vectors: `relay_auth`, `relay_auth.cases` (valid then reused, expired, another origin, signed as another
+kind, another key, an unknown kind).
 
 ## 13. Questions (spec §8)
 
 - `question_id` is 16 random bytes (hex).
 - `content_hash = b64u(H("orch/v2/question|" || cj({question_id, ticket, text, options})))`.
 - A decision is the bridge op
-  `{"op":"decision", "decision_id": hex, "question_id": hex, "content_hash": b64u, "answer": <JSON>}`.
+  `{"op":"decision", "decision_id": hex, "question_id": hex, "content_hash": b64u, "answer": <JSON>,
+  "sig": b64u}`, with exactly these fields.
+- `sig` is a **detached** signature by the device's `dk_sig`:
+
+  ```
+  sig = Sign(dk_sig, "orch/v2/sig/decision|" || cj({"workspace_id", "question_id", "content_hash",
+                                                   "decision_id", "answer"}))
+  ```
+
+  The bridge envelope already authenticates the request. The detached signature lets the decision travel
+  on as a device-signed ledger entry (spec §12: "decisions from devices carry device-key signatures") and
+  to a peer the question came from. `workspace_id` binds it to one workspace. The host checks the field
+  set → `malformed`, then the signature with the sender's certificate → `bad_signature`, before
+  compare-and-set.
 
 The host applies the first valid decision by compare-and-set, then:
 
@@ -1255,8 +1461,10 @@ Refusals:
 - a later decision → `already_answered`, with `by_device_label` and `at_ms`;
 - a `content_hash` that is no longer current → `question_changed`, with the current `content_hash`.
 
-Clients reconcile on open by fetching each question's state. **DECIDED HERE:** the hash input, the op, and
-`question_changed`. Vector: `question_hash`.
+Clients reconcile on open by fetching each question's state. **DECIDED HERE:** the hash input, the op, its
+detached signature (the review's `ws` field is spelled `workspace_id`, like everywhere else), and
+`question_changed`. Vectors: `question_hash`, `decisions` (valid, answer changed, replayed into another
+workspace, signed by another device, without signature).
 
 ## 14. Refusal codes
 
@@ -1277,7 +1485,7 @@ shows its own fixed text per code.
 | `stale_sequence` | `high` | |
 | `stale_epoch` | `epoch` | new (§8.5) |
 | `pairing_closed` | — | |
-| `other_person` | — | new: a certificate of another person (spec D1 C) |
+| `other_person` | — | new: a certificate or revocation of another person (spec D1 C) |
 | `cert_invalid`, `cert_expired` | — | new |
 | `forbidden_scope` | — | |
 | `assertion_required`, `lease_required` | v1 §9.4's challenge fields | |
@@ -1287,22 +1495,33 @@ shows its own fixed text per code.
 | `already_answered` | `by_device_label`, `at_ms` | new (§13) |
 | `question_changed` | `content_hash` | new (§13) |
 
-Every refusal to an epoch-0 request also carries `wsk_pub`.
+Every answer to an epoch-0 request, refusals included, also carries `wsk_pub`.
 
-**ws→ws (sealed envelopes, §11.5):** `stale_wxk` (`wxk_version`), `depth_exceeded`, `deadline_passed`,
-`bad_cosignature`, `unknown_reply`, `malformed`.
+**ws→ws (sealed envelopes with the `REFUSAL` flag, §11.5):** `stale_wxk` (`wxk_version`),
+`depth_exceeded`, `deadline_passed`, `bad_cosignature`, `unknown_reply`, `malformed`.
 
 **Relay and orch-publish HTTP** (`{"error": code, …}`):
 
 | Status | Codes |
 |---|---|
-| 400 | `malformed`, `wrong_suite`, `cert_invalid`, `cert_expired` |
-| 401 | `bad_signature`, `stale_timestamp` (`server_ms`), `unknown_workspace`, `replay` |
+| 400 | `malformed`, `wrong_suite`, `cert_invalid`, `cert_expired`, `delegation_mismatch` |
+| 401 | `bad_signature`, `stale_timestamp` (`server_ms`), `unknown_workspace`, `replay`, `unknown_challenge`, `expired` |
 | 403 | `revoked`, `other_person`, `scope_exceeded`, `not_eligible`, `not_for_this_device` |
-| 409 | `other_workspace`, `wsk_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version`, `stale_list`, `bad_epoch`, `rotation_required`, `missing_grant`, `already_claimed` (`claimed_by`), `version_conflict` (`current`) |
+| 409 | `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version`, `stale_list`, `bad_epoch`, `rotation_required`, `missing_grant`, `already_claimed` (`claimed_by`), `version_conflict` (`current`) |
 | 428 | `precondition_required` |
 
-**Primary device (local, never on the wire):** `client_hosted`, `expired`.
+**Primary device (local, never on the wire):**
+
+- for cert requests (§8.4): `other_person`, `bad_signature`, `not_for_this_device`, `expired`, `replayed`,
+  `request_open`, `malformed`, `scope_exceeded`, `already_signed`, and the warning `client_hosted`;
+- for enrolment (§6.4): `bad_signature`, `malformed`, `unknown_code`, `used`, `expired`, `bad_mac`.
+
+**Phone, on a pairing answer (drops, never sent):** `not_my_key` (raises the alarm),
+`challenge_signature`, `not_for_this_workspace`, `challenge_expired`, `pk_pin`, `wsk_pin`.
+
+**Service worker (drops):** `signature`, `replay`, `stale`, `no_key`, `tag`, `payload`.
+
+**Document reader:** `fork`.
 
 ## 15. Clock rules
 
@@ -1317,12 +1536,14 @@ Boundaries are inclusive where the cell says ≤.
 | Pairing offer | 10 min, single use; the host keeps the offer record 24 h to answer `pairing_closed` |
 | `cert_pending` | 10 min from entering the state, then `expired` |
 | Cert request | `created − 300 s ≤ now < expires`, and `expires − created ≤ 10 min` |
+| Cert challenge | the phone accepts it while `now (+ offset) < expires_ms` (the request's expiry) |
 | Device certificate | `created_ms ≤ now + 300 s`; expired when `now ≥ expires_ms` |
-| Push payload | `now − 24 h ≤ ts_ms ≤ now + 300 s` |
+| Push payload | `now − 24 h ≤ ts_ms ≤ now + 300 s`, and higher than the last shown for `(ws, id)` |
 | ws ticket | `deadline_ms + 300 s ≥ now`, and `deadline_ms ≤ now + 30 d`; seen ids kept to `max(now, deadline) + 7 d` |
 | WXK overlap | previous key accepted while `now < retired_ms + 14 d` |
 | Publish | `\|now − ts\| ≤ 120 s`; nonces kept 240 s |
-| Relay login | challenge 60 s, single use; session 15 min |
+| Relay login | challenge 60 s, single use (expired when `now ≥ expires_ms`); session 15 min |
+| Enrolment code | expired when `now ≥ expires_ms`; one use |
 | WebAuthn challenges | 120 s (v1) |
 | Epoch age | rotate at 90 days (host clock), checked at startup and daily |
 | Stream silence | 60 s (v1); keepalive at least every 20 s |
@@ -1345,15 +1566,25 @@ are FAKE (`SHA-256("FAKE orch v2 test vector: " || label)`), and so is every "ra
 | `seal`, `seal_open` | sealing to a device with every intermediate; opening with the wrong purpose, recipient, object, epoch or key, and tampered |
 | `label_sealed` | §5.4 |
 | `certs` | 16 cases (§6.1) |
-| `revocations` | valid, another person, wrong key, bad reason |
-| `card` | sealed part, card-key wrap, 13 update cases |
-| `wk_grants`, `member_lists` | grants; 13 member-list cases (§7.2) |
-| `bridge.seal`, `bridge.host_cases`, `bridge.device_cases`, `bridge.pair_answers`, `bridge.links`, `bridge.sas` | §8 |
-| `cert_request`, `enroll`, `webauthn`, `question_hash` | §8.4, §6.4, §8.7, §13 |
-| `push` | §9: valid, unknown workspace or epoch, 24 h edge, changed epoch, unknown kind, extra field |
-| `drop` | content blob (3 chunks, empty), metadata, every wrap kind and moved wraps, descriptors, claims, documents |
-| `ws_envelopes` | layout, both co-signatures, 21 receiver cases |
-| `publish`, `relay_auth` | §12 |
+| `revocations`, `revocation_op` | valid, another person, wrong key, bad reason; the bridge op (§6.2) |
+| `card` | delegation, sealed part, `ck_commit`, card-key wrap, 16 update cases |
+| `wk_grants`, `member_lists` | grants; 14 member-list cases (§7.2) |
+| `bridge.seal`, `bridge.host_cases`, `bridge.device_cases`, `bridge.pair_answers`, `bridge.links`, `bridge.sas` | §8, including the R1 attack |
+| `cert_request` | 10 primary cases, the challenge and its code, the certificate, a second signature refused, the attack challenge (§8.4) |
+| `enroll`, `webauthn`, `question_hash`, `decisions` | §6.4, §8.7, §13 |
+| `push` | §9: valid, unknown workspace or epoch, 24 h edge, changed epoch, unknown kind, extra field, forged by a member device, replays |
+| `drop` | content blob (3 chunks, empty), metadata, every wrap kind and moved wraps, descriptors, claims (with version and epoch checks), documents, chains and forks |
+| `ws_envelopes` | layout, both co-signatures and five WebAuthn negatives, refusal envelopes, reply consumption, ids per sender |
+| `publish`, `relay_auth` | §12, including challenge reuse, expiry, another origin, another kind, another key |
+
+**Round trips.** `tests/test_vectors.py` also feeds one side's output into the other side's checks:
+
+- pairing through `cert_pending` (phone → host → primary → host → phone);
+- the R1 attack;
+- a bridge request and a `stale_epoch` refusal;
+- a card;
+- a ws ticket, its refusal and a late result;
+- a Drop claim.
 
 Every implementation (orch-core host, orch-relay, orch mobile) MUST run the vectors of its deployment's
 suite in its own test suite.
@@ -1363,13 +1594,13 @@ suite in its own test suite.
 - quota and store-limit cases beyond `quota_busy`. They are v1's rules, unchanged, and v1's `quota_*`
   vectors describe them;
 - SK grants;
-- the `drop_rewrap`, `member_remove`, `decision` and `new_ticket` ops on the host;
-- the enrolment request object;
+- the `drop_rewrap`, `member_remove` and `new_ticket` ops on the host;
 - WebAuthn registration parsing (v1 F2).
 
 ## 17. Decisions taken here
 
-Each is marked **DECIDED HERE** where it is used; the reviewer may reverse any of them.
+Each is marked **DECIDED HERE** where it is used; the reviewer may reverse any of them. Items marked
+*(review)* were added or changed after the first review of PR #23.
 
 1. Suite ids `1` and `2`, a suite byte in every binary layout and a `suite` field in every JSON object; a
    suite mismatch is dropped (§1.1).
@@ -1379,62 +1610,91 @@ Each is marked **DECIDED HERE** where it is used; the reviewer may reverse any o
 5. The JSON subset: no floats, ASCII keys, safe integers, signatures over `cj(o)` after strict parsing
    (§2.3, §2.4).
 6. Trailing `"|"` on the spec's `orch/v2/ws-envelope` and `orch/v2/publish` domains (§3).
-7. `person_id` and `device_id` derived from keys, one device id across workspaces (§4).
-8. The 6-character code binds a host nonce revealed only to the device that consumed the offer (§4).
-9. `WSK` never rotates; the relay refuses a changed `wsk_pub` (§5.2).
-10. A fresh `DEK` for every document version (§5.2).
-11. The seal purposes, and their `object_id`, `epoch` and `extra` (§5.3).
-12. `label_sealed` under a key derived from the personal vault key (§5.4).
-13. Scopes as a prefix list of v1's ordered levels; `expires_ms` always present (§6.1).
-14. Revocation reasons, and no un-revoke (§6.2).
-15. The scoped-agent enrolment link and MAC (§6.4).
+7. The 6-character pairing code binds a host nonce revealed only to the device that consumed the offer
+   (§4).
+8. `WSK` never rotates; the relay refuses a changed `wsk_pub` (§5.2).
+9. A fresh `DEK` for every document version (§5.2).
+10. The seal purposes, and their `object_id`, `epoch` and `extra` (§5.3).
+11. `label_sealed` under a key derived from the personal vault key (§5.4).
+12. Scopes as a prefix list of v1's ordered levels; `expires_ms` always present (§6.1).
+13. Revocation reasons, and no un-revoke (§6.2).
+14. *(review)* The bridge op `revocation`, authorised by `PK`'s signature whoever relays it (§6.2).
+15. The scoped-agent enrolment link and MAC, and the primary's check order (§6.4).
 16. The recovery kit's format is deferred to P1 (§6.5).
-17. The card's two signature labels, `sealed_hash`, `card_seq`, the relay URL form and the update rules
-    (§7.1).
-18. `list_seq` beside `epoch`; epochs never skip; the relay requires grants before the list (§7.2).
-19. WK grants are signed by `WSK` (§7.3).
+17. *(review)* The card: a one-time `PK`-signed delegation (with `client_hosted` in the clear), and the
+    rotating card signed by `WSK` alone. Also `sealed_hash`, `ck_commit`, `card_seq`, the relay URL form
+    and the update rules (§7.1).
+18. `list_seq` beside `epoch`; epochs never skip; the relay requires grants before the list, and checks the
+    first list's workspace against the card (§7.2).
+19. WK grants are signed by `WSK`; a device's current epoch never moves backwards (§7.3).
 20. The bridge header: magic `"ORB2"`, `suite` in place of `key_version`, a `u32` epoch, and the offer id in
     `stream` at epoch 0 (§8.1).
 21. A fifth link field `pk_pin`; no pairing MAC (§8.3).
-22. The `pair_status` answer shapes, including `expired`; `approved` carries `pk_pub` and the certificate
-    (§8.3).
-23. A primary refuses cert requests from client-hosted workspaces (§8.4).
-24. `stale_epoch` handling; nothing new is ever sealed under an old epoch (§8.5).
+22. *(review)* The `pair_status` answer shapes. All carry `wsk_pub`; `pending` repeats the full five fields;
+    `cert_pending` carries `pk_pub` and the challenge; there is an `expired` state. The window applies to
+    every answer except a verified `stale_timestamp` (§8.3).
+23. *(review)* `cert_pending` with a `PK`-signed challenge: the primary draws its nonce, and the phone checks
+    the keys and shows `cert_code`. The primary signs once, only for its own challenge's keys, keeps at
+    most one open request per workspace, and refuses drop scopes and replays. Client-hosted is a warning
+    (§8.4).
+24. `stale_epoch` handling; nothing new is ever sealed under an old epoch; a `stale_epoch` not higher than
+    the request's is dropped (§8.5).
 25. The `epoch` in the WebAuthn assertion challenge (§8.7).
 26. The relay checks the header's device against the session and the member list (§8.9).
-27. `ts_ms` in push payloads, with a 24 h maximum age; a 3,072-byte cap (§9).
+27. *(review)* Push: `ts_ms` with a 24 h maximum age, a `WSK` signature inside the sealed payload, and a
+    replay rule per `(ws, id)`; a 3,072-byte cap (§9).
 28. The Drop content header `"ORD2"`; per-version metadata keys (§10.2).
 29. `dek_commit` in the descriptor (§10.4).
-30. Idempotent claims; the loser learns `claimed_by` (§10.5).
-31. The ws envelope's binary header with magic, suite and flags (§11.1).
-32. The header in the body's AAD; the extra body fields `result` and `refusal` (§11.2).
-33. The WebAuthn co-signature's `bind_sig`, and its origin tied to the sender card's relay (§11.3).
-34. Sealed refusal envelopes; a refusal is never answered (§11.5).
-35. The publish signature layout, its headers and its nonce rules (§12.1).
-36. Relay login layout and lifetimes (§12.2).
-37. The question hash input, the `decision` op and `question_changed` (§13).
+30. *(review)* Idempotent claims; the loser learns `claimed_by`; the relay checks the wrap's version and its
+    epoch against the claimer's member list (§10.5).
+31. *(review)* `parent_hash` chains document versions; the relay and readers check it (§10.6).
+32. The ws envelope's binary header with magic, suite and flags (§11.1).
+33. The header in the body's AAD; the extra body fields `result` and `refusal` (§11.2).
+34. The WebAuthn co-signature's `bind_sig`, and its origin tied to the sender card's relay (§11.3).
+35. *(review)* Seen ids keyed by `(from_ws, id)`; replies consume the sender's `sent` entry per kind
+    (§11.4).
+36. *(review)* Sealed refusal envelopes with a signed `REFUSAL` flag; such an envelope is never answered
+    (§11.5).
+37. The publish signature layout, its headers and its nonce rules (§12.1).
+38. Relay login layout and lifetimes, and its check order (§12.2).
+39. *(review)* The question hash input, the `decision` op with a detached `dk_sig` signature over
+    `workspace_id` and the decision, and `question_changed` (§13).
+
+Taken out after review: the first draft's item "the primary refuses cert requests from client-hosted
+workspaces" (now a warning), and "ids derived from keys" (the owner accepted it, and spec §4 is being
+amended).
 
 ## 18. Open risks and follow-ups
 
-- **R1, the 30-bit code against a malicious host.** The spec's 6-character code cannot bind the primary's
-  confirmation against a host that chooses the nonce (§8.4). It is mitigated here by refusing cert
-  requests from client-hosted workspaces.
+**Closed in review:**
 
-  The stronger fix needs a spec amendment, because the primary would no longer show "the same
-  fingerprint". The primary would draw its own nonce after receiving the keys, sign it with `PK`, and the
-  phone would verify that signed nonce (it holds `pk_pin`) and show the code computed with it.
+- **R1, a forged certificate through a malicious host.** Fixed by the primary's `PK`-signed challenge
+  (§8.4). The phone shows a code only for a challenge naming its own keys. Vectors and a round trip show
+  the attack failing.
+- **R3, push forgery by a member device.** Fixed by the `WSK` signature inside the payload (§9).
+- **R6, rollback and forks.**
+  - Documents: closed by `parent_hash` (§10.6).
+  - Cards: `card_seq` rises strictly at the relay, and peers MUST persist the highest `card_seq` they have
+    seen and refuse a lower one.
+  - Epochs: never move backwards on a device (§7.3).
+
+**Open:**
+
 - **R2, web-delivered JavaScript** (spec §4) is unchanged. A compromised `/app` at pairing time owns the
   device key. Nothing in this protocol narrows that beyond spec §4.
-- **R3, push forgery by a member device** (§9). Accepted, because members are the owner's own devices.
 - **R4, one device id across workspaces** (§4) lets the relay link a device's traffic across workspaces.
-  This is accepted in spec §4 (routing ids).
+  The owner accepted this; spec §4 is being amended.
 - **R5, suite 1 depends on spike S1.** If WebCrypto Ed25519/X25519 is unreliable on the oldest supported
   iOS, deployments use suite 2. Every vector exists for both suites.
-- **R6, rollback of documents and cards by the relay** is detected only by clients that remember the
-  highest version or `card_seq` they have seen. Implementations MUST persist that per document and per
-  peer.
-- **F1:** vectors for the v1 quota cases in the v2 layout, SK grants, the host ops of §8.7, the enrolment
-  request object, and WebAuthn registration (CBOR).
+- **R7, the relay learns `client_hosted`** from the delegation (§7.1). The owner names no one; the text
+  stays sealed.
+- **R8, the human compares two codes in `cert_pending`.** The phone shows the pairing code first, then the
+  challenge's code. The UI must make clear which code goes with which confirmation.
+
+**Follow-ups:**
+
+- **F1:** vectors for the v1 quota cases in the v2 layout, SK grants, the host ops `drop_rewrap`,
+  `member_remove` and `new_ticket`, and WebAuthn registration (CBOR).
 - **F2:** a mutation test like v1's (`test_bridge_protocol_mutations.py`), so that every MUST is shown
   to be pinned by a vector.
 - **F3:** the `http` meta mapping (method, path, header allow-list) and `new_ticket` belong to the host

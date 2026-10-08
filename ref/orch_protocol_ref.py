@@ -189,7 +189,10 @@ LABELS = {
     "sig_device_cert": "orch/v2/sig/device-cert|",
     "sig_revocation": "orch/v2/sig/revocation|",
     "sig_card_wsk": "orch/v2/sig/card-wsk|",
-    "sig_card_pk": "orch/v2/sig/card-pk|",
+    "sig_ws_delegation": "orch/v2/sig/ws-delegation|",
+    "sig_cert_challenge": "orch/v2/sig/cert-challenge|",
+    "sig_push": "orch/v2/sig/push|",
+    "sig_decision": "orch/v2/sig/decision|",
     "sig_member_list": "orch/v2/sig/member-list|",
     "sig_wk_grant": "orch/v2/sig/wk-grant|",
     "sig_sk_grant": "orch/v2/sig/sk-grant|",
@@ -209,7 +212,10 @@ LABELS = {
     "h_pin_person": "orch/v2/pin/person|",
     "h_pin_workspace": "orch/v2/pin/workspace|",
     "h_sas": "orch/v2/sas|",
+    "h_sas_cert": "orch/v2/sas-cert|",
     "h_dek_commit": "orch/v2/dek-commit|",
+    "h_card_key_commit": "orch/v2/card-key-commit|",
+    "h_drop_parent": "orch/v2/drop-parent|",
     "h_ws_envelope": "orch/v2/ws-envelope-hash|",
     "h_question": "orch/v2/question|",
     "h_assert": "orch/v2/assert|",
@@ -525,6 +531,7 @@ def open_sealed(suite: Suite, rcpt_kx_priv, rcpt_id: bytes, purpose: str, object
 
 KIND_LABEL = {"device_cert": "sig_device_cert", "revocation": "sig_revocation", "member_list": "sig_member_list",
               "wk_grant": "sig_wk_grant", "sk_grant": "sig_sk_grant", "cert_request": "sig_cert_request",
+              "ws_delegation": "sig_ws_delegation", "cert_challenge": "sig_cert_challenge",
               "enroll_request": "sig_enroll_request", "drop_object": "sig_drop_object",
               "drop_claim": "sig_drop_claim"}
 
@@ -615,8 +622,32 @@ def verify_revocation(suite: Suite, signed, pk_pub: bytes, cert: dict | None) ->
 _RELAY_URL = re.compile(r"https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[1-9][0-9]{0,4})?|"
                         r"http://(localhost|127\.0\.0\.1|\[::1\])(:[1-9][0-9]{0,4})?")
 CARD_FIELDS = {"v", "suite", "kind", "workspace_id", "wsk_pub", "wxk_pub", "wxk_version", "owner_person_id",
-               "relay_url", "card_seq", "issued_ms", "sealed_hash"}
+               "relay_url", "card_seq", "issued_ms", "sealed_hash", "ck_commit"}
 SEALED_CARD_FIELDS = {"name", "description", "capabilities", "hosted_by"}
+DELEGATION_FIELDS = {"v", "suite", "kind", "workspace_id", "wsk_pub", "owner_person_id", "client_hosted", "issued_ms"}
+
+
+def ck_commit(ws: bytes, card_seq: int, ck: bytes) -> bytes:
+    return H(L["h_card_key_commit"] + ws + u32(card_seq) + ck)
+
+
+def make_delegation(suite: Suite, pk, ws: bytes, wsk_pub: bytes, owner: bytes, client_hosted: bool,
+                    issued_ms: int) -> dict:
+    """§7.1: signed once by the owner's PK when the workspace is created; it never changes."""
+    return sign_object(suite, pk, {"v": 2, "suite": suite.id, "kind": "ws_delegation", "workspace_id": ws.hex(),
+                                   "wsk_pub": b64u(wsk_pub), "owner_person_id": owner.hex(),
+                                   "client_hosted": client_hosted, "issued_ms": issued_ms})
+
+
+def verify_delegation(suite: Suite, signed, owner_pk_pub: bytes) -> dict:
+    o = verify_object(suite, owner_pk_pub, signed, "ws_delegation")
+    if o is None:
+        return {"refuse": "bad_signature"}
+    if set(o) != DELEGATION_FIELDS or type(o["client_hosted"]) is not bool or type(o["issued_ms"]) is not int:
+        return {"refuse": "malformed"}
+    if o["owner_person_id"] != person_id(suite, owner_pk_pub).hex():
+        return {"refuse": "other_person"}
+    return {"ok": o}
 
 
 def card_sealed_part(suite: Suite, ck: bytes, ws: bytes, card_seq: int, part: dict) -> bytes:
@@ -625,22 +656,27 @@ def card_sealed_part(suite: Suite, ck: bytes, ws: bytes, card_seq: int, part: di
                                                     L["aad_card"] + bytes([suite.id]) + ws + u32(card_seq))
 
 
-def open_card_sealed_part(suite: Suite, ck: bytes, ws: bytes, card_seq: int, sealed: bytes) -> dict:
-    return parse_json(AESGCM(k_card(ck, ws, card_seq)).decrypt(
-        ZERO_NONCE, sealed, L["aad_card"] + bytes([suite.id]) + ws + u32(card_seq)))
+def open_card_sealed_part(suite: Suite, card_o: dict, ck: bytes, sealed: bytes) -> dict:
+    """§7.1: a reader that unwrapped CK first checks it against the signed ck_commit, then opens."""
+    ws, seq = unhex(card_o["workspace_id"], 16), card_o["card_seq"]
+    if not hmac.compare_digest(unb64u(card_o["ck_commit"], 32), ck_commit(ws, seq, ck)):
+        raise ValueError("card key does not match ck_commit")
+    return parse_json(AESGCM(k_card(ck, ws, seq)).decrypt(
+        ZERO_NONCE, sealed, L["aad_card"] + bytes([suite.id]) + ws + u32(seq)))
 
 
-def make_card(suite: Suite, wsk, pk, o: dict, sealed: bytes) -> dict:
-    o = {**o, "sealed_hash": b64u(H(sealed))}
-    b = cj(o)
-    return {"o": o, "sig_wsk": b64u(suite.sign(wsk, L["sig_card_wsk"] + b)),
-            "sig_pk": b64u(suite.sign(pk, L["sig_card_pk"] + b)), "sealed": b64u(sealed)}
+def make_card(suite: Suite, wsk, delegation: dict, o: dict, sealed: bytes, ck: bytes) -> dict:
+    """§7.1: the rotating card is signed by WSK alone; the owner's PK signed the delegation once."""
+    ws = unhex(o["workspace_id"], 16)
+    o = {**o, "sealed_hash": b64u(H(sealed)), "ck_commit": b64u(ck_commit(ws, o["card_seq"], ck))}
+    return {"delegation": delegation, "o": o, "sig": b64u(suite.sign(wsk, L["sig_card_wsk"] + cj(o))),
+            "sealed": b64u(sealed)}
 
 
 def verify_card(suite: Suite, card, owner_pk_pub: bytes) -> dict:
-    """§7.1, what the relay, orch-publish and a peer check. {"ok": o} or {"refuse": code}."""
+    """§7.1, what the relay, orch-publish and a peer check: the delegation (owner PK), then the card (WSK)."""
     try:
-        if not isinstance(card, dict) or set(card) != {"o", "sig_wsk", "sig_pk", "sealed"}:
+        if not isinstance(card, dict) or set(card) != {"delegation", "o", "sig", "sealed"}:
             return {"refuse": "malformed"}
         o = card["o"]
         if not isinstance(o, dict) or set(o) != CARD_FIELDS or o["v"] != 2 or o["kind"] != "card":
@@ -656,13 +692,18 @@ def verify_card(suite: Suite, card, owner_pk_pub: bytes) -> dict:
         for k in ("wxk_version", "card_seq", "issued_ms"):
             if type(o[k]) is not int or o[k] < (1 if k != "issued_ms" else 0):
                 return {"refuse": "malformed"}
+        unb64u(o["ck_commit"], 32)
         sealed = unb64u(card["sealed"])
-        b = cj(o)
-        if not suite.verify(wsk_pub, unb64u(card["sig_wsk"], 64), L["sig_card_wsk"] + b):
-            return {"refuse": "bad_signature"}
         if o["owner_person_id"] != person_id(suite, owner_pk_pub).hex():
             return {"refuse": "other_person"}
-        if not suite.verify(owner_pk_pub, unb64u(card["sig_pk"], 64), L["sig_card_pk"] + b):
+        d = verify_delegation(suite, card["delegation"], owner_pk_pub)
+        if "refuse" in d:
+            return d
+        d = d["ok"]
+        if (d["workspace_id"], d["wsk_pub"], d["owner_person_id"]) != (o["workspace_id"], o["wsk_pub"],
+                                                                        o["owner_person_id"]):
+            return {"refuse": "delegation_mismatch"}
+        if not suite.verify(wsk_pub, unb64u(card["sig"], 64), L["sig_card_wsk"] + cj(o)):
             return {"refuse": "bad_signature"}
         if unb64u(o["sealed_hash"], 32) != H(sealed):
             return {"refuse": "bad_signature"}
@@ -672,31 +713,34 @@ def verify_card(suite: Suite, card, owner_pk_pub: bytes) -> dict:
 
 
 def relay_accept_card(suite: Suite, stored: dict | None, card, owner_pk_pub: bytes) -> dict:
-    """§7.1 update rules, as the relay applies them."""
+    """§7.1 update rules, as the relay applies them. stored: {"o": card o, "delegation": delegation o} or None."""
     r = verify_card(suite, card, owner_pk_pub)
     if "refuse" in r:
         return r
     o = r["ok"]
     if stored is None:
         return {"ok": o}
-    if o["workspace_id"] != stored["workspace_id"] or o["owner_person_id"] != stored["owner_person_id"]:
+    so = stored["o"]
+    if o["workspace_id"] != so["workspace_id"] or o["owner_person_id"] != so["owner_person_id"]:
         return {"refuse": "other_workspace"}
-    if o["wsk_pub"] != stored["wsk_pub"]:
+    if o["wsk_pub"] != so["wsk_pub"]:
         return {"refuse": "wsk_changed"}
-    if o["card_seq"] <= stored["card_seq"]:
+    if cj(card["delegation"]["o"]) != cj(stored["delegation"]):
+        return {"refuse": "delegation_changed"}
+    if o["card_seq"] <= so["card_seq"]:
         return {"refuse": "stale_card"}
-    if o["wxk_version"] == stored["wxk_version"]:
-        if o["wxk_pub"] != stored["wxk_pub"]:
+    if o["wxk_version"] == so["wxk_version"]:
+        if o["wxk_pub"] != so["wxk_pub"]:
             return {"refuse": "wxk_changed_without_version"}
-    elif o["wxk_version"] != stored["wxk_version"] + 1 or o["wxk_pub"] == stored["wxk_pub"]:
+    elif o["wxk_version"] != so["wxk_version"] + 1 or o["wxk_pub"] == so["wxk_pub"]:
         return {"refuse": "bad_wxk_version"}
     return {"ok": o}
 
 
-def relay_accept_member_list(suite: Suite, wsk_pub: bytes, prev: dict | None, signed, dir_state: dict,
-                             now_ms: int) -> dict:
-    """§7.2. dir_state: {"owner_pk_pub": bytes, "certs": {device hex: signed cert}, "revoked": set,
-    "grants": {(device hex, epoch)}}."""
+def relay_accept_member_list(suite: Suite, wsk_pub: bytes, card_ws: str, prev: dict | None, signed,
+                             dir_state: dict, now_ms: int) -> dict:
+    """§7.2. card_ws: the workspace id of the card whose wsk_pub verifies. dir_state: {"owner_pk_pub": bytes,
+    "certs": {device hex: signed cert}, "revoked": set, "grants": {(device hex, epoch)}}."""
     o = verify_object(suite, wsk_pub, signed, "member_list")
     if o is None:
         return {"refuse": "bad_signature"}
@@ -714,9 +758,9 @@ def relay_accept_member_list(suite: Suite, wsk_pub: bytes, prev: dict | None, si
             return {"refuse": "malformed"}
     except (ValueError, TypeError, KeyError, AttributeError):
         return {"refuse": "malformed"}
+    if o["workspace_id"] != card_ws:
+        return {"refuse": "other_workspace"}
     if prev is not None:
-        if o["workspace_id"] != prev["workspace_id"]:
-            return {"refuse": "malformed"}
         if o["list_seq"] <= prev["list_seq"]:
             return {"refuse": "stale_list"}
         if o["epoch"] not in (prev["epoch"], prev["epoch"] + 1):
@@ -1153,16 +1197,20 @@ def pending_answer(state, held) -> dict:
 
 
 def pair_status_answer(state, held, now_ms) -> dict:
-    """§8.3 step 5: one of six shapes, nothing else."""
-    s = held["state"]
+    """§8.3 step 5: one of six shapes; every one carries wsk_pub, so the device can check it against the
+    link's pin before anything else (§8.3 step 4)."""
+    s, w = held["state"], state["wsk_pub"]
+    if s == "pending":
+        return pending_answer(state, held)
     if s == "cert_pending" and now_ms >= held["cert_pending_since"] + CERT_PENDING_MS:
-        return {"state": "expired"}
+        return {"state": "expired", "wsk_pub": w}
     if s == "cert_pending":
-        return {"state": "cert_pending", "primary_label": held["primary_label"]}
+        return {"state": "cert_pending", "primary_label": held["primary_label"], "pk_pub": state["owner_pk_pub"],
+                "challenge": held.get("challenge"), "wsk_pub": w}
     if s == "approved":
         return {"state": "approved", "scopes": held["scopes"], "cert": held["cert"], "pk_pub": state["owner_pk_pub"],
-                "epoch": state["epoch"]}
-    return {"state": s}                                   # pending, rejected, expired
+                "epoch": state["epoch"], "wsk_pub": w}
+    return {"state": s, "wsk_pub": w}                     # rejected, expired
 
 
 # --- the device side ---------------------------------------------------------------------------------
@@ -1216,7 +1264,10 @@ def device_check(env: bytes, c: dict, mailbox: dict, now_ms: int) -> dict:
     elif abs(now_ms + c.get("offset_ms", 0) - h.ts_ms) > WINDOW_MS:
         return _drop("stale_timestamp")
     if h.flags & F_REFUSAL and meta.get("refusal") == "stale_epoch":
-        res["fetch_grants"] = True                       # §8.5: fetch the newer WK grant, then send anew
+        # §8.5: only a strictly higher epoch sends the device to fetch grants; it never moves backwards
+        if type(meta.get("epoch")) is not int or meta["epoch"] <= h.epoch:
+            return _drop("stale_epoch_not_higher")
+        res["fetch_grants"] = True
     pend["next"] += 1
     return res
 
@@ -1251,54 +1302,63 @@ def open_pair_answer(env: bytes, c: dict, now_ms: int) -> dict:
     if h.seq != pend["next"]:
         return _drop("out_of_order")
     refusal = bool(h.flags & F_REFUSAL)
+    if refusal and not isinstance(meta.get("refusal"), str):
+        return _drop("not_a_pairing_answer")
     res = {"result": "accept", "wsk_pub": b64u(wsk_pub)}
-    if refusal:
-        if not isinstance(meta.get("refusal"), str):
-            return _drop("not_a_pairing_answer")
-        res["refusal"] = meta["refusal"]
-        if meta["refusal"] == "stale_timestamp" and type(meta.get("host_ms")) is int:
-            if not pend.get("offset_adopted"):
-                pend["offset_adopted"] = True
-                off = meta["host_ms"] - now_ms
-                if abs(off) <= MAX_OFFSET_MS:
-                    res["offset_ms"] = off
-                else:
-                    res["clock_wrong"] = True
-            pend["next"] += 1
-            return res
-    elif abs(now_ms + c.get("offset_ms", 0) - h.ts_ms) > WINDOW_MS:
+    if refusal and meta["refusal"] == "stale_timestamp" and type(meta.get("host_ms")) is int:
+        # the one answer exempt from the window: it says this device's clock is off (§5.1 of bridge v1)
+        res["refusal"] = "stale_timestamp"
+        if not pend.get("offset_adopted"):
+            pend["offset_adopted"] = True
+            off = meta["host_ms"] - now_ms
+            if abs(off) <= MAX_OFFSET_MS:
+                res["offset_ms"] = off
+            else:
+                res["clock_wrong"] = True
+        pend["next"] += 1
+        return res
+    if abs(now_ms + c.get("offset_ms", 0) - h.ts_ms) > WINDOW_MS:   # every other answer, refusals included
         return _drop("stale_timestamp")
-    if not refusal:
-        st = meta.get("state")
-        if st == "pending":
-            if meta.get("dk_sig_pub") != c["dk_sig_pub"] or meta.get("dk_kx_pub") != c["dk_kx_pub"]:
-                return _drop("not_my_key")                 # the host is pairing someone else's key
-            try:
-                nonce = unb64u(meta.get("sas_nonce"), 32)
-            except ValueError:
-                return _drop("not_a_pairing_answer")
-            res["state"] = "pending"
-            res["sas"] = sas(suite, h.workspace, h.stream, unb64u(c["dk_sig_pub"]), unb64u(c["dk_kx_pub"]),
-                             wsk_pub, nonce)
-        elif st == "approved":
-            try:
-                pk_pub = unb64u(meta["pk_pub"], suite.sig_pub_len)
-            except (ValueError, KeyError):
-                return _drop("not_a_pairing_answer")
-            if not hmac.compare_digest(pk_pin(suite, pk_pub), bytes.fromhex(c["pk_pin"])):
-                return _drop("pk_pin")
+    if refusal:
+        res["refusal"] = meta["refusal"]
+        pend["next"] += 1
+        return res
+    st = meta.get("state")
+    if st == "pending":
+        if meta.get("dk_sig_pub") != c["dk_sig_pub"] or meta.get("dk_kx_pub") != c["dk_kx_pub"]:
+            return {**_drop("not_my_key"), "alarm": True}           # the host is pairing someone else's key
+        try:
+            nonce = unb64u(meta.get("sas_nonce"), 32)
+        except ValueError:
+            return _drop("not_a_pairing_answer")
+        res["state"] = "pending"
+        res["sas"] = sas(suite, h.workspace, h.stream, unb64u(c["dk_sig_pub"]), unb64u(c["dk_kx_pub"]),
+                         wsk_pub, nonce)
+    elif st in ("cert_pending", "approved"):
+        try:
+            pk_pub = unb64u(meta["pk_pub"], suite.sig_pub_len)
+        except (ValueError, KeyError):
+            return _drop("not_a_pairing_answer")
+        if not hmac.compare_digest(pk_pin(suite, pk_pub), bytes.fromhex(c["pk_pin"])):
+            return _drop("pk_pin")
+        if st == "cert_pending":
+            res.update(state="cert_pending", primary_label=meta.get("primary_label"))
+            if meta.get("challenge") is not None:
+                v = check_cert_challenge(suite, meta["challenge"], pk_pub, c, now_ms + c.get("offset_ms", 0))
+                if "drop" in v:
+                    return {**_drop(v["drop"]), **({"alarm": True} if v["drop"] == "not_my_key" else {})}
+                res["cert_code"] = v["cert_code"]
+        else:
             v = verify_cert(suite, meta.get("cert"), pk_pub, now_ms + c.get("offset_ms", 0))
             if "refuse" in v or v["ok"]["dk_sig_pub"] != c["dk_sig_pub"] or v["ok"]["dk_kx_pub"] != c["dk_kx_pub"]:
                 return _drop("cert")
             if not scopes_ok(meta.get("scopes")) or type(meta.get("epoch")) is not int:
                 return _drop("not_a_pairing_answer")
             res.update(state="approved", scopes=meta["scopes"], epoch=meta["epoch"], device_id=v["ok"]["device_id"])
-        elif st in ("cert_pending", "rejected", "expired"):
-            res["state"] = st
-            if st == "cert_pending":
-                res["primary_label"] = meta.get("primary_label")
-        else:
-            return _drop("not_a_pairing_answer")
+    elif st in ("rejected", "expired"):
+        res["state"] = st
+    else:
+        return _drop("not_a_pairing_answer")
     pend["next"] += 1
     return res
 
@@ -1320,6 +1380,8 @@ def parse_pair_fragment(fragment):
 
 def make_cert_request(suite: Suite, wsk, ws: bytes, person: bytes, primary: bytes, primary_kx_pub: bytes,
                       request_id: bytes, inner: dict, created_ms: int, eph_seed: bytes) -> dict:
+    """§8.4. inner = {device_id, dk_sig_pub, dk_kx_pub, label, scopes_max, offer_id}: no host nonce, so the
+    host has nothing to grind the code with (R1)."""
     sealed = seal_to(suite, primary_kx_pub, primary, "cert-request", request_id, 0, cj(inner), eph_seed)
     return sign_object(suite, wsk, {"v": 2, "suite": suite.id, "kind": "cert_request", "request_id": request_id.hex(),
                                     "workspace_id": ws.hex(), "person_id": person.hex(), "primary_device_id": primary.hex(),
@@ -1327,14 +1389,14 @@ def make_cert_request(suite: Suite, wsk, ws: bytes, person: bytes, primary: byte
                                     "sealed": b64u(sealed)})
 
 
-def primary_open_cert_request(suite: Suite, signed, card_o: dict, card_part: dict, my_person: bytes, me: bytes,
-                              my_kx_priv, now_ms: int) -> dict:
-    """§8.4: what the owner's primary device checks before it shows the code and asks for a confirmation.
-    card_part is the card's opened sealed part: a client-hosted workspace (D29) never gets a certificate made."""
+def primary_open_cert_request(suite: Suite, signed, card: dict, my_person: bytes, me: bytes, my_kx_priv,
+                              prim: dict, now_ms: int) -> dict:
+    """§8.4: what the owner's primary device checks before it draws its nonce and signs a challenge.
+    card: the workspace's verified card (with its delegation). prim (mutated on success): {"seen": [request
+    ids], "open": {workspace hex: request id}}."""
+    card_o, deleg = card["o"], card["delegation"]["o"]
     if card_o["owner_person_id"] != my_person.hex():
         return {"refuse": "other_person"}
-    if card_part.get("hosted_by") is not None:
-        return {"refuse": "client_hosted"}
     o = verify_object(suite, unb64u(card_o["wsk_pub"]), signed, "cert_request")
     if o is None or o["workspace_id"] != card_o["workspace_id"]:
         return {"refuse": "bad_signature"}
@@ -1342,18 +1404,88 @@ def primary_open_cert_request(suite: Suite, signed, card_o: dict, card_part: dic
         return {"refuse": "not_for_this_device"}
     if not o["created_ms"] - SKEW_MS <= now_ms < o["expires_ms"] or o["expires_ms"] - o["created_ms"] > CERT_PENDING_MS:
         return {"refuse": "expired"}
+    if o["request_id"] in prim["seen"]:
+        return {"refuse": "replayed"}
+    if o["workspace_id"] in prim["open"]:
+        return {"refuse": "request_open"}                # at most one open request per workspace
     try:
         inner = parse_json(open_sealed(suite, my_kx_priv, me, "cert-request", unhex(o["request_id"], 16), 0,
                                        unb64u(o["sealed"])))
+        if set(inner) != {"device_id", "dk_sig_pub", "dk_kx_pub", "label", "scopes_max", "offer_id"}:
+            raise ValueError("fields")
         sig_pub = unb64u(inner["dk_sig_pub"], suite.sig_pub_len)
         kx_pub = unb64u(inner["dk_kx_pub"], suite.kx_pub_len)
+        unhex(inner["offer_id"], 16)
     except (InvalidTag, ValueError, KeyError, TypeError):
         return {"refuse": "malformed"}
-    if inner["device_id"] != device_id(suite, sig_pub).hex() or not scopes_ok(inner["scopes_max"]):
+    if inner["device_id"] != device_id(suite, sig_pub).hex() or not suite.sig_pub_ok(sig_pub) \
+            or not suite.kx_pub_ok(kx_pub) or not scopes_ok(inner["scopes_max"]):
         return {"refuse": "malformed"}
-    code = sas(suite, unhex(o["workspace_id"], 16), unhex(inner["offer_id"], 16), sig_pub, kx_pub,
-               unb64u(card_o["wsk_pub"]), unb64u(inner["sas_nonce"], 32))
-    return {"ok": inner, "sas": code}
+    if inner["scopes_max"][0].startswith("drop:"):
+        return {"refuse": "scope_exceeded"}              # scoped agents enrol through §6.4 only
+    prim["seen"].append(o["request_id"])
+    prim["open"][o["workspace_id"]] = o["request_id"]
+    return {"ok": inner, "warning": "client_hosted" if deleg["client_hosted"] else None}
+
+
+CHALLENGE_FIELDS = {"v", "suite", "kind", "request_id", "workspace_id", "person_id", "device_id", "dk_sig_pub",
+                    "dk_kx_pub", "primary_nonce", "expires_ms"}
+
+
+def cert_sas(suite: Suite, challenge_o: dict) -> str:
+    """§8.4: the code the primary and the phone both show; the primary's nonce was drawn after the keys
+    reached it, and only PK can sign the challenge, so nobody can grind it."""
+    return base64.b32encode(H(L["h_sas_cert"] + bytes([suite.id]) + cj(challenge_o))).decode()[:6]
+
+
+def make_cert_challenge(suite: Suite, pk, request_o: dict, inner: dict, primary_nonce: bytes) -> dict:
+    assert len(primary_nonce) == 32
+    return sign_object(suite, pk, {"v": 2, "suite": suite.id, "kind": "cert_challenge",
+                                   "request_id": request_o["request_id"], "workspace_id": request_o["workspace_id"],
+                                   "person_id": request_o["person_id"], "device_id": inner["device_id"],
+                                   "dk_sig_pub": inner["dk_sig_pub"], "dk_kx_pub": inner["dk_kx_pub"],
+                                   "primary_nonce": b64u(primary_nonce), "expires_ms": request_o["expires_ms"]})
+
+
+def primary_issue_challenge(suite: Suite, pk, prim: dict, request_o: dict, inner: dict, primary_nonce: bytes) -> dict:
+    """§8.4: the primary draws primary_nonce (32 CSPRNG bytes) only now, after the keys reached it, keeps the
+    challenge as the only thing it will ever certify for this request, and posts it to (ws, request_id)."""
+    ch = make_cert_challenge(suite, pk, request_o, inner, primary_nonce)
+    prim.setdefault("challenges", {})[request_o["request_id"]] = ch["o"]
+    return ch
+
+
+def check_cert_challenge(suite: Suite, signed, pk_pub: bytes, c: dict, now_ms: int) -> dict:
+    """§8.4, on the phone: the challenge the host relayed must be PK's, for this workspace, for this device's
+    own two keys (else the alarm: someone asked the primary to certify another key), and unexpired."""
+    o = verify_object(suite, pk_pub, signed, "cert_challenge")
+    if o is None or set(o) != CHALLENGE_FIELDS:
+        return {"drop": "challenge_signature"}
+    if o["workspace_id"] != c["workspace"] or o["person_id"] != person_id(suite, pk_pub).hex():
+        return {"drop": "not_for_this_workspace"}
+    if o["dk_sig_pub"] != c["dk_sig_pub"] or o["dk_kx_pub"] != c["dk_kx_pub"] or o["device_id"] != c["device"]:
+        return {"drop": "not_my_key"}
+    if type(o["expires_ms"]) is not int or now_ms >= o["expires_ms"]:
+        return {"drop": "challenge_expired"}
+    return {"ok": o, "cert_code": cert_sas(suite, o)}
+
+
+def primary_sign_cert(suite: Suite, pk, prim: dict, request_id: str, label_sealed: str, created_ms: int,
+                      expires_ms, scopes_max: list) -> dict:
+    """§8.4: after the human confirmed the code, the primary certifies exactly the keys of ITS OWN stored
+    challenge for that request, once. prim: {"challenges": {request id: challenge o}, "signed": [ids], "open"}."""
+    ch = prim["challenges"].get(request_id)
+    if ch is None:
+        return {"refuse": "unknown_request"}
+    if request_id in prim.setdefault("signed", []):
+        return {"refuse": "already_signed"}
+    prim["signed"].append(request_id)
+    prim["open"].pop(ch["workspace_id"], None)
+    return {"ok": sign_object(suite, pk, {"v": 2, "suite": suite.id, "kind": "device_cert",
+                                          "device_id": ch["device_id"], "person_id": ch["person_id"],
+                                          "dk_sig_pub": ch["dk_sig_pub"], "dk_kx_pub": ch["dk_kx_pub"],
+                                          "label_sealed": label_sealed, "created_ms": created_ms,
+                                          "expires_ms": expires_ms, "scopes_max": scopes_max})}
 
 
 def enroll_mac(code: bytes, suite: Suite, space: bytes, dk_sig_pub: bytes, dk_kx_pub: bytes) -> bytes:
@@ -1381,6 +1513,50 @@ def question_hash(content: dict) -> bytes:
     return H(L["h_question"] + cj(content))
 
 
+def decision_signed_bytes(ws_hex: str, d: dict) -> bytes:
+    return L["sig_decision"] + cj({"workspace_id": ws_hex, "question_id": d["question_id"],
+                                   "content_hash": d["content_hash"], "decision_id": d["decision_id"],
+                                   "answer": d["answer"]})
+
+
+def sign_decision(suite: Suite, dk, ws_hex: str, d: dict) -> dict:
+    """§13: the decision op's meta, with a detached device signature that survives outside the bridge."""
+    return {"op": "decision", **d, "sig": b64u(suite.sign(dk, decision_signed_bytes(ws_hex, d)))}
+
+
+def host_check_decision(suite: Suite, meta: dict, ws_hex: str, dk_sig_pub: bytes) -> dict:
+    try:
+        if set(meta) != {"op", "decision_id", "question_id", "content_hash", "answer", "sig"}:
+            return {"refuse": "malformed"}
+        unhex(meta["decision_id"], 16), unhex(meta["question_id"], 16), unb64u(meta["content_hash"], 32)
+        sig = unb64u(meta["sig"], 64)
+    except (ValueError, TypeError):
+        return {"refuse": "malformed"}
+    if not suite.verify(dk_sig_pub, sig, decision_signed_bytes(ws_hex, meta)):
+        return {"refuse": "bad_signature"}
+    return {"ok": True}
+
+
+def host_revocation(suite: Suite, state: dict, meta: dict) -> dict:
+    """§6.2: the bridge op {"op": "revocation", "record": <signed revocation>}. Authority is PK's signature,
+    whoever relays it. The host records it and rotates when the device was a member (mutates state)."""
+    if not isinstance(meta, dict) or set(meta) != {"op", "record"}:
+        return {"refuse": "malformed"}
+    o = verify_object(suite, unb64u(state["owner_pk_pub"]), meta["record"], "revocation")
+    if o is None:
+        return {"refuse": "bad_signature"}
+    if set(o) != {"v", "suite", "kind", "person_id", "device_id", "revoked_ms", "reason"} \
+            or o["reason"] not in REVOKE_REASONS or type(o["revoked_ms"]) is not int:
+        return {"refuse": "malformed"}
+    if o["person_id"] != state["owner_person_id"]:
+        return {"refuse": "other_person"}
+    did = o["device_id"]
+    if did not in state["revoked"]:
+        state["revoked"].append(did)
+    was_member = state["members"].pop(did, None) is not None
+    return {"ok": did, "rotate": was_member}
+
+
 # =====================================================================================================
 # §9 Push
 # =====================================================================================================
@@ -1390,19 +1566,26 @@ MAX_PUSH = 3072
 PUSH_MAX_AGE_MS = 24 * 3600 * 1000
 
 
+def push_signed_bytes(suite, ws: bytes, epoch: int, payload: dict) -> bytes:
+    return L["sig_push"] + bytes([suite.id]) + ws + u32(epoch) + cj(payload)
+
+
 def push_aad(suite, ws, epoch):
     return L["aad_push"] + bytes([suite.id]) + ws + u32(epoch)
 
 
-def seal_push(suite: Suite, wk: bytes, ws: bytes, epoch: int, payload: dict, salt: bytes) -> bytes:
-    c = salted_seal(k_push(wk, ws, epoch), L["kdf_push_msg"], push_aad(suite, ws, epoch), cj(payload), salt)
+def seal_push(suite: Suite, wsk, wk: bytes, ws: bytes, epoch: int, payload: dict, salt: bytes) -> bytes:
+    sig = suite.sign(wsk, push_signed_bytes(suite, ws, epoch, payload))
+    pt = cj({"p": payload, "sig": b64u(sig)})
+    c = salted_seal(k_push(wk, ws, epoch), L["kdf_push_msg"], push_aad(suite, ws, epoch), pt, salt)
     out = cj({"v": 2, "ws": ws.hex(), "epoch": epoch, "c": b64u(c)})
     assert len(out) <= MAX_PUSH
     return out
 
 
-def sw_open_push(suite: Suite, raw: bytes, keys: dict, now_ms: int) -> dict:
-    """§9.2: what the service worker does. keys: {ws hex: {epoch str: wk hex}}."""
+def sw_open_push(suite: Suite, raw: bytes, keys: dict, last: dict, now_ms: int) -> dict:
+    """§9.2: what the service worker does. keys: {ws hex: {"wsk_pub": b64u, "wk": {epoch str: wk hex}}};
+    last (mutated): {"<ws hex>/<id>": highest ts_ms shown}."""
     if len(raw) > MAX_PUSH:
         return _drop("size")
     try:
@@ -1413,21 +1596,32 @@ def sw_open_push(suite: Suite, raw: bytes, keys: dict, now_ms: int) -> dict:
         c = unb64u(m["c"])
     except (ValueError, UnicodeDecodeError):
         return _drop("shape")
-    wk = keys.get(m["ws"], {}).get(str(m["epoch"]))
+    entry = keys.get(m["ws"])
+    wk = None if entry is None else entry["wk"].get(str(m["epoch"]))
     if wk is None or type(m["epoch"]) is not int:
         return _drop("no_key")
     try:
-        p = parse_json(salted_open(k_push(bytes.fromhex(wk), ws, m["epoch"]), L["kdf_push_msg"],
-                                   push_aad(suite, ws, m["epoch"]), c))
+        outer = parse_json(salted_open(k_push(bytes.fromhex(wk), ws, m["epoch"]), L["kdf_push_msg"],
+                                       push_aad(suite, ws, m["epoch"]), c))
+        if not isinstance(outer, dict) or set(outer) != {"p", "sig"} or not isinstance(outer["p"], dict):
+            return _drop("payload")
+        sig = unb64u(outer["sig"], 64)
     except (InvalidTag, ValueError, UnicodeDecodeError):
         return _drop("tag")
-    if not isinstance(p, dict) or set(p) != {"kind", "id", "label", "ts_ms"} or p["kind"] not in PUSH_KINDS:
+    p = outer["p"]
+    if not suite.verify(unb64u(entry["wsk_pub"]), sig, push_signed_bytes(suite, ws, m["epoch"], p)):
+        return _drop("signature")                        # a member device cannot speak for the host (R3)
+    if set(p) != {"kind", "id", "label", "ts_ms"} or p["kind"] not in PUSH_KINDS:
         return _drop("payload")
     if not isinstance(p["label"], str) or len(p["label"]) > MAX_LABEL or not isinstance(p["id"], str) \
             or type(p["ts_ms"]) is not int:
         return _drop("payload")
     if not now_ms - PUSH_MAX_AGE_MS <= p["ts_ms"] <= now_ms + SKEW_MS:
         return _drop("stale")
+    key = f"{m['ws']}/{p['id']}"
+    if key in last and p["ts_ms"] <= last[key]:
+        return _drop("replay")
+    last[key] = p["ts_ms"]
     return {"result": "show", "tag": p["id"], **p}
 
 
@@ -1487,6 +1681,19 @@ def drop_meta_open(suite, dek, obj, ver, sealed: bytes) -> dict:
     return parse_json(AESGCM(k).decrypt(ZERO_NONCE, sealed, L["aad_drop_meta"] + bytes([suite.id]) + obj + u32(ver)))
 
 
+def drop_parent_hash(parent_o: dict) -> bytes:
+    return H(L["h_drop_parent"] + cj(parent_o))
+
+
+def verify_doc_chain(versions: list[dict]) -> dict:
+    """§10.6, a reader: descriptor objects (already signature-checked) from version 1 up must chain."""
+    for i, o in enumerate(versions):
+        want = None if i == 0 else b64u(drop_parent_hash(versions[i - 1]))
+        if o["version"] != i + 1 or o["parent_hash"] != want:
+            return {"refuse": "fork", "at": o["version"]}
+    return {"ok": len(versions)}
+
+
 def dek_commit(obj: bytes, ver: int, dek: bytes) -> bytes:
     return H(L["h_dek_commit"] + obj + u32(ver) + dek)
 
@@ -1530,8 +1737,8 @@ def unwrap_dek(suite: Suite, rec: dict, *, wk=None, sk=None, kx_priv=None) -> by
 
 
 DROP_OBJECT_FIELDS = {"v", "suite", "kind", "object_id", "space_id", "space_kind", "object_kind", "version", "parent",
-                      "author_kind", "author_id", "content_hash", "content_len", "dek_commit", "meta", "recipients",
-                      "origin", "created_ms", "expires_ms"}
+                      "parent_hash", "author_kind", "author_id", "content_hash", "content_len", "dek_commit", "meta",
+                      "recipients", "origin", "created_ms", "expires_ms"}
 
 
 def verify_drop_object(suite: Suite, signed, author_pub: bytes) -> dict:
@@ -1544,15 +1751,22 @@ def verify_drop_object(suite: Suite, signed, author_pub: bytes) -> dict:
         return {"refuse": "malformed"}
     if o["version"] != o["parent"] + 1 or (o["object_kind"] == "file" and o["version"] != 1):
         return {"refuse": "malformed"}
+    try:
+        if (o["version"] == 1) != (o["parent_hash"] is None) or (o["parent_hash"] is not None
+                                                                 and len(unb64u(o["parent_hash"])) != 32):
+            return {"refuse": "malformed"}
+    except ValueError:
+        return {"refuse": "malformed"}
     r = o["recipients"]
     if r != "inbox" and (not isinstance(r, list) or r != sorted(set(r))):
         return {"refuse": "malformed"}
     return {"ok": o}
 
 
-def relay_claim(suite: Suite, obj_state: dict, signed, cards: dict) -> dict:
-    """§10.4, one transaction. obj_state: {"object_id", "state": "inbox"|"claimed", "claimed_by", "wraps":
-    [records]}; cards: {ws hex: card o}. Mutated only on success."""
+def relay_claim(suite: Suite, obj_state: dict, signed, cards: dict, epochs: dict) -> dict:
+    """§10.5, one transaction. obj_state: {"object_id", "version", "state": "inbox"|"claimed", "claimed_by",
+    "wraps": [records]}; cards: {ws hex: card o}; epochs: {ws hex: the workspace's current epoch, from its
+    member list}. Mutated only on success."""
     o0 = signed.get("o", {}) if isinstance(signed, dict) else {}
     ws_hex = o0.get("workspace_id") if isinstance(o0, dict) else None
     card = cards.get(ws_hex) if isinstance(ws_hex, str) else None
@@ -1567,7 +1781,8 @@ def relay_claim(suite: Suite, obj_state: dict, signed, cards: dict) -> dict:
     try:
         w = o["wrap"]
         if set(w) != {"object_id", "version", "target_kind", "target_id", "key_version", "wrap"} \
-                or w["target_kind"] != "wk" or w["target_id"] != ws_hex or w["object_id"] != o["object_id"]:
+                or w["target_kind"] != "wk" or w["target_id"] != ws_hex or w["object_id"] != o["object_id"] \
+                or w["version"] != obj_state["version"] or w["key_version"] != epochs.get(ws_hex):
             return {"status": 400, "error": "malformed"}
     except (TypeError, AttributeError):
         return {"status": 400, "error": "malformed"}
@@ -1581,14 +1796,17 @@ def relay_claim(suite: Suite, obj_state: dict, signed, cards: dict) -> dict:
     return {"status": 200, "claimed_by": ws_hex}
 
 
-def relay_put_version(doc: dict, if_match, signed_version_o: dict) -> dict:
-    """§10.5: If-Match and the version chain. doc: {"current": n}. The signature is checked before this."""
+def relay_put_version(doc: dict, if_match, new_o: dict) -> dict:
+    """§10.6: If-Match and the hash chain. doc: {"current": n, "head": descriptor o of version n, or None}.
+    The descriptor's signature is checked before this."""
     if not isinstance(if_match, str) or not re.fullmatch(r"0|[1-9][0-9]{0,15}", if_match):
         return {"status": 428, "error": "precondition_required"}
     cur = doc["current"]
-    if int(if_match) != cur or signed_version_o["parent"] != cur or signed_version_o["version"] != cur + 1:
+    want_parent = None if doc["head"] is None else b64u(drop_parent_hash(doc["head"]))
+    if int(if_match) != cur or new_o["parent"] != cur or new_o["version"] != cur + 1 \
+            or new_o["parent_hash"] != want_parent:
         return {"status": 409, "error": "version_conflict", "current": cur}
-    doc["current"] = cur + 1
+    doc["current"], doc["head"] = cur + 1, new_o
     return {"status": 201, "version": cur + 1}
 
 
@@ -1600,6 +1818,8 @@ WX_MAGIC = b"ORWX"
 WX_HEADER = struct.Struct(">4sBBBB16s16s16sI")
 WX_HEADER_LEN = WX_HEADER.size                     # 60
 F_COSIGNED = 0x01
+F_WS_REFUSAL = 0x02
+FINAL_KINDS = ("result", "refusal")
 MAX_WS_ENVELOPE = 1 << 20
 MAX_DEADLINE_MS = 30 * 24 * 3600 * 1000
 WXK_OVERLAP_MS = 14 * 24 * 3600 * 1000
@@ -1630,6 +1850,15 @@ def build_ws_envelope(suite: Suite, wsk, hb: bytes, body_pt: dict, to_wxk_pub: b
 
 def device_cosign(suite: Suite, dk, cert: dict, hb: bytes, body: bytes) -> dict:
     return {"type": "device", "cert": cert, "sig": b64u(suite.sign(dk, L["sig_ws_cosign"] + ws_envelope_hash(hb, body)))}
+
+
+def build_ws_refusal(suite: Suite, wsk, me: bytes, refused_id: bytes, sender: bytes, sender_wxk_pub: bytes,
+                     sender_wxk_version: int, code: str, env_id: bytes, eph_seed: bytes, now_ms: int, **fields) -> bytes:
+    """§11.5: a refusal is an envelope back to the sender with the signed REFUSAL flag."""
+    hb = wx_header(suite, F_WS_REFUSAL, env_id, me, sender, sender_wxk_version)
+    body = {"kind": "refusal", "in_reply_to": refused_id.hex(), "depth": 0, "deadline_ms": now_ms, "ticket": None,
+            "result": None, "refusal": {"code": code, **fields}, "attachments": []}
+    return build_ws_envelope(suite, wsk, hb, body, sender_wxk_pub, eph_seed)
 
 
 def split_ws_envelope(env: bytes):
@@ -1682,15 +1911,15 @@ def _verify_cosig(suite: Suite, cos: dict, peer: dict, hb: bytes, body: bytes, n
 
 def ws_receive(env: bytes, st: dict, now_ms: int) -> dict:
     """§11.4, the receiver's order. st: {"suite", "workspace", "wxk": {version str: {"seed", "retired_ms"}},
-    "wxk_version", "peers": {ws hex: {wsk_pub, owner_pk_pub, relay_url}}, "seen": {id hex: {digest, outcome,
-    until}}, "sent": {id hex: to ws hex}}."""
+    "wxk_version", "peers": {ws hex: {wsk_pub, owner_pk_pub, relay_url, revoked}}, "seen": {"<from>/<id>":
+    {digest, outcome, until}}, "sent": {id hex: {"to": ws hex, "consumed": [kinds]}}}."""
     suite = SUITES[st["suite"]]
     try:
         hb, body, sig, rest = split_ws_envelope(env)
     except ValueError:
         return _drop("size")
     magic, v, s, flags, res, env_id, from_ws, to_ws, wxk_version = WX_HEADER.unpack(hb)
-    if magic != WX_MAGIC or v != 2 or res != 0 or flags & ~F_COSIGNED:
+    if magic != WX_MAGIC or v != 2 or res != 0 or flags & ~(F_COSIGNED | F_WS_REFUSAL):
         return _drop("shape")
     if s != suite.id:
         return _drop("suite")
@@ -1701,16 +1930,19 @@ def ws_receive(env: bytes, st: dict, now_ms: int) -> dict:
         return _drop("not_pinned")
     if not suite.verify(unb64u(peer["wsk_pub"]), sig, L["sig_ws_envelope"] + hb + body):
         return _drop("signature")
+    is_refusal = bool(flags & F_WS_REFUSAL)
     d = H(hb + body).hex()
-    seen = st["seen"].get(env_id.hex())
+    seen_key = f"{from_ws.hex()}/{env_id.hex()}"
+    seen = st["seen"].get(seen_key)
     if seen is not None and now_ms < seen["until"]:
-        if seen["digest"] != d or seen["from"] != from_ws.hex():
+        if seen["digest"] != d:
             return _drop("id_conflict")
         return {"result": "duplicate", "outcome": seen["outcome"]}
 
     def done(r, deadline=None):
-        st["seen"][env_id.hex()] = {"from": from_ws.hex(), "digest": d, "outcome": r,
-                                    "until": max(now_ms, deadline or 0) + SEEN_RETENTION_MS}
+        if is_refusal and r["result"] == "refuse":       # §11.5: a refusal is never answered
+            r = _drop(r["code"])
+        st["seen"][seen_key] = {"digest": d, "outcome": r, "until": max(now_ms, deadline or 0) + SEEN_RETENTION_MS}
         return r
 
     if flags & F_COSIGNED:
@@ -1736,10 +1968,14 @@ def ws_receive(env: bytes, st: dict, now_ms: int) -> dict:
             raise ValueError("body")
         if type(p["depth"]) is not int or type(p["deadline_ms"]) is not int or not isinstance(p["attachments"], list):
             raise ValueError("body")
+        if (p["kind"] == "refusal") != is_refusal:       # the signed flag and the sealed kind agree
+            raise ValueError("refusal flag")
+        if is_refusal and (not isinstance(p["refusal"], dict) or p["refusal"].get("code") not in WS_REFUSALS):
+            raise ValueError("refusal body")
     except (InvalidTag, ValueError, UnicodeDecodeError):
         return done(_refuse("malformed"))
     if p["kind"] == "ticket":
-        if p["ticket"] is None or p["depth"] < 0:
+        if p["ticket"] is None or p["depth"] < 0 or p["in_reply_to"] is not None:
             return done(_refuse("malformed"))
         if p["depth"] > 1:
             return done(_refuse("depth_exceeded"))
@@ -1748,11 +1984,17 @@ def ws_receive(env: bytes, st: dict, now_ms: int) -> dict:
         if p["deadline_ms"] + SKEW_MS < now_ms:
             return done(_refuse("deadline_passed"))
         return done({"result": "inbox", "kind": "ticket", "from": from_ws.hex(), "depth": p["depth"]}, p["deadline_ms"])
-    if p["in_reply_to"] is None or st["sent"].get(p["in_reply_to"]) != from_ws.hex():
+    # a reply: it must answer an envelope we sent to this peer, and each kind of reply is taken once (§11.4)
+    sent = st["sent"].get(p["in_reply_to"]) if isinstance(p["in_reply_to"], str) else None
+    group = FINAL_KINDS if p["kind"] in FINAL_KINDS else (p["kind"],)
+    if sent is None or sent["to"] != from_ws.hex() or any(k_ in sent["consumed"] for k_ in group):
         return done(_refuse("unknown_reply"))
-    late = p["deadline_ms"] + SKEW_MS < now_ms
-    return done({"result": "deliver", "kind": p["kind"], "in_reply_to": p["in_reply_to"], "late": late},
-                p["deadline_ms"])
+    sent["consumed"].append(p["kind"])
+    r = {"result": "deliver", "kind": p["kind"], "in_reply_to": p["in_reply_to"],
+         "late": p["kind"] == "result" and p["deadline_ms"] + SKEW_MS < now_ms}
+    if is_refusal:
+        r["code"] = p["refusal"]["code"]
+    return done(r, p["deadline_ms"])
 
 
 # =====================================================================================================
@@ -1813,6 +2055,78 @@ def relay_auth_signed_bytes(suite: Suite, origin: str, challenge: bytes, kind: s
 # =====================================================================================================
 # The vector file
 # =====================================================================================================
+
+RELAY_CHALLENGE_MS = 60_000
+
+
+def relay_auth_check(suite: Suite, st: dict, origin: str, challenge: bytes, kind: str, ident: bytes, sig: bytes,
+                     pub: bytes, now_ms: int) -> dict:
+    """§12.2, the relay. st: {"challenges": {hex: expires_ms}} (single use: removed whatever happens). `origin`
+    is the relay's OWN origin, never one the client names; `pub` comes from the certificate or card of `ident`."""
+    exp = st["challenges"].pop(challenge.hex(), None)
+    if exp is None:
+        return {"status": 401, "error": "unknown_challenge"}
+    if now_ms >= exp:
+        return {"status": 401, "error": "expired"}
+    if kind not in ("device", "workspace"):
+        return {"status": 400, "error": "malformed"}
+    if not suite.verify(pub, sig, relay_auth_signed_bytes(suite, origin, challenge, kind, ident)):
+        return {"status": 401, "error": "bad_signature"}
+    return {"status": 200}
+
+
+def make_enroll_request(suite: Suite, dk, person: bytes, space: bytes, code_id: bytes, dk_sig_pub: bytes,
+                        dk_kx_pub: bytes, mac: bytes) -> dict:
+    return sign_object(suite, dk, {"v": 2, "suite": suite.id, "kind": "enroll_request", "person_id": person.hex(),
+                                   "space_id": space.hex(), "code_id": code_id.hex(), "dk_sig_pub": b64u(dk_sig_pub),
+                                   "dk_kx_pub": b64u(dk_kx_pub), "mac": b64u(mac)})
+
+
+def primary_check_enroll(suite: Suite, signed, me_person: bytes, codes: dict, now_ms: int) -> dict:
+    """§6.4. codes (mutated): {code_id hex: {"code": hex, "space_id": hex, "expires_ms", "used": bool}}."""
+    try:
+        o = signed["o"]
+        sig_pub, kx_pub = unb64u(o["dk_sig_pub"], suite.sig_pub_len), unb64u(o["dk_kx_pub"], suite.kx_pub_len)
+    except (KeyError, TypeError, ValueError):
+        return {"refuse": "malformed"}
+    o = verify_object(suite, sig_pub, signed, "enroll_request")      # proof of possession
+    if o is None or not suite.kx_pub_ok(kx_pub):
+        return {"refuse": "bad_signature"}
+    if set(o) != {"v", "suite", "kind", "person_id", "space_id", "code_id", "dk_sig_pub", "dk_kx_pub", "mac"} \
+            or o["person_id"] != me_person.hex():
+        return {"refuse": "malformed"}
+    entry = codes.get(o["code_id"])
+    if entry is None:
+        return {"refuse": "unknown_code"}
+    if entry["used"]:
+        return {"refuse": "used"}
+    if now_ms >= entry["expires_ms"]:
+        return {"refuse": "expired"}
+    want = enroll_mac(bytes.fromhex(entry["code"]), suite, bytes.fromhex(entry["space_id"]), sig_pub, kx_pub)
+    if o["space_id"] != entry["space_id"] or not hmac.compare_digest(want, unb64u(o["mac"], 32)):
+        return {"refuse": "bad_mac"}
+    entry["used"] = True
+    return {"ok": {"device_id": device_id(suite, sig_pub).hex(), "scopes_max": [f"drop:{entry['space_id']}"]}}
+
+
+def host_respond(suite: Suite, wsk, state: dict, req_env: bytes, result: dict, now_ms: int, salt: bytes) -> bytes:
+    """The host's answer envelope to one request (round-trip tests): a refusal chunk, a pairing answer, or a
+    one-chunk 200. Sealed under the request's channel key and epoch, signed by WSK."""
+    h = Header.decode(req_env)
+    if result["result"] == "refuse":
+        meta = {"refusal": result["code"], **{k_: v for k_, v in result.items()
+                                             if k_ not in ("result", "code", "stream", "why")}}
+        flags = F_LAST | F_REFUSAL
+    elif result["result"] in ("pair_pending", "pair_status"):
+        meta, flags = result["answer"], F_LAST
+    else:
+        meta, flags = {"status": 200, "headers": {}}, F_LAST
+    if h.flags & F_STREAM:
+        flags |= F_STREAM
+    stream = h.stream if h.epoch == 0 else (h.rid if h.flags & F_STREAM else ZERO_ID)
+    rh = Header(TO_DEVICE, flags, suite.id, h.workspace, h.device, h.rid, stream, 0, now_ms, h.epoch, salt)
+    return envelope(suite, bridge_key(state, rh), wsk, rh, frame(meta))
+
 
 VECTORS = Path(__file__).resolve().parents[1] / "tests" / "vectors_v2.json"
 

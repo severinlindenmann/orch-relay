@@ -5,7 +5,6 @@ keys, ids) is fixed the same way, so the file is reproducible byte for byte.
 """
 from __future__ import annotations
 
-import base64
 import copy
 import json
 
@@ -123,7 +122,7 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
     pk, pk_bob = k.sig("person_alice"), k.sig("person_bob")
     for n in ("primary", "phone", "laptop", "intruder", "agent", "bob_phone"):
         k.sig(n), k.kx(n)
-    wsk_a, wsk_b, wsk_x = k.sig("wsk_a"), k.sig("wsk_b"), k.sig("wsk_intruder")
+    wsk_a, _, wsk_x = k.sig("wsk_a"), k.sig("wsk_b"), k.sig("wsk_intruder")
     for n in ("wxk_a_1", "wxk_a_2", "wxk_b_1"):
         k.kx(n)
     pub = k.pub
@@ -320,11 +319,16 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
     card_o = {"v": 2, "suite": S.id, "kind": "card", "workspace_id": ws_a.hex(), "wsk_pub": b64u(pub["wsk_a.sig"]),
               "wxk_pub": b64u(pub["wxk_a_1.kx"]), "wxk_version": 1, "owner_person_id": pid.hex(),
               "relay_url": "https://relay.dev.severin.io", "card_seq": 1, "issued_ms": NOW}
+    deleg = R.make_delegation(S, pk, ws_a, pub["wsk_a.sig"], pid, False, NOW - 86_400_000)
+    ck2 = fake(f"suite{S.id}/card key 2")
     sp = R.card_sealed_part(S, ck, ws_a, 1, part)
-    card1 = R.make_card(S, wsk_a, pk, card_o, sp)
-    card2 = R.make_card(S, wsk_a, pk, {**card_o, "card_seq": 2, "wxk_pub": b64u(pub["wxk_a_2.kx"]), "wxk_version": 2},
-                        R.card_sealed_part(S, ck, ws_a, 2, part))
+    sp2 = R.card_sealed_part(S, ck2, ws_a, 2, part)
+    card1 = R.make_card(S, wsk_a, deleg, card_o, sp, ck)
+    c2o = {**card_o, "card_seq": 2, "wxk_pub": b64u(pub["wxk_a_2.kx"]), "wxk_version": 2}
+    card2 = R.make_card(S, wsk_a, deleg, c2o, sp2, ck2)
     ck_wrap = R.seal_to(S, pub["phone.kx"], dev["phone"], "card", ws_a, 1, ck, fake(f"suite{S.id}/eph card"))
+    st1 = {"o": card1["o"], "delegation": deleg["o"]}
+    st2 = {"o": card2["o"], "delegation": deleg["o"]}
     card_cases = []
 
     def crd(name, card, stored=None, owner=pub["person_alice.sig"]):
@@ -332,27 +336,34 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
                            "expect": R.relay_accept_card(S, stored, card, owner)})
 
     crd("first_registration", card1)
-    crd("wxk_rotation_seq_2", card2, stored=card1["o"])
-    crd("replayed_older_card", card1, stored=card2["o"])
-    crd("same_seq", card1, stored=card1["o"])
-    crd("wsk_changed", R.make_card(S, wsk_x, pk, {**card_o, "card_seq": 2, "wsk_pub": b64u(pub["wsk_intruder.sig"])}, sp),
-        stored=card1["o"])
-    crd("wxk_changed_without_version", R.make_card(S, wsk_a, pk, {**card_o, "card_seq": 2,
-                                                                   "wxk_pub": b64u(pub["wxk_a_2.kx"])}, sp), stored=card1["o"])
-    crd("wxk_version_skips", R.make_card(S, wsk_a, pk, {**card_o, "card_seq": 2, "wxk_version": 3,
-                                                         "wxk_pub": b64u(pub["wxk_a_2.kx"])}, sp), stored=card1["o"])
-    crd("owner_signature_by_another_person", R.make_card(S, wsk_a, pk_bob, card_o, sp))
+    crd("wxk_rotation_seq_2_signed_by_wsk_alone", card2, stored=st1)
+    crd("replayed_older_card", card1, stored=st2)
+    crd("same_seq", card1, stored=st1)
+    deleg_x = R.make_delegation(S, pk, ws_a, pub["wsk_intruder.sig"], pid, False, NOW)
+    crd("wsk_changed", R.make_card(S, wsk_x, deleg_x, {**card_o, "card_seq": 2,
+                                                      "wsk_pub": b64u(pub["wsk_intruder.sig"])}, sp, ck), stored=st1)
+    crd("wxk_changed_without_version", R.make_card(S, wsk_a, deleg, {**card_o, "card_seq": 2,
+                                                                      "wxk_pub": b64u(pub["wxk_a_2.kx"])}, sp, ck), stored=st1)
+    crd("wxk_version_skips", R.make_card(S, wsk_a, deleg, {**c2o, "wxk_version": 3}, sp2, ck2), stored=st1)
+    crd("delegation_changed", R.make_card(S, wsk_a, R.make_delegation(S, pk, ws_a, pub["wsk_a.sig"], pid, True, NOW),
+                                          c2o, sp2, ck2), stored=st1)
+    crd("delegation_signed_by_another_person", R.make_card(S, wsk_a, R.make_delegation(
+        S, pk_bob, ws_a, pub["wsk_a.sig"], pid, False, NOW), card_o, sp, ck))
+    crd("delegation_for_another_wsk", R.make_card(S, wsk_a, deleg_x, card_o, sp, ck))
+    crd("card_signed_by_another_wsk", R.make_card(S, wsk_x, deleg, card_o, sp, ck))
     crd("owner_is_another_person", card1, owner=pub["person_bob.sig"])
-    swapped = dict(card1, sealed=b64u(R.card_sealed_part(S, ck, ws_a, 1, {**part, "name": "Something else"})))
-    crd("sealed_part_swapped", swapped)
-    crd("relay_url_with_path", R.make_card(S, wsk_a, pk, {**card_o, "relay_url": "https://relay.dev.severin.io/x"}, sp))
-    crd("relay_url_loopback_http", R.make_card(S, wsk_a, pk, {**card_o, "relay_url": "http://127.0.0.1:8787"}, sp))
-    crd("relay_url_plain_http", R.make_card(S, wsk_a, pk, {**card_o, "relay_url": "http://relay.example.com"}, sp))
+    crd("sealed_part_swapped", dict(card1, sealed=b64u(R.card_sealed_part(S, ck, ws_a, 1, {**part, "name": "Else"}))))
+    crd("relay_url_with_path", R.make_card(S, wsk_a, deleg, {**card_o, "relay_url": "https://relay.dev.severin.io/x"},
+                                           sp, ck))
+    crd("relay_url_loopback_http", R.make_card(S, wsk_a, deleg, {**card_o, "relay_url": "http://127.0.0.1:8787"}, sp, ck))
+    crd("relay_url_plain_http", R.make_card(S, wsk_a, deleg, {**card_o, "relay_url": "http://relay.example.com"}, sp, ck))
     o["card"] = {"card_key": ck.hex(), "sealed_part_plaintext": part, "k_card": R.k_card(ck, ws_a, 1).hex(),
                  "aad": (R.L["aad_card"] + bytes([S.id]) + ws_a + u32(1)).hex(), "sealed_part": sp.hex(),
+                 "ck_commit": b64u(R.ck_commit(ws_a, 1, ck)),
                  "signed_bytes_wsk": (R.L["sig_card_wsk"] + cj(card1["o"])).hex(),
-                 "card": card1, "card_key_wrap_to_phone": {"eph_seed": fake(f"suite{S.id}/eph card").hex(),
-                                                           "sealed": ck_wrap.hex()},
+                 "signed_bytes_delegation": (R.L["sig_ws_delegation"] + cj(deleg["o"])).hex(),
+                 "card": card1, "card_seq_2": card2,
+                 "card_key_wrap_to_phone": {"eph_seed": fake(f"suite{S.id}/eph card").hex(), "sealed": ck_wrap.hex()},
                  "cases": card_cases}
 
     # --- WK grants, member lists (§7.2, §7.3) -------------------------------------------------------
@@ -367,8 +378,8 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
                                                                             wk1, fake("x")), pub["wsk_a.sig"], "phone"),
                             ("grant_for_another_device", grants[("laptop", 1)], pub["wsk_a.sig"], "phone"))]}
 
-    def mlist(epoch, seq, members, signer=wsk_a):
-        return R.sign_object(S, signer, {"v": 2, "suite": S.id, "kind": "member_list", "workspace_id": ws_a.hex(),
+    def mlist(epoch, seq, members, signer=wsk_a, ws=ws_a):
+        return R.sign_object(S, signer, {"v": 2, "suite": S.id, "kind": "member_list", "workspace_id": ws.hex(),
                                          "epoch": epoch, "list_seq": seq, "issued_ms": NOW,
                                          "members": sorted(({"device_id": dev[n].hex(), "scopes": sc}
                                                             for n, sc in members), key=lambda m: m["device_id"])})
@@ -383,13 +394,14 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
         ds = copy.deepcopy(dstate)
         if mutate:
             mutate(ds)
-        ml_cases.append({"name": name, "prev": prev, "signed": signed,
+        ml_cases.append({"name": name, "prev": prev, "signed": signed, "card_workspace_id": ws_a.hex(),
                          "directory": {"owner_pk_pub": ds["owner_pk_pub"].hex(), "certs": ds["certs"],
                                        "revoked": sorted(ds["revoked"]), "grants": sorted([d, e] for d, e in ds["grants"])},
                          "wsk_pub": signer_pub.hex(), "now_ms": NOW,
-                         "expect": R.relay_accept_member_list(S, signer_pub, prev, signed, ds, NOW)})
+                         "expect": R.relay_accept_member_list(S, signer_pub, ws_a.hex(), prev, signed, ds, NOW)})
 
     ml("first_list", None, l1)
+    ml("first_list_for_another_workspace", None, mlist(1, 1, [("primary", full)], ws=ws_b))
     ml("first_list_not_epoch_1", None, mlist(2, 1, [("primary", full)]))
     ml("add_device_same_epoch", l1["o"], mlist(1, 2, [("primary", full), ("phone", ["look", "decide"]), ("laptop", full)]))
     ml("remove_device_with_rotation", l1["o"], mlist(2, 2, [("primary", full)]))
@@ -406,30 +418,89 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
     ml("signed_by_another_workspace_key", l1["o"], mlist(1, 2, [("primary", full)], signer=wsk_x))
     o["member_lists"] = ml_cases
 
-    # --- bridge v2 (§8) --------------------------------------------------------------------------------
-    o["bridge"] = _bridge(S, k, certs, ws_a, wk1, wk2, dev, offer, secret, pid, grants)
-
-    # --- cert request to the primary (§8.4) --------------------------------------------------------
-    sas_nonce = fake("sas nonce")
+    # --- cert request to the primary, its challenge (§8.4) ----------------------------------------------
     inner = {"device_id": dev["phone"].hex(), "dk_sig_pub": b64u(pub["phone.sig"]), "dk_kx_pub": b64u(pub["phone.kx"]),
-             "label": "Severin's iPhone", "scopes_max": full, "offer_id": offer.hex(), "sas_nonce": b64u(sas_nonce)}
+             "label": "Severin's iPhone", "scopes_max": full, "offer_id": offer.hex()}
     req_id = fake("cert request id")[:16]
-    creq = R.make_cert_request(S, wsk_a, ws_a, pid, dev["primary"], pub["primary.kx"], req_id, inner, NOW,
-                               fake(f"suite{S.id}/eph cert request"))
-    hosted = {**part, "hosted_by": "Client AG"}
-    o["cert_request"] = {"signed": creq, "inner": inner, "card": card1["o"], "cases": [
-        {"name": n, "now_ms": t, "signed": s_, "card_part": cp, "expect": R.primary_open_cert_request(
-            S, s_, card1["o"], cp, pid, dev["primary"], k.priv["primary.kx"], t)}
-        for n, s_, t, cp in (("valid", creq, NOW + 1000, part), ("expired", creq, NOW + R.CERT_PENDING_MS, part),
-                             ("signed_by_another_workspace", R.make_cert_request(
-                                 S, wsk_x, ws_a, pid, dev["primary"], pub["primary.kx"], req_id, inner, NOW, fake("e")),
-                              NOW, part),
-                             ("from_a_client_hosted_workspace", creq, NOW + 1000, hosted))]}
+
+    def creq_(inner_=inner, rid=req_id, signer=wsk_a, primary="primary", person=pid):
+        return R.make_cert_request(S, signer, ws_a, person, dev[primary], pub[primary + ".kx"], rid, inner_, NOW,
+                                   fake(f"suite{S.id}/eph cert request {rid.hex()}"))
+
+    creq = creq_()
+    hosted_card = {**card1, "delegation": R.make_delegation(S, pk, ws_a, pub["wsk_a.sig"], pid, True, NOW)}
+    cr_cases = []
+
+    def crc(name, steps, card=card1, me="primary", person=pid, prim=None):
+        p_ = prim if prim is not None else {"seen": [], "open": {}}
+        before = copy.deepcopy(p_)
+        out_ = []
+        for s_, t in steps:
+            out_.append({"signed": s_, "now_ms": t, "expect": R.primary_open_cert_request(
+                S, s_, card, person, dev[me], k.priv[me + ".kx"], p_, t)})
+        cr_cases.append({"name": name, "card": card, "me": me, "person_id": person.hex(), "primary": before,
+                         "steps": out_})
+
+    crc("valid", [(creq, NOW + 1000)])
+    crc("expired", [(creq, NOW + R.CERT_PENDING_MS)])
+    crc("signed_by_another_workspace", [(creq_(signer=wsk_x), NOW)])
+    crc("from_a_client_hosted_workspace_warns", [(creq, NOW + 1000)], card=hosted_card)
+    crc("not_for_this_device", [(creq_(primary="laptop"), NOW)])
+    crc("card_of_another_person", [(creq, NOW)], person=pid_bob)
+    crc("drop_scope_refused", [(creq_(inner_={**inner, "scopes_max": [f"drop:{space.hex()}"]}), NOW)])
+    crc("replayed_request_id", [(creq, NOW), (creq, NOW + 5)], prim={"seen": [], "open": {}})
+    crc("second_open_request_for_the_workspace", [(creq, NOW), (creq_(rid=fake("cert request 2")[:16]), NOW + 5)])
+    crc("inner_with_a_host_nonce_is_malformed", [(creq_(inner_={**inner, "sas_nonce": b64u(fake("sas nonce"))}), NOW)])
+    prim = {"seen": [], "open": {}}
+    R.primary_open_cert_request(S, creq, card1, pid, dev["primary"], k.priv["primary.kx"], prim, NOW)
+    p_nonce = fake(f"suite{S.id}/primary nonce")
+    chal = R.primary_issue_challenge(S, pk, prim, creq["o"], inner, p_nonce)
+    phone_cert = R.primary_sign_cert(S, pk, prim, req_id.hex(), certs["phone"]["o"]["label_sealed"], NOW,
+                                     None, full)
+    again = R.primary_sign_cert(S, pk, prim, req_id.hex(), certs["phone"]["o"]["label_sealed"], NOW, None, full)
+    # R1: a host that sends the primary a request for ITS key gets a challenge for that key, which the phone refuses
+    attack_inner = {**inner, "device_id": dev["intruder"].hex(), "dk_sig_pub": b64u(pub["intruder.sig"]),
+                    "dk_kx_pub": b64u(pub["intruder.kx"])}
+    attack_chal = R.make_cert_challenge(S, pk, creq["o"], attack_inner, p_nonce)
+    o["cert_request"] = {"signed": creq, "inner": inner, "cases": cr_cases,
+                         "challenge": chal, "primary_nonce": p_nonce.hex(), "cert_code": R.cert_sas(S, chal["o"]),
+                         "signed_bytes_challenge": (R.L["sig_cert_challenge"] + cj(chal["o"])).hex(),
+                         "signed_cert": phone_cert, "sign_again": again, "attack_challenge": attack_chal}
+    challenges = {"valid": chal, "attack": attack_chal,
+                  "signed_by_wsk": {"o": chal["o"], "sig": b64u(S.sign(wsk_a, R.L["sig_cert_challenge"] + cj(chal["o"])))},
+                  "other_workspace": R.make_cert_challenge(S, pk, {**creq["o"], "workspace_id": ws_b.hex()}, inner, p_nonce),
+                  "expired": R.make_cert_challenge(S, pk, {**creq["o"], "expires_ms": NOW - 1}, inner, p_nonce)}
+
+    # enrolment of a scoped agent device (§6.4)
     code = fake("enrollment code")
+    code_id = fake("code id")[:16]
+    mac = R.enroll_mac(code, S, space, pub["agent.sig"], pub["agent.kx"])
+    ereq = R.make_enroll_request(S, k.priv["agent.sig"], pid, space, code_id, pub["agent.sig"], pub["agent.kx"], mac)
+    codes = {code_id.hex(): {"code": code.hex(), "space_id": space.hex(), "expires_ms": NOW + 3_600_000, "used": False}}
+    en_cases = []
+
+    def enc(name, steps, codes_=codes):
+        cs = copy.deepcopy(codes_)
+        before = copy.deepcopy(cs)
+        en_cases.append({"name": name, "codes": before, "steps": [
+            {"signed": s_, "now_ms": t, "expect": R.primary_check_enroll(S, s_, pid, cs, t)} for s_, t in steps]})
+
+    enc("valid_then_reused", [(ereq, NOW), (ereq, NOW + 1)])
+    enc("expired_code", [(ereq, NOW + 3_600_000)])
+    enc("unknown_code", [(ereq, NOW)], codes_={})
+    enc("mac_over_other_keys", [(R.make_enroll_request(S, k.priv["agent.sig"], pid, space, code_id, pub["agent.sig"],
+                                                       pub["agent.kx"], R.enroll_mac(code, S, space, pub["intruder.sig"],
+                                                                                     pub["agent.kx"])), NOW)])
+    enc("signed_by_another_key", [({"o": ereq["o"], "sig": b64u(S.sign(k.priv["intruder.sig"],
+                                                                       R.L["sig_enroll_request"] + cj(ereq["o"])))}, NOW)])
+    enc("other_space", [(R.make_enroll_request(S, k.priv["agent.sig"], pid, fake("other space")[:16], code_id,
+                                               pub["agent.sig"], pub["agent.kx"], mac), NOW)])
     o["enroll"] = {"code": code.hex(), "space_id": space.hex(), "dk_sig_pub": pub["agent.sig"].hex(),
-                   "dk_kx_pub": pub["agent.kx"].hex(),
-                   "code_link": f"v2.{pid.hex()}.{space.hex()}.{fake('code id')[:16].hex()}.{b64u(code)}",
-                   "mac": R.enroll_mac(code, S, space, pub["agent.sig"], pub["agent.kx"]).hex()}
+                   "dk_kx_pub": pub["agent.kx"].hex(), "code_link": f"v2.{pid.hex()}.{space.hex()}.{code_id.hex()}.{b64u(code)}",
+                   "mac": mac.hex(), "request": ereq, "cases": en_cases}
+
+    # --- bridge v2 (§8) --------------------------------------------------------------------------------
+    o["bridge"] = _bridge(S, k, certs, ws_a, wk1, wk2, dev, offer, secret, pid, grants, challenges)
 
     # --- WebAuthn challenges (§8.7) ---------------------------------------------------------------------
     subj = {"kind": "action", "shown": "Move L-0042 to done", "digest": ""}
@@ -443,30 +514,70 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
                          "nonce": fake("reg nonce").hex(),
                          "challenge": R.registration_challenge(ws_a, dev["phone"], NOW + 120_000, fake("reg nonce")).hex()},
     }
+
+    # --- questions and decisions (§13) ------------------------------------------------------------------
     qc = {"question_id": fake("question")[:16].hex(), "ticket": "L-0042", "text": "Ship it?", "options": ["yes", "no"]}
+    dec = {"decision_id": fake("decision")[:16].hex(), "question_id": qc["question_id"],
+           "content_hash": b64u(R.question_hash(qc)), "answer": "yes"}
+    dmeta = R.sign_decision(S, k.priv["phone.sig"], ws_a.hex(), dec)
     o["question_hash"] = {"content": qc, "content_hash": b64u(R.question_hash(qc))}
+    o["decisions"] = {"signed_bytes": R.decision_signed_bytes(ws_a.hex(), dec).hex(), "cases": [
+        {"name": n, "meta": m_, "workspace_id": w_, "dk_sig_pub": pub["phone.sig"].hex(),
+         "expect": R.host_check_decision(S, m_, w_, pub["phone.sig"])}
+        for n, m_, w_ in (("valid", dmeta, ws_a.hex()),
+                          ("answer_changed_after_signing", {**dmeta, "answer": "no"}, ws_a.hex()),
+                          ("replayed_into_another_workspace", dmeta, ws_b.hex()),
+                          ("signed_by_another_device", R.sign_decision(S, k.priv["laptop.sig"], ws_a.hex(), dec), ws_a.hex()),
+                          ("without_signature", {k_: v for k_, v in dmeta.items() if k_ != "sig"}, ws_a.hex()))]}
+
+    # --- revocation pushed to a host over the bridge (§6.2) --------------------------------------------
+    def hstate():
+        return {"owner_pk_pub": b64u(pub["person_alice.sig"]), "owner_person_id": pid.hex(), "revoked": [],
+                "members": {dev["primary"].hex(): full, dev["phone"].hex(): ["look", "decide", "operate"]}}
+
+    rv_cases = []
+    for n, m_ in (("member_revoked_rotates", {"op": "revocation", "record": rev}),
+                  ("non_member_recorded_no_rotation", {"op": "revocation", "record": R.sign_object(
+                      S, pk, {**rev["o"], "device_id": dev["laptop"].hex()})}),
+                  ("signed_by_another_person", {"op": "revocation", "record": rev_bob}),
+                  ("record_of_another_person_under_its_key", {"op": "revocation", "record": R.sign_object(
+                      S, pk, {**rev["o"], "person_id": pid_bob.hex()})}),
+                  ("extra_field", {"op": "revocation", "record": rev, "why": "x"})):
+        s_ = hstate()
+        before = copy.deepcopy(s_)
+        r_ = R.host_revocation(S, s_, m_)
+        rv_cases.append({"name": n, "state": before, "meta": m_, "expect": r_, "state_after": s_})
+    o["revocation_op"] = rv_cases
 
     # --- push (§9) -------------------------------------------------------------------------------------
     payload = {"kind": "question", "id": "q-" + fake("question")[:8].hex(), "label": "Ship L-0042?", "ts_ms": NOW}
     p_salt = fake("push salt")[:16]
-    raw = R.seal_push(S, wk1, ws_a, 1, payload, p_salt)
-    keys = {ws_a.hex(): {"1": wk1.hex()}}
+    raw = R.seal_push(S, wsk_a, wk1, ws_a, 1, payload, p_salt)
+    keys = {ws_a.hex(): {"wsk_pub": b64u(pub["wsk_a.sig"]), "wk": {"1": wk1.hex()}}}
     pushes = []
 
-    def pc(name, raw_, now=NOW, keys_=keys):
-        pushes.append({"name": name, "raw": raw_.decode(), "keys": keys_, "now_ms": now,
-                       "expect": R.sw_open_push(S, raw_, keys_, now)})
+    def pc(name, steps, keys_=keys):
+        last = {}
+        pushes.append({"name": name, "keys": keys_, "steps": [
+            {"raw": r_.decode(), "now_ms": t, "expect": R.sw_open_push(S, r_, keys_, last, t)} for r_, t in steps]})
 
-    pc("valid", raw)
-    pc("unknown_workspace", raw, keys_={})
-    pc("epoch_not_held", R.seal_push(S, wk2, ws_a, 2, payload, p_salt))
-    pc("older_than_24_h", raw, now=NOW + R.PUSH_MAX_AGE_MS + 1)
-    pc("exactly_24_h", raw, now=NOW + R.PUSH_MAX_AGE_MS)
-    pc("epoch_field_changed", raw.replace(b'"epoch":1', b'"epoch":2'), keys_={ws_a.hex(): {"1": wk1.hex(), "2": wk1.hex()}})
-    pc("unknown_kind", R.seal_push(S, wk1, ws_a, 1, {**payload, "kind": "exec"}, p_salt))
-    pc("extra_field", R.seal_push(S, wk1, ws_a, 1, {**payload, "url": "https://x"}, p_salt))
+    pc("valid", [(raw, NOW)])
+    pc("unknown_workspace", [(raw, NOW)], keys_={})
+    pc("epoch_not_held", [(R.seal_push(S, wsk_a, wk2, ws_a, 2, payload, p_salt), NOW)])
+    pc("older_than_24_h", [(raw, NOW + R.PUSH_MAX_AGE_MS + 1)])
+    pc("exactly_24_h", [(raw, NOW + R.PUSH_MAX_AGE_MS)])
+    pc("epoch_field_changed", [(raw.replace(b'"epoch":1', b'"epoch":2'), NOW)],
+       keys_={ws_a.hex(): {"wsk_pub": b64u(pub["wsk_a.sig"]), "wk": {"1": wk1.hex(), "2": wk1.hex()}}})
+    pc("unknown_kind", [(R.seal_push(S, wsk_a, wk1, ws_a, 1, {**payload, "kind": "exec"}, p_salt), NOW)])
+    pc("extra_field", [(R.seal_push(S, wsk_a, wk1, ws_a, 1, {**payload, "url": "https://x"}, p_salt), NOW)])
+    pc("forged_by_a_member_device", [(R.seal_push(S, k.priv["phone.sig"], wk1, ws_a, 1, payload, p_salt), NOW)])
+    newer = R.seal_push(S, wsk_a, wk1, ws_a, 1, {**payload, "ts_ms": NOW + 10, "label": "Answered on phone",
+                                                  "kind": "question.closed"}, fake("push salt 2")[:16])
+    pc("replayed", [(raw, NOW), (raw, NOW + 5)])
+    pc("older_after_newer_for_the_same_id", [(newer, NOW + 20), (raw, NOW + 30)])
     o["push"] = {"payload": payload, "salt": p_salt.hex(), "k_push": R.k_push(wk1, ws_a, 1).hex(),
-                 "aad": R.push_aad(S, ws_a, 1).hex(), "raw": raw.decode(), "cases": pushes}
+                 "aad": R.push_aad(S, ws_a, 1).hex(),
+                 "signed_bytes": R.push_signed_bytes(S, ws_a, 1, payload).hex(), "raw": raw.decode(), "cases": pushes}
 
     # --- Drop (§10) ------------------------------------------------------------------------------------
     o["drop"] = _drop(S, k, ws_a, ws_b, space, obj, dek, wk1, sk1, dev, certs)
@@ -509,11 +620,33 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
     rab = R.relay_auth_signed_bytes(S, "https://relay.dev.severin.io", chal, "device", dev["phone"])
     o["relay_auth"] = {"origin": "https://relay.dev.severin.io", "challenge": chal.hex(), "kind": "device",
                        "id": dev["phone"].hex(), "signed_bytes": rab.hex(),
-                       "sig": S.sign(k.priv["phone.sig"], rab).hex()}
+                       "sig": S.sign(k.priv["phone.sig"], rab).hex(), "cases": []}
+    origin = "https://relay.dev.severin.io"
+
+    def ra(name, steps, exp=NOW + R.RELAY_CHALLENGE_MS):
+        st = {"challenges": {chal.hex(): exp}}
+        before = copy.deepcopy(st)
+        out_ = []
+        for kind, sig_, _, t in steps:
+            out_.append({"kind": kind, "id": dev["phone"].hex(), "sig": sig_.hex(), "pub": pub["phone.sig"].hex(),
+                         "now_ms": t, "expect": R.relay_auth_check(S, st, origin, chal, kind, dev["phone"], sig_,
+                                                                   pub["phone.sig"], t)})
+        o["relay_auth"]["cases"].append({"name": name, "origin": origin, "challenge": chal.hex(), "state": before,
+                                         "steps": out_})
+
+    good = S.sign(k.priv["phone.sig"], rab)
+    ra("valid_then_challenge_reused", [("device", good, "device", NOW), ("device", good, "device", NOW + 1)])
+    ra("expired_challenge", [("device", good, "device", NOW + R.RELAY_CHALLENGE_MS)])
+    ra("signed_for_another_origin", [("device", S.sign(k.priv["phone.sig"], R.relay_auth_signed_bytes(
+        S, "https://evil.example", chal, "device", dev["phone"])), "device", NOW)])
+    ra("signed_as_a_workspace_presented_as_a_device", [("device", S.sign(k.priv["phone.sig"], R.relay_auth_signed_bytes(
+        S, origin, chal, "workspace", dev["phone"])), "workspace", NOW)])
+    ra("signed_by_another_key", [("device", S.sign(k.priv["laptop.sig"], rab), "device", NOW)])
+    ra("unknown_kind", [("agent", good, "device", NOW)])
     return o
 
 
-def _bridge(S, k, certs, ws, wk1, wk2, dev, offer, secret, pid, grants):
+def _bridge(S, k, certs, ws, wk1, wk2, dev, offer, secret, pid, grants, challenges):
     pub = k.pub
     wsk = k.priv["wsk_a.sig"]
     kb = {1: R.k_bridge(wk1, ws, 1), 2: R.k_bridge(wk2, ws, 2)}
@@ -645,7 +778,11 @@ def _bridge(S, k, certs, ws, wk1, wk2, dev, offer, secret, pid, grants):
     status = {"op": "pair_status"}
     case("pair_status_pending", preq(meta=status, seq=2), held({"state": "pending"}))
     case("pair_status_cert_pending", preq(meta=status, seq=2),
-         held({"state": "cert_pending", "cert_pending_since": NOW - 1000, "primary_label": "MacBook Pro"}))
+         held({"state": "cert_pending", "cert_pending_since": NOW - 1000, "primary_label": "MacBook Pro",
+               "challenge": None}))
+    case("pair_status_cert_pending_with_the_primarys_challenge", preq(meta=status, seq=2),
+         held({"state": "cert_pending", "cert_pending_since": NOW - 1000, "primary_label": "MacBook Pro",
+               "challenge": challenges["valid"]}))
     case("pair_status_cert_pending_expired", preq(meta=status, seq=2),
          held({"state": "cert_pending", "cert_pending_since": NOW - R.CERT_PENDING_MS, "primary_label": "MacBook Pro"}))
     case("pair_status_approved", preq(meta=status, seq=2),
@@ -680,6 +817,8 @@ def _bridge(S, k, certs, ws, wk1, wk2, dev, offer, secret, pid, grants):
     dc("response_accepted", resp({"status": 200, "headers": {}}, b"ok"))
     dc("response_in_another_epoch_than_the_request", resp({"status": 200, "headers": {}}, epoch=1))
     dc("stale_epoch_refusal", resp({"refusal": "stale_epoch", "epoch": 3}, flags=R.F_LAST | R.F_REFUSAL))
+    dc("stale_epoch_refusal_not_higher_than_the_request", resp({"refusal": "stale_epoch", "epoch": 2},
+                                                              flags=R.F_LAST | R.F_REFUSAL))
     dc("signed_by_a_member_device_not_the_host", resp({"status": 200, "headers": {}}, signer=k.priv["primary.sig"]))
     dc("signed_by_another_workspace", resp({"status": 200, "headers": {}}, signer=k.priv["wsk_intruder.sig"]))
     dc("tag_under_another_key", resp({"status": 200, "headers": {}}, key=kb[1]))
@@ -723,9 +862,21 @@ def _bridge(S, k, certs, ws, wk1, wk2, dev, offer, secret, pid, grants):
     ac("approved_with_a_cert_for_another_device", pans({"state": "approved", "scopes": ["look"], "cert": certs["laptop"],
                                                         "pk_pub": b64u(pub["person_alice.sig"]), "epoch": 2,
                                                         "wsk_pub": b64u(pub["wsk_a.sig"])}))
-    ac("cert_pending", pans({"state": "cert_pending", "primary_label": "MacBook Pro", "wsk_pub": b64u(pub["wsk_a.sig"])}))
+    cp = {"state": "cert_pending", "primary_label": "MacBook Pro", "pk_pub": b64u(pub["person_alice.sig"]),
+          "challenge": None, "wsk_pub": b64u(pub["wsk_a.sig"])}
+    ac("cert_pending_waiting_for_the_primary", pans(cp))
+    ac("cert_pending_with_the_primarys_challenge_shows_its_code", pans({**cp, "challenge": challenges["valid"]}))
+    ac("r1_attack_challenge_for_another_key_raises_the_alarm", pans({**cp, "challenge": challenges["attack"]}))
+    ac("challenge_signed_by_the_host_not_pk", pans({**cp, "challenge": challenges["signed_by_wsk"]}))
+    ac("challenge_for_another_workspace", pans({**cp, "challenge": challenges["other_workspace"]}))
+    ac("challenge_expired", pans({**cp, "challenge": challenges["expired"]}))
+    ac("cert_pending_with_a_pk_not_of_the_pin", pans({**cp, "pk_pub": b64u(pub["person_bob.sig"]),
+                                                      "challenge": challenges["valid"]}))
+    ac("rejected", pans({"state": "rejected", "wsk_pub": b64u(pub["wsk_a.sig"])}))
     ac("refusal_other_person", pans({"refusal": "other_person", "wsk_pub": b64u(pub["wsk_a.sig"])},
                                     flags=R.F_LAST | R.F_REFUSAL))
+    ac("refusal_outside_the_window", pans({"refusal": "pairing_closed", "wsk_pub": b64u(pub["wsk_a.sig"])},
+                                          flags=R.F_LAST | R.F_REFUSAL, ts=NOW - R.WINDOW_MS - 1))
     ac("refusal_stale_timestamp_adopts_offset", pans({"refusal": "stale_timestamp", "host_ms": NOW - 7_200_000,
                                                       "wsk_pub": b64u(pub["wsk_a.sig"])}, flags=R.F_LAST | R.F_REFUSAL,
                                                      ts=NOW - 7_200_000))
@@ -763,7 +914,8 @@ def _raw_meta(text):
 
 EXPECT_KEYS = ("result", "code", "why", "scopes", "meta", "data", "outcome", "high", "host_ms", "epoch", "status",
                "answer", "label", "sas", "cert_state", "wsk_pub", "stream", "last", "refusal", "offset_ms",
-               "clock_wrong", "pin_failure", "fetch_grants", "state", "scopes", "primary_label", "device_id")
+               "clock_wrong", "pin_failure", "fetch_grants", "state", "scopes", "primary_label", "device_id",
+               "alarm", "cert_code")
 
 
 def _strip(r):
@@ -810,7 +962,7 @@ def _drop(S, k, ws_a, ws_b, space, obj, dek, wk1, sk1, dev, certs):
              "space_kind": "workspace", "object_kind": "file", "version": 1, "parent": 0, "author_kind": author_kind,
              "author_id": author_id, "content_hash": b64u(R.H(blob)), "content_len": len(blob),
              "dek_commit": b64u(R.dek_commit(obj, 1, dek)), "meta": b64u(msealed), "recipients": "inbox",
-             "origin": "human", "created_ms": NOW, "expires_ms": NOW + 7 * 86_400_000}
+             "origin": "human", "created_ms": NOW, "expires_ms": NOW + 7 * 86_400_000, "parent_hash": None}
         d.update(over)
         return R.sign_object(S, signer, d)
 
@@ -822,7 +974,9 @@ def _drop(S, k, ws_a, ws_b, space, obj, dek, wk1, sk1, dev, certs):
                                                              version=2, parent=1), pub["phone.sig"]),
                                 ("recipients_unsorted", desc(k.priv["phone.sig"], "device", dev["phone"].hex(),
                                                              recipients=sorted([ws_a.hex(), ws_b.hex()], reverse=True)),
-                                 pub["phone.sig"]))]
+                                 pub["phone.sig"]),
+                                ("version_1_with_a_parent_hash", desc(k.priv["phone.sig"], "device", dev["phone"].hex(),
+                                                                      parent_hash=b64u(bytes(32))), pub["phone.sig"]))]
     # claim-once
     claim_wrap = R.wrap_dek(S, "wk", ws_b, 1, obj, 1, dek, wk=fake(f"suite{S.id}/WK b epoch 1"),
                             salt=fake("claim wrap salt")[:16])
@@ -832,7 +986,9 @@ def _drop(S, k, ws_a, ws_b, space, obj, dek, wk1, sk1, dev, certs):
                                          "workspace_id": ws_hex, "wrap": w})
 
     cards = {ws_a.hex(): {"wsk_pub": b64u(pub["wsk_a.sig"])}, ws_b.hex(): {"wsk_pub": b64u(pub["wsk_b.sig"])}}
-    inbox = {"object_id": obj.hex(), "state": "inbox", "claimed_by": None, "wraps": [wraps["wxk_a"], wraps["wxk_b"]]}
+    inbox = {"object_id": obj.hex(), "version": 1, "state": "inbox", "claimed_by": None,
+             "wraps": [wraps["wxk_a"], wraps["wxk_b"]]}
+    epochs = {ws_a.hex(): 1, ws_b.hex(): 1}
     ccases = []
 
     def clc(name, steps):
@@ -840,8 +996,9 @@ def _drop(S, k, ws_a, ws_b, space, obj, dek, wk1, sk1, dev, certs):
         before = copy.deepcopy(s)
         st = []
         for signed in steps:
-            st.append({"claim": signed, "expect": R.relay_claim(S, s, signed, cards)})
-        ccases.append({"name": name, "object": before, "cards": cards, "steps": st, "after": copy.deepcopy(s)})
+            st.append({"claim": signed, "expect": R.relay_claim(S, s, signed, cards, epochs)})
+        ccases.append({"name": name, "object": before, "cards": cards, "epochs": epochs, "steps": st,
+                       "after": copy.deepcopy(s)})
 
     claim_a_wrap = R.wrap_dek(S, "wk", ws_a, 1, obj, 1, dek, wk=wk1, salt=fake("claim wrap salt a")[:16])
     clc("b_claims_then_a_loses", [claim(k.priv["wsk_b.sig"], ws_b.hex()),
@@ -849,19 +1006,42 @@ def _drop(S, k, ws_a, ws_b, space, obj, dek, wk1, sk1, dev, certs):
     clc("claim_repeated_is_idempotent", [claim(k.priv["wsk_b.sig"], ws_b.hex()), claim(k.priv["wsk_b.sig"], ws_b.hex())])
     clc("claim_signed_by_another_workspace", [claim(k.priv["wsk_a.sig"], ws_b.hex())])
     clc("claim_with_a_wrap_for_another_workspace", [claim(k.priv["wsk_b.sig"], ws_b.hex(), claim_a_wrap)])
-    # documents
+    clc("claim_with_a_wrap_for_another_version", [claim(k.priv["wsk_b.sig"], ws_b.hex(), {**claim_wrap, "version": 2})])
+    clc("claim_with_a_wrap_under_another_epoch", [claim(k.priv["wsk_b.sig"], ws_b.hex(),
+                                                        {**claim_wrap, "key_version": 2})])
+    # documents: a chain of descriptors, each naming the hash of its parent (§10.6)
+    def docv(ver, parent_o, author="phone", tag=""):
+        return desc(k.priv[author + ".sig"], "device", dev[author].hex(), object_kind="document", version=ver,
+                    parent=ver - 1, content_hash=b64u(R.H(f"doc v{ver}{tag}".encode())),
+                    parent_hash=None if parent_o is None else b64u(R.drop_parent_hash(parent_o)))["o"]
+
+    v1 = docv(1, None)
+    v2 = docv(2, v1)
+    v3 = docv(3, v2)
+    v2x = docv(2, v1, author="laptop", tag="x")              # another writer's version 2
+    v3x = docv(3, v2x, author="laptop", tag="x")
+    v4 = docv(4, v3)
+    v4x = docv(4, v3x, author="laptop", tag="x")
     docs = []
-    for name, cur, im, ver, par in (("put_on_current", 3, "3", 4, 3), ("stale_if_match", 4, "3", 4, 3),
-                                    ("missing_if_match", 3, None, 4, 3), ("version_skips", 3, "3", 5, 4),
-                                    ("if_match_with_leading_zero", 3, "03", 4, 3)):
-        d = {"current": cur}
-        docs.append({"name": name, "doc": dict(d), "if_match": im, "version": ver, "parent": par,
-                     "expect": R.relay_put_version(d, im, {"version": ver, "parent": par})})
+    for name, cur, head, im, new in (("put_on_current", 3, v3, "3", v4), ("stale_if_match", 4, v4, "3", v4),
+                                     ("missing_if_match", 3, v3, None, v4),
+                                     ("version_skips", 3, v3, "3", {**v4, "version": 5, "parent": 4}),
+                                     ("if_match_with_leading_zero", 3, v3, "03", v4),
+                                     ("fork_parent_hash_of_another_version_3", 3, v3, "3", v4x),
+                                     ("first_version", 0, None, "0", v1)):
+        d = {"current": cur, "head": head}
+        before = copy.deepcopy(d)
+        docs.append({"name": name, "doc": before, "if_match": im, "descriptor": new,
+                     "expect": R.relay_put_version(d, im, new)})
+    chains = [{"name": n, "versions": vs, "expect": R.verify_doc_chain(vs)}
+              for n, vs in (("valid", [v1, v2, v3, v4]), ("fork_served_by_the_relay", [v1, v2, v3x]),
+                            ("version_missing", [v1, v3]))]
     return {"dek": dek.hex(), "object_id": obj.hex(), "content": content.hex(), "chunk_size": 512,
             "nonce_prefix": prefix.hex(), "k_content": R.drop_content_key(dek, obj, 1).hex(), "blob": blob.hex(),
             "empty_blob": empty.hex(), "meta": meta, "meta_sealed": msealed.hex(),
             "dek_commit": b64u(R.dek_commit(obj, 1, dek)), "wraps": wraps, "wrap_negative": neg,
-            "descriptor": d_phone, "descriptor_cases": dcases, "claims": ccases, "documents": docs}
+            "descriptor": d_phone, "descriptor_cases": dcases, "claims": ccases, "documents": docs,
+            "document_chains": chains}
 
 
 def _ws(S, k, ws_a, ws_b, dev, certs, card_a):
@@ -906,12 +1086,19 @@ def _ws(S, k, ws_a, ws_b, dev, certs, card_a):
     rp = origin.split("://")[1]
     cdj = json.dumps({"type": "webauthn.get", "challenge": b64u(eh), "origin": origin, "crossOrigin": False},
                      separators=(",", ":")).encode()
-    ad = R.H(rp.encode()) + bytes([0x05]) + (7).to_bytes(4, "big")
-    wsig = auth.sign(ad + R.H(cdj), ec.ECDSA(hashes.SHA256(), deterministic_signing=True))
-    cos_wa = {"type": "webauthn", "cert": certs["phone"], "credential_id": b64u(cred_id), "credential_pub": b64u(cred_pub),
-              "bind_sig": b64u(S.sign(k.priv["phone.sig"], R.L["sig_webauthn_bind"] + R.lp16(cred_id) + cred_pub)),
-              "rp_id": rp, "origin": origin, "authenticator_data": b64u(ad), "client_data_json": b64u(cdj),
-              "signature": b64u(wsig)}
+    def wa(rp_id=rp, origin_=origin, flags=0x05, challenge=eh, bind_pub=cred_pub):
+        cdj_ = json.dumps({"type": "webauthn.get", "challenge": b64u(challenge), "origin": origin_,
+                           "crossOrigin": False}, separators=(",", ":")).encode()
+        ad_ = R.H(rp_id.encode()) + bytes([flags]) + (7).to_bytes(4, "big")
+        sig_ = auth.sign(ad_ + R.H(cdj_), ec.ECDSA(hashes.SHA256(), deterministic_signing=True))
+        return {"type": "webauthn", "cert": certs["phone"], "credential_id": b64u(cred_id),
+                "credential_pub": b64u(cred_pub),
+                "bind_sig": b64u(S.sign(k.priv["phone.sig"], R.L["sig_webauthn_bind"] + R.lp16(cred_id) + bind_pub)),
+                "rp_id": rp_id, "origin": origin_, "authenticator_data": b64u(ad_), "client_data_json": b64u(cdj_),
+                "signature": b64u(sig_)}
+
+    cos_wa = wa()
+    assert cdj  # the documented client data of the valid case is wa()'s
     webauthn_env = env(flags=R.F_COSIGNED, eid=eid3, cosig=cos_wa)
 
     def rstate(**over):
@@ -942,6 +1129,12 @@ def _ws(S, k, ws_a, ws_b, dev, certs, card_a):
     rchain("duplicate_returns_the_stored_outcome", [(plain, NOW), (plain, NOW + 5000)])
     rc("cosigned_by_device_key", cosigned)
     rc("cosigned_by_webauthn", webauthn_env)
+    for n_, kw in (("webauthn_rp_id_of_another_site", {"rp_id": "evil.example"}),
+                   ("webauthn_origin_of_another_site", {"origin_": "https://evil.example"}),
+                   ("webauthn_user_not_verified", {"flags": 0x01}),
+                   ("webauthn_challenge_of_another_envelope", {"challenge": R.H(b"another envelope")}),
+                   ("webauthn_bind_sig_over_another_key", {"bind_pub": b"\x04" + bytes(64)})):
+        rc(n_, env(flags=R.F_COSIGNED, eid=eid3, cosig=wa(**kw)))
     rc("cosigned_by_a_revoked_device", cosigned, st=rstate(peers={ws_a.hex(): {
         "wsk_pub": b64u(pub["wsk_a.sig"]), "owner_pk_pub": b64u(pub["person_alice.sig"]), "relay_url": origin,
         "revoked": [dev["phone"].hex()]}}))
@@ -963,10 +1156,36 @@ def _ws(S, k, ws_a, ws_b, dev, certs, card_a):
     rc("depth_1_accepted", env(body(depth=1), eid=fake("envelope d1")[:16]))
     rc("deadline_passed", env(body(deadline_ms=NOW - R.SKEW_MS - 1), eid=fake("envelope dl")[:16]))
     rc("deadline_too_far", env(body(deadline_ms=NOW + R.MAX_DEADLINE_MS + 1), eid=fake("envelope df")[:16]))
-    rc("result_for_a_ticket_we_sent", env(body(kind="result", in_reply_to=fake("our ticket")[:16].hex(), ticket=None,
-                                               result={"status": "done", "summary": "Reconciled."}),
-                                          eid=fake("envelope r")[:16]),
-       st=rstate(sent={fake("our ticket")[:16].hex(): ws_a.hex()}))
+    ours = fake("our ticket")[:16].hex()
+
+    def sent_():
+        return {ours: {"to": ws_a.hex(), "consumed": []}}
+
+    res_body = body(kind="result", in_reply_to=ours, ticket=None, result={"status": "done", "summary": "Reconciled."})
+    rc("result_for_a_ticket_we_sent", env(res_body, eid=fake("envelope r")[:16]), st=rstate(sent=sent_()))
+    rchain("second_result_for_the_same_ticket_refused", [
+        (env(res_body, eid=fake("envelope r")[:16]), NOW),
+        (env({**res_body, "result": {"status": "done", "summary": "Again."}}, eid=fake("envelope r3")[:16]), NOW + 5)],
+        st=rstate(sent=sent_()))
+    ref_ = R.build_ws_refusal(S, k.priv["wsk_a.sig"], ws_a, bytes.fromhex(ours), ws_b, pub["wxk_b_1.kx"], 1,
+                              "depth_exceeded", fake("envelope rf")[:16], fake(f"suite{S.id}/eph refusal"), NOW)
+    rc("refusal_for_a_ticket_we_sent", ref_, st=rstate(sent=sent_()))
+    rchain("refusal_after_a_result_refused_silently", [(env(res_body, eid=fake("envelope r")[:16]), NOW),
+                                                         (ref_, NOW + 5)], st=rstate(sent=sent_()))
+    rc("refusal_for_a_ticket_we_never_sent_is_dropped_not_answered", ref_)
+    rc("refusal_flag_on_a_result_body_is_dropped", env(res_body, flags=R.F_WS_REFUSAL, eid=fake("envelope rr")[:16]),
+       st=rstate(sent=sent_()))
+    rc("refusal_body_without_the_flag_is_malformed", env(body(kind="refusal", in_reply_to=ours, ticket=None,
+                                                             refusal={"code": "depth_exceeded"}),
+                                                        eid=fake("envelope rn")[:16]), st=rstate(sent=sent_()))
+    # seen ids are per sender: the same id from another pinned workspace is a different envelope
+    ws_c = fake("workspace c")[:16]
+    from_c = env(signer=k.priv["wsk_intruder.sig"], from_ws=ws_c)
+    rchain("same_id_from_two_senders", [(plain, NOW), (from_c, NOW + 1)], st=rstate(peers={
+        ws_a.hex(): {"wsk_pub": b64u(pub["wsk_a.sig"]), "owner_pk_pub": b64u(pub["person_alice.sig"]),
+                     "relay_url": origin, "revoked": []},
+        ws_c.hex(): {"wsk_pub": b64u(pub["wsk_intruder.sig"]), "owner_pk_pub": b64u(pub["person_bob.sig"]),
+                     "relay_url": origin, "revoked": []}}))
     rc("result_for_a_ticket_we_never_sent", env(body(kind="result", in_reply_to=fake("our ticket")[:16].hex(),
                                                      ticket=None, result={"status": "done", "summary": "x"}),
                                                 eid=fake("envelope r2")[:16]))
