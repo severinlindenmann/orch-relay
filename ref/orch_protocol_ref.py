@@ -639,6 +639,15 @@ def make_delegation(suite: Suite, pk, ws: bytes, wsk_pub: bytes, owner: bytes, c
                                    "client_hosted": client_hosted, "issued_ms": issued_ms})
 
 
+def card_hosted_marker(delegation_o: dict, sealed_part: dict) -> dict:
+    """§7.1: what a reader shows. The PK-signed flag decides whether the client-hosted marker is shown; the
+    WSK-only sealed part only supplies the name, so a client host cannot hide the marker by sealing null."""
+    name = sealed_part.get("hosted_by")
+    if delegation_o["client_hosted"] or name is not None:
+        return {"marker": True, "hosted_by": name if isinstance(name, str) and name else "(unknown)"}
+    return {"marker": False, "hosted_by": None}
+
+
 def verify_delegation(suite: Suite, signed, owner_pk_pub: bytes) -> dict:
     o = verify_object(suite, owner_pk_pub, signed, "ws_delegation")
     if o is None:
@@ -1393,7 +1402,7 @@ def primary_open_cert_request(suite: Suite, signed, card: dict, my_person: bytes
                               prim: dict, now_ms: int) -> dict:
     """§8.4: what the owner's primary device checks before it draws its nonce and signs a challenge.
     card: the workspace's verified card (with its delegation). prim (mutated on success): {"seen": [request
-    ids], "open": {workspace hex: request id}}."""
+    ids], "open": {workspace hex: {"request_id", "expires_ms"}}, "signed": [ids], "rejected": [ids]}."""
     card_o, deleg = card["o"], card["delegation"]["o"]
     if card_o["owner_person_id"] != my_person.hex():
         return {"refuse": "other_person"}
@@ -1406,7 +1415,7 @@ def primary_open_cert_request(suite: Suite, signed, card: dict, my_person: bytes
         return {"refuse": "expired"}
     if o["request_id"] in prim["seen"]:
         return {"refuse": "replayed"}
-    if o["workspace_id"] in prim["open"]:
+    if primary_open_request(prim, o["workspace_id"], now_ms) is not None:
         return {"refuse": "request_open"}                # at most one open request per workspace
     try:
         inner = parse_json(open_sealed(suite, my_kx_priv, me, "cert-request", unhex(o["request_id"], 16), 0,
@@ -1424,7 +1433,7 @@ def primary_open_cert_request(suite: Suite, signed, card: dict, my_person: bytes
     if inner["scopes_max"][0].startswith("drop:"):
         return {"refuse": "scope_exceeded"}              # scoped agents enrol through §6.4 only
     prim["seen"].append(o["request_id"])
-    prim["open"][o["workspace_id"]] = o["request_id"]
+    prim["open"][o["workspace_id"]] = {"request_id": o["request_id"], "expires_ms": o["expires_ms"]}
     return {"ok": inner, "warning": "client_hosted" if deleg["client_hosted"] else None}
 
 
@@ -1470,15 +1479,38 @@ def check_cert_challenge(suite: Suite, signed, pk_pub: bytes, c: dict, now_ms: i
     return {"ok": o, "cert_code": cert_sas(suite, o)}
 
 
+def primary_open_request(prim: dict, ws_hex: str, now_ms: int):
+    """§8.4: a workspace's request is open while it is unexpired and neither signed nor rejected. An expired
+    or rejected request never blocks the next one."""
+    e = prim["open"].get(ws_hex)
+    if e is None or now_ms >= e["expires_ms"] or e["request_id"] in prim.get("signed", []) \
+            or e["request_id"] in prim.get("rejected", []):
+        return None
+    return e["request_id"]
+
+
+def primary_reject(prim: dict, request_id: str) -> None:
+    """§8.4: the human rejected the code on the primary; nothing is ever signed for this request."""
+    prim.setdefault("rejected", []).append(request_id)
+    for ws_hex, e in list(prim["open"].items()):
+        if e["request_id"] == request_id:
+            del prim["open"][ws_hex]
+
+
 def primary_sign_cert(suite: Suite, pk, prim: dict, request_id: str, label_sealed: str, created_ms: int,
                       expires_ms, scopes_max: list) -> dict:
     """§8.4: after the human confirmed the code, the primary certifies exactly the keys of ITS OWN stored
-    challenge for that request, once. prim: {"challenges": {request id: challenge o}, "signed": [ids], "open"}."""
+    challenge for that request, once, and only while it is unexpired and not rejected. created_ms is the
+    primary's clock. prim: {"challenges": {request id: challenge o}, "signed", "rejected", "open"}."""
     ch = prim["challenges"].get(request_id)
     if ch is None:
         return {"refuse": "unknown_request"}
     if request_id in prim.setdefault("signed", []):
         return {"refuse": "already_signed"}
+    if request_id in prim.get("rejected", []):
+        return {"refuse": "rejected"}
+    if created_ms >= ch["expires_ms"]:
+        return {"refuse": "expired"}
     prim["signed"].append(request_id)
     prim["open"].pop(ch["workspace_id"], None)
     return {"ok": sign_object(suite, pk, {"v": 2, "suite": suite.id, "kind": "device_cert",

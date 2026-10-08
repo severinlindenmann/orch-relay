@@ -565,6 +565,17 @@ this `WSK` speaks for this workspace of this owner, and `WSK` signs everything t
 **`client_hosted`** is in the clear (the relay learns that the workspace runs on someone else's machine).
 The text "hosted by …" stays in the sealed part (spec D29).
 
+**Showing the marker.** The sealed `hosted_by` is signed only by `WSK`, so a malicious client host could
+publish `hosted_by: null`. Readers MUST therefore decide on the marker from the `PK`-signed delegation:
+
+- **Readers MUST show the client-hosted marker whenever `delegation.client_hosted` is true.** The sealed
+  `hosted_by` only supplies the name.
+- If `hosted_by` is `null` (or empty) while the flag is true, readers show "hosted by (unknown)".
+- If the flag is false but `hosted_by` names someone, readers show the marker with that name too. A host
+  can only add the warning, never remove it.
+
+Vector: `card.hosted_marker`.
+
 **The sealed part:**
 
 - It is `AES-256-GCM(HKDF(CK, "", "orch/v2/card|ws|card_seq"), zero nonce,
@@ -681,6 +692,9 @@ Vectors: `wk_grants`.
 - The host records `retired_ms`, the moment the old key stopped being current. It keeps the old private
   key, and accepts envelopes and wraps sealed to it, while `now < retired_ms + 14 days`. Then it deletes it.
 - Senders take `wxk_version` from the card. On `stale_wxk` (§11.5), they refetch the card and reseal.
+- **The resealed envelope MUST get a new `id`**, and a new `sent` entry (the old entry is dropped). The
+  receiver keeps the refused envelope's outcome under `(from_ws, id)`, so the same id with other bytes is an
+  `id_conflict` and is dropped (§11.4). Vector `reseal_after_stale_wxk_needs_a_new_id`.
 
 Vectors: `ws_envelopes.previous_wxk_inside_14_days`, `previous_wxk_after_14_days`.
 
@@ -882,7 +896,8 @@ host must not be able to get one for a key of its choosing. The flow is:
    4. `created − 300 s ≤ now < expires`, with `expires − created ≤ 10 min` → `expired`;
    5. the `request_id` was never seen before → `replayed`;
    6. no other request of this workspace is open → `request_open` (at most one open request per
-      workspace);
+      workspace). **A request is open while it is unexpired and neither signed nor rejected**, so an
+      expired or rejected request never blocks the workspace;
    7. the inner field set is exact, the keys are valid, `device_id` derives from `dk_sig_pub`, and the
       scopes are valid → `malformed`;
    8. `scopes_max` is not a `drop:` scope → `scope_exceeded` (scoped agents enrol only through §6.4).
@@ -916,10 +931,19 @@ host must not be able to get one for a key of its choosing. The flow is:
 
    Then it shows `cert_code`.
 
-6. **The human compares the code on the primary and the phone, and confirms on the primary.** The primary
-   signs a certificate (§6.1) **for exactly the two keys of its own stored challenge**, once per request
-   (`already_signed` afterwards), and uploads it to the directory. The host polls the directory for it,
-   then continues with §8.3 step 6.
+6. **The human compares the code on the primary and the phone, and confirms on the primary.**
+   - The primary signs a certificate (§6.1) **for exactly the two keys of its own stored challenge**, once
+     per request (`already_signed` afterwards), and uploads it to the directory. It signs only while the
+     challenge is unexpired (`expired`) and not rejected (`rejected`).
+   - A human who rejects on the primary closes the request; nothing is ever signed for it.
+   - The host polls the directory for the certificate, then continues with §8.3 step 6.
+
+**UI rules for the two codes (R8).** The phone shows two codes in turn. To keep them apart:
+
+- When `cert_pending` begins, the phone **clears the first (pairing) code** from its screen.
+- It labels `cert_code` "compare with <primary>", using `primary_label`.
+- It **stops showing `cert_code` after the challenge's `expires_ms`**.
+- The primary shows `cert_code` under the same label, and the phone's label.
 
 **Why this closes R1.** **DECIDED HERE:** the challenge. The host never chooses anything the code depends
 on. `PK` signs the keys, and the nonce is drawn after the keys are fixed. Only the primary holds `PK`, so the
@@ -938,7 +962,8 @@ fix it shows the challenge's code instead, which the phone also shows. The owner
 
 Vectors: `cert_request.cases` (valid; expired; signed by another workspace; client-hosted with a warning;
 not for this device; the card of another person; a drop scope; a replayed request id; a second open
-request; an inner object with a host nonce), `cert_request.challenge`, `cert_code`, `signed_cert`,
+request; an inner object with a host nonce), `cert_request.open_cases` (the next request after one expired
+or was rejected, signing after a rejection or after expiry), `cert_request.challenge`, `cert_code`, `signed_cert`,
 `sign_again`, `attack_challenge`, and `pair_answers` (`cert_pending_with_the_primarys_challenge_shows_its_code`,
 `r1_attack_challenge_for_another_key_raises_the_alarm`, `challenge_signed_by_the_host_not_pk`,
 `challenge_for_another_workspace`, `challenge_expired`, `cert_pending_with_a_pk_not_of_the_pin`). Round
@@ -1346,7 +1371,7 @@ From step 5 on, the outcome is stored with `(from_ws, id)` until `max(now, deadl
 keeps `sent[id] = {to, consumed kinds}` until the ticket's deadline plus 7 d. **DECIDED HERE:** the
 `(from_ws, id)` key and the consumption of replies.
 
-Vectors: `ws_envelopes.cases` (33 per suite), and the round trip
+Vectors: `ws_envelopes.cases` (34 per suite), and the round trip
 `test_round_trip_ws_ticket_refusal_and_result`.
 
 ### 11.5 Refusals
@@ -1513,7 +1538,8 @@ Every answer to an epoch-0 request, refusals included, also carries `wsk_pub`.
 **Primary device (local, never on the wire):**
 
 - for cert requests (§8.4): `other_person`, `bad_signature`, `not_for_this_device`, `expired`, `replayed`,
-  `request_open`, `malformed`, `scope_exceeded`, `already_signed`, and the warning `client_hosted`;
+  `request_open`, `malformed`, `scope_exceeded`, `already_signed`, `rejected`, and the warning
+  `client_hosted`;
 - for enrolment (§6.4): `bad_signature`, `malformed`, `unknown_code`, `used`, `expired`, `bad_mac`.
 
 **Phone, on a pairing answer (drops, never sent):** `not_my_key` (raises the alarm),
@@ -1622,8 +1648,9 @@ Each is marked **DECIDED HERE** where it is used; the reviewer may reverse any o
 15. The scoped-agent enrolment link and MAC, and the primary's check order (§6.4).
 16. The recovery kit's format is deferred to P1 (§6.5).
 17. *(review)* The card: a one-time `PK`-signed delegation (with `client_hosted` in the clear), and the
-    rotating card signed by `WSK` alone. Also `sealed_hash`, `ck_commit`, `card_seq`, the relay URL form
-    and the update rules (§7.1).
+    rotating card signed by `WSK` alone. The client-hosted marker is decided by the delegation flag, and
+    the sealed name only names. Also `sealed_hash`, `ck_commit`, `card_seq`, the relay URL form and the
+    update rules (§7.1).
 18. `list_seq` beside `epoch`; epochs never skip; the relay requires grants before the list, and checks the
     first list's workspace against the card (§7.2).
 19. WK grants are signed by `WSK`; a device's current epoch never moves backwards (§7.3).
@@ -1634,9 +1661,10 @@ Each is marked **DECIDED HERE** where it is used; the reviewer may reverse any o
     `cert_pending` carries `pk_pub` and the challenge; there is an `expired` state. The window applies to
     every answer except a verified `stale_timestamp` (§8.3).
 23. *(review)* `cert_pending` with a `PK`-signed challenge: the primary draws its nonce, and the phone checks
-    the keys and shows `cert_code`. The primary signs once, only for its own challenge's keys, keeps at
-    most one open request per workspace, and refuses drop scopes and replays. Client-hosted is a warning
-    (§8.4).
+    the keys and shows `cert_code`. The primary signs once, only for its own challenge's keys and only while
+    it is unexpired and not rejected. It keeps at most one open request per workspace, where "open" means
+    unexpired and neither signed nor rejected, and refuses drop scopes and replays. Client-hosted is a
+    warning. Also the UI rules for the two codes (§8.4).
 24. `stale_epoch` handling; nothing new is ever sealed under an old epoch; a `stale_epoch` not higher than
     the request's is dropped (§8.5).
 25. The `epoch` in the WebAuthn assertion challenge (§8.7).
@@ -1689,7 +1717,9 @@ amended).
 - **R7, the relay learns `client_hosted`** from the delegation (§7.1). The owner names no one; the text
   stays sealed.
 - **R8, the human compares two codes in `cert_pending`.** The phone shows the pairing code first, then the
-  challenge's code. The UI must make clear which code goes with which confirmation.
+  challenge's code. Mitigated by the UI rules in §8.4: clear the first code, label the second "compare
+  with <primary>", and hide it after `expires_ms`. This remains a usability risk to test on a real phone
+  (iPhone session 1).
 
 **Follow-ups:**
 

@@ -364,7 +364,13 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
                  "signed_bytes_delegation": (R.L["sig_ws_delegation"] + cj(deleg["o"])).hex(),
                  "card": card1, "card_seq_2": card2,
                  "card_key_wrap_to_phone": {"eph_seed": fake(f"suite{S.id}/eph card").hex(), "sealed": ck_wrap.hex()},
-                 "cases": card_cases}
+                 "cases": card_cases,
+                 "hosted_marker": [
+                     {"name": n_, "delegation": {"client_hosted": f_}, "sealed_part": {**part, "hosted_by": h_},
+                      "expect": R.card_hosted_marker({"client_hosted": f_}, {**part, "hosted_by": h_})}
+                     for n_, f_, h_ in (("own_machine", False, None), ("client_hosted_with_name", True, "Client AG"),
+                                        ("client_hosted_but_name_sealed_null", True, None),
+                                        ("name_without_the_flag", False, "Client AG"))]}
 
     # --- WK grants, member lists (§7.2, §7.3) -------------------------------------------------------
     grants = {(d, e): R.make_wk_grant(S, wsk_a, ws_a, dev[d], pub[d + ".kx"], e, {1: wk1, 2: wk2}[e],
@@ -450,6 +456,41 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
     crc("drop_scope_refused", [(creq_(inner_={**inner, "scopes_max": [f"drop:{space.hex()}"]}), NOW)])
     crc("replayed_request_id", [(creq, NOW), (creq, NOW + 5)], prim={"seen": [], "open": {}})
     crc("second_open_request_for_the_workspace", [(creq, NOW), (creq_(rid=fake("cert request 2")[:16]), NOW + 5)])
+    # "open" = unexpired, neither signed nor rejected: an expired or rejected request never blocks the workspace
+    rid2 = fake("cert request 2")[:16]
+    later = R.make_cert_request(S, wsk_a, ws_a, pid, dev["primary"], pub["primary.kx"], rid2, inner,
+                                NOW + R.CERT_PENDING_MS, fake(f"suite{S.id}/eph cert request later"))
+    open_cases = []
+
+    def opc(name, ops):
+        p_ = {"seen": [], "open": {}}
+        before = copy.deepcopy(p_)
+        steps = []
+        for op in ops:
+            if op[0] == "open":
+                steps.append({"op": "open", "signed": op[1], "now_ms": op[2], "expect": R.primary_open_cert_request(
+                    S, op[1], card1, pid, dev["primary"], k.priv["primary.kx"], p_, op[2])})
+            elif op[0] == "challenge":
+                R.primary_issue_challenge(S, pk, p_, op[1]["o"], inner, fake(f"suite{S.id}/primary nonce"))
+                steps.append({"op": "challenge", "request_id": op[1]["o"]["request_id"],
+                              "primary_nonce": fake(f"suite{S.id}/primary nonce").hex()})
+            elif op[0] == "reject":
+                R.primary_reject(p_, op[1])
+                steps.append({"op": "reject", "request_id": op[1]})
+            else:
+                steps.append({"op": "sign", "request_id": op[1], "now_ms": op[2], "expect": R.primary_sign_cert(
+                    S, pk, p_, op[1], certs["phone"]["o"]["label_sealed"], op[2], None, full)})
+        open_cases.append({"name": name, "primary": before, "steps": steps})
+
+    opc("next_request_after_the_first_expired", [("open", creq, NOW), ("open", later, NOW + R.CERT_PENDING_MS)])
+    opc("next_request_after_the_first_was_rejected", [("open", creq, NOW), ("reject", req_id.hex()),
+                                                       ("open", creq_(rid=rid2), NOW + 5)])
+    opc("sign_after_reject_refused", [("open", creq, NOW), ("challenge", creq), ("reject", req_id.hex()),
+                                      ("sign", req_id.hex(), NOW + 10)])
+    opc("sign_after_expiry_refused", [("open", creq, NOW), ("challenge", creq),
+                                      ("sign", req_id.hex(), NOW + R.CERT_PENDING_MS)])
+    opc("sign_while_open_then_next_request", [("open", creq, NOW), ("challenge", creq),
+                                              ("sign", req_id.hex(), NOW + 10), ("open", creq_(rid=rid2), NOW + 20)])
     crc("inner_with_a_host_nonce_is_malformed", [(creq_(inner_={**inner, "sas_nonce": b64u(fake("sas nonce"))}), NOW)])
     prim = {"seen": [], "open": {}}
     R.primary_open_cert_request(S, creq, card1, pid, dev["primary"], k.priv["primary.kx"], prim, NOW)
@@ -465,7 +506,8 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
     o["cert_request"] = {"signed": creq, "inner": inner, "cases": cr_cases,
                          "challenge": chal, "primary_nonce": p_nonce.hex(), "cert_code": R.cert_sas(S, chal["o"]),
                          "signed_bytes_challenge": (R.L["sig_cert_challenge"] + cj(chal["o"])).hex(),
-                         "signed_cert": phone_cert, "sign_again": again, "attack_challenge": attack_chal}
+                         "signed_cert": phone_cert, "sign_again": again, "attack_challenge": attack_chal,
+                         "open_cases": open_cases}
     challenges = {"valid": chal, "attack": attack_chal,
                   "signed_by_wsk": {"o": chal["o"], "sig": b64u(S.sign(wsk_a, R.L["sig_cert_challenge"] + cj(chal["o"])))},
                   "other_workspace": R.make_cert_challenge(S, pk, {**creq["o"], "workspace_id": ws_b.hex()}, inner, p_nonce),
@@ -1152,6 +1194,12 @@ def _ws(S, k, ws_a, ws_b, dev, certs, card_a):
         wxk_version=2, wxk={"1": {"seed": k.seeds["wxk_b_1.kx"].hex(), "retired_ms": NOW - R.WXK_OVERLAP_MS},
                             "2": {"seed": k.seeds["wxk_a_2.kx"].hex(), "retired_ms": None}}))
     rc("unknown_wxk_version", env(wxk_version=7))
+    # §7.4: after stale_wxk the sender reseals under a NEW id; the old id with other bytes is a conflict
+    eid_s = fake("envelope stale")[:16]
+    rchain("reseal_after_stale_wxk_needs_a_new_id", [
+        (env(wxk_version=7, eid=eid_s), NOW),
+        (env(wxk_version=1, eid=eid_s), NOW + 5),
+        (env(wxk_version=1, eid=fake("envelope resealed")[:16]), NOW + 10)])
     rc("depth_2_refused", env(body(depth=2), eid=fake("envelope d2")[:16]))
     rc("depth_1_accepted", env(body(depth=1), eid=fake("envelope d1")[:16]))
     rc("deadline_passed", env(body(deadline_ms=NOW - R.SKEW_MS - 1), eid=fake("envelope dl")[:16]))

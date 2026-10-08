@@ -2376,6 +2376,84 @@
        "refuse": "malformed"
       }
      }
+    ],
+    "hosted_marker": [
+     {
+      "name": "own_machine",
+      "delegation": {
+       "client_hosted": false
+      },
+      "sealed_part": {
+       "name": "Client A — billing",
+       "description": "Invoices and reminders",
+       "capabilities": [
+        "tickets",
+        "drop"
+       ],
+       "hosted_by": null
+      },
+      "expect": {
+       "marker": false,
+       "hosted_by": null
+      }
+     },
+     {
+      "name": "client_hosted_with_name",
+      "delegation": {
+       "client_hosted": true
+      },
+      "sealed_part": {
+       "name": "Client A — billing",
+       "description": "Invoices and reminders",
+       "capabilities": [
+        "tickets",
+        "drop"
+       ],
+       "hosted_by": "Client AG"
+      },
+      "expect": {
+       "marker": true,
+       "hosted_by": "Client AG"
+      }
+     },
+     {
+      "name": "client_hosted_but_name_sealed_null",
+      "delegation": {
+       "client_hosted": true
+      },
+      "sealed_part": {
+       "name": "Client A — billing",
+       "description": "Invoices and reminders",
+       "capabilities": [
+        "tickets",
+        "drop"
+       ],
+       "hosted_by": null
+      },
+      "expect": {
+       "marker": true,
+       "hosted_by": "(unknown)"
+      }
+     },
+     {
+      "name": "name_without_the_flag",
+      "delegation": {
+       "client_hosted": false
+      },
+      "sealed_part": {
+       "name": "Client A — billing",
+       "description": "Invoices and reminders",
+       "capabilities": [
+        "tickets",
+        "drop"
+       ],
+       "hosted_by": "Client AG"
+      },
+      "expect": {
+       "marker": true,
+       "hosted_by": "Client AG"
+      }
+     }
     ]
    },
    "wk_grants": {
@@ -6052,7 +6130,401 @@
       "expires_ms": 1790000600000
      },
      "sig": "OaeNOFV0ciBVcmxP-BTH7JTQ7dnEm1XvUmTCdhKbe0JxM4LG8sR-FVOFn5C6Mb2Lz9TLP9u71w_JDcSyLeSkAg"
-    }
+    },
+    "open_cases": [
+     {
+      "name": "next_request_after_the_first_expired",
+      "primary": {
+       "seen": [],
+       "open": {}
+      },
+      "steps": [
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 1,
+          "kind": "cert_request",
+          "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "c0ba4c0e49f25a37022cc22323a15986",
+          "primary_device_id": "4693874c0d984a3cdec3bc508f56757f",
+          "created_ms": 1790000000000,
+          "expires_ms": 1790000600000,
+          "sealed": "I1WqQn6_K03pAFzdjsbHC5G1Bl0IiktxDtQ2ceVWlEtetTQXnI_3-Lj6_NXGlcuqBm4oSYCFHIlj10F3LwpoIW6EC9wxfU2rJqqqCUF0VjzqJU8J5zMuJA5FXMigmcQrC4VfbAHrtnI5hWdwIMiNLAAu3zjaW9yyPX5OWduZCO453xwKguqAJZOxJsxDezmu_gd5j99FQ7xsNzaKz-VwRMUucU36NzQqs7zjyOBo9dmDwi83PRXD5dNziC92zQMzH6NALuLZrvP6qy_n8GKUApqBdSZE4S9n3HltQTxUB0ahOwJKQ5T0icA_xQa3JRMuncMGf8aCx6NcpXgMfocMjPa9VIjNwCAtLPQfrRTO5DMZSruKBAJdONlrYIsKnhWu94pf4wuZLeQug9EN8Fm4cg9Cm2qw-Xkq82jBwn5BN4dRvJAWARTs8h-MnSJRMA"
+         },
+         "sig": "vHVDvryQ1emfszP7YMQoMEyJyzn7SniZHmdVOhZKlV2ApFPsoxGNyiWXUSjQTe6syB4sZJNShS4wbFasAo-4DA"
+        },
+        "now_ms": 1790000000000,
+        "expect": {
+         "ok": {
+          "device_id": "ed2a9b65180497dd0022753339a5a378",
+          "dk_kx_pub": "kbiLVbp7bnYEXa-QcX5Onjaj8-KXzk-dl1LR7gmvZB4",
+          "dk_sig_pub": "OO4iFA8qjHRITQA_xYVCaNIf6Iyic1Ccae5HsJooTng",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       },
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 1,
+          "kind": "cert_request",
+          "request_id": "bc27d7f00607ebfe35bf1b584172840d",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "c0ba4c0e49f25a37022cc22323a15986",
+          "primary_device_id": "4693874c0d984a3cdec3bc508f56757f",
+          "created_ms": 1790000600000,
+          "expires_ms": 1790001200000,
+          "sealed": "pGvX8CuhTE03t_PsHiBPfYC75bD95oh5Z8rCe6YuiFFKucS78bX16v69AeGlxaP_SMLOwxLVyfCeLnNONQij3y8H0lBBTCI0isqDUr3gH7S7MxrJWXcTSMVa-uB42L31YZTMGWdp0Z1j45d2AmhwG4vLVRROKtcmO33hjiuJiK_6ScezQlbIuSKzqsDyri7IohDRzNwPRyLurGKuCc-LuhYU6HYf9-FQBU-P7KtMIr5gf2nXJsfOb8j8DpxSZANOSBeZNUVjenCkL7JG_yPT-uPcoyPIVBIycniZfnqIv2SCDfplyxmhh5ONKINX-wk4rURLUu07yz0p7JMDp5zdl91Q4f604Zen6UUcxS7_NInQWl0bPr_84FXlKSZVix1dWEbPkXOEFiGStxq8e8FlWV7XYFwdbxS_LOLQUAGk2c04SnSE6r0eD9YOP9sj9A"
+         },
+         "sig": "P4ZtarTC2yUDSXEOrH2nxsbpyL8lE71t0nje95qdsEZB7tkR8zk95-MFG0Yp35gxShMkAU5gcP4-BI39-G_EDQ"
+        },
+        "now_ms": 1790000600000,
+        "expect": {
+         "ok": {
+          "device_id": "ed2a9b65180497dd0022753339a5a378",
+          "dk_kx_pub": "kbiLVbp7bnYEXa-QcX5Onjaj8-KXzk-dl1LR7gmvZB4",
+          "dk_sig_pub": "OO4iFA8qjHRITQA_xYVCaNIf6Iyic1Ccae5HsJooTng",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       }
+      ]
+     },
+     {
+      "name": "next_request_after_the_first_was_rejected",
+      "primary": {
+       "seen": [],
+       "open": {}
+      },
+      "steps": [
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 1,
+          "kind": "cert_request",
+          "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "c0ba4c0e49f25a37022cc22323a15986",
+          "primary_device_id": "4693874c0d984a3cdec3bc508f56757f",
+          "created_ms": 1790000000000,
+          "expires_ms": 1790000600000,
+          "sealed": "I1WqQn6_K03pAFzdjsbHC5G1Bl0IiktxDtQ2ceVWlEtetTQXnI_3-Lj6_NXGlcuqBm4oSYCFHIlj10F3LwpoIW6EC9wxfU2rJqqqCUF0VjzqJU8J5zMuJA5FXMigmcQrC4VfbAHrtnI5hWdwIMiNLAAu3zjaW9yyPX5OWduZCO453xwKguqAJZOxJsxDezmu_gd5j99FQ7xsNzaKz-VwRMUucU36NzQqs7zjyOBo9dmDwi83PRXD5dNziC92zQMzH6NALuLZrvP6qy_n8GKUApqBdSZE4S9n3HltQTxUB0ahOwJKQ5T0icA_xQa3JRMuncMGf8aCx6NcpXgMfocMjPa9VIjNwCAtLPQfrRTO5DMZSruKBAJdONlrYIsKnhWu94pf4wuZLeQug9EN8Fm4cg9Cm2qw-Xkq82jBwn5BN4dRvJAWARTs8h-MnSJRMA"
+         },
+         "sig": "vHVDvryQ1emfszP7YMQoMEyJyzn7SniZHmdVOhZKlV2ApFPsoxGNyiWXUSjQTe6syB4sZJNShS4wbFasAo-4DA"
+        },
+        "now_ms": 1790000000000,
+        "expect": {
+         "ok": {
+          "device_id": "ed2a9b65180497dd0022753339a5a378",
+          "dk_kx_pub": "kbiLVbp7bnYEXa-QcX5Onjaj8-KXzk-dl1LR7gmvZB4",
+          "dk_sig_pub": "OO4iFA8qjHRITQA_xYVCaNIf6Iyic1Ccae5HsJooTng",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       },
+       {
+        "op": "reject",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9"
+       },
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 1,
+          "kind": "cert_request",
+          "request_id": "bc27d7f00607ebfe35bf1b584172840d",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "c0ba4c0e49f25a37022cc22323a15986",
+          "primary_device_id": "4693874c0d984a3cdec3bc508f56757f",
+          "created_ms": 1790000000000,
+          "expires_ms": 1790000600000,
+          "sealed": "eiw2P5IcBDIVFb41x90BhAhUd-qH9EzIyOpaQ2Pfzn5jikqF11bjWyMfR_r2ENCSbTPjwae2V-3-aHOdhbRCDBaNDYk3r6tPoB_SUt0rOpoQ6EdwS4D-Er-GKwNq7d33FI8f4ClVld_i9BUlGhvh1636mj54OI5r24F8sdsMYXSvwclTIwIh_6I7-sKFURPXYzhFBueoECIfveWnLt0JucrxR_1SfUWXYuNbg8bxXy21D8urgfjXiIC56tFwZZKql34JXETyD0FIJggjb82pgENUa1YfGY0lA8mPu7knzAe2Qca9EJLd4GTCeWayEj4yI1CGeYzpF8K3seyXR_1RbDF0TKLk6A65XEYMrmsxCNoDt-AUQSCEHaxYtXnrHxPc-gN0mwnICngzh254P57A-0zlVow_wb2kiK8zuWplPUBP-WHFqwHXAbyeWmdXkQ"
+         },
+         "sig": "IKLYwJzbw3BJovzFmP_LU4CgTDNF5akf4_fDThP8MGqUwgFnpxgPgwU8eDVvcDlvKkTAReZudCVm7eaD68TmAA"
+        },
+        "now_ms": 1790000000005,
+        "expect": {
+         "ok": {
+          "device_id": "ed2a9b65180497dd0022753339a5a378",
+          "dk_kx_pub": "kbiLVbp7bnYEXa-QcX5Onjaj8-KXzk-dl1LR7gmvZB4",
+          "dk_sig_pub": "OO4iFA8qjHRITQA_xYVCaNIf6Iyic1Ccae5HsJooTng",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       }
+      ]
+     },
+     {
+      "name": "sign_after_reject_refused",
+      "primary": {
+       "seen": [],
+       "open": {}
+      },
+      "steps": [
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 1,
+          "kind": "cert_request",
+          "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "c0ba4c0e49f25a37022cc22323a15986",
+          "primary_device_id": "4693874c0d984a3cdec3bc508f56757f",
+          "created_ms": 1790000000000,
+          "expires_ms": 1790000600000,
+          "sealed": "I1WqQn6_K03pAFzdjsbHC5G1Bl0IiktxDtQ2ceVWlEtetTQXnI_3-Lj6_NXGlcuqBm4oSYCFHIlj10F3LwpoIW6EC9wxfU2rJqqqCUF0VjzqJU8J5zMuJA5FXMigmcQrC4VfbAHrtnI5hWdwIMiNLAAu3zjaW9yyPX5OWduZCO453xwKguqAJZOxJsxDezmu_gd5j99FQ7xsNzaKz-VwRMUucU36NzQqs7zjyOBo9dmDwi83PRXD5dNziC92zQMzH6NALuLZrvP6qy_n8GKUApqBdSZE4S9n3HltQTxUB0ahOwJKQ5T0icA_xQa3JRMuncMGf8aCx6NcpXgMfocMjPa9VIjNwCAtLPQfrRTO5DMZSruKBAJdONlrYIsKnhWu94pf4wuZLeQug9EN8Fm4cg9Cm2qw-Xkq82jBwn5BN4dRvJAWARTs8h-MnSJRMA"
+         },
+         "sig": "vHVDvryQ1emfszP7YMQoMEyJyzn7SniZHmdVOhZKlV2ApFPsoxGNyiWXUSjQTe6syB4sZJNShS4wbFasAo-4DA"
+        },
+        "now_ms": 1790000000000,
+        "expect": {
+         "ok": {
+          "device_id": "ed2a9b65180497dd0022753339a5a378",
+          "dk_kx_pub": "kbiLVbp7bnYEXa-QcX5Onjaj8-KXzk-dl1LR7gmvZB4",
+          "dk_sig_pub": "OO4iFA8qjHRITQA_xYVCaNIf6Iyic1Ccae5HsJooTng",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       },
+       {
+        "op": "challenge",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+        "primary_nonce": "fac42d6cdc6e142b05949eb2821d8a2b2c9cbb202884dc0880e3f09e7cdb7eee"
+       },
+       {
+        "op": "reject",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9"
+       },
+       {
+        "op": "sign",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+        "now_ms": 1790000000010,
+        "expect": {
+         "refuse": "rejected"
+        }
+       }
+      ]
+     },
+     {
+      "name": "sign_after_expiry_refused",
+      "primary": {
+       "seen": [],
+       "open": {}
+      },
+      "steps": [
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 1,
+          "kind": "cert_request",
+          "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "c0ba4c0e49f25a37022cc22323a15986",
+          "primary_device_id": "4693874c0d984a3cdec3bc508f56757f",
+          "created_ms": 1790000000000,
+          "expires_ms": 1790000600000,
+          "sealed": "I1WqQn6_K03pAFzdjsbHC5G1Bl0IiktxDtQ2ceVWlEtetTQXnI_3-Lj6_NXGlcuqBm4oSYCFHIlj10F3LwpoIW6EC9wxfU2rJqqqCUF0VjzqJU8J5zMuJA5FXMigmcQrC4VfbAHrtnI5hWdwIMiNLAAu3zjaW9yyPX5OWduZCO453xwKguqAJZOxJsxDezmu_gd5j99FQ7xsNzaKz-VwRMUucU36NzQqs7zjyOBo9dmDwi83PRXD5dNziC92zQMzH6NALuLZrvP6qy_n8GKUApqBdSZE4S9n3HltQTxUB0ahOwJKQ5T0icA_xQa3JRMuncMGf8aCx6NcpXgMfocMjPa9VIjNwCAtLPQfrRTO5DMZSruKBAJdONlrYIsKnhWu94pf4wuZLeQug9EN8Fm4cg9Cm2qw-Xkq82jBwn5BN4dRvJAWARTs8h-MnSJRMA"
+         },
+         "sig": "vHVDvryQ1emfszP7YMQoMEyJyzn7SniZHmdVOhZKlV2ApFPsoxGNyiWXUSjQTe6syB4sZJNShS4wbFasAo-4DA"
+        },
+        "now_ms": 1790000000000,
+        "expect": {
+         "ok": {
+          "device_id": "ed2a9b65180497dd0022753339a5a378",
+          "dk_kx_pub": "kbiLVbp7bnYEXa-QcX5Onjaj8-KXzk-dl1LR7gmvZB4",
+          "dk_sig_pub": "OO4iFA8qjHRITQA_xYVCaNIf6Iyic1Ccae5HsJooTng",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       },
+       {
+        "op": "challenge",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+        "primary_nonce": "fac42d6cdc6e142b05949eb2821d8a2b2c9cbb202884dc0880e3f09e7cdb7eee"
+       },
+       {
+        "op": "sign",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+        "now_ms": 1790000600000,
+        "expect": {
+         "refuse": "expired"
+        }
+       }
+      ]
+     },
+     {
+      "name": "sign_while_open_then_next_request",
+      "primary": {
+       "seen": [],
+       "open": {}
+      },
+      "steps": [
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 1,
+          "kind": "cert_request",
+          "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "c0ba4c0e49f25a37022cc22323a15986",
+          "primary_device_id": "4693874c0d984a3cdec3bc508f56757f",
+          "created_ms": 1790000000000,
+          "expires_ms": 1790000600000,
+          "sealed": "I1WqQn6_K03pAFzdjsbHC5G1Bl0IiktxDtQ2ceVWlEtetTQXnI_3-Lj6_NXGlcuqBm4oSYCFHIlj10F3LwpoIW6EC9wxfU2rJqqqCUF0VjzqJU8J5zMuJA5FXMigmcQrC4VfbAHrtnI5hWdwIMiNLAAu3zjaW9yyPX5OWduZCO453xwKguqAJZOxJsxDezmu_gd5j99FQ7xsNzaKz-VwRMUucU36NzQqs7zjyOBo9dmDwi83PRXD5dNziC92zQMzH6NALuLZrvP6qy_n8GKUApqBdSZE4S9n3HltQTxUB0ahOwJKQ5T0icA_xQa3JRMuncMGf8aCx6NcpXgMfocMjPa9VIjNwCAtLPQfrRTO5DMZSruKBAJdONlrYIsKnhWu94pf4wuZLeQug9EN8Fm4cg9Cm2qw-Xkq82jBwn5BN4dRvJAWARTs8h-MnSJRMA"
+         },
+         "sig": "vHVDvryQ1emfszP7YMQoMEyJyzn7SniZHmdVOhZKlV2ApFPsoxGNyiWXUSjQTe6syB4sZJNShS4wbFasAo-4DA"
+        },
+        "now_ms": 1790000000000,
+        "expect": {
+         "ok": {
+          "device_id": "ed2a9b65180497dd0022753339a5a378",
+          "dk_kx_pub": "kbiLVbp7bnYEXa-QcX5Onjaj8-KXzk-dl1LR7gmvZB4",
+          "dk_sig_pub": "OO4iFA8qjHRITQA_xYVCaNIf6Iyic1Ccae5HsJooTng",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       },
+       {
+        "op": "challenge",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+        "primary_nonce": "fac42d6cdc6e142b05949eb2821d8a2b2c9cbb202884dc0880e3f09e7cdb7eee"
+       },
+       {
+        "op": "sign",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+        "now_ms": 1790000000010,
+        "expect": {
+         "ok": {
+          "o": {
+           "v": 2,
+           "suite": 1,
+           "kind": "device_cert",
+           "device_id": "ed2a9b65180497dd0022753339a5a378",
+           "person_id": "c0ba4c0e49f25a37022cc22323a15986",
+           "dk_sig_pub": "OO4iFA8qjHRITQA_xYVCaNIf6Iyic1Ccae5HsJooTng",
+           "dk_kx_pub": "kbiLVbp7bnYEXa-QcX5Onjaj8-KXzk-dl1LR7gmvZB4",
+           "label_sealed": "Rp0gYPV3JJuTsT4doXbj-foG1ZQpeaBUBlX-rZM8LixY7bCo_w",
+           "created_ms": 1790000000010,
+           "expires_ms": null,
+           "scopes_max": [
+            "look",
+            "decide",
+            "operate",
+            "type"
+           ]
+          },
+          "sig": "3_lSO0dVJs4yI0AnRQPl0FfkpoHKIUtYLKUhR-PaxKMCIEndtFUzRa-ZSNA2Nehm4l44jTwtEQTLYkDgaO5HAw"
+         }
+        }
+       },
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 1,
+          "kind": "cert_request",
+          "request_id": "bc27d7f00607ebfe35bf1b584172840d",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "c0ba4c0e49f25a37022cc22323a15986",
+          "primary_device_id": "4693874c0d984a3cdec3bc508f56757f",
+          "created_ms": 1790000000000,
+          "expires_ms": 1790000600000,
+          "sealed": "eiw2P5IcBDIVFb41x90BhAhUd-qH9EzIyOpaQ2Pfzn5jikqF11bjWyMfR_r2ENCSbTPjwae2V-3-aHOdhbRCDBaNDYk3r6tPoB_SUt0rOpoQ6EdwS4D-Er-GKwNq7d33FI8f4ClVld_i9BUlGhvh1636mj54OI5r24F8sdsMYXSvwclTIwIh_6I7-sKFURPXYzhFBueoECIfveWnLt0JucrxR_1SfUWXYuNbg8bxXy21D8urgfjXiIC56tFwZZKql34JXETyD0FIJggjb82pgENUa1YfGY0lA8mPu7knzAe2Qca9EJLd4GTCeWayEj4yI1CGeYzpF8K3seyXR_1RbDF0TKLk6A65XEYMrmsxCNoDt-AUQSCEHaxYtXnrHxPc-gN0mwnICngzh254P57A-0zlVow_wb2kiK8zuWplPUBP-WHFqwHXAbyeWmdXkQ"
+         },
+         "sig": "IKLYwJzbw3BJovzFmP_LU4CgTDNF5akf4_fDThP8MGqUwgFnpxgPgwU8eDVvcDlvKkTAReZudCVm7eaD68TmAA"
+        },
+        "now_ms": 1790000000020,
+        "expect": {
+         "ok": {
+          "device_id": "ed2a9b65180497dd0022753339a5a378",
+          "dk_kx_pub": "kbiLVbp7bnYEXa-QcX5Onjaj8-KXzk-dl1LR7gmvZB4",
+          "dk_sig_pub": "OO4iFA8qjHRITQA_xYVCaNIf6Iyic1Ccae5HsJooTng",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       }
+      ]
+     }
+    ]
    },
    "enroll": {
     "code": "2b915d6d83f636cd87fdf3f0a4d20a1c11886ee61be0fcba7684b0fe8427723a",
@@ -13381,6 +13853,59 @@
       }
      },
      {
+      "name": "reseal_after_stale_wxk_needs_a_new_id",
+      "state": {
+       "suite": 1,
+       "workspace": "282193f85af5b8d07610fbb3a8448857",
+       "wxk_version": 1,
+       "wxk": {
+        "1": {
+         "seed": "631ab2522ddb2f342f6b996c386322f6a6b8c20b1fd23b2b17d4ebcb5fa0d119",
+         "retired_ms": null
+        }
+       },
+       "peers": {
+        "705d40abbb8c1c90354a1acaa94c935c": {
+         "wsk_pub": "UJSjZsAS_obtd4Ob42R7s99sRMU_tokzRoazVMGqJpo",
+         "owner_pk_pub": "ty3gvOhDsPjsB6JD_gAgYinB80QoghxGSe65UsfbI2U",
+         "relay_url": "https://relay.dev.severin.io",
+         "revoked": []
+        }
+       },
+       "seen": {},
+       "sent": {}
+      },
+      "steps": [
+       {
+        "envelope": "4f52575802010000b146b38ac65780948a3db5b152d1e9cf705d40abbb8c1c90354a1acaa94c935c282193f85af5b8d07610fbb3a844885700000007000000fbbad28d410051a2250e03a320a1790a1b07882835b0238cfed91fd2d033fb1c694ae821ad3ff39ff9df16bf60bae19465ee6cbfdab77c1b5ad20fff1fa24de970a0744d9af29f384ffc5a9ca35336184627c922b8a17e1539834d6b98b5f541db954abc2ffaca539a8d4dd1b986395569de2002685fa002e583fdbfda3be583f12438ac2d7eb6cf9f01483e14c2193e8e3c410531aa47ef3f767dfcc919ce3f0e7eb0d5e3f7e120acf695ae4178d24e51858398a928bf7461b66d3079c314d5ed3eb99d6f566fadb6bf0ac8c282f6bd4384c8c7c6557961e0e6022431d6583f4e3d4b0a2452518a0ff10f60376999a5315df3d632b1a4a95352c88521f5c592a7dfffadac0e4863de6679ed69d2676c66c765b6a6c943d6970fce71dabd89e34f15b79ded4bca803400f23ad8a72bdfa1d6ac54167384ce25bfa306",
+        "now_ms": 1790000000000,
+        "expect": {
+         "result": "refuse",
+         "code": "stale_wxk",
+         "wxk_version": 1
+        }
+       },
+       {
+        "envelope": "4f52575802010000b146b38ac65780948a3db5b152d1e9cf705d40abbb8c1c90354a1acaa94c935c282193f85af5b8d07610fbb3a844885700000001000000fbbad28d410051a2250e03a320a1790a1b07882835b0238cfed91fd2d033fb1c694ae821ad3ff39ff9df16bf60bae19465ee6cbfdab77c1b5ad20fff1fa24de970a0744d9af29f384ffc5a9ca35336184627c922b8a17e1539834d6b98b5f541db954abc2ffaca539a8d4dd1b986395569de2002685fa002e583fdbfda3be583f12438ac2d7eb6cf9f01483e14c2193e8e3c410531aa47ef3f767dfcc919ce3f0e7eb0d5e3f7e120acf695ae4178d24e51858398a928bf7461b66d3079c314d5ed3eb99d6f566fadb6bf0ac8c282f6bd4384c8c7c6557961e0e6022431d6583f4e3d4b0a2452518a0ff10f602eed7ed084764a79caccb945caf219eda5cbe8140a7f47a350302342c09bf977435381dc6df7a2758ccb7cccad9b45d025788663c5a3dc2b58eade95fe39c1b0a687de94f8bc2437b0dc8dfcdba32602",
+        "now_ms": 1790000000005,
+        "expect": {
+         "result": "drop",
+         "why": "id_conflict"
+        }
+       },
+       {
+        "envelope": "4f5257580201000083baa5891fa7c626a665363ad903ca48705d40abbb8c1c90354a1acaa94c935c282193f85af5b8d07610fbb3a844885700000001000000fb5a053e85154786f0f8406977e96a4eff680d1955d69f0457e83a66676bed5a1ec45717b2cf8e5afa76fb4a3eebf9f7dc594c19caed1b29305da53e0b52c9a72d4e21475f1ba50cf16f1f29b281cff20e33d9488d785c5ce773b568123b1f1726b8d438e1ef3e3726796b0704a5ccbfb464236ca13cecc3593a1dba6146733bc78b4bdb909fe76d583d1bcdf06eba784c27f4f5afbc701bfdcf064e5e75225a6ee459515cddee98534f385944b71d4b4fc831a3262259a3a6cfb0a0353901f9dca856672f90c510949acbd8bc3596e15e5147d1508f954153fe112ca0825cd35fa242c2029e79fa3cd25240d19fa70adbd3b00eb8b38798edd9e6ea42a4d6abf089ae87c397fb418f421dbad18510054afd76c50f45084bb147986e666fa741ee142b4814df52d00e32aa7a51f5c60d227ec4d4ff25db1e4261ca08",
+        "now_ms": 1790000000010,
+        "expect": {
+         "result": "inbox",
+         "kind": "ticket",
+         "from": "705d40abbb8c1c90354a1acaa94c935c",
+         "depth": 0
+        }
+       }
+      ]
+     },
+     {
       "name": "depth_2_refused",
       "envelope": "4f525758020100001428c3ea40648e9e699ddea91b41a0e3705d40abbb8c1c90354a1acaa94c935c282193f85af5b8d07610fbb3a844885700000001000000fb2e1ef9bcab5eb212a6ab93cd651de22bc741539fc869b3fe7b5c055fe6c2461a46979bcfd4c6c5b0e1f4ae620b81e61055f7ff8c4bdb42e114b1358aeb1642f1c90f71bd20df90a746ce0aa5b46763d90164214d983b71b6bd460c82523111d7bb8437518eb30ffc74df229bae005442a401bd3617a252828e14312dea6d3d4350a55af2e5485d7afab869343e6d2f4d93181ebf2e74ba384c3f2fc9c0e4e230d2b70c65cb1910a0a0cdadc03b8b3442724a4a3549a72afae2d39c4942b56e76be3d3e85da24e4445ea46b3b50c61f0c3c13c6ec7f2ed7e0decc93a0e4480f6cbe80302f3154475090e520d70a33e074faa560ec727c95cb90e8f180db3760ea5a0779d3da27118475702ed3263289436323d023174a7c09c66966a3b3db8df9cc495cad80d75bc65823430dcee3914f53f8e018e439ac2cb73e02",
       "state": {
@@ -16445,6 +16970,84 @@
       "owner_pk_pub": "04e8119f3a57d0050f6067cd5a5e2feddf8dbf42d00e9a33e4f3ffe570fcbe0bb45b767a97a6369538fd4f2fc2d8b8b2be7cb19e4756487451535e80b2c0e17cb6",
       "expect": {
        "refuse": "malformed"
+      }
+     }
+    ],
+    "hosted_marker": [
+     {
+      "name": "own_machine",
+      "delegation": {
+       "client_hosted": false
+      },
+      "sealed_part": {
+       "name": "Client A — billing",
+       "description": "Invoices and reminders",
+       "capabilities": [
+        "tickets",
+        "drop"
+       ],
+       "hosted_by": null
+      },
+      "expect": {
+       "marker": false,
+       "hosted_by": null
+      }
+     },
+     {
+      "name": "client_hosted_with_name",
+      "delegation": {
+       "client_hosted": true
+      },
+      "sealed_part": {
+       "name": "Client A — billing",
+       "description": "Invoices and reminders",
+       "capabilities": [
+        "tickets",
+        "drop"
+       ],
+       "hosted_by": "Client AG"
+      },
+      "expect": {
+       "marker": true,
+       "hosted_by": "Client AG"
+      }
+     },
+     {
+      "name": "client_hosted_but_name_sealed_null",
+      "delegation": {
+       "client_hosted": true
+      },
+      "sealed_part": {
+       "name": "Client A — billing",
+       "description": "Invoices and reminders",
+       "capabilities": [
+        "tickets",
+        "drop"
+       ],
+       "hosted_by": null
+      },
+      "expect": {
+       "marker": true,
+       "hosted_by": "(unknown)"
+      }
+     },
+     {
+      "name": "name_without_the_flag",
+      "delegation": {
+       "client_hosted": false
+      },
+      "sealed_part": {
+       "name": "Client A — billing",
+       "description": "Invoices and reminders",
+       "capabilities": [
+        "tickets",
+        "drop"
+       ],
+       "hosted_by": "Client AG"
+      },
+      "expect": {
+       "marker": true,
+       "hosted_by": "Client AG"
       }
      }
     ]
@@ -20123,7 +20726,401 @@
       "expires_ms": 1790000600000
      },
      "sig": "9O4xdlYyHxDrU5SVFLQcULILkIpiEelLlmJgoJqyF_dglNEo7fp9DQuQ-1OxMhjt0AVm5sgvIWgqpligeEE3XQ"
-    }
+    },
+    "open_cases": [
+     {
+      "name": "next_request_after_the_first_expired",
+      "primary": {
+       "seen": [],
+       "open": {}
+      },
+      "steps": [
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 2,
+          "kind": "cert_request",
+          "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+          "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+          "created_ms": 1790000000000,
+          "expires_ms": 1790000600000,
+          "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+         },
+         "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+        },
+        "now_ms": 1790000000000,
+        "expect": {
+         "ok": {
+          "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+          "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+          "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       },
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 2,
+          "kind": "cert_request",
+          "request_id": "bc27d7f00607ebfe35bf1b584172840d",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+          "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+          "created_ms": 1790000600000,
+          "expires_ms": 1790001200000,
+          "sealed": "BHuFOHp7WaPYF-ka6ndQ8LnIYPa12gIo4ogqi8_CQxNwRDDtjuVmkRSX3cFc42BKSNH9FtZLtqQ0bwmIjbW17lXxAzLVEsYNmiWq3E8muqCH3dq4jYoeuK0d4aFfFWnmsG50kYAUhIuoLfthH5zolgiLY86hbFolB2tRrQoXT_odLPPJhNLLgyVTTJa2QMtEy-gVlWbBV_E98I3qZJWOHy2qgYHvzUjokodBQuMjs_1TpCgnJDlm1cBf55wHw1_Bzsvo6ds6AsclL0BEC41aR9ZmIyX4EK_7vhSHkWt8TBCFGH7B1eWad_IliAgV7h0-8-VmaaYJtq9wbeQn9gARG-uARB7POwTPaYseEULRE3kmPZUI-eul9HelVIXaHTj7PDtDxzmQk75TXqVwqFlqWL5klsI9eQ2yuQVnHMGigJBJFEt632ybi3nUVqcRpu1gq7Eo_U_5i1r-3Vhym5LEETSug-kYr9ArQzQbcRuaYxO2okTi7sa4jmps-6JSUbvijwy7qm6dSL9PovyXxjGwrpdeZGgPEKXwp6qss0Zxt1s4kVH0AX1EDt5iqma_cdVc4Anf7UGrMIqnEc--lSRUurG1_tHPWFA"
+         },
+         "sig": "L83lYiFYcIUZPF9Xyznr3O_tk1s_MQhY57mnuL-Nqkgoc7xyfEOlY3VZJ4scgCJHsotLh595daLMOKHqr3wpzg"
+        },
+        "now_ms": 1790000600000,
+        "expect": {
+         "ok": {
+          "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+          "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+          "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       }
+      ]
+     },
+     {
+      "name": "next_request_after_the_first_was_rejected",
+      "primary": {
+       "seen": [],
+       "open": {}
+      },
+      "steps": [
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 2,
+          "kind": "cert_request",
+          "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+          "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+          "created_ms": 1790000000000,
+          "expires_ms": 1790000600000,
+          "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+         },
+         "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+        },
+        "now_ms": 1790000000000,
+        "expect": {
+         "ok": {
+          "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+          "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+          "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       },
+       {
+        "op": "reject",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9"
+       },
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 2,
+          "kind": "cert_request",
+          "request_id": "bc27d7f00607ebfe35bf1b584172840d",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+          "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+          "created_ms": 1790000000000,
+          "expires_ms": 1790000600000,
+          "sealed": "BGsmEQvMa5q94YpNlMM6tCqhQlU9eS1ndQR-GbYnmmJnbG0c_F2Mlpl7vhEMPF96QS27795fEfn44ti8eEk7yTFS5JlTw9rNYUtuWZDEq_4Ph4xGGKL529RfeJNX5C7C75aNHfImd33JneuT5Ov2c2gXxxIxKeUbReXQCS6cdfAP5xlPE7leri6cSnua5BMR6jxtyEEnA2RqoKD1HliBxzMPaxau53cQFT57XcOMiA1CXo9aZsZXUcLGnrpGECr2I_kqbCwsIR1PY0yUjQW51agMxBGv69Yvw0ojY7TbShvy-UvmarygCVgID7SHj0P1zgu7iEWLkrg6-nSN8aH2TUKmZrd8CFbkTk3LQ6A9l1fHmhNq7upcevToUDJuIx10jmCAgirUkULknmNfSTAlxQfuk-J2jtI96RwrfS9Sv2MbRKIOMg5Qn8Rjh5brCDVjL29_xZujaFQMSYj-ljPVfeII8nic8cGhRC4KPsb67tJqT_rz3INvIX-lFQC_NZf45HAGriUe8dl9K1UintKkll3N3nzPXsyr3iN6C7BfzGgzuPmf6t9NlFkPf1_ZuJ8qew1UfYLjM62fWWpNUqPyv_0MhWhzerQ"
+         },
+         "sig": "VWBYAxsaUqc_icI286vXR1a4BkIeq5RU0vF6FSR2HFL4_5DPXr0sp2tgIgWVdumUK332xn43LVa5Ly2Sqs9N-Q"
+        },
+        "now_ms": 1790000000005,
+        "expect": {
+         "ok": {
+          "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+          "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+          "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       }
+      ]
+     },
+     {
+      "name": "sign_after_reject_refused",
+      "primary": {
+       "seen": [],
+       "open": {}
+      },
+      "steps": [
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 2,
+          "kind": "cert_request",
+          "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+          "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+          "created_ms": 1790000000000,
+          "expires_ms": 1790000600000,
+          "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+         },
+         "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+        },
+        "now_ms": 1790000000000,
+        "expect": {
+         "ok": {
+          "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+          "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+          "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       },
+       {
+        "op": "challenge",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+        "primary_nonce": "c9eb0cd3f2f1c427602e78d0c8289d582ba0cbce2ec9157e7e9ff6b19a23939e"
+       },
+       {
+        "op": "reject",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9"
+       },
+       {
+        "op": "sign",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+        "now_ms": 1790000000010,
+        "expect": {
+         "refuse": "rejected"
+        }
+       }
+      ]
+     },
+     {
+      "name": "sign_after_expiry_refused",
+      "primary": {
+       "seen": [],
+       "open": {}
+      },
+      "steps": [
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 2,
+          "kind": "cert_request",
+          "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+          "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+          "created_ms": 1790000000000,
+          "expires_ms": 1790000600000,
+          "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+         },
+         "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+        },
+        "now_ms": 1790000000000,
+        "expect": {
+         "ok": {
+          "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+          "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+          "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       },
+       {
+        "op": "challenge",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+        "primary_nonce": "c9eb0cd3f2f1c427602e78d0c8289d582ba0cbce2ec9157e7e9ff6b19a23939e"
+       },
+       {
+        "op": "sign",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+        "now_ms": 1790000600000,
+        "expect": {
+         "refuse": "expired"
+        }
+       }
+      ]
+     },
+     {
+      "name": "sign_while_open_then_next_request",
+      "primary": {
+       "seen": [],
+       "open": {}
+      },
+      "steps": [
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 2,
+          "kind": "cert_request",
+          "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+          "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+          "created_ms": 1790000000000,
+          "expires_ms": 1790000600000,
+          "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+         },
+         "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+        },
+        "now_ms": 1790000000000,
+        "expect": {
+         "ok": {
+          "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+          "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+          "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       },
+       {
+        "op": "challenge",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+        "primary_nonce": "c9eb0cd3f2f1c427602e78d0c8289d582ba0cbce2ec9157e7e9ff6b19a23939e"
+       },
+       {
+        "op": "sign",
+        "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+        "now_ms": 1790000000010,
+        "expect": {
+         "ok": {
+          "o": {
+           "v": 2,
+           "suite": 2,
+           "kind": "device_cert",
+           "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+           "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+           "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+           "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+           "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+           "created_ms": 1790000000010,
+           "expires_ms": null,
+           "scopes_max": [
+            "look",
+            "decide",
+            "operate",
+            "type"
+           ]
+          },
+          "sig": "c3AbXclYmWrhMbgqZ5GS4TtovzOPe7VNz1qTt1nz31uGTrqCDCS6amjuNK-e7-8OCY98woQ2AMgwCDFFkf8OXA"
+         }
+        }
+       },
+       {
+        "op": "open",
+        "signed": {
+         "o": {
+          "v": 2,
+          "suite": 2,
+          "kind": "cert_request",
+          "request_id": "bc27d7f00607ebfe35bf1b584172840d",
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+          "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+          "created_ms": 1790000000000,
+          "expires_ms": 1790000600000,
+          "sealed": "BGsmEQvMa5q94YpNlMM6tCqhQlU9eS1ndQR-GbYnmmJnbG0c_F2Mlpl7vhEMPF96QS27795fEfn44ti8eEk7yTFS5JlTw9rNYUtuWZDEq_4Ph4xGGKL529RfeJNX5C7C75aNHfImd33JneuT5Ov2c2gXxxIxKeUbReXQCS6cdfAP5xlPE7leri6cSnua5BMR6jxtyEEnA2RqoKD1HliBxzMPaxau53cQFT57XcOMiA1CXo9aZsZXUcLGnrpGECr2I_kqbCwsIR1PY0yUjQW51agMxBGv69Yvw0ojY7TbShvy-UvmarygCVgID7SHj0P1zgu7iEWLkrg6-nSN8aH2TUKmZrd8CFbkTk3LQ6A9l1fHmhNq7upcevToUDJuIx10jmCAgirUkULknmNfSTAlxQfuk-J2jtI96RwrfS9Sv2MbRKIOMg5Qn8Rjh5brCDVjL29_xZujaFQMSYj-ljPVfeII8nic8cGhRC4KPsb67tJqT_rz3INvIX-lFQC_NZf45HAGriUe8dl9K1UintKkll3N3nzPXsyr3iN6C7BfzGgzuPmf6t9NlFkPf1_ZuJ8qew1UfYLjM62fWWpNUqPyv_0MhWhzerQ"
+         },
+         "sig": "VWBYAxsaUqc_icI286vXR1a4BkIeq5RU0vF6FSR2HFL4_5DPXr0sp2tgIgWVdumUK332xn43LVa5Ly2Sqs9N-Q"
+        },
+        "now_ms": 1790000000020,
+        "expect": {
+         "ok": {
+          "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+          "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+          "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+          "label": "Severin's iPhone",
+          "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+          "scopes_max": [
+           "look",
+           "decide",
+           "operate",
+           "type"
+          ]
+         },
+         "warning": null
+        }
+       }
+      ]
+     }
+    ]
    },
    "enroll": {
     "code": "2b915d6d83f636cd87fdf3f0a4d20a1c11886ee61be0fcba7684b0fe8427723a",
@@ -27450,6 +28447,59 @@
        "code": "stale_wxk",
        "wxk_version": 1
       }
+     },
+     {
+      "name": "reseal_after_stale_wxk_needs_a_new_id",
+      "state": {
+       "suite": 2,
+       "workspace": "282193f85af5b8d07610fbb3a8448857",
+       "wxk_version": 1,
+       "wxk": {
+        "1": {
+         "seed": "2ffd923ef5dc47ac0fa1be4499ebbd5e93eae923bdb3be73ee23c8542219b323",
+         "retired_ms": null
+        }
+       },
+       "peers": {
+        "705d40abbb8c1c90354a1acaa94c935c": {
+         "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+         "owner_pk_pub": "BOgRnzpX0AUPYGfNWl4v7d-Nv0LQDpoz5PP_5XD8vgu0W3Z6l6Y2lTj9Ty_C2LiyvnyxnkdWSHRRU16AssDhfLY",
+         "relay_url": "https://relay.dev.severin.io",
+         "revoked": []
+        }
+       },
+       "seen": {},
+       "sent": {}
+      },
+      "steps": [
+       {
+        "envelope": "4f52575802020000b146b38ac65780948a3db5b152d1e9cf705d40abbb8c1c90354a1acaa94c935c282193f85af5b8d07610fbb3a8448857000000070000011c042f9b2bb5076d232aedd0e70327fe83e93ce4fc3ac76081f076464879e81f2fb645e7d14c385fc5a6a3916ee1a0fc9a9869fb9ba6d2dd1170675ef73d6880c1e570aff62aa62601e7ce9d14e3628a8943c60df811a6a108136c58f00fcfd45ebd184d7904ae7045ff68a33ed20e7d4fe5f69dc6a3a4a6e4c6b315ef17345a5b6572cd27ae862a155d5c62c4b1df1531d1cea557419900222af1c5b6db6b640716948898ed20e21b03a04c75cd0325a49d98681620b1513d4e288ddf2b7f3bda00b37d5cff2a495c5d19b1247dc7e2b68bad09715224e2d82942e41658cd0671da7fdd505bb0d222557d07612543b4c83b8d2c0496b870bc1b5fd4b20ff3c3ae3dc6a05896771e70a57290b03bca51b897820421ec18f6e59baa446ed001c2ab6721fbdb2cbf5d8cfab20c0fcbee46d3ea7888c1dbf801d627c56c498caccb601295a8c5177463ec3143cb128c445ba03b6faea7e3b04c588e01dc48",
+        "now_ms": 1790000000000,
+        "expect": {
+         "result": "refuse",
+         "code": "stale_wxk",
+         "wxk_version": 1
+        }
+       },
+       {
+        "envelope": "4f52575802020000b146b38ac65780948a3db5b152d1e9cf705d40abbb8c1c90354a1acaa94c935c282193f85af5b8d07610fbb3a8448857000000010000011c042f9b2bb5076d232aedd0e70327fe83e93ce4fc3ac76081f076464879e81f2fb645e7d14c385fc5a6a3916ee1a0fc9a9869fb9ba6d2dd1170675ef73d6880c1e570aff62aa62601e7ce9d14e3628a8943c60df811a6a108136c58f00fcfd45ebd184d7904ae7045ff68a33ed20e7d4fe5f69dc6a3a4a6e4c6b315ef17345a5b6572cd27ae862a155d5c62c4b1df1531d1cea557419900222af1c5b6db6b640716948898ed20e21b03a04c75cd0325a49d98681620b1513d4e288ddf2b7f3bda00b37d5cff2a495c5d19b1247dc7e2b68bad09715224e2d82942e41658cd0671da7fdd505bb0d222557d07612543b4c83b8d2c0496b870bc1b5fd4b20ff3c3ae3dc6a05896771e70a57290b0bcf502777d6825e92544f99fee8e2b315dfc4cfca03ce78530b814fa1dcab3851a48364253f0f853a6e38147ecc0c263be67b37914e7633f88e928c3400b05bb45d1225699df76d1bbd421bc6748ec06",
+        "now_ms": 1790000000005,
+        "expect": {
+         "result": "drop",
+         "why": "id_conflict"
+        }
+       },
+       {
+        "envelope": "4f5257580202000083baa5891fa7c626a665363ad903ca48705d40abbb8c1c90354a1acaa94c935c282193f85af5b8d07610fbb3a8448857000000010000011c04728cb162d554cc35b7a2184c47b653bd90c0c868af62d4c60d67de5c4749c650020eba004049f2efeaecb2f7c8f601325d6d09a0a2b45ff988af2569634a9918f4c109861a9a609519bd27b716c859a1cfaedb95c5b780b3f90913adb56d4cdec3fc431b085f2dd9850122acb6eaabea7b2b781ae32821a3d81f5e89b6a7b88154c3f7da0f958b3de181ce82765f853189c9a7107434c9710273c52f1b3a3144bf15d29509c823e0396a61715e7c516e472ee2ae6b1fad2e9eb80d71440bf45c135e2dda4e313bec73eca32a05567da05a579960335feef962ffba582285081b7408d66b4954a6ef0cfa33aa145c1acc92c3ff7e00f653087510e53723489190117bae7d769d135175ce7266a351950fd274ea103010615c4c64fb68ec3bbabffdf6c333e88d571cec415c39f2bd34339413d78c18e87416956521380f52a270516ad9b61c0afb149e43aa22aedb54055b8d7ec0435745155535ab",
+        "now_ms": 1790000000010,
+        "expect": {
+         "result": "inbox",
+         "kind": "ticket",
+         "from": "705d40abbb8c1c90354a1acaa94c935c",
+         "depth": 0
+        }
+       }
+      ]
      },
      {
       "name": "depth_2_refused",

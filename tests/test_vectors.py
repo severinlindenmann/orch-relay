@@ -673,3 +673,34 @@ def test_round_trip_drop_claim(sid):
     cards = {b.hex(): {"wsk_pub": R.b64u(w.pub["wsk_b.sig"])}}
     assert R.relay_claim(S, state, claim, cards, {b.hex(): 3}) == {"status": 200, "claimed_by": b.hex()}
     assert R.unwrap_dek(S, state["wraps"][0], wk=wk_b) == dek
+
+
+@each_suite("card", "hosted_marker")
+def test_card_hosted_marker(S, c):
+    assert R.card_hosted_marker(c["delegation"], c["sealed_part"]) == c["expect"]
+
+
+@each_suite("cert_request", "open_cases")
+def test_primary_open_requests(S, c):
+    """§8.4: "open" is unexpired and neither signed nor rejected; replays every step on one primary state."""
+    v = VEC["suites"][str(S.id)]
+    pk = S.sig_key(bytes.fromhex(v["keys"]["person_alice.sig"]["seed"]))
+    kx = S.kx_key(bytes.fromhex(v["keys"]["primary.kx"]["seed"]))
+    me, person = bytes.fromhex(v["ids"]["device_primary"]), bytes.fromhex(v["ids"]["person_alice"])
+    card, inner = v["card"]["card"], v["cert_request"]["inner"]
+    label = v["certs"]["signed"]["phone"]["o"]["label_sealed"]
+    prim = copy.deepcopy(c["primary"])
+    requests = {}
+    for s in c["steps"]:
+        if s["op"] == "open":
+            requests[s["signed"]["o"]["request_id"]] = s["signed"]
+            assert R.primary_open_cert_request(S, s["signed"], card, person, me, kx, prim, s["now_ms"]) == s["expect"]
+        elif s["op"] == "challenge":
+            R.primary_issue_challenge(S, pk, prim, requests[s["request_id"]]["o"], inner,
+                                      bytes.fromhex(s["primary_nonce"]))
+        elif s["op"] == "reject":
+            R.primary_reject(prim, s["request_id"])
+        else:
+            got = R.primary_sign_cert(S, pk, prim, s["request_id"], label, s["now_ms"], None,
+                                      ["look", "decide", "operate", "type"])
+            assert got == s["expect"]
