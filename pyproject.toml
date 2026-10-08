@@ -25,4 +25,6 @@ markers = ["slow: tests taking more than 2 s"]
 
 [tool.ruff]
 line-length = 100
+# ref/ and tests/test_vectors.py are the reviewed wire-contract files (PR #23), deliberately
+# unchanged in this PR; they have pre-existing lint findings to be fixed in a follow-up.
 extend-exclude = ["ref", "tests/test_vectors.py"]

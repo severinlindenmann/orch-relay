@@ -23,10 +23,10 @@ curl http://127.0.0.1:8101/healthz # {"ok":true,"version":"...","instance":"publ
 ```
 
 Environment: `ORCH_RELAY_DATA` (data dir), `ORCH_RELAY_PORT` (default port),
-`ORCH_RELAY_INSTANCE` (name reported by `/healthz`; default `public`, `int` on port 8102).
+`ORCH_RELAY_INSTANCE` (name reported by `/healthz`; default `public`; the int unit sets `int`).
 Several instances can run side by side with different data dirs and ports.
 
-Migrations are numbered `.sql` files in `src/orch_relay/migrations/`, tracked in `schema_migrations`.
+Migrations run at `serve` startup (a bad migration shows up as a failed deploy health check, which rolls back). They are numbered `.sql` files in `src/orch_relay/migrations/`, tracked in `schema_migrations`.
 
 ## Deploy (dev VPS)
 
