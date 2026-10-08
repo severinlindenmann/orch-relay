@@ -5,8 +5,6 @@ import sys
 from . import app as app_mod
 from . import db
 
-PORT_INSTANCES = {8102: "int"}
-
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="orch-relay")
@@ -24,8 +22,7 @@ def main(argv: list[str] | None = None) -> int:
 
     import uvicorn
 
-    instance = os.environ.get("ORCH_RELAY_INSTANCE") or PORT_INSTANCES.get(args.port, "public")
-    uvicorn.run(app_mod.create_app(instance=instance), host=args.host, port=args.port)
+    uvicorn.run(app_mod.create_app(), host=args.host, port=args.port)
     return 0
 
 
