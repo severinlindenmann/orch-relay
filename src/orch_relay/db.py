@@ -1,6 +1,7 @@
 """SQLite (WAL) setup and a tiny numbered-.sql migration runner."""
 
 import sqlite3
+import time
 from importlib import resources
 from pathlib import Path
 
@@ -12,10 +13,26 @@ def connect(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path, timeout=5)
     con.execute("PRAGMA busy_timeout=5000")
-    con.execute("PRAGMA journal_mode=WAL")
+    _set_wal(con)
     con.execute("PRAGMA synchronous=NORMAL")
     con.execute("PRAGMA foreign_keys=ON")
     return con
+
+
+def _set_wal(con: sqlite3.Connection, deadline_s: float = 5.0) -> None:
+    """Switch to WAL. On a fresh file, racing connections can get "database is locked" here without
+    the busy handler being consulted, so retry briefly (WAL is persistent: one success is enough)."""
+    end = time.monotonic() + deadline_s
+    delay = 0.005
+    while True:
+        try:
+            con.execute("PRAGMA journal_mode=WAL")
+            return
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) or time.monotonic() >= end:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.1)
 
 
 def _migration_files(mdir: Path | None) -> list[tuple[str, str]]:

@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from ref import orch_protocol_ref as R  # noqa: E402
+from ref import orch_protocol_ref as R
 
 BUNDLE_ID = "io.severin.orch"
 DEMO_QUESTION_ID = "q-0167f4bf37be9ccc"
@@ -89,7 +89,6 @@ def main() -> None:
     out = Path(a.outdir)
     out.mkdir(parents=True, exist_ok=True)
     for name, body in build(a.now_ms).items():
-        data = json.dumps(body, separators=(",", ":"))
         (out / f"{name}.apns").write_text(json.dumps(body, indent=1), encoding="utf-8")
         apns_body = {k: v for k, v in body.items() if k != "Simulator Target Bundle"}
         print(f"{name}.apns  APNs payload {len(json.dumps(apns_body, separators=(',', ':')))} bytes "
