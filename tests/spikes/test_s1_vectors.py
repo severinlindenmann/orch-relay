@@ -31,7 +31,7 @@ def _sig_cases():
             yield pytest.param(who, c, id=f"{who}-{i}")
 
 
-SIG_CASES = list(_SIG_CASES)
+SIG_CASES = list(_sig_cases())
 
 
 def test_fixture_metadata():
