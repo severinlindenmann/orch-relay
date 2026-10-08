@@ -4,6 +4,8 @@ import LocalAuthentication
 import S1Support
 import Security
 
+// s1-fixtures --stats N     N Secure Enclave signatures: high-s ratio and ms per signature (observation, not a test)
+// s1-fixtures --probe-keychain   SecItemAdd of an SE key blob with and without kSecUseDataProtectionKeychain
 // s1-fixtures [--out PATH]   writes fixtures/se-mac.json (Secure Enclave + software CryptoKit outputs for Python to verify)
 // s1-fixtures --presence     MANUAL: creates an SE key with .userPresence (Touch ID / passcode prompt) and signs once.
 //                            Not used by tests: it blocks on a human.
@@ -11,7 +13,7 @@ import Security
 func fail(_ m: String) -> Never { FileHandle.standardError.write(Data((m + "\n").utf8)); exit(1) }
 
 let args = CommandLine.arguments
-let accessible = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+let accessible = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
 
 func accessControl(_ flags: SecAccessControlCreateFlags) -> SecAccessControl {
     var err: Unmanaged<CFError>?
@@ -32,6 +34,36 @@ if args.contains("--presence") {
     let msg = Data("orch v2 presence test".utf8)
     let sig = try key.signature(for: msg)
     print("verified: \(key.publicKey.isValidSignature(sig, for: msg)), sig = \(sig.rawRepresentation.hex)")
+    exit(0)
+}
+
+if let i = args.firstIndex(of: "--stats") {
+    guard SecureEnclave.isAvailable else { fail("no Secure Enclave") }
+    let n = i + 1 < args.count ? Int(args[i + 1]) ?? 400 : 400
+    let key = try SecureEnclave.P256.Signing.PrivateKey(accessControl: accessControl(.privateKeyUsage))
+    var high = 0
+    let t0 = Date()
+    for j in 0..<n {
+        let sig = try key.signature(for: Data("stats \(j)".utf8)).rawRepresentation
+        if isHighS(sig) { high += 1 }
+    }
+    let ms = Date().timeIntervalSince(t0) * 1000 / Double(n)
+    print("\(high)/\(n) signatures had s > (n-1)/2 (\(Int(100 * Double(high) / Double(n)))%), \(String(format: "%.2f", ms)) ms per signature")
+    exit(0)
+}
+
+if args.contains("--probe-keychain") {
+    guard SecureEnclave.isAvailable else { fail("no Secure Enclave") }
+    let key = try SecureEnclave.P256.Signing.PrivateKey(accessControl: accessControl(.privateKeyUsage))
+    for dp in [true, false] {
+        var q: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: "io.severin.orch.s1.probe",
+                                kSecAttrAccount as String: dp ? "dp" : "legacy", kSecValueData as String: key.dataRepresentation,
+                                kSecAttrAccessible as String: accessible]
+        if dp { q[kSecUseDataProtectionKeychain as String] = true }
+        let add = SecItemAdd(q as CFDictionary, nil)
+        let del = SecItemDelete(q as CFDictionary)
+        print("\(dp ? "data-protection" : "legacy file") keychain: SecItemAdd=\(add) SecItemDelete=\(del)  (-34018 = missing entitlement)")
+    }
     exit(0)
 }
 
@@ -67,11 +99,11 @@ let ecdh: [String: Any] = ["se_kx_pub": seKx.x963, "peer_vector_key": "laptop.kx
 // --- seal with the SE key as the sender's ephemeral key, to the vector phone.kx key (Python opens it)
 let rcptID = try Data(hex: ids["device_phone"]!), objectID = try Data(hex: ids["workspace_a"]!)
 let plaintext = try Data(hex: "25f9c35cafc016ffc1633cdfa8f9cd0bfe3d17b70fdd62f6289184539eeadc4f")
-let seSealed = try sealTo(labels, eph: seKx, rcptPub: vecPhoneKx.x963, rcptID: rcptID, purpose: "wk", objectID: objectID, epoch: 1, plaintext: plaintext)
+let seSealed = try _sealToWithEphemeralForVectors(labels, eph: seKx, rcptPub: vecPhoneKx.x963, rcptID: rcptID, purpose: "wk", objectID: objectID, epoch: 1, plaintext: plaintext)
 
 // --- the same with a plain software ephemeral key
 let softEph = P256.KeyAgreement.PrivateKey()
-let softSealed = try sealTo(labels, eph: softEph, rcptPub: vecPhoneKx.x963, rcptID: rcptID, purpose: "wk", objectID: objectID, epoch: 1, plaintext: plaintext)
+let softSealed = try _sealToWithEphemeralForVectors(labels, eph: softEph, rcptPub: vecPhoneKx.x963, rcptID: rcptID, purpose: "wk", objectID: objectID, epoch: 1, plaintext: plaintext)
 
 // --- software CryptoKit signer
 let softSig = P256.Signing.PrivateKey()

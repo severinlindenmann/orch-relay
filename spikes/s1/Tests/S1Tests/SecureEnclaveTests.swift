@@ -19,16 +19,25 @@ final class SecureEnclaveTests: XCTestCase {
     }
 
     /// `.privateKeyUsage` only: no biometry / passcode, so automation can use the key.
-    /// Accessibility: AfterFirstUnlockThisDeviceOnly. In this unsigned `swift test` process on a Mac whose screen may be
-    /// locked, WhenUnlockedThisDeviceOnly and WhenPasscodeSetThisDeviceOnly fail with -25308 / AKSError -536870174
-    /// (kIOReturnNotPermitted); see docs/spikes/S1-secure-enclave-p256.md.
+    /// Accessibility: WhenUnlockedThisDeviceOnly (the class to use for a key that must not work while the device is
+    /// locked). It needs an unlocked screen: with the screen locked, key creation fails with -25308 (AKSError
+    /// -536870174, kIOReturnNotPermitted); that case is turned into a skip with a clear message.
+    /// Do NOT copy AfterFirstUnlock* for signing keys: it lets the key sign while the device is locked.
     func ac() throws -> SecAccessControl {
         var err: Unmanaged<CFError>?
-        guard let ac = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly, .privateKeyUsage, &err) else {
+        guard let ac = SecAccessControlCreateWithFlags(nil, kSecAttrAccessibleWhenUnlockedThisDeviceOnly, .privateKeyUsage, &err) else {
             throw err!.takeRetainedValue() as Error
         }
         return ac
     }
+
+    func make<T>(_ f: () throws -> T) throws -> T {
+        do { return try f() } catch let e as NSError where e.domain == NSOSStatusErrorDomain && e.code == -25308 {
+            throw XCTSkip("Secure Enclave key creation refused (-25308): the device/screen is locked. Unlock it and rerun.")
+        }
+    }
+    func sigKey() throws -> SecureEnclave.P256.Signing.PrivateKey { try make { try SecureEnclave.P256.Signing.PrivateKey(accessControl: ac()) } }
+    func kxKeySE() throws -> SecureEnclave.P256.KeyAgreement.PrivateKey { try make { try SecureEnclave.P256.KeyAgreement.PrivateKey(accessControl: ac()) } }
 
     func vectorKx(_ name: String) throws -> P256.KeyAgreement.PrivateKey {
         let keys = s2["keys"] as! [String: [String: String]]
@@ -36,7 +45,7 @@ final class SecureEnclaveTests: XCTestCase {
     }
 
     func testSigningKeyPublicFormatAndSignature() throws {
-        let k = try SecureEnclave.P256.Signing.PrivateKey(accessControl: ac())
+        let k = try sigKey()
         let pub = k.publicKey.x963Representation
         XCTAssertEqual(pub.count, 65)
         XCTAssertEqual(pub[0], 4)
@@ -55,14 +64,14 @@ final class SecureEnclaveTests: XCTestCase {
     }
 
     func testKeyAgreementKeyFormat() throws {
-        let k = try SecureEnclave.P256.KeyAgreement.PrivateKey(accessControl: ac())
+        let k = try kxKeySE()
         XCTAssertEqual(k.publicKey.x963Representation.count, 65)
         XCTAssertEqual(k.publicKey.x963Representation[0], 4)
     }
 
     /// SE ECDH vs a vector software key: both sides must produce the same 32-byte x-coordinate.
     func testEcdhWithVectorKeyAgrees() throws {
-        let se = try SecureEnclave.P256.KeyAgreement.PrivateKey(accessControl: ac())
+        let se = try kxKeySE()
         let vec = try vectorKx("phone.kx")
         let a = rawBytes(try se.agree(with: vec.publicKey))
         let b = rawBytes(try vec.agree(with: try P256.KeyAgreement.PublicKey(x963Representation: se.publicKey.x963Representation)))
@@ -72,21 +81,21 @@ final class SecureEnclaveTests: XCTestCase {
 
     /// Software sealer -> SE recipient, and SE ephemeral -> software recipient, both round-trip.
     func testSealToAndFromSecureEnclave() throws {
-        let se = try SecureEnclave.P256.KeyAgreement.PrivateKey(accessControl: ac())
+        let se = try kxKeySE()
         let soft = P256.KeyAgreement.PrivateKey()
         let rid = try Data(hex: "4177b27d8e4ac182e8d388b247d2b136"), oid = try Data(hex: "705d40abbb8c1c90354a1acaa94c935c")
         let pt = Data("wk-bytes".utf8)
         // soft eph -> SE recipient
-        let b1 = try sealTo(labels, eph: soft, rcptPub: se.x963, rcptID: rid, purpose: "wk", objectID: oid, epoch: 1, plaintext: pt)
+        let b1 = try sealTo(labels, rcptPub: se.x963, rcptID: rid, purpose: "wk", objectID: oid, epoch: 1, plaintext: pt)
         XCTAssertEqual(try openSealed(labels, rcpt: se, rcptID: rid, purpose: "wk", objectID: oid, epoch: 1, blob: b1), pt)
         XCTAssertThrowsError(try openSealed(labels, rcpt: se, rcptID: rid, purpose: "sk", objectID: oid, epoch: 1, blob: b1))
         // SE eph -> soft recipient
-        let b2 = try sealTo(labels, eph: se, rcptPub: soft.x963, rcptID: rid, purpose: "wk", objectID: oid, epoch: 1, plaintext: pt)
+        let b2 = try _sealToWithEphemeralForVectors(labels, eph: se, rcptPub: soft.x963, rcptID: rid, purpose: "wk", objectID: oid, epoch: 1, plaintext: pt)
         XCTAssertEqual(try openSealed(labels, rcpt: soft, rcptID: rid, purpose: "wk", objectID: oid, epoch: 1, blob: b2), pt)
     }
 
     func testDataRepresentationReload() throws {
-        let k = try SecureEnclave.P256.Signing.PrivateKey(accessControl: ac())
+        let k = try sigKey()
         let blob = k.dataRepresentation
         XCTAssertGreaterThan(blob.count, 65)
         XCTAssertNotEqual(blob.count, 32, "this is a wrapped handle, not the 32-byte scalar")
@@ -95,7 +104,7 @@ final class SecureEnclaveTests: XCTestCase {
         let msg = Data("reload".utf8)
         XCTAssertTrue(k.publicKey.isValidSignature(try again.signature(for: msg), for: msg))
 
-        let ka = try SecureEnclave.P256.KeyAgreement.PrivateKey(accessControl: ac())
+        let ka = try kxKeySE()
         let ka2 = try SecureEnclave.P256.KeyAgreement.PrivateKey(dataRepresentation: ka.dataRepresentation)
         XCTAssertEqual(ka.publicKey.x963Representation, ka2.publicKey.x963Representation)
         let vec = try vectorKx("laptop.kx")
@@ -103,13 +112,12 @@ final class SecureEnclaveTests: XCTestCase {
     }
 
     func testPrivateKeyIsNotExportable() throws {
-        let k = try SecureEnclave.P256.Signing.PrivateKey(accessControl: ac())
-        // API surface: SE private keys have no rawRepresentation / x963 / pem / der export. dataRepresentation
-        // is an opaque blob that only this device's Secure Enclave can use. Feeding it to the software type fails.
+        let k = try sigKey()
+        // dataRepresentation is a device-bound handle, not key material; the software types refuse it.
+        // (These throw on length alone; they document the type boundary, they do not prove the blob hides the scalar.)
         XCTAssertThrowsError(try P256.Signing.PrivateKey(rawRepresentation: k.dataRepresentation))
         XCTAssertThrowsError(try P256.Signing.PrivateKey(x963Representation: k.dataRepresentation))
-        // the blob embeds no 32-byte scalar that reproduces the public key
-        XCTAssertNotEqual(k.dataRepresentation.suffix(32), k.dataRepresentation.prefix(32))
+        // Non-exportability itself is the API surface (no raw/x963/PEM/DER export exists on SecureEnclave.P256.*).
     }
 
     func testSecureEnclaveRejectsGarbageDataRepresentation() {

@@ -91,7 +91,7 @@ final class SoftwareP256Tests: XCTestCase {
             let aad = sealAAD(labels, purpose: purpose, objectID: objectID, epoch: epoch, extra: try hex(c["extra_aad"]))
             XCTAssertEqual(aad, try hex(c["aad"]))
             // AES-GCM is deterministic with the zero nonce: whole blob must match
-            let sealed = try sealTo(labels, eph: eph, rcptPub: rcptPub, rcptID: rcptID, purpose: purpose, objectID: objectID,
+            let sealed = try _sealToWithEphemeralForVectors(labels, eph: eph, rcptPub: rcptPub, rcptID: rcptID, purpose: purpose, objectID: objectID,
                                     epoch: epoch, plaintext: try hex(c["plaintext"]), extra: try hex(c["extra_aad"]))
             XCTAssertEqual(sealed, try hex(c["sealed"]))
         }
@@ -113,9 +113,8 @@ final class SoftwareP256Tests: XCTestCase {
             let okm = hkdf(ikm: try hex(c["ikm"]), salt: try hex(c["salt"]), info: info)
             XCTAssertEqual(okm, try hex(c["okm"]), c["name"] as! String)
         }
-        // empty salt == 32 zero bytes in CryptoKit
-        let ikm = Data(repeating: 7, count: 32), info = Data("x".utf8)
-        XCTAssertEqual(hkdf(ikm: ikm, salt: Data(), info: info), hkdf(ikm: ikm, salt: Data(count: 32), info: info))
+        // 9 of the 10 vectors have an empty salt, so "empty salt = 32 zero bytes" is shown against the reference above.
+        XCTAssertGreaterThanOrEqual(cases.filter { ($0["salt"] as? String) == "" }.count, 9)
     }
 
     func testSaltedAeadVectors() throws {
@@ -149,8 +148,52 @@ final class SoftwareP256Tests: XCTestCase {
         let bad = try hex(cases.first { $0["name"] as? String == "point_not_on_curve" }!["pub"])
         XCTAssertThrowsError(try P256.KeyAgreement.PublicKey(x963Representation: bad))
         XCTAssertThrowsError(try P256.Signing.PublicKey(x963Representation: bad))
-        // compressed and short encodings are not accepted as x963
-        XCTAssertThrowsError(try P256.Signing.PublicKey(x963Representation: Data(bad.prefix(33))))
+    }
+
+    /// Public-key encodings that are not a 65-byte uncompressed point must be rejected as x963 input.
+    func testNonUncompressedPublicKeyEncodingsRejected() throws {
+        let keys = s2["keys"] as! [String: [String: String]]
+        let good = try Data(hex: keys["phone.sig"]!["pub"]!)
+        let compressed = try P256.Signing.PrivateKey(rawRepresentation: scalar(fromSeed: try Data(hex: keys["phone.sig"]!["seed"]!)))
+            .publicKey.compressedRepresentation
+        XCTAssertEqual(compressed.count, 33)
+        XCTAssertTrue(compressed[0] == 2 || compressed[0] == 3)
+        var hybrid = good; hybrid[0] = 6 + (good[64] & 1)               // 06 / 07 hybrid form
+        var cases: [(String, Data)] = [
+            ("compressed 02/03", compressed),
+            ("hybrid 06/07", hybrid),
+            ("identity 04||0^64", Data([4]) + Data(count: 64)),
+            ("single 00", Data([0])),
+            ("64 bytes (no prefix)", good.dropFirst()),
+            ("66 bytes", good + Data([0])),
+            ("empty", Data()),
+        ]
+        cases.append(("prefix 05", Data([5]) + good.dropFirst()))
+        for (name, enc) in cases {
+            XCTAssertThrowsError(try P256.Signing.PublicKey(x963Representation: enc), name)
+            XCTAssertThrowsError(try P256.KeyAgreement.PublicKey(x963Representation: enc), name)
+        }
+    }
+
+    /// Negative signatures built from the vector `valid` case; strictVerify (and CryptoKit) must reject all of them.
+    /// Python checks the same list against ref and cryptography in tests/spikes/test_s1_vectors.py.
+    func testMalformedSignaturesRejected() throws {
+        let valid = (s2["sign"] as! [[String: Any]]).first { $0["name"] as? String == "valid" }!
+        let pub = try hex(valid["pub"]), msg = try hex(valid["msg"]), sig = try hex(valid["sig"])
+        XCTAssertTrue(strictVerify(pub: pub, sig: sig, msg: msg))
+        let r = sig.prefix(32), s = sig.suffix(32), n = Data(p256N), zero = Data(count: 32), ones = Data(repeating: 255, count: 32)
+        let cases: [(String, Data)] = [
+            ("s = 0", r + zero), ("r = 0", zero + s), ("r = n", n + s), ("s = n", r + n),
+            ("r = 2^256-1 (>= n)", ones + s), ("s = 2^256-1 (>= n)", r + ones),
+            ("63 bytes", sig.dropLast()), ("65 bytes", sig + Data([0])), ("empty", Data()),
+        ]
+        for (name, bad) in cases {
+            XCTAssertFalse(strictVerify(pub: pub, sig: bad, msg: msg), name)
+            // CryptoKit on its own: parse may succeed (s = 0, r = n ...) but isValidSignature must be false
+            if let k = try? P256.Signing.PublicKey(x963Representation: pub), let g = try? P256.Signing.ECDSASignature(rawRepresentation: bad) {
+                XCTAssertFalse(k.isValidSignature(g, for: msg), "CryptoKit accepted: \(name)")
+            }
+        }
     }
 
     func testSoftwareKeyIsExportable() {

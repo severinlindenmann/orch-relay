@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from cryptography.exceptions import InvalidSignature, InvalidTag
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature, encode_dss_signature
@@ -91,6 +92,56 @@ def test_tampered_seal_fails():
     c = fx["secure_enclave"]["seal_with_se_ephemeral"]
     blob = bytearray.fromhex(c["sealed"])
     blob[-1] ^= 1
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidTag):
         ref.open_sealed(S, vkey(c["recipient_vector_key"]), bytes.fromhex(c["recipient_id"]), c["purpose"],
                         bytes.fromhex(c["object_id"]), c["epoch"], bytes(blob))
+
+
+# --- negative cases (same list as SoftwareP256Tests.testMalformedSignaturesRejected / ...EncodingsRejected)
+
+_valid = next(c for c in vec["sign"] if c["name"] == "valid")
+_PUB, _MSG, _SIG = (bytes.fromhex(_valid[k]) for k in ("pub", "msg", "sig"))
+_R, _S = _SIG[:32], _SIG[32:]
+_N = N.to_bytes(32, "big")
+_ONES = b"\xff" * 32
+BAD_SIGS = {
+    "s=0": _R + bytes(32), "r=0": bytes(32) + _S, "r=n": _N + _S, "s=n": _R + _N,
+    "r=2^256-1": _ONES + _S, "s=2^256-1": _R + _ONES,
+    "63 bytes": _SIG[:-1], "65 bytes": _SIG + b"\0", "empty": b"",
+}
+
+
+def test_valid_baseline():
+    assert S.verify(_PUB, _SIG, _MSG)
+
+
+@pytest.mark.parametrize("name", list(BAD_SIGS))
+def test_malformed_signature_rejected_by_ref_and_cryptography(name):
+    bad = BAD_SIGS[name]
+    assert not S.verify(_PUB, bad, _MSG)                       # reference: explicit length and range checks
+    if len(bad) == 64:                                         # cryptography alone, via DER, must also refuse
+        r, s = int.from_bytes(bad[:32], "big"), int.from_bytes(bad[32:], "big")
+        pub = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), _PUB)
+        try:
+            der = encode_dss_signature(r, s)
+        except ValueError:
+            return                                             # not even encodable
+        with pytest.raises(InvalidSignature):
+            pub.verify(der, _MSG, ec.ECDSA(hashes.SHA256()))
+
+
+def _compressed(pub: bytes) -> bytes:
+    return bytes([2 + (pub[64] & 1)]) + pub[1:33]
+
+
+BAD_PUBS = {
+    "compressed": _compressed(_PUB), "hybrid": bytes([6 + (_PUB[64] & 1)]) + _PUB[1:],
+    "identity": b"\x04" + bytes(64), "single 00": b"\x00", "no prefix": _PUB[1:], "66 bytes": _PUB + b"\0",
+    "prefix 05": b"\x05" + _PUB[1:], "empty": b"",
+}
+
+
+@pytest.mark.parametrize("name", list(BAD_PUBS))
+def test_malformed_public_key_rejected(name):
+    assert not S.sig_pub_ok(BAD_PUBS[name])
+    assert not S.verify(BAD_PUBS[name], _SIG, _MSG)

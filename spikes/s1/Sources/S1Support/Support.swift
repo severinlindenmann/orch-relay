@@ -144,8 +144,18 @@ public func gcmOpen(key: SymmetricKey, blob: Data, aad: Data) throws -> Data {
     return try AES.GCM.open(AES.GCM.SealedBox(nonce: zeroNonce, ciphertext: ct, tag: tag), using: key, authenticating: aad)
 }
 
-/// Does the same as ref.seal_to, given the ephemeral private key (software or Secure Enclave) and recipient pub.
-public func sealTo<K: KeyAgreementKey>(_ labels: Labels, eph: K, rcptPub: Data, rcptID: Data, purpose: String,
+/// Production seal (protocol section 5.3): a fresh software ephemeral key is generated here for every call, used once
+/// and discarded. The ephemeral key is deliberately NOT a parameter: the zero nonce is safe only because K is unique per
+/// seal, and a long-lived key (including a Secure Enclave key) as `eph` would reuse key and nonce.
+public func sealTo(_ labels: Labels, rcptPub: Data, rcptID: Data, purpose: String,
+                   objectID: Data, epoch: Int, plaintext: Data, extra: Data = Data()) throws -> Data {
+    try _sealToWithEphemeralForVectors(labels, eph: P256.KeyAgreement.PrivateKey(), rcptPub: rcptPub, rcptID: rcptID,
+                                       purpose: purpose, objectID: objectID, epoch: epoch, plaintext: plaintext, extra: extra)
+}
+
+/// TEST-ONLY seam, same as ref.seal_to with a given `eph`: reproduces the vector seals (fixed eph_seed) and lets the
+/// fixture tool push a Secure Enclave ECDH output through Python's open_sealed. Never call it from product code.
+public func _sealToWithEphemeralForVectors<K: KeyAgreementKey>(_ labels: Labels, eph: K, rcptPub: Data, rcptID: Data, purpose: String,
                                        objectID: Data, epoch: Int, plaintext: Data, extra: Data = Data()) throws -> Data {
     let peer = try P256.KeyAgreement.PublicKey(x963Representation: rcptPub)
     let ephPub = eph.x963
@@ -184,3 +194,24 @@ extension SecureEnclave.P256.KeyAgreement.PrivateKey: KeyAgreementKey {
 
 /// Protocol form: 64 bytes r||s. CryptoKit's `rawRepresentation` is exactly that.
 public func rawSig(_ s: P256.Signing.ECDSASignature) -> Data { s.rawRepresentation }
+
+// MARK: strict verification (what the app does before calling CryptoKit)
+
+/// Spec section 1.2 suite 2: 64-byte signature, 1 <= r,s <= n-1, 65-byte `04` public key on the curve; then CryptoKit.
+/// CryptoKit alone only throws for some of these (it parses r = 0 or s >= n and relies on isValidSignature).
+public func strictVerify(pub: Data, sig: Data, msg: Data) -> Bool {
+    guard sig.count == 64 else { return false }
+    let r = Array(sig.prefix(32)), s = Array(sig.suffix(32)), zero = [UInt8](repeating: 0, count: 32)
+    for x in [r, s] where cmp(x, zero) == 0 || cmp(x, p256N) >= 0 { return false }
+    guard pub.count == 65, pub[0] == 4,
+          let key = try? P256.Signing.PublicKey(x963Representation: pub),
+          let sg = try? P256.Signing.ECDSASignature(rawRepresentation: sig) else { return false }
+    return key.isValidSignature(sg, for: msg)
+}
+
+/// half of n, for classifying s as high (s > (n-1)/2) or low.
+public func isHighS(_ rawSig: Data) -> Bool {
+    var half = p256N, carry: UInt8 = 0
+    for i in 0..<half.count { let b = half[i]; half[i] = (b >> 1) | carry; carry = (b & 1) << 7 }
+    return cmp(Array(rawSig.suffix(32)), half) > 0
+}
