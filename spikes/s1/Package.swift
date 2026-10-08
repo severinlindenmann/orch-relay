@@ -12,5 +12,6 @@ let package = Package(
         .target(name: "S1Support"),
         .executableTarget(name: "s1-fixtures", dependencies: ["S1Support"]),
         .testTarget(name: "S1Tests", dependencies: ["S1Support"]),
-    ]
+    ],
+    swiftLanguageModes: [.v5]
 )
