@@ -4,11 +4,19 @@ import XCTest
 /// Runs every `push.cases` vector of suite 2 in tests/vectors_v2.json against PushOpener.
 final class VectorTests: XCTestCase {
     static func vectors() throws -> [String: Any] {
-        // spikes/s2/PushCore/Tests/PushCoreTests/VectorTests.swift -> repo root is 6 deletions up
-        var url = URL(fileURLWithPath: #filePath)
-        for _ in 0..<6 { url.deleteLastPathComponent() }
-        let data = try Data(contentsOf: url.appendingPathComponent("tests/vectors_v2.json"))
-        return try JSONSerialization.jsonObject(with: data) as! [String: Any]
+        // walk up from this file until tests/vectors_v2.json exists
+        var dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        var searched: [String] = []
+        for _ in 0..<12 {
+            let f = dir.appendingPathComponent("tests/vectors_v2.json")
+            searched.append(f.path)
+            if FileManager.default.fileExists(atPath: f.path) {
+                return try JSONSerialization.jsonObject(with: Data(contentsOf: f)) as! [String: Any]
+            }
+            dir.deleteLastPathComponent()
+        }
+        XCTFail("tests/vectors_v2.json not found; searched: \(searched.joined(separator: ", "))")
+        throw CocoaError(.fileNoSuchFile)
     }
 
     static func keys(_ j: [String: Any]) -> [String: PushOpener.WorkspaceKeys] {
@@ -17,7 +25,7 @@ final class VectorTests: XCTestCase {
             let e = v as! [String: Any]
             var wk: [Int: Data] = [:]
             for (ep, h) in e["wk"] as! [String: String] { wk[Int(ep)!] = Hex.decode(h, length: 32)! }
-            out[ws] = .init(wskPub: B64U.decode(e["wsk_pub"] as! String)!, wk: wk)
+            out[ws] = .init(wskPub: B64U.decode(e["wsk_pub"] as! String)!, wsHex: ws, wk: wk)
         }
         return out
     }
@@ -60,6 +68,20 @@ final class VectorTests: XCTestCase {
             XCTAssertEqual(PushOpener.verifyP256(pub: pub, sig: sig, msg: msg), c["valid"] as! Bool, c["name"] as! String)
         }
         XCTAssertTrue(sign.contains { ($0["name"] as! String) == "high_s_twin_verifies" })
+    }
+
+    func testBOMIsKeptNotDropped() throws {
+        let bytes = Data([0x7B, 0x22, 0x61, 0x22, 0x3A, 0x22, 0xEF, 0xBB, 0xBF, 0x78, 0x22, 0x7D])   // {"a":"<BOM>x"}
+        let v = try StrictJSON.parse(bytes)
+        XCTAssertEqual(v.object?["a"]?.string?.unicodeScalars.count, 2)
+        XCTAssertEqual(canonicalJSON(v), bytes)
+        XCTAssertThrowsError(try StrictJSON.parse(Data([0x22, 0xFF, 0x22])))      // invalid UTF-8 still refused
+    }
+
+    func testLastKeyIsByUTF8BytesNotStringEquality() {
+        let a = "\u{e9}", b = "e\u{301}"
+        XCTAssertEqual(a, b)                                                      // Swift: equal
+        XCTAssertNotEqual(PushOpener.lastKey(wsHex: "00", id: a), PushOpener.lastKey(wsHex: "00", id: b))
     }
 
     func testStrictJSONRejects() {

@@ -25,7 +25,9 @@ GENERIC = {"title": "orch", "body": "New activity"}   # what the relay sends in 
 def material() -> dict:
     vec = json.loads((ROOT / "tests" / "vectors_v2.json").read_text(encoding="utf-8"))
     s2 = vec["suites"]["2"]
-    keys = s2["push"]["cases"][0]["keys"]                     # the `valid` case: workspace A
+    case0 = s2["push"]["cases"][0]
+    assert case0["name"] == "valid"
+    keys = case0["keys"]                                      # the `valid` case: workspace A
     ws_hex, entry = next(iter(keys.items()))
     return {
         "suite": 2,
@@ -37,40 +39,45 @@ def material() -> dict:
     }
 
 
-def seal(m: dict, payload: dict, signer_seed: str | None = None) -> dict:
+def k_push_hex(m: dict, epoch: int = 1) -> str:
+    return R.k_push(bytes.fromhex(m["wk"][str(epoch)]), bytes.fromhex(m["ws"]), epoch).hex()
+
+
+def seal(m: dict, payload: dict, signer_seed: str | None = None) -> str:
     S = R.SUITES[2]
     ws = bytes.fromhex(m["ws"])
     wsk = S.sig_key(bytes.fromhex(signer_seed or m["wsk_seed"]))
     raw = R.seal_push(S, wsk, bytes.fromhex(m["wk"]["1"]), ws, 1, payload, os.urandom(16))
-    return json.loads(raw)
+    return raw.decode()          # cj(outer): the exact bytes the relay forwards, as a JSON string
 
 
-def apns(outer: dict, thread_id: str, bundle: str = BUNDLE_ID) -> dict:
-    """The APNs JSON body the relay would send: generic visible text, mutable-content, thread-id, sealed object."""
+def apns(outer: str, bundle: str = BUNDLE_ID) -> dict:
+    """The APNs JSON body the relay would send: fixed generic alert, mutable-content, no thread-id, and the sealed
+    outer object as a JSON string in `o` (the receiver feeds those exact bytes to the section 9 rules)."""
     return {
         "Simulator Target Bundle": bundle,
-        "aps": {"alert": dict(GENERIC), "mutable-content": 1, "thread-id": thread_id, "sound": "default"},
+        "aps": {"alert": dict(GENERIC), "mutable-content": 1, "sound": "default"},
         "o": outer,
     }
 
 
 def build(now_ms: int) -> dict[str, dict]:
     m = material()
-    ws = m["ws"]
     q = {"kind": "question", "id": DEMO_QUESTION_ID, "label": "Ship L-0042?", "ts_ms": now_ms}
     closed = {"kind": "question.closed", "id": DEMO_QUESTION_ID, "label": "Answered on laptop", "ts_ms": now_ms + 1000}
     valid = seal(m, q)
-    tampered = json.loads(json.dumps(valid))
+    tampered = json.loads(valid)
     c = tampered["c"]
     tampered["c"] = c[:40] + ("A" if c[40] != "A" else "B") + c[41:]
+    tampered = json.dumps(tampered, sort_keys=True, separators=(",", ":"))
     forged = seal(m, {**q, "label": "Wire 5000 EUR to attacker.example"}, signer_seed=m["phone_seed"])
     stale = seal(m, {**q, "id": "q-stale0000000001", "ts_ms": now_ms - 25 * 3600 * 1000, "label": "Old news"})
     return {
-        "01_question": apns(valid, ws),
-        "02_tampered": apns(tampered, ws),
-        "03_forged_by_member_device": apns(forged, ws),
-        "04_stale_25h": apns(stale, ws),
-        "05_question_closed": apns(seal(m, closed), ws),
+        "01_question": apns(valid),
+        "02_tampered": apns(tampered),
+        "03_forged_by_member_device": apns(forged),
+        "04_stale_25h": apns(stale),
+        "05_question_closed": apns(seal(m, closed)),
     }
 
 
@@ -86,11 +93,12 @@ def main() -> None:
         (out / f"{name}.apns").write_text(json.dumps(body, indent=1), encoding="utf-8")
         apns_body = {k: v for k, v in body.items() if k != "Simulator Target Bundle"}
         print(f"{name}.apns  APNs payload {len(json.dumps(apns_body, separators=(',', ':')))} bytes "
-              f"(outer object {len(json.dumps(body['o'], separators=(',', ':')))} bytes)")
+              f"(outer object {len(body['o'].encode())} bytes)")
     m = material()
-    app_material = {k: m[k] for k in ("suite", "ws", "wsk_pub", "wk")}     # public half + WK_e only
+    # public half + K_push(ws, e) only: a push receiver never needs WK_e
+    app_material = {"suite": 2, "ws": m["ws"], "wsk_pub": m["wsk_pub"], "k_push": {"1": k_push_hex(m)}}
     (out / "demo_material.json").write_text(json.dumps(app_material, indent=1), encoding="utf-8")
-    print("demo_material.json written (WK_e + WSK pub, what the app is provisioned with)")
+    print("demo_material.json written (K_push + WSK pub, what the app is provisioned with; spike only)")
 
 
 if __name__ == "__main__":

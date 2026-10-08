@@ -168,8 +168,10 @@ public struct StrictJSON {
 
 private extension String {
     init?(validatingUTF8CString bytes: [UInt8]) {
-        // Reject invalid UTF-8 rather than repairing it.
-        guard let s = String(bytes: bytes, encoding: .utf8) else { return nil }
+        // Validate without transforming: Foundation's String(bytes:encoding:) drops a leading U+FEFF, which would
+        // change the bytes that a signature covers. Invalid input decodes to U+FFFD and fails the round trip.
+        let s = String(decoding: bytes, as: UTF8.self)
+        guard Array(s.utf8) == bytes else { return nil }
         self = s
     }
 }

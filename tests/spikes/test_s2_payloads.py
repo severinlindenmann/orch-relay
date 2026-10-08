@@ -20,16 +20,17 @@ def keys():
 
 
 def open_(body, last=None):
-    return R.sw_open_push(R.SUITES[2], json.dumps(body["o"], separators=(",", ":")).encode(), keys(),
-                          {} if last is None else last, NOW + 2000)
+    assert isinstance(body["o"], str)                      # the relay forwards `o` as a string, unchanged
+    return R.sw_open_push(R.SUITES[2], body["o"].encode(), keys(), {} if last is None else last, NOW + 2000)
 
 
 def test_all_payloads_fit_in_4kb_and_outer_in_3kb():
     for name, body in mp.build(NOW).items():
         apns = {k: v for k, v in body.items() if k != "Simulator Target Bundle"}
         assert len(json.dumps(apns, separators=(",", ":"))) < APNS_LIMIT, name
-        assert len(json.dumps(body["o"], separators=(",", ":"))) <= R.MAX_PUSH, name
+        assert len(body["o"].encode()) <= R.MAX_PUSH, name
         assert body["aps"]["alert"] == mp.GENERIC and body["aps"]["mutable-content"] == 1
+        assert "thread-id" not in body["aps"] and set(body) == {"Simulator Target Bundle", "aps", "o"}
 
 
 def test_valid_question_then_closed_then_replay():
@@ -47,3 +48,11 @@ def test_bad_payloads_are_refused_with_the_expected_reason():
     assert open_(b["02_tampered"]) == {"result": "drop", "why": "tag"}
     assert open_(b["03_forged_by_member_device"]) == {"result": "drop", "why": "signature"}
     assert open_(b["04_stale_25h"]) == {"result": "drop", "why": "stale"}
+
+
+def test_app_material_has_k_push_not_wk():
+    m = mp.material()
+    kp = bytes.fromhex(mp.k_push_hex(m))
+    assert kp == R.k_push(bytes.fromhex(m["wk"]["1"]), bytes.fromhex(m["ws"]), 1)
+    app = {"ws", "wsk_pub", "k_push", "suite"}
+    assert set(json.loads(json.dumps({"suite": 2, "ws": m["ws"], "wsk_pub": m["wsk_pub"], "k_push": {"1": kp.hex()}}))) == app

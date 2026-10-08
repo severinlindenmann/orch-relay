@@ -46,8 +46,6 @@ targets:
     sources:
       - OrchNSE
       - Shared
-      - path: demo_material.json
-        buildPhase: resources
     dependencies:
       - package: PushCore
     entitlements:

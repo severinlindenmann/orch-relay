@@ -10,19 +10,19 @@ struct OrchApp: App {
 final class Delegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions o: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         UNUserNotificationCenter.current().delegate = self
-        let store = SharedStore()
+        let store = SpikeStore()
         // Provision the demo material into the shared container (what pairing would do on a real device).
-        if let src = Bundle.main.url(forResource: "demo_material", withExtension: "json") {
-            try? FileManager.default.removeItem(at: store.materialURL)
-            try? FileManager.default.copyItem(at: src, to: store.materialURL)
+        if let src = Bundle.main.url(forResource: "demo_material", withExtension: "json"), let dst = try? store.materialURL() {
+            try? FileManager.default.removeItem(at: dst)
+            try? FileManager.default.copyItem(at: src, to: dst)
         }
-        orchLog.notice("app launched; shared dir uses group container: \(store.usesGroup, privacy: .public) path: \(store.dir.path, privacy: .public)")
+        orchLog.notice("app launched; group container: \(store.usesGroup, privacy: .public)")
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .provisional]) { ok, err in  // provisional: no prompt, so headless Simulator runs work
             orchLog.notice("notification authorization granted=\(ok, privacy: .public) err=\(String(describing: err), privacy: .public)")
         }
         let args = ProcessInfo.processInfo.arguments
         if let i = args.firstIndex(of: "-nse-selftest"), i + 1 < args.count {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { SelfTest.run(dir: args[i + 1]) { orchLog.notice("selftest done") } }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { SelfTest.run(dir: args[i + 1]) {} }
         }
         return true
     }
@@ -37,15 +37,15 @@ struct ContentView: View {
     @State private var log: [String] = []
     @State private var delivered: [String] = []
     var body: some View {
-        let store = SharedStore()
+        let store = SpikeStore()
         NavigationStack {
             List {
                 Section("Shared container") {
-                    Text(store.usesGroup ? "App Group container: yes" : "App Group container: NO (private Library)")
-                    Text(store.dir.path).font(.caption2).textSelection(.enabled)
+                    Text(store.usesGroup ? "App Group container: yes" : "App Group container: NO")
+                    Text(store.dir?.path ?? "-").font(.caption2).textSelection(.enabled)
                 }
                 Section("Delivered notifications (\(delivered.count))") { ForEach(delivered, id: \.self) { Text($0).font(.caption) } }
-                Section("NSE log") { ForEach(log, id: \.self) { Text($0).font(.caption2) } }
+                Section("NSE log (reasons only)") { ForEach(log, id: \.self) { Text($0).font(.caption2) } }
             }
             .navigationTitle("orch S2")
             .toolbar { Button("Refresh") { refresh() } }
@@ -53,8 +53,8 @@ struct ContentView: View {
         }
     }
     func refresh() {
-        let store = SharedStore()
-        log = ((try? String(contentsOf: store.logURL, encoding: .utf8)) ?? "").split(separator: "\n").suffix(12).map(String.init)
+        let store = SpikeStore()
+        log = ((try? String(contentsOf: store.logURL(), encoding: .utf8)) ?? "").split(separator: "\n").suffix(12).map(String.init)
         UNUserNotificationCenter.current().getDeliveredNotifications { ns in
             DispatchQueue.main.async { delivered = ns.map { "\($0.request.content.title) | \($0.request.content.body)" } }
         }

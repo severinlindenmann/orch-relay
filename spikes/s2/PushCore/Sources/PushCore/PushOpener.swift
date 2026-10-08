@@ -13,8 +13,12 @@ public enum PushOpener {
 
     public struct WorkspaceKeys {
         public var wskPub: Data                // 65-byte uncompressed P-256 point
-        public var wk: [Int: Data]             // epoch -> WK_e (32 bytes)
-        public init(wskPub: Data, wk: [Int: Data]) { self.wskPub = wskPub; self.wk = wk }
+        public var kPush: [Int: Data]          // epoch -> K_push(ws, e) (32 bytes): all a push receiver needs, not WK_e
+        public init(wskPub: Data, kPush: [Int: Data]) { self.wskPub = wskPub; self.kPush = kPush }
+        /// Derive K_push(ws, e) from WK_e (what the host or the app does once, at pairing / epoch change).
+        public init(wskPub: Data, wsHex: String, wk: [Int: Data]) {
+            self.init(wskPub: wskPub, kPush: wk.reduce(into: [:]) { $0[$1.key] = PushOpener.deriveKPush(wk: $1.value, wsHex: wsHex, epoch: $1.key) })
+        }
     }
 
     public struct Payload: Equatable {
@@ -33,11 +37,11 @@ public enum PushOpener {
               let wsHex = m["ws"]?.string, let ws = Hex.decode(wsHex, length: 16),
               let cStr = m["c"]?.string, let c = B64U.decode(cStr) else { return .drop("shape") }
         guard let epoch = m["epoch"]?.int, epoch >= 0, epoch <= Int64(UInt32.max),
-              let entry = keys[wsHex], let wk = entry.wk[Int(epoch)] else { return .drop("no_key") }
+              let entry = keys[wsHex], let kPushData = entry.kPush[Int(epoch)] else { return .drop("no_key") }
 
         let e32 = UInt32(epoch)
         let eBytes = Data([UInt8(e32 >> 24), UInt8((e32 >> 16) & 255), UInt8((e32 >> 8) & 255), UInt8(e32 & 255)])
-        let kPush = hkdf(ikm: wk, salt: Data(), info: Data("orch/v2/push|\(wsHex)|\(epoch)".utf8))
+        let kPush = SymmetricKey(data: kPushData)
         let aad = Data("orch/v2/push-aad|".utf8) + Data([suiteID]) + ws + eBytes
 
         guard c.count >= 32, let plain = try? saltedOpen(kBase: kPush, msgLabel: Data("orch/v2/push-msg".utf8), aad: aad, blob: c),
@@ -52,10 +56,18 @@ public enum PushOpener {
               let label = p["label"]?.string, label.unicodeScalars.count <= maxLabel,
               let id = p["id"]?.string, let ts = p["ts_ms"]?.int else { return .drop("payload") }
         guard ts >= nowMs - maxAgeMs, ts <= nowMs + skewMs else { return .drop("stale") }
-        let key = "\(wsHex)/\(id)"
+        let key = lastKey(wsHex: wsHex, id: id)
         if let prev = last[key], ts <= prev { return .drop("replay") }
         last[key] = ts
         return .show(Payload(kind: kind, id: id, label: label, tsMs: ts))
+    }
+
+    /// Key of the "last shown" table: ws hex, "/", hex of the id's UTF-8 bytes (Swift String equality is
+    /// canonical equivalence, ref compares code points, so never key by the String itself).
+    public static func lastKey(wsHex: String, id: String) -> String { "\(wsHex)/\(Hex.encode(Data(id.utf8)))" }
+
+    public static func deriveKPush(wk: Data, wsHex: String, epoch: Int) -> Data {
+        hkdf(ikm: wk, salt: Data(), info: Data("orch/v2/push|\(wsHex)|\(epoch)".utf8)).withUnsafeBytes { Data($0) }
     }
 
     // MARK: primitives

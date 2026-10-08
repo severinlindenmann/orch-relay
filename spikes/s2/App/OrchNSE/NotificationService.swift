@@ -1,74 +1,89 @@
 import PushCore
 import UserNotifications
 
-/// Opens the protocol v2 section 9 sealed object in the APNs payload key "o". On any refusal the notification
-/// keeps the generic text that the relay put in aps.alert: attacker-chosen content is never shown.
+/// SPIKE reference for P4. Opens the protocol v2 section 9 sealed object that the relay forwards as the JSON
+/// *string* in APNs key "o" (those exact bytes go to PushOpener). Every path delivers freshly built content: the
+/// relay's title/subtitle/category/thread/sound/attachments/userInfo are never carried over, because whoever holds
+/// the APNs key controls them (and can also skip the extension by omitting mutable-content).
 final class NotificationService: UNNotificationServiceExtension {
+    private let gate = NSLock()
     private var handler: ((UNNotificationContent) -> Void)?
-    private var best: UNMutableNotificationContent?
-    private let store = SharedStore()
+    private let store = SpikeStore()
+
+    /// Delivers exactly once, whichever of didReceive paths and the timeout gets here first.
+    private func finish(_ c: UNNotificationContent) {
+        gate.lock(); let h = handler; handler = nil; gate.unlock()
+        h?(c)
+    }
+
+    static func generic() -> UNMutableNotificationContent {
+        let c = UNMutableNotificationContent()
+        c.title = "orch"; c.body = "New activity"; c.sound = .default
+        return c
+    }
+
+    enum Outcome { case refuse(String), show(UNMutableNotificationContent, key: String, closed: Bool) }
 
     override func didReceive(_ request: UNNotificationRequest, withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void) {
-        handler = contentHandler
-        let content = (request.content.mutableCopy() as? UNMutableNotificationContent) ?? UNMutableNotificationContent()
-        best = content
-        let rid = request.identifier
-        orchLog.notice("NSE didReceive id=\(rid, privacy: .public) group=\(self.store.usesGroup, privacy: .public)")
-
-        let (result, source) = open(request.content.userInfo)
-        switch result {
-        case .show(let p):
-            content.title = p.kind == "question.closed" ? "Answered" : "orch"
-            content.body = p.label
-            content.threadIdentifier = content.threadIdentifier   // keep the ws thread from aps.thread-id
-            content.userInfo["orch_id"] = p.id
-            content.userInfo["orch_kind"] = p.kind
-            orchLog.notice("NSE show kind=\(p.kind, privacy: .public) id=\(p.id, privacy: .public) label=\(p.label, privacy: .public) material=\(source, privacy: .public)")
-            record(["res": "show", "kind": p.kind, "id": p.id, "label": p.label, "rid": rid, "material": source])
-            // "Answered elsewhere": drop the delivered notification(s) of the same question, then deliver this one.
-            if p.kind == "question.closed" {
-                replaceDelivered(id: p.id, thenDeliver: content)
-                return
-            }
-        case .drop(let why):
-            content.title = "orch"
-            content.body = "New activity"                       // never attacker content
-            orchLog.notice("NSE drop why=\(why, privacy: .public) material=\(source, privacy: .public)")
-            record(["res": "drop", "why": why, "rid": rid, "material": source])
+        gate.lock(); handler = contentHandler; gate.unlock()
+        switch process(request.content.userInfo, now: Date()) {
+        case .refuse(let why):
+            orchLog.notice("NSE refuse why=\(why, privacy: .public)")
+            store.appendLog(["res": "refuse", "why": why, "t": Int(Date().timeIntervalSince1970)])
+            finish(Self.generic())
+        case .show(let content, let key, let closed):
+            orchLog.notice("NSE show")
+            store.appendLog(["res": "show", "t": Int(Date().timeIntervalSince1970)])
+            if closed { replaceDelivered(key: key, thenDeliver: content) } else { finish(content) }
         }
-        contentHandler(content)
     }
 
     override func serviceExtensionTimeWillExpire() {
-        // Out of time: deliver whatever we have, which is the generic text unless a result was set.
         orchLog.error("NSE time expired")
-        if let h = handler, let c = best { c.body = c.body.isEmpty ? "New activity" : c.body; h(c) }
+        finish(Self.generic())                      // never the relay's alert
     }
 
-    private func open(_ userInfo: [AnyHashable: Any]) -> (PushOpener.Result, String) {
-        guard let obj = userInfo["o"], JSONSerialization.isValidJSONObject(obj),
-              let raw = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys, .withoutEscapingSlashes]),
-              let m = store.loadMaterial(bundle: Bundle(for: NotificationService.self)) else { return (.drop("shape"), "-") }
-        var last = store.loadLast()
-        let now = Int64(Date().timeIntervalSince1970 * 1000)
-        let r = PushOpener.open(raw: raw, keys: m.keys, last: &last, nowMs: now)
-        if case .show = r { store.saveLast(last) }
-        return (r, m.source)
+    /// Everything before showing: material, lock, load table, section 9 rules, durable write. Fails closed.
+    func process(_ userInfo: [AnyHashable: Any], now: Date) -> Outcome {
+        guard let o = userInfo["o"] as? String else { return .refuse("no_o") }
+        guard let keys = store.loadMaterial() else { return .refuse("no_material") }
+        let raw = Data(o.utf8)
+        do {
+            return try store.withLock {
+                var last = try store.loadLast()
+                let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+                switch PushOpener.open(raw: raw, keys: keys, last: &last, nowMs: nowMs) {
+                case .drop(let why): return .refuse(why)
+                case .show(let p):
+                    // `last` was loaded under the lock, so recording p.ts is already a merge to the maximum.
+                    last = last.filter { $0.value >= nowMs - PushOpener.maxAgeMs - PushOpener.skewMs }
+                    try store.saveLast(last)         // durable BEFORE anything is shown
+                    guard let ws = try StrictJSON.parse(raw).object?["ws"]?.string else { return .refuse("shape") }
+                    let c = UNMutableNotificationContent()
+                    c.title = p.kind == "question.closed" ? "Answered" : "orch"
+                    c.body = p.label
+                    c.sound = .default
+                    c.threadIdentifier = ws          // local only, set from the verified ws
+                    let key = "\(ws)/\(p.id)"
+                    c.userInfo = ["o": o, "orch_key": key]
+                    return .show(c, key: key, closed: p.kind == "question.closed")
+                }
+            }
+        } catch let e as StoreError { return .refuse(e.why) }
+        catch { return .refuse("store") }
     }
 
-    private func replaceDelivered(id: String, thenDeliver content: UNMutableNotificationContent) {
+    /// "Answered elsewhere": remove delivered notifications of the same (ws, id), then deliver this one.
+    private func replaceDelivered(key: String, thenDeliver content: UNMutableNotificationContent) {
         let center = UNUserNotificationCenter.current()
         center.getDeliveredNotifications { [weak self] delivered in
-            let old = delivered.filter { $0.request.content.userInfo["orch_id"] as? String == id }.map(\.request.identifier)
-            orchLog.notice("NSE replace: removing \(old.count, privacy: .public) delivered with orch_id=\(id, privacy: .public)")
-            self?.record(["res": "replace", "removed": old.count, "id": id])
+            let want = Data(key.utf8)
+            let old = delivered.filter { ($0.request.content.userInfo["orch_key"] as? String).map { Data($0.utf8) == want } ?? false }
+                .map(\.request.identifier)
             center.removeDeliveredNotifications(withIdentifiers: old)
-            self?.handler?(content)
+            orchLog.notice("NSE replace removed=\(old.count, privacy: .public)")
+            self?.store.appendLog(["res": "replace", "removed": old.count])
+            self?.finish(content)
         }
-    }
-
-    private func record(_ d: [String: Any]) {
-        var d = d; d["t"] = Int(Date().timeIntervalSince1970)
-        store.appendLog(d)
     }
 }
