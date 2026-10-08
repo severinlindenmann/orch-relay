@@ -3,3 +3,4 @@ out/
 *.xcodeproj
 DerivedData/
 .swiftpm/
+DerivedData*/

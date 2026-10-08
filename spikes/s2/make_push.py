@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 
 from ref import orch_protocol_ref as R  # noqa: E402
 
-BUNDLE_ID = "io.severin.orch.s2"
+BUNDLE_ID = "io.severin.orch"
 DEMO_QUESTION_ID = "q-0167f4bf37be9ccc"
 GENERIC = {"title": "orch", "body": "New activity"}   # what the relay sends in the clear: nothing about content
 
