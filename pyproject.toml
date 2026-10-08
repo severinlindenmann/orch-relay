@@ -1,0 +1,13 @@
+[project]
+name = "orch-relay"
+version = "0.0.0"
+description = "orch-relay: directory, relay, drop and push for orch v2"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8", "cryptography>=43"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
