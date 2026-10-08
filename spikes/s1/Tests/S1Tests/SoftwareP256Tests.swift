@@ -158,3 +158,15 @@ final class SoftwareP256Tests: XCTestCase {
         XCTAssertEqual(k.rawRepresentation.count, 32)
     }
 }
+
+/// Records, in the test log, what this destination reports.
+final class EnvironmentReportTests: XCTestCase {
+    func testReportSecureEnclaveAvailability() {
+        let line = "S1-ENV isAvailable=\(SecureEnclave.isAvailable) os=\(ProcessInfo.processInfo.operatingSystemVersionString)"
+        print(line)
+        XCTContext.runActivity(named: line) { _ in }
+        #if targetEnvironment(simulator)
+        print("S1-ENV running in the iOS Simulator")
+        #endif
+    }
+}
