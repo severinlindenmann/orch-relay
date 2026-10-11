@@ -444,6 +444,8 @@ class Directory:
 
     def recovery(self, con, body, raw, address, now, device=None):
         """Verify and apply recovery; handle() has already enforced the address budget."""
+        from .cert_queue import complete
+
         revocation = device is None
         kind = "revocation" if revocation else "certificate"
         field = "record" if revocation else "cert"
@@ -466,6 +468,7 @@ class Directory:
             if not revocation:
                 stored = con.execute("SELECT * FROM devices WHERE device_id=?", (did,)).fetchone()
                 self.device_status(con, stored, now)
+                complete(con, P.parse_json(stored["cert"]), now)
             return {"device_id": did}
         account = con.execute("SELECT pk_pub FROM accounts WHERE person_id=?", (person,)).fetchone()
         if account is None:
@@ -490,6 +493,8 @@ class Directory:
         ):
             # Cache accepted no-ops too: a byte-identical retry must bypass address budgets.
             con.execute("INSERT INTO recovery_receipts VALUES (?,?,?)", (kind, digest(raw), did))
+            if not revocation:
+                complete(con, signed, now)
             return {"device_id": did}
         self.rate(kind + "-person", person, DAY, 32 if revocation else 64, now, False)
         if revocation and prior:
@@ -501,6 +506,8 @@ class Directory:
             self.revoke(con, signed, now)
         elif stored is None:
             self.store_device(con, signed)
+        if not revocation:
+            complete(con, signed, now)
         con.execute("INSERT INTO recovery_receipts VALUES (?,?,?)", (kind, digest(raw), did))
         return {"device_id": did}
 
