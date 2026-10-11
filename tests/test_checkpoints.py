@@ -939,3 +939,74 @@ def test_ticket_restores_report_nothing_unpublished(tmp_path):
     result, tables = run_case(tmp_path, "ticket_restore", prepare)
     assert result["result"] == "accepted" and "unpublished" not in result
     assert tables["checkpoint_unpublished"] == []
+
+
+def test_unknown_device_cannot_be_self_certified_under_two_persons_in_one_restore(tmp_path):
+    # With entries unique per (device, person), one restore could carry two self-certifying
+    # entries for one unknown device: bob's own and alice's (her PK certifying bob's phone id).
+    # Both would bind; the global row would then name bob with alice's record. Refused.
+    import copy
+
+    from checkpoint_support import CORPUS, http, seed
+    from directory_support import V, signed
+    from fastapi.testclient import TestClient
+
+    from orch_relay import proto as P
+    from orch_relay.app import create_app
+    from ref import checkpoints as C
+    from ref import orch_protocol_ref as R
+
+    S = R.SUITES[2]
+
+    def key(name):
+        return S.sig_key(bytes.fromhex(V["keys"][name]["seed"]))
+
+    case = next(
+        c
+        for c in CORPUS["suites"]["2"]["checkpoints"]["cases"]
+        if c["name"] == "B1_unknown_device_self_certifying"
+    )
+    page = case["steps"][0]["input"]["body"]
+    body = copy.deepcopy(case["steps"][2]["input"]["body"])
+    line = body["restore"]["line"]
+    (bob_item,) = line["revocations"]
+    phone = bob_item["device_cert"]["o"]["device_id"]
+    alice_cert = signed({**bob_item["device_cert"]["o"], "person_id": ALICE})
+    alice_rev = signed({**bob_item["revocation"]["o"], "person_id": ALICE, "reason": "compromised"})
+    alice_item = {
+        "revocation": alice_rev,
+        "device_cert": alice_cert,
+        "pk_pub": P.b64u(bytes.fromhex(V["keys"]["person_alice.sig"]["pub"])),
+    }
+    line["revocations"] = sorted(
+        [bob_item, alice_item], key=lambda e: (phone, e["revocation"]["o"]["person_id"])
+    )
+    ws = WS
+    line["sig"] = R.b64u(S.sign(key("phone.sig"), C.event_bytes(S, line, ws, "workspace")))
+    line["host_sig"] = R.b64u(
+        S.sign(key("wsk_a.sig"), C.event_bytes(S, line, ws, "workspace", True))
+    )
+    t = body["checkpoint"]
+    entry = t["o"]["workspace_log"]
+    head = C.event_head(line)
+    prev_acc = case["state"]["nodes"]["workspace"]
+    acc2 = next(n["acc"] for n in prev_acc.values() if n["seq"] == 2)
+    body["checkpoint"] = R.sign_object(
+        S,
+        key("wsk_a.sig"),
+        {**t["o"], "workspace_log": {**entry, "head": head, "acc": C.log_acc(acc2, head)}},
+    )
+    target = C.checkpoint_hash(body["checkpoint"])
+    host = {"Authorization": "Bearer FAKE-workspace", "Orch-Holder": "1"}
+    with TestClient(create_app(tmp_path)) as client:
+        path = tmp_path / db.DB_NAME
+        seed(path, case["state"], case)
+        client.app.state.directory.clock = lambda: 1790000000000
+        base = f"/v2/workspaces/{WS}/staging/{body['source_hash']}/{target}"
+        assert http(client, "PUT", base + "/pages/0", host, body=page)["status"] == 200
+        manifest = {"pages": [C.descriptor(0, page)]}
+        assert http(client, "PUT", base + "/manifest", host, body=manifest)["complete"]
+        result = http(client, "PUT", f"/v2/workspaces/{WS}/checkpoint", host, body=body)
+        assert result == {"status": 409, "error": "restore_invalid"}, result
+        with closing(db.connect(path)) as con:
+            assert not con.execute("SELECT 1 FROM devices WHERE device_id=?", (phone,)).fetchone()
