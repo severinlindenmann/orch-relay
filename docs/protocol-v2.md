@@ -452,7 +452,9 @@ to whom. Vector: `label_sealed`.
 ### 6.1 Device certificate
 
 **P3-D5.** Certificate upload is session-less and PK-authorized, under the recovery quotas
-of §19.1. Exact retries are free; no replacement of a stored certificate with different bytes.
+of §19.1. (G0a review 3) After signature verification, identical `cj(o)` is a free idempotent
+repeat (200, no state change), even with a different signature. Different canonical certificate
+content for the same device is 409 `cert_conflict`.
 
 A signed object (§2.4), signed by `PK` with `sig_device_cert`, of kind `device_cert`, with exactly these
 fields:
@@ -1049,8 +1051,9 @@ The relay verifies requests under the card's WSK and challenges/rejections under
 Identifiers must match the stored request; a challenge has the request's expiry, valid device keys
 and the derived device id. The state machine is `open → challenged → signed`, with `rejected`
 from open or challenged, and `expired` from either at `expires_ms`. Challenges cannot be replaced:
-same bytes are idempotent, different bytes are `replayed`. Rejection after signing is `already_signed`;
-challenge or certificate completion after rejection is `replayed`. Exact terminal retries are
+(G0a review 3) a valid signature over identical `cj(o)` is idempotent (200, no state change),
+including re-signed challenges and rejections; different canonical challenge content is `replayed`. Rejection after signing is `already_signed`;
+challenge or certificate completion after rejection is `replayed`. Verified canonical terminal retries are
 idempotent while the record is retained. Expired non-terminal requests return 410 `expired`.
 The request becomes signed only when a stored, valid certificate matches **both keys**, device and
 person of its challenge. An unrelated certificate can be stored but cannot complete the request.
@@ -1647,8 +1650,9 @@ Every answer to an epoch-0 request, refusals included, also carries `wsk_pub`.
 | 401 | `bad_signature`, `stale_timestamp` (`server_ms`), `unknown_workspace`, `replay`, `unknown_challenge`, `expired`, `unauthenticated` (P3-D2) |
 | 403 | `revoked`, `other_person`, `scope_exceeded`, `not_eligible`, `not_for_this_device`, `cert_expired` (membership publication, P3-D7) |
 | 404 | `not_found` (P3-D1) |
-| 409 | `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version`, `stale_list`, `bad_epoch`, `rotation_required`, `missing_grant`, `already_claimed` (`claimed_by`), `version_conflict` (`current`), `account_exists`, `cert_conflict`, `grant_conflict`, `rid_conflict`, `retry_exhausted`, `chunk_conflict`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed` (P3-D3/D5/D7–D11/D22) |
-| 410 | `expired` (P3-D11) |
+| 409 | `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version`, `stale_list`, `bad_epoch`, `rotation_required`, `missing_grant`, `already_claimed` (`claimed_by`), `version_conflict` (`current`), `account_exists`, `cert_conflict`, `grant_conflict`, `wrap_conflict` (G0a review 10), `rid_conflict`, `retry_exhausted`, `chunk_conflict`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed` (P3-D3/D5/D7–D11/D22) |
+| 413 | `too_large` for JSON routes (G0a review 2); before parsing |
+| 410 | `expired` (P3-D11; unknown/expired response rid, G0a review 8) |
 | 429 | `rate_limited`, `quota_exceeded` (P3-D5/D17; `Retry-After`) |
 | 503 | `overloaded` (P3-D17; `Retry-After`) |
 | 428 | `precondition_required` |
@@ -1891,18 +1895,35 @@ The **Auth** column uses these codes:
 
 ### 19.1 Directory and sessions
 
+(G0a review 1) Each workspace has durable `ever_persons` and `ever_devices` sets, updated only
+on accepted member-list publication. A device enters `ever_devices` exactly when it is a member
+of an accepted list. A person enters `ever_persons` exactly when an accepted list contains at
+least one member device whose stored certificate belongs to that person (check 8 binds this).
+Every `persons` entry MUST have at least one member device of that person in the same list;
+otherwise publication is refused with 403 `other_person`. Failed publications add no authority.
+W certificate and person-feed reads require `ever_persons`; device reads and feed entries are
+restricted to `ever_devices`. Apply these filters before pagination and to relevant notices.
+Departure never removes historical authority; one workspace's sets never authorize another.
+
+(G0a review 2) Every JSON route below has a whole-body cap in its limits cell, checked before
+JSON parsing, authentication or signature verification; excess is 413 `too_large`. KiB = 1024
+bytes. Membership retains 2 MiB. GET accepts no body. ORB2 keeps its existing binary caps/status.
+Card-key batches may be split across multiple requests within the cap.
+Caps apply to streamed bytes as well as declared Content-Length; never buffer above the cap.
+
+
 | Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
 |---|---|---|---|---|---|
-| `POST /v2/session/challenge` | none | `{}` → `{challenge, expires_ms}` | 60 s, single use; per address ≤ 16 outstanding and 60/min; global ≤ 65 536 outstanding, excess **refused** (P3-D17) | 429 `rate_limited` | §12.2 |
-| `POST /v2/session/login` | none | `{challenge, kind, id, sig}` → `{token, expires_ms}` | challenge consumed on every attempt; 15 min; concurrent tokens allowed | 400 `malformed`, `cert_expired`, `cert_invalid`; 401 `unknown_challenge`, `expired`, `bad_signature`; 403 `revoked` | §12.2, §4 |
-| `POST /v2/session/logout` | D or W | `{}` → `{}` | idempotent; safe to retry with an expired token (200) | — | new |
-| `POST /v2/accounts` | none | `{invite, pk_pub, device_cert, challenge, sig}` → `{person_id}` | `sig` is the new device's login signature over a fresh challenge; the exact same request → 200 (by digest) | 400 `malformed`, `cert_invalid`; 401 `bad_signature`, `unknown_challenge`; 403 `not_eligible` (one code for unknown, used or expired); 409 `account_exists` | spec §6.1 (P3-D3) |
-| `PUT /v2/devices/{device}` | none | `{cert}` → `{device_id}` | self-authenticating under the account `PK`; per address 30/h; per person 64/day, charged only after the signature verifies; an exact retry is free | 400 `cert_invalid`, `cert_expired`; 403 `revoked`, `other_person` (no account); 409 `cert_conflict` | §6.1, §8.3, §8.4 (P3-D5) |
-| `GET /v2/devices/{device}` | D(p), or W whose `ever_persons` contains the person | → `{cert}` | | 403 `not_eligible`; 404 `not_found` | §6.1 |
-| `POST /v2/revocations` | none | `{record}` → `{device_id}` | authority is `PK`; per address 10/min; per person 32/day, charged only after the signature verifies, with 8/day reserved for revocations of devices not yet revoked; an exact retry is free | 400 `malformed`; 401 `bad_signature`; 403 `other_person` | §6.2 (P3-D5) |
+| `POST /v2/session/challenge` | none | `{}` → `{challenge, expires_ms}` | 60 s, single use; per address (/64 IPv6) ≤ 16 outstanding and 60/min; /56 ≤ 256 outstanding and 960/min (G0a review 9); global ≤ 65 536 outstanding, excess **refused** (P3-D17); JSON cap 16 KiB (G0a review 2) | 429 `rate_limited` | §12.2 |
+| `POST /v2/session/login` | none | `{challenge, kind, id, sig}` → `{token, expires_ms}` | challenge consumed on every attempt; 15 min; ≤ 8 live tokens/device (G0a review 10); JSON cap 16 KiB (G0a review 2) | 400 `malformed`, `cert_expired`, `cert_invalid`; 401 `unknown_challenge`, `expired`, `bad_signature`; 403 `revoked`; 429 `quota_exceeded` (G0a review 10) | §12.2, §4 |
+| `POST /v2/session/logout` | D or W | `{}` → `{}` | idempotent; safe to retry with an expired token (200); JSON cap 16 KiB (G0a review 2) | — | new |
+| `POST /v2/accounts` | none | `{invite, pk_pub, device_cert, challenge, sig}` → `{person_id}` | `sig` is the new device's login signature over a fresh challenge; the exact same request → 200 (by digest); JSON cap 64 KiB (G0a review 2) | 400 `malformed`, `cert_invalid`; 401 `bad_signature`, `unknown_challenge`; 403 `not_eligible` (one code for unknown, used or expired); 409 `account_exists` | spec §6.1 (P3-D3) |
+| `PUT /v2/devices/{device}` | none | `{cert}` → `{device_id}` | self-authenticating under the account `PK`; per address 30/h; per person 64/day, charged only on verified state changes; canonical retries and refused submissions are free (G0a review 3) (G0a review 5); JSON cap 16 KiB (G0a review 2) | 400 `cert_invalid`, `cert_expired`; 403 `revoked`, `other_person` (no account); 409 `cert_conflict` | §6.1, §8.3, §8.4 (P3-D5) |
+| `GET /v2/devices/{device}` | D(p), or W whose `ever_persons` contains the person and `ever_devices` contains the device (G0a review 1) | → `{cert}` | | 403 `not_eligible`; 404 `not_found` | §6.1 |
+| `POST /v2/revocations` | none | `{record}` → `{device_id}` | authority is `PK`; per address 10/min; per person 32/day, charged only on verified state changes (G0a review 5), with 8/day reserved for revocations of devices not yet revoked; an exact retry is free; JSON cap 16 KiB (G0a review 2) | 400 `malformed`; 401 `bad_signature`; 403 `other_person` | §6.2 (P3-D5) |
 | `GET /v2/devices/{device}/revocation` | none | → `{record}` | per address 60/min | 404; 429 | §6.2, gaps 24 |
-| `GET /v2/persons/{person}/revocations?after=&limit=` | D(p), or W whose `ever_persons` contains the person | → `{revocations, next}` | limit ≤ 256 | 403 | §6.2 |
-| `PUT /v2/workspaces/{ws}/card` | none for the first card; W(g) after | `{card}` → `{card_seq}` | first card: per address 10/h, per owner account 10/h, first writer wins in one transaction; same card → 200 | §7.1 codes: 400 `malformed`, `wrong_suite`, `delegation_mismatch`; 401 `bad_signature`; 403 `other_person`; 409 `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version` | §7.1 (P3-D4) |
+| `GET /v2/persons/{person}/revocations?after=&limit=` | D(p), or W whose `ever_persons` contains the person | → `{revocations, next}` | W sees only `ever_devices`, filtered before pagination (G0a review 1); limit ≤ 256 | 403 | §6.2 |
+| `PUT /v2/workspaces/{ws}/card` | none for the first card; W(g) after | `{card}` → `{card_seq}` | first card: per address 10/h, per owner account 10/h charged only after delegation and card signatures verify; same-card retries are free (G0a review 5); first writer wins in one transaction; same card → 200; JSON cap 64 KiB (G0a review 2) | §7.1 codes: 400 `malformed`, `wrong_suite`, `delegation_mismatch`; 401 `bad_signature`; 403 `other_person`; 409 `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version` | §7.1 (P3-D4) |
 | `GET /v2/workspaces/{ws}/card` | D(m) or W | → `{card}` | | 403; 404 | §7.1 |
 
 **P3-D3 (accounts; C5).** Accounts come only from single-use invite codes made by the admin CLI
@@ -1927,13 +1948,16 @@ on.
 - **Quota denial (challenge 2, finding 10).** Person quotas are charged only after the signature verifies, exact retries
   are free, windows are kept for their full duration (hour, day), never idle-pruned, and a reserved share stays
   available for revocations, so invalid or replayed submissions cannot block a recovery.
+- (G0a review 5) Charge recovery/certificate person quotas only in the transaction that changes
+  state. Verified expiry, revoked-device and superseded-revocation refusals, and exact retries,
+  cost nothing. Do not charge first-card owner quota until both signatures verify.
 
 ### 19.2 Members and epochs
 
 | Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
 |---|---|---|---|---|---|
-| `PUT /v2/workspaces/{ws}/membership` | W(g) | `{member_list, grants: [wk_grant], card_key_wraps?: {card_seq, wraps}}` → `{list_seq, epoch}` | one transaction; the exact same body → 200; ≤ 1024 members, ≤ 2 MiB | 401 `bad_signature`; 403 `revoked`, `other_person`, `scope_exceeded`, `cert_expired`; 409 `other_workspace`, `stale_list`, `bad_epoch`, `rotation_required`, `missing_grant`, `grant_conflict`, `stale_card`, `fenced` | §7.2, §7.3 (P3-D7) |
-| `PUT /v2/workspaces/{ws}/card-keys` | W(g) | `{card_seq, wraps: [{device_id, sealed}]}` → `{stored}` | only devices of the current list; same → no-op | 403; 409 `stale_card`, `fenced` | §5.3 |
+| `PUT /v2/workspaces/{ws}/membership` | W(g) | `{member_list, grants: [wk_grant], card_key_wraps?: {card_seq, wraps}}` → `{list_seq, epoch}` | one transaction; the exact same body → 200; ≤ 1024 members, ≤ 2 MiB; JSON cap 2 MiB (G0a review 2) | 401 `bad_signature`; 403 `revoked`, `other_person`, `scope_exceeded`, `cert_expired`; 409 `other_workspace`, `stale_list`, `bad_epoch`, `rotation_required`, `missing_grant`, `grant_conflict`, `stale_card`, `wrap_conflict` (G0a review 10), `fenced` | §7.2, §7.3 (P3-D7) |
+| `PUT /v2/workspaces/{ws}/card-keys` | W(g) | `{card_seq, wraps: [{device_id, sealed}]}` → `{stored}` | only devices of the current list; same → no-op; JSON cap 64 KiB (G0a review 2) | 403; 409 `stale_card`, `wrap_conflict` (G0a review 10), `fenced` | §5.3 |
 | `GET /v2/workspaces/{ws}/grants[?epoch=e]` | D(m) | → `{grants}` (own device, ascending, from `first_epoch` on) | | 403; 404 | §7.3 |
 | `GET /v2/workspaces/{ws}/members` | D(m) or W | → `{member_list}` | | 403; 404 | §7.2 |
 | `GET /v2/workspaces/{ws}/card-key?card_seq=N` | D(m) | → `{workspace_id, device_id, card_seq, sealed}` | | 403; 404 | host-api §3 |
@@ -1942,6 +1966,7 @@ on.
 epoch and optionally the card-key wraps for new devices are published in **one request and one transaction**:
 
 1. Every §7.2 check, with check 8 per P3-D6 and check 9 against the grants in the same body.
+   (G0a review 1) Refuse 403 `other_person` if any `persons` entry lacks a member device.
 2. The write-time re-check of each grant's and wrap's device certificate: stored, owned by the card owner or by a person
    in **this list's** `persons`, unexpired now, not revoked.
 3. The write.
@@ -1964,7 +1989,8 @@ Consequences:
 
 **P3-D6 (persons, D39; C8).** Each member entry is `{device_id, person_id, scopes}`, and the list carries
 `persons: [person_id]` (sorted, unique). Check 8: the certificate's person is the card owner **or** in `persons`
-(`other_person` otherwise).
+(`other_person` otherwise). (G0a review 1) Every listed person must also have a member
+device in this list; an unsupported person entry is 403 `other_person`.
 
 The guarantee is narrower than F1:
 
@@ -1978,17 +2004,17 @@ In P3, lists have one person in practice.
 
 | Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
 |---|---|---|---|---|---|
-| `POST /v2/workspaces/{ws}/bridge/{rid}` (device) | D(m) | raw ORB2, direction 1 → 202 `{}` | ≤ 1 MiB whole envelope; P3-D9 coalescing; budgets of P3-D17 | 400 `malformed`, `wrong_suite`; 403 `not_for_this_device`, `not_eligible`, `revoked`; 409 `rid_conflict`, `stale_epoch` (`epoch`); 429 | §8.1, §8.9 |
+| `POST /v2/workspaces/{ws}/bridge/{rid}` (device) | D(m) | raw ORB2, direction 1 → 202 `{}` | ≤ 1 MiB whole envelope; P3-D9 coalescing; budgets of P3-D17 | 400 `malformed`, `wrong_suite`; 403 `not_for_this_device`, `not_eligible`, `revoked`; 409 `rid_conflict`, `stale_epoch` (`epoch`), `retry_exhausted`; 429 `rate_limited` (G0a review 4) | §8.1, §8.9 |
 | `GET /v2/workspaces/{ws}/bridge/{rid}?after=i&wait=s` (device) | D(m), own mailbox | → `{chunks: [{id, idx, last, stream, envelope}]}` | non-consuming | 401; 403 | §8.8 |
-| `POST /v2/workspaces/{ws}/host/hold` | W | `{gen: int \| null, take_over: bool}` → `{gen, lease_s: 40, cursor}` | `gen` = the current generation: renews the lease, same `gen`; `gen: null`: a new generation when the lease is expired or `take_over` is set, otherwise 409; a stale `gen` → 409 `fenced` | 409 `holder_conflict`, `fenced` | P3-D10 |
+| `POST /v2/workspaces/{ws}/host/hold` | W | `{gen: int \| null, take_over: bool}` → `{gen, lease_s: 40, cursor}` | `gen` = the current generation: renews the lease, same `gen`; `gen: null`: a new generation when the lease is expired or `take_over` is set, otherwise 409; a stale `gen` → 409 `fenced`; JSON cap 16 KiB (G0a review 2) | 409 `holder_conflict`, `fenced` | P3-D10 |
 | `GET /v2/workspaces/{ws}/host/poll?after=n&wait=s` | W(g) | → `{items: [{n, route, device, rid, offer, envelope}], notices: {revocations_cursor, cert_requests, rotation_due}, next}` | non-consuming; `after` acknowledges everything up to it (stored as `holders.cursor`); renews the lease; ≤ 16 items or 4 MiB | 409 `fenced`; 401 | P3-D10 |
-| `POST /v2/workspaces/{ws}/bridge/{rid}` (host) | W(g) | raw ORB2, direction 2 → 202 `{}` | ≤ 256 KiB whole chunk; same `(device, rid, idx)` and bytes → no-op; other bytes → 409; epoch rule P3-D22 | 400; 403 `not_eligible`, `revoked`; 409 `chunk_conflict`, `stale_epoch`, `fenced`; 429 | §8.1, §8.5, §8.9 |
-| `POST /v2/workspaces/{ws}/pair/{offer}/{rid}` | none (device), W(g) (host answer) | raw epoch-0 ORB2 → 202 | ≤ 64 KiB; per workspace and per address 60/min; global 6 000/min | 400; 401 `unknown_workspace`; 429 | §8.3, §8.9 |
-| `GET /v2/workspaces/{ws}/pair/{offer}/{rid}?after=i&wait=s` | none | → `{chunks}` | per address 120/min; global 12 000/min | 429 | §8.3 |
-| `POST /v2/persons/{person}/cert-requests` | W(g), card owner = person | `{request}` → `{request_id}` | ≤ 1 open per workspace, ≤ 64 open per person; same → 200 | 401 `bad_signature`; 403 `other_person`, `not_for_this_device`; 409 `request_open`, `replayed` | §8.4 step 1 |
+| `POST /v2/workspaces/{ws}/bridge/{rid}` (host) | W(g) | raw ORB2, direction 2 → 202 `{}` | ≤ 256 KiB whole chunk; same `(device, rid, idx)` and bytes → no-op; other bytes → 409; epoch rule P3-D22 | 400; 403 `not_eligible`, `revoked`; 409 `chunk_conflict`, `stale_epoch`, `fenced`; 410 `expired` (G0a review 8); 429 | §8.1, §8.5, §8.9 |
+| `POST /v2/workspaces/{ws}/pair/{offer}/{rid}` | none (device), W(g) (host answer) | raw epoch-0 ORB2 → 202 | ≤ 64 KiB; per workspace and per address (/64 IPv6) 60/min; /56 480/min (G0a review 9); global 6 000/min | 400; 401 `unknown_workspace`; 429 | §8.3, §8.9 |
+| `GET /v2/workspaces/{ws}/pair/{offer}/{rid}?after=i&wait=s` | none | → `{chunks}` | per address (/64 IPv6) 120/min; /56 960/min (G0a review 9); global 12 000/min | 429 | §8.3 |
+| `POST /v2/persons/{person}/cert-requests` | W(g), card owner = person | `{request}` → `{request_id}` | ≤ 1 open per workspace, ≤ 64 open per person; same → 200; JSON cap 64 KiB (G0a review 2) | 401 `bad_signature`; 403 `other_person`, `not_for_this_device`; 409 `request_open`, `replayed` | §8.4 step 1 |
 | `GET /v2/persons/{person}/cert-requests?wait=s` | D(p), addressee only | → `{requests}` | open only | 403 | §8.4 step 2 |
-| `POST /v2/cert-requests/{id}/challenge` | D(p), addressee | `{challenge}` → `{}` | `open` → `challenged` only; same bytes → 200; another challenge → 409 | 401; 409 `replayed`; 410 `expired` | §8.4 step 3 |
-| `POST /v2/cert-requests/{id}/rejection` | D(p), addressee | `{rejection}` → `{}` | `open` or `challenged` → `rejected`; repeat → 200 | 401; 409 `already_signed`; 410 | new (P3-D11) |
+| `POST /v2/cert-requests/{id}/challenge` | D(p), addressee | `{challenge}` → `{}` | `open` → `challenged` only; same verified `cj(o)` → 200 (G0a review 3); another challenge → 409; JSON cap 16 KiB (G0a review 2) | 401; 409 `replayed`; 410 `expired` | §8.4 step 3 |
+| `POST /v2/cert-requests/{id}/rejection` | D(p), addressee | `{rejection}` → `{}` | `open` or `challenged` → `rejected`; same verified `cj(o)` → 200 (G0a review 3); JSON cap 16 KiB (G0a review 2) | 401; 409 `already_signed`; 410 | new (P3-D11) |
 | `GET /v2/cert-requests/{id}` | W, the requester | → `{state, challenge, cert, rejection}` | kept until expiry + 60 s | 404 | §8.4 |
 
 **P3-D8 (epoch at the relay; C10).** A device request for a **new** rid, whose header epoch is not the current list
@@ -2006,7 +2032,7 @@ A resend never extends this; the only exception is that the record lives on unti
 expired (`keep_until_ms`):
 
 - **Same bytes:**
-  - If an undelivered copy exists (its `n` is above the holder's acknowledged cursor), the resend is coalesced: 202,
+  - If an unexpired undelivered copy exists (its `n` is above the holder's acknowledged cursor and now is before its expiry; G0a review 7), the resend is coalesced: 202,
     nothing new queued.
   - Otherwise it is queued again, at most once per 10 s and at most 8 times per rid. After that cap the relay answers
     409 `retry_exhausted`, so a device never takes a 202 for a delivery promise (challenge 2, finding 9). A new copy
@@ -2061,7 +2087,7 @@ no relay part.
 confidentiality boundary against a malicious host (the relay sees a flag, not the sealed refusal). A response chunk's
 epoch must equal its request's (`rid_seen.req_epoch`), and the chunk must answer a known request (rid). Once the list
 epoch has moved past that epoch, the relay accepts an old-epoch chunk only if it has the `LAST | REFUSAL` shape, or if it
-is byte-identical to a chunk already accepted for that rid (a stored replay, `rid_chunks`). Everything else is 409
+is byte-identical to a chunk already accepted for that rid (a stored replay, `rid_chunks`). An unknown or expired rid is 410 `expired` (G0a review 8). Other epoch violations are 409
 `stale_epoch`. The device validates the refusal itself (§8.8). Replaying stored bytes never extends a chunk's
 TTL. This cannot constrain a compromised relay.
 
@@ -2075,7 +2101,9 @@ TTL. This cannot constrain a compromised relay.
 - Check order: the challenge is known (and removed whatever follows), unexpired, a valid `kind`, then the signature.
 
 **Unknown ids** are verified against a fixed dummy P-256 key: same timing, the same 401 `bad_signature`, and the
-challenge is consumed.
+challenge is consumed. (G0a review 10) Even a signature that verifies under the dummy key MUST
+return 401. Production MUST generate a per-instance random dummy public key and discard its
+private half; the publicly derived reference key is only a test artifact.
 
 **Revoked devices get no session** (the owner's decision):
 
@@ -2086,7 +2114,9 @@ challenge is consumed.
 **P3-D2 (sessions; C4).**
 
 - **Lifetime.** Bearer tokens last 15 minutes, with no refresh. A new login never invalidates other live tokens:
-  clients reauthenticate single-flight and may overlap tokens.
+  clients reauthenticate single-flight and may overlap tokens. (G0a review 10) At most eight
+  unexpired tokens per device across all sessions; additional logins return 429 `quota_exceeded`
+  with Retry-After until the earliest expiry. Consume the challenge, preserve existing tokens.
 - **Every route re-checks** expiry, revocation and certificate expiry against the database at request time. Long polls
   re-check immediately before handing over data, not only every few seconds.
 - **Scope.** A device token is scoped to the relay; each workspace route authorizes against the current list. A
@@ -2101,15 +2131,23 @@ challenge is consumed.
   (429), never the eviction of other clients' challenges.
 - **Per device, across all its sessions:** ≤ 128 live request mailboxes per workspace, 20 posts/s, 6 concurrent long
   polls, ≤ 8 MiB of queued requests.
-- **Per workspace:** ≤ 1 024 queued requests, ≤ 16 MiB queued requests, ≤ 16 MiB undelivered responses.
+- **Per workspace:** ≤ 1 024 queued requests, ≤ 16 MiB queued requests, ≤ 16 MiB undelivered responses. (G0a review 10) Each device may consume at most
+  2 MiB of that response budget across its sessions; excess is 429 `quota_exceeded`, without eviction.
 - **Global:** ≤ 256 MiB of queued bodies and ≤ 4 096 concurrent long polls (503 `overloaded`).
 - **Client addresses.**
   - The peer address is used, or Caddy's `X-Forwarded-For` only when the peer is the configured proxy.
   - Addresses are canonicalized: IPv4-mapped IPv6 becomes IPv4, and IPv6 is grouped by /64.
   - Windows are kept for their full duration (minute, hour, day) and pruned only after it ends; per-person windows
-    are charged only after a signature verifies (§19.1 P3-D5).
+    are charged only on verified state changes (§19.1 P3-D5; G0a review 5).
 - **Per device:** at most 4 096 `rid_seen` records and 64 chunk digests per rid.
 
+
+(G0a review 9) IPv6 challenge and pairing limits are hierarchical: enforce the existing /64
+limits AND a /56 aggregate. Each /56 permits at most 256 outstanding login challenges and
+960 new challenges/min; pairing permits 960 GET/min and 480 POST/min. The existing global
+challenge and pairing limits still apply. A distributed attacker spanning enough /56 networks
+can saturate the global limits and temporarily lock out honest clients; this remaining global
+saturation is an accepted limit of this contract. Do not evict existing state.
 
 ### 19.5 The relay side of revocation (#12, §6.2)
 
@@ -2139,8 +2177,12 @@ generation. The first card is the only unfenced workspace write. Logout returns 
 unknown/expired token as well as an already-logged-out token.
 
 All routes can refuse 400 `malformed` for invalid fields, paths, query or strict JSON; bounded
-requests can refuse 400 `too_large`. Authenticated routes can refuse 401 `unauthenticated`,
-400 `cert_expired`, or 403 `revoked`; a wrong principal or inaccessible workspace/person is
+JSON requests refuse 413 `too_large` before parsing (G0a review 2); bounded ORB2 requests
+retain 400 `too_large`. Authenticated routes can refuse 401 `unauthenticated`.
+(G0a review 6) Only D sessions can fail session checks with 400 `cert_expired` or 403 `revoked`;
+W sessions have no device certificate. Membership uses only 403 `cert_expired`, because the
+expired certificate is a proposed member's, not the W session's. Target-device revocation checks
+on membership and host bridge posts still apply. A wrong principal or inaccessible workspace/person is
 403 `not_eligible`. W(g) routes additionally refuse 409 `fenced` for missing, stale or expired
 holder authority. Signature objects of another deployment suite are 400 `wrong_suite`.
 Route-table bare statuses mean: 400 `malformed`, 401 `unauthenticated`, 403 `not_eligible`,
@@ -2167,9 +2209,14 @@ is the latest relevant revocation-feed position (0 if none). `cert_requests` lis
 records with challenge/rejection/certificate results to fetch. Cert-request GET always returns
 all four fields `{state, challenge, cert, rejection}`, using null when absent.
 
-P3-D9's ten-second requeue interval also refuses 409 `retry_exhausted` until eligible (no
-202 delivery promise without a queued copy). Eight requeues exclude the first receipt.
-P3-D22 refuses an unknown response rid with 409 `stale_epoch` and the current epoch hint.
+(G0a review 4) (ambiguity 10) During P3-D9's ten-second requeue interval return 429
+`rate_limited` with `Retry-After` equal to the remaining interval rounded up to integer seconds.
+409 `retry_exhausted` is terminal, only once eight requeues have been used (excluding the first
+receipt), when no unexpired undelivered copy remains. After a 202 or 429 the device MUST keep
+polling its mailbox for that rid and MUST NOT automatically reissue the operation under a new
+rid. Terminal exhaustion also MUST NOT trigger automatic reissue under a new rid; continue
+polling for a queued response while retained, then surface failure for explicit user resolution.
+(G0a review 8) (ambiguity 11) P3-D22 returns 410 `expired` for an unknown or expired response rid.
 A stored chunk replay returns 202 without refreshing its TTL or resurrecting expired bytes.
 If a matching known chunk index has different bytes, `chunk_conflict` precedes the epoch rule.
 `LAST | REFUSAL` may also carry `STREAM`; a refusal always has LAST.
@@ -2186,3 +2233,39 @@ P3-D11 request signature/shape/context precede insertion. Open means open or cha
 unexpired, for quota purposes. Request and challenge times use §8.4. Context mismatch is
 403 `other_person` (person), 409 `other_workspace` (workspace), or 403 `not_for_this_device`
 (request/addressee). Invalid certificate keys in a challenge are 400 `malformed`.
+
+
+### 19.7 Implementation notes and orch-mobile changes
+
+(G0a review 10) Keep exact membership publication digests and results scoped per workspace
+for seven days from acceptance (retries do not refresh retention). After a lost response and
+`stale_list`, the host MUST GET the signed members and compare with its persisted publication.
+If equal, treat publication as accepted. If a newer list exists, reconcile it and publish using a
+fresh sequence/epoch under §7.2; never replay an older list over it. If acceptance cannot be
+established, surface a conflict rather than assuming success.
+
+(G0a review 10) For both membership `card_key_wraps` and `PUT card-keys`, an identical wrap
+for `(device, card_seq)` is an idempotent no-op; different sealed bytes for that pair return
+409 `wrap_conflict`, atomically with no partial writes. A newer card sequence may replace the
+older wrap. Hosts MUST persist wraps before sending, as they do grants.
+
+(G0a review 7) Same-card identity includes `sealed_hash` and `ck_commit`; identical sequence
+with different sealed content is 409 `stale_card`. Certificate completion MUST compare both
+`dk_sig_pub` and `dk_kx_pub`. Accepted publication MUST prune grants and wraps for departed
+devices. Boundary limits remain 64 certificates/day, 64 open requests/person, 64 chunks/rid,
+900-second rid retention (extended only for dependent messages), and ten-minute cert requests.
+
+**orch-mobile changes (G0a review 11).** Stream C MUST update FakeRelay and the adapter:
+
+- Parse/sign the new member-list `persons` and per-member `person_id`; enforce the directory
+  admission and historical-device filtering rules (G0a review 1).
+- Replace staged grants with atomic membership publication; remove the abandon route.
+- Require the primary's device session and PK-signed `cert_rejection`.
+- Handle `retry_exhausted`, `stale_epoch` with bounded signed-list/grant refetch, and `not_visible`.
+- Coalesce only live undelivered copies; do not refresh mailbox TTL on retries.
+- Use the `/v2` routes without `host_api` or `Orch-Host-API`.
+- Accept re-signed identical canonical certificates/challenges/rejections as idempotent (G0a review 3).
+- Distinguish interval 429 + Retry-After from terminal 409; keep polling the same rid after
+  202/429 and never automatically reissue under a new rid (G0a review 4).
+- Enforce JSON caps/413, state-change-only quotas, auth-class refusals, unknown-rid 410,
+  wrap conflicts, token and response budgets, and hierarchical IPv6 caps as specified above.

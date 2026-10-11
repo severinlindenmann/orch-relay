@@ -46,7 +46,7 @@
       "given": {
         "scenario": "malformed",
         "now_ms": 1790000000000,
-        "condition": "Unknown query parameter; strict route parsing refuses before dispatch."
+        "condition": "revocation_get: Unknown query parameter; strict route parsing refuses before dispatch."
       },
       "request": {
         "method": "GET",
@@ -71,7 +71,7 @@
       "given": {
         "scenario": "not_found",
         "now_ms": 1790000000000,
-        "condition": "Authorized resource is absent, or certificate request retention has ended."
+        "condition": "revocation_get: Authorized resource is absent, or certificate request retention has ended."
       },
       "request": {
         "method": "GET",
@@ -94,7 +94,7 @@
       "given": {
         "scenario": "rate_limited",
         "now_ms": 1790000000000,
-        "condition": "Applicable full-duration address/person rate window or outstanding challenge cap is full."
+        "condition": "revocation_get: Applicable full-duration address/person rate window or outstanding challenge cap is full."
       },
       "request": {
         "method": "GET",

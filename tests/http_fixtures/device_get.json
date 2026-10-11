@@ -57,7 +57,7 @@
       "given": {
         "scenario": "cert_expired",
         "now_ms": 1790000000000,
-        "condition": "Device certificate expires at the request-time clock; session admission or publication recheck fails."
+        "condition": "Device certificate used by device_get has expired (400)."
       },
       "request": {
         "method": "GET",
@@ -82,7 +82,7 @@
       "given": {
         "scenario": "malformed",
         "now_ms": 1790000000000,
-        "condition": "Unknown query parameter; strict route parsing refuses before dispatch."
+        "condition": "device_get: Unknown query parameter; strict route parsing refuses before dispatch."
       },
       "request": {
         "method": "GET",
@@ -109,7 +109,7 @@
       "given": {
         "scenario": "unauthenticated",
         "now_ms": 1790000000000,
-        "condition": "Authorization header is absent; no valid bearer session."
+        "condition": "device_get: Authorization header is absent; no valid bearer session."
       },
       "request": {
         "method": "GET",
@@ -132,7 +132,7 @@
       "given": {
         "scenario": "not_eligible",
         "now_ms": 1790000000000,
-        "condition": "Principal fails current membership/person/workspace gate; for account creation, invite is unknown, used or expired."
+        "condition": "W workspace has never admitted this person or device."
       },
       "request": {
         "method": "GET",
@@ -157,7 +157,7 @@
       "given": {
         "scenario": "revoked",
         "now_ms": 1790000000000,
-        "condition": "The authenticated or publication-target device has a verified permanent revocation in the directory."
+        "condition": "The device authenticating device_get is revoked."
       },
       "request": {
         "method": "GET",
@@ -182,7 +182,7 @@
       "given": {
         "scenario": "not_found",
         "now_ms": 1790000000000,
-        "condition": "Authorized resource is absent, or certificate request retention has ended."
+        "condition": "device_get: Authorized resource is absent, or certificate request retention has ended."
       },
       "request": {
         "method": "GET",
@@ -199,6 +199,29 @@
         },
         "json": {
           "error": "not_found"
+        }
+      }
+    },
+    {
+      "name": "other_workspace_person_refused",
+      "given": {
+        "condition": "W belongs to a workspace whose ever_persons excludes the requested person."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace-token"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
         }
       }
     }

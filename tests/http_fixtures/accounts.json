@@ -64,7 +64,7 @@
       "given": {
         "scenario": "cert_invalid",
         "now_ms": 1790000000000,
-        "condition": "Directory certificate validation fails (certificate absent, invalid shape, key or PK binding)."
+        "condition": "accounts: Directory certificate validation fails (certificate absent, invalid shape, key or PK binding)."
       },
       "request": {
         "method": "POST",
@@ -116,7 +116,7 @@
       "given": {
         "scenario": "malformed",
         "now_ms": 1790000000000,
-        "condition": "Unknown query parameter; strict route parsing refuses before dispatch."
+        "condition": "accounts: Unknown query parameter; strict route parsing refuses before dispatch."
       },
       "request": {
         "method": "POST",
@@ -170,7 +170,7 @@
       "given": {
         "scenario": "wrong_suite",
         "now_ms": 1790000000000,
-        "condition": "Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
+        "condition": "accounts: Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
       },
       "request": {
         "method": "POST",
@@ -222,7 +222,7 @@
       "given": {
         "scenario": "bad_signature",
         "now_ms": 1790000000000,
-        "condition": "Trusted directory verification key differs from the artifact's signing key; artifact remains valid under its fixture key."
+        "condition": "accounts: Trusted directory verification key differs from the artifact's signing key; artifact remains valid under its fixture key."
       },
       "request": {
         "method": "POST",
@@ -274,7 +274,7 @@
       "given": {
         "scenario": "expired",
         "now_ms": 1790000000000,
-        "condition": "Challenge or non-terminal cert request expires at now_ms; challenges are consumed."
+        "condition": "The fresh login challenge has expired."
       },
       "request": {
         "method": "POST",
@@ -326,7 +326,7 @@
       "given": {
         "scenario": "unknown_challenge",
         "now_ms": 1790000000000,
-        "condition": "Challenge is absent from the relay's outstanding challenge set (also after prior use)."
+        "condition": "accounts: Challenge is absent from the relay's outstanding challenge set (also after prior use)."
       },
       "request": {
         "method": "POST",
@@ -378,7 +378,7 @@
       "given": {
         "scenario": "not_eligible",
         "now_ms": 1790000000000,
-        "condition": "Principal fails current membership/person/workspace gate; for account creation, invite is unknown, used or expired."
+        "condition": "Invite is unknown, used or expired."
       },
       "request": {
         "method": "POST",
@@ -430,7 +430,7 @@
       "given": {
         "scenario": "account_exists",
         "now_ms": 1790000000000,
-        "condition": "Person account exists under a different request digest; this is not an exact retry."
+        "condition": "accounts: Person account exists under a different request digest; this is not an exact retry."
       },
       "request": {
         "method": "POST",
@@ -474,6 +474,37 @@
         },
         "json": {
           "error": "account_exists"
+        }
+      }
+    },
+    {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "accounts: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/accounts",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 65537,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
         }
       }
     },

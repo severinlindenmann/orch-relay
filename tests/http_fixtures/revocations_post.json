@@ -51,7 +51,7 @@
       "given": {
         "scenario": "malformed",
         "now_ms": 1790000000000,
-        "condition": "Unknown query parameter; strict route parsing refuses before dispatch."
+        "condition": "revocations_post: Unknown query parameter; strict route parsing refuses before dispatch."
       },
       "request": {
         "method": "POST",
@@ -92,7 +92,7 @@
       "given": {
         "scenario": "wrong_suite",
         "now_ms": 1790000000000,
-        "condition": "Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
+        "condition": "revocations_post: Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
       },
       "request": {
         "method": "POST",
@@ -131,7 +131,7 @@
       "given": {
         "scenario": "bad_signature",
         "now_ms": 1790000000000,
-        "condition": "Trusted directory verification key differs from the artifact's signing key; artifact remains valid under its fixture key."
+        "condition": "revocations_post: Trusted directory verification key differs from the artifact's signing key; artifact remains valid under its fixture key."
       },
       "request": {
         "method": "POST",
@@ -170,7 +170,7 @@
       "given": {
         "scenario": "other_person",
         "now_ms": 1790000000000,
-        "condition": "No account for the signed person, or certificate/request person is neither owner nor authorized person."
+        "condition": "revocations_post: No account for the signed person, or certificate/request person is neither owner nor authorized person."
       },
       "request": {
         "method": "POST",
@@ -205,11 +205,42 @@
       }
     },
     {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "revocations_post: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/revocations",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 16385,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
       "name": "refusal_429_rate_limited",
       "given": {
         "scenario": "rate_limited",
         "now_ms": 1790000000000,
-        "condition": "Applicable full-duration address/person rate window or outstanding challenge cap is full."
+        "condition": "revocations_post: Applicable full-duration address/person rate window or outstanding challenge cap is full."
       },
       "request": {
         "method": "POST",

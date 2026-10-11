@@ -16,6 +16,14 @@ def replay(S, c):
         d["owner_pk_pub"] = bytes.fromhex(d["owner_pk_pub"])
         d["persons"] = {p: bytes.fromhex(k) for p, k in d.get("persons", {}).items()}
         result = R.relay_membership(S, bytes.fromhex(a["wsk_pub"]), a["ws"], state, d, a["body_raw"].encode() if "body_raw" in a else a["body"], a["now_ms"])
+    elif op == "directory":
+        result = R.relay_directory_read(state, **a)
+    elif op == "certificate":
+        a["pk_pub"] = bytes.fromhex(a["pk_pub"])
+        result = R.relay_certificate(S, state, **a)
+    elif op == "first_card":
+        a["owner_pk_pub"] = bytes.fromhex(a["owner_pk_pub"])
+        result = R.relay_first_card(S, state, **a)
     elif op == "rejection":
         result = R.verify_cert_rejection(S, a["signed"], bytes.fromhex(a["pk_pub"]), a["request"])
     elif op == "queue":
@@ -212,7 +220,7 @@ def add_p3(out):
         case("new_rid_stale_epoch_hint", "request_replay", {}, {**ba, "epoch": 2}, "stale_epoch")
         case("undelivered_resend_coalesced", "request_replay", bs, {**ba, "epoch": 2}, "coalesced")
         case("rid_conflict", "request_replay", bs, {**ba, "raw": env(1, 1, salt="other").hex()}, "rid_conflict")
-        case("ten_second_retry_floor", "request_replay", bs, {**ba, "cursor": 1, "now_ms": NOW + 9999}, "retry_exhausted")
+        case("ten_second_retry_floor", "request_replay", bs, {**ba, "cursor": 1, "now_ms": NOW + 9999}, "rate_limited")
         next_bs = bs
         for i in range(1, 9):
             next_bs = case(f"requeue_{i}_after_rotation", "request_replay", next_bs,
@@ -228,7 +236,7 @@ def add_p3(out):
         case("chunk_conflict", "chunk", stored, {**ca, "raw": env(2, 1, R.F_LAST, salt="other").hex()}, "chunk_conflict")
         case("old_epoch_new_data_refused", "chunk", bs, {**ca, "epoch": 2}, "stale_epoch")
         case("old_epoch_refusal_known_rid", "chunk", bs, {**ca, "epoch": 2, "raw": refusal.hex()}, "stored")
-        case("old_epoch_refusal_unknown_rid", "chunk", {}, {**ca, "epoch": 2, "raw": refusal.hex()}, "stale_epoch")
+        case("old_epoch_refusal_unknown_rid", "chunk", {}, {**ca, "epoch": 2, "raw": refusal.hex()}, "expired")
         case("response_epoch_must_match_request", "chunk", bs, {**ca, "epoch": 2, "raw": env(2, 2, R.F_LAST | R.F_REFUSAL).hex()}, "stale_epoch")
         ea = {"raw": req.hex(), "ws": ws, "rid": rid.hex(), "direction": 1, "device": phone}
         case("envelope_route_valid", "envelope", {}, ea, True)
@@ -303,6 +311,82 @@ def add_p3(out):
         case("rejected_request_releases_open_slot", "request", after_rejection, {**rq, "signed": cr2}, cr2["o"]["request_id"])
         ch_bad_sig = sign(ch["o"], "wsk_a")
         case("challenge_host_cannot_sign_for_pk", "queue", entry, {**qa, "signed": ch_bad_sig}, "bad_signature")
+        # (G0a review 1) An unrelated persons entry cannot create read authority.
+        victim = {**body, "member_list": sign({**lo, "persons": sorted([ids["person_bob"], R.fake("victim")[:16].hex()])})}
+        case("victim_person_without_member", "membership", st, {**args, "body": victim}, "other_person")
+        laptop_rev = sign({**rev["o"], "device_id": ids["device_laptop"]}, "person_alice")
+        read = {"person": person, "records": [rev, laptop_rev]}
+        case("directory_other_workspace_person", "directory", {"ever_persons": [], "ever_devices": []}, read, "not_eligible")
+        case("directory_filtered_feed", "directory", committed, read, [rev])
+        case("directory_unseen_device", "directory", committed, {**read, "device": ids["device_laptop"]}, "not_eligible")
+        departed = copy.deepcopy(committed)
+        departed["list"]["members"] = sorted([*lo["members"], member("laptop")], key=lambda m: m["device_id"])
+        departed["grants"][ids["device_laptop"] + "/1"] = sign({**grants[0]["o"], "device_id": ids["device_laptop"]})
+        departed["wraps"][ids["device_laptop"]] = {"card_seq": 1, "sealed": wraps["wraps"][0]["sealed"]}
+        case("departed_grants_and_wraps_pruned", "membership", departed, {**args, "body": rotated}, {"list_seq": 3, "epoch": 2})
+        conflicting = copy.deepcopy(committed)
+        conflicting["wraps"][phone]["sealed"] = "other"
+        case("wrap_conflict_atomic", "membership", conflicting,
+             {**args, "body": {**body, "member_list": sign({**lo, "list_seq": 2})}}, "wrap_conflict")
+
+        # (G0a review 3) A second fixed nonce produces reproducible, distinct P-256 signatures.
+        def resign(obj):
+            if S.id != 2:
+                return sign(obj["o"], "person_alice")
+            from cryptography.hazmat.primitives.asymmetric import ec
+            msg = R.L[R.KIND_LABEL[obj["o"]["kind"]]] + R.cj(obj["o"])
+            nonce = int.from_bytes(R.fake("G0a alternate nonce " + obj["o"]["kind"]), "big") % (R.P256_N - 1) + 1
+            r = ec.derive_private_key(nonce, ec.SECP256R1()).public_key().public_numbers().x % R.P256_N
+            scalar = (pow(nonce, -1, R.P256_N) * (int.from_bytes(R.H(msg), "big") + r * priv("person_alice").private_numbers().private_value)) % R.P256_N
+            result = {"o": obj["o"], "sig": R.b64u(r.to_bytes(32, "big") + scalar.to_bytes(32, "big"))}
+            assert result["sig"] != obj["sig"]
+            assert R.verify_object(S, bytes.fromhex(pub("person_alice")), result, obj["o"]["kind"])
+            return result
+        for action, obj, old, want in (("challenge", ch, challenged, "challenged"), ("rejection", rejection, rejected, "rejected"), ("certificate", cert, signed, "signed")):
+            case(action + "_resigned_identical", "queue", old, {**qa, "action": action, "signed": resign(obj)}, want)
+            case(action + "_invalid_signature_retry", "queue", old, {**qa, "action": action, "signed": {**obj, "sig": R.b64u(bytes(64))}}, "bad_signature")
+        case("rejection_different_content_conflict", "queue", rejected,
+             {**qa, "action": "rejection", "signed": sign({**ro, "request_id": R.fake("different rejection")[:16].hex()}, "person_alice")}, "not_for_this_device")
+        certargs = {"signed": cert, "pk_pub": pub("person_alice"), "now_ms": NOW}
+        certstate = case("certificate_directory_insert", "certificate", {}, certargs, "stored")
+        case("certificate_directory_resigned_retry", "certificate", certstate, {**certargs, "signed": resign(cert)}, "retry")
+        case("certificate_directory_content_conflict", "certificate", certstate,
+             {**certargs, "signed": sign({**cert["o"], "created_ms": cert["o"]["created_ms"] - 1}, "person_alice")}, "cert_conflict")
+        case("only_kx_key_differs_no_completion", "queue", challenged,
+             {**qa, "action": "certificate", "signed": sign({**cert["o"], "dk_kx_pub": certs["laptop"]["o"]["dk_kx_pub"]}, "person_alice")}, "unmatched")
+
+        # (G0a review 7) Exact boundaries, including allowed side, prevent smaller caps.
+        case("expired_undelivered_copy_requeues", "request_replay", bs, {**ba, "now_ms": NOW + 60000}, "queued")
+        case("rid_before_900s_conflicts", "request_replay", bs, {**ba, "raw": env(1, 1, salt="new").hex(), "now_ms": NOW + 899999}, "rid_conflict")
+        case("rid_at_900s_new_record", "request_replay", bs, {**ba, "raw": env(1, 1, salt="new").hex(), "now_ms": NOW + 900000}, "queued")
+        case("response_at_rid_expiry", "chunk", bs, {**ca, "now_ms": NOW + 900000}, "expired")
+        chunks = {**bs, "chunks": {str(i): {"digest": "other", "expires_ms": NOW + 60000, "flags": 0} for i in range(63)}}
+        chunks64 = case("chunk_64_allowed", "chunk", chunks, {**ca, "raw": env(2, 1, idx=63).hex()}, "stored")
+        case("chunk_65_refused", "chunk", chunks64, {**ca, "raw": env(2, 1, idx=64).hex()}, "quota_exceeded")
+        for count, want in ((32, "charged"), (63, "charged"), (64, "rate_limited")):
+            case(f"certificate_quota_{count}", "quota", {**full_repeat, "total": count},
+                 {**qu, "valid_signature": True, "revocation": False}, want)
+        for count, want in ((63, cr["o"]["request_id"]), (64, "quota_exceeded")):
+            many = {str(i): {**entry, "request": sign({**cr["o"], "workspace_id": R.fake("queue ws " + str(i))[:16].hex(), "request_id": R.fake("queue rid " + str(i))[:16].hex()})} for i in range(count)}
+            case(f"open_request_limit_{count}", "request", many, rq, want)
+        for lifetime, want in ((600000, cr["o"]["request_id"]), (600001, "expired")):
+            case(f"request_lifetime_{lifetime}", "request", {}, {**rq, "signed": sign({**cr["o"], "created_ms": NOW, "expires_ms": NOW + lifetime})}, want)
+        for reason in ("expired_certificate", "revoked_device", "superseded_revocation"):
+            case(reason + "_no_quota_charge", "quota", full_repeat, {**qu, "valid_signature": True, "changes_state": False}, "unchanged")
+        fa = {"card": v["card"]["card"], "owner_pk_pub": pub("person_alice"), "now_ms": NOW}
+        first = case("first_card_charged_after_verification", "first_card", {}, fa, "stored")
+        case("first_card_retry_free", "first_card", first, fa, "retry")
+        for field in ("card", "delegation"):
+            bad = copy.deepcopy(fa["card"])
+            if field == "card":
+                bad["sig"] = R.b64u(bytes(64))
+            else:
+                bad["delegation"]["sig"] = R.b64u(bytes(64))
+            case("invalid_" + field + "_no_owner_charge", "first_card", {}, {**fa, "card": bad}, "bad_signature")
+        dummy_sig = S.sign(S.sig_key(R.fake("P3 dummy verification key")), msg)
+        case("valid_dummy_signature_still_401", "login", ls, {**la, "subject": None, "sig": dummy_sig.hex()}, "bad_signature")
+        tokens = {str(i): {"kind": "device", "id": phone, "expires_ms": NOW + 1} for i in range(8)}
+        case("device_token_cap_eight", "login", {**ls, "tokens": tokens}, la, "quota_exceeded")
         v["p3"] = {"cases": cases, "envelope_sizes": sizes, "objects": {"publication": body, "cert_rejection": rejection,
                     "request": cr, "challenge": ch, "cert": cert, "bridge_request": req.hex(), "bridge_response": resp.hex(),
                     "bridge_refusal": refusal.hex(), "login": {"challenge": R.b64u(challenge), "kind": "device", "id": phone, "sig": R.b64u(bytes.fromhex(la["sig"]))}}}

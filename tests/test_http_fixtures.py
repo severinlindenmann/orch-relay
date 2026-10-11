@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from ref import orch_protocol_ref as R
-from ref._http_fixtures import ROUTES, build, refusals
+from ref._http_fixtures import BODY_CAPS, ROUTES, build, refusals
 
 ROOT = Path(__file__).resolve().parents[1]
 DOC = (ROOT / "docs/protocol-v2.md").read_text()
@@ -138,10 +138,9 @@ def test_http_fixture(path):
         if "body_recipe" in request:
             recipe = request["body_recipe"]
             raw = R.unb64u(recipe["prefix_b64u"]) + bytes([recipe["byte"]]) * recipe["count"] + R.unb64u(recipe["suffix_b64u"])
-            caps = {"membership": 2097152, "bridge_device_post": 1048576, "bridge_host_post": 262144, "pair_device_post": 65536, "pair_host_post": 65536}
-            assert len(raw) == caps[path.stem] + 1
+            assert len(raw) == BODY_CAPS[path.stem] + 1
             assert response["json"] == {"error": "too_large"}
-        if path.stem in {"session_login", "accounts"}:
+        if path.stem in {"session_login", "accounts"} and "json" in request:
             body = request["json"]
             kind, ident = (body["kind"], body["id"]) if path.stem == "session_login" else ("device", body["device_cert"]["o"]["device_id"])
             suite_id = body["device_cert"]["o"]["suite"] if path.stem == "accounts" else 2
@@ -172,3 +171,36 @@ def test_fixture_success_shapes():
                     h = check_envelope(item["envelope"])
                     assert item["device"] == h.device.hex() and item["rid"] == h.rid.hex()
                     assert item["offer"] == (h.stream.hex() if item["route"] == "pair" else None)
+
+
+def test_json_caps_match_route_tables_and_success_bodies_fit():
+    """Caps cover every JSON write before parsing, including unauthenticated endpoints."""
+    for name, fixture in build().items():
+        success = fixture["cases"][0]
+        if "json" not in success["request"]:
+            continue
+        path = fixture["route"]["path"]
+        row = next(line for line in DOC.splitlines()
+                   if line.startswith(f'| `{fixture["route"]["method"]} {path}`'))
+        amount, unit = re.search(r"JSON cap (\d+) (KiB|MiB)", row).groups()
+        cap = int(amount) * (1024 if unit == "KiB" else 1024 * 1024)
+        assert BODY_CAPS[name] == cap
+        assert len(R.cj(success["request"]["json"])) <= cap
+        oversized = next(c for c in fixture["cases"]
+                         if c["response"]["json"].get("error") == "too_large")
+        assert oversized["response"]["status"] == 413
+        assert oversized["request"]["body_recipe"]["count"] == cap + 1
+
+
+def test_workspace_fixtures_do_not_invent_device_session_failures():
+    for name, fixture in build().items():
+        auth = fixture["route"]["auth"]
+        if "W" not in auth or "D(" in auth:
+            continue
+        errors = {(c["response"]["status"], c["response"]["json"].get("error"))
+                  for c in fixture["cases"]}
+        assert (400, "cert_expired") not in errors
+        if name == "membership":
+            assert (403, "cert_expired") in errors  # proposed member's certificate
+        if name not in {"membership", "bridge_host_post"}:
+            assert (403, "revoked") not in errors

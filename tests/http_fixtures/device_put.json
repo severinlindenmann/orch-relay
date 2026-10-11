@@ -60,7 +60,7 @@
       "given": {
         "scenario": "cert_expired",
         "now_ms": 1790000000000,
-        "condition": "Device certificate expires at the request-time clock; session admission or publication recheck fails."
+        "condition": "Device certificate used by device_put has expired (400)."
       },
       "request": {
         "method": "PUT",
@@ -108,7 +108,7 @@
       "given": {
         "scenario": "cert_invalid",
         "now_ms": 1790000000000,
-        "condition": "Directory certificate validation fails (certificate absent, invalid shape, key or PK binding)."
+        "condition": "device_put: Directory certificate validation fails (certificate absent, invalid shape, key or PK binding)."
       },
       "request": {
         "method": "PUT",
@@ -156,7 +156,7 @@
       "given": {
         "scenario": "malformed",
         "now_ms": 1790000000000,
-        "condition": "Unknown query parameter; strict route parsing refuses before dispatch."
+        "condition": "device_put: Unknown query parameter; strict route parsing refuses before dispatch."
       },
       "request": {
         "method": "PUT",
@@ -206,7 +206,7 @@
       "given": {
         "scenario": "wrong_suite",
         "now_ms": 1790000000000,
-        "condition": "Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
+        "condition": "device_put: Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
       },
       "request": {
         "method": "PUT",
@@ -254,7 +254,7 @@
       "given": {
         "scenario": "other_person",
         "now_ms": 1790000000000,
-        "condition": "No account for the signed person, or certificate/request person is neither owner nor authorized person."
+        "condition": "device_put: No account for the signed person, or certificate/request person is neither owner nor authorized person."
       },
       "request": {
         "method": "PUT",
@@ -302,7 +302,7 @@
       "given": {
         "scenario": "revoked",
         "now_ms": 1790000000000,
-        "condition": "The authenticated or publication-target device has a verified permanent revocation in the directory."
+        "condition": "The target device for device_put is revoked."
       },
       "request": {
         "method": "PUT",
@@ -350,7 +350,7 @@
       "given": {
         "scenario": "cert_conflict",
         "now_ms": 1790000000000,
-        "condition": "A certificate with other bytes is already committed for this device id."
+        "condition": "device_put: A certificate with different canonical content is already committed for this device id."
       },
       "request": {
         "method": "PUT",
@@ -394,11 +394,42 @@
       }
     },
     {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "device_put: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 16385,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
       "name": "refusal_429_rate_limited",
       "given": {
         "scenario": "rate_limited",
         "now_ms": 1790000000000,
-        "condition": "Applicable full-duration address/person rate window or outstanding challenge cap is full."
+        "condition": "device_put: Applicable full-duration address/person rate window or outstanding challenge cap is full."
       },
       "request": {
         "method": "PUT",
@@ -439,6 +470,53 @@
         },
         "json": {
           "error": "rate_limited"
+        }
+      }
+    },
+    {
+      "name": "resigned_identical",
+      "given": {
+        "scenario": "Same canonical signed object, different valid P-256 signature; no state change",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1790000000000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "nBF2V4wJb4ebEegxUjC-N0-SnNtIhge5flF5lKQchNtyHCnxEuaXYQGFF7eJkGB43VcR1YktFGTZ-H08YreGzA"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "device_id": "4177b27d8e4ac182e8d388b247d2b136"
         }
       }
     },

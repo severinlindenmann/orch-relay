@@ -826,6 +826,8 @@ def relay_accept_member_list(suite: Suite, wsk_pub: bytes, card_ws: str, prev: d
             return {"refuse": "scope_exceeded"}
         if (did, o["epoch"]) not in dir_state["grants"]:
             return {"refuse": "missing_grant"}
+    if not set(o["persons"]) <= {m["person_id"] for m in o["members"]}:
+        return {"refuse": "other_person"}  # (G0a review 1)
     return {"ok": o}
 
 
@@ -2203,6 +2205,48 @@ def _sealed_shape(suite, text, plaintext_len=None):
             and (plaintext_len is None or len(b) == n + 16 + plaintext_len))
 
 
+def relay_directory_read(state, person, records, device=None):
+    """(G0a review 1) W session already bound to this workspace; filter before pagination."""
+    if person not in state.get("ever_persons", []):
+        return {"refuse": "not_eligible"}
+    allowed = state.get("ever_devices", [])
+    if device is not None:
+        if device not in allowed:
+            return {"refuse": "not_eligible"}
+        return {"ok": [r for r in records if r["o"]["device_id"] == device and r["o"]["person_id"] == person]}
+    return {"ok": [r for r in records if r["o"]["device_id"] in allowed and r["o"]["person_id"] == person]}
+
+
+def relay_certificate(suite, state, signed, pk_pub, now_ms, revoked=()):
+    """(G0a review 3) Immutable canonical certificates, verified before retry identity."""
+    o = verify_object(suite, pk_pub, signed, "device_cert")
+    if o is None:
+        return {"refuse": "bad_signature"}
+    old = state.get(o.get("device_id"))
+    if old:
+        return {"ok": "retry"} if cj(old["o"]) == cj(o) else {"refuse": "cert_conflict"}
+    result = verify_cert(suite, signed, pk_pub, now_ms, revoked)
+    if "refuse" in result:
+        return result
+    state[o["device_id"]] = signed
+    return {"ok": "stored"}
+
+
+def relay_first_card(suite, state, card, owner_pk_pub, now_ms):
+    """(G0a review 5) Owner quota gate after both signatures; retries cost nothing."""
+    result = relay_accept_card(suite, state.get("card"), card, owner_pk_pub)
+    if "refuse" in result:
+        return result
+    if state.get("card"):
+        return {"ok": "retry"}
+    hour = now_ms // 3_600_000
+    count = state.get("count", 0) if state.get("hour") == hour else 0
+    if count >= 10:
+        return {"refuse": "rate_limited"}
+    state.update(hour=hour, count=count + 1, card={"o": result["ok"], "delegation": card["delegation"]["o"]})
+    return {"ok": "stored"}
+
+
 def relay_membership(suite, wsk_pub, ws, state, directory, body, now_ms):
     """P3-D6/D7. Caller has checked session and holder; raw bytes retain exact retry identity.
     state: {list, grants: {device/epoch: signed}, wraps, card_seq, publications, rotation_due}.
@@ -2260,12 +2304,17 @@ def relay_membership(suite, wsk_pub, ws, state, directory, body, now_ms):
                     return {"refuse": "not_for_this_device"}
                 if not _sealed_shape(suite, w["sealed"], 32):
                     return {"refuse": "malformed"}
+                old = state.get("wraps", {}).get(w["device_id"])
+                if old and old["card_seq"] == wraps["card_seq"] and old["sealed"] != w["sealed"]:
+                    return {"refuse": "wrap_conflict"}  # (G0a review 10)
                 seen.add(w["device_id"])
         # A rotation obligation survives same-epoch lists and restart; only a higher excluding list clears it.
         due = {d: r for d, r in state.get("rotation_due", {}).items()
                if d in ids or o["epoch"] <= r["epoch"]}
     except (ValueError, TypeError, KeyError, AttributeError):
         return {"refuse": "malformed"}
+    state["ever_persons"] = sorted(set(state.get("ever_persons", [])) | {m["person_id"] for m in o["members"]})
+    state["ever_devices"] = sorted(set(state.get("ever_devices", [])) | ids)
     state["list"] = o
     state["grants"] = {k: g for k, g in {**state["grants"], **grants}.items() if g["o"]["device_id"] in ids}
     state["wraps"] = {d: w for d, w in state.get("wraps", {}).items() if d in ids}
@@ -2341,7 +2390,11 @@ def relay_cert_queue(suite, entry, action, signed, pk_pub, now_ms):
     if now_ms >= req["expires_ms"] + 60_000:
         return {"refuse": "not_found"}
     field = {"challenge": "challenge", "rejection": "rejection", "certificate": "cert"}[action]
-    if entry.get(field) == signed:
+    old = entry.get(field)
+    if old and cj(old["o"]) == cj(signed["o"]):
+        # (G0a review 3) Verify even a canonical repeat; signatures may be randomized.
+        if verify_object(suite, pk_pub, signed, old["o"]["kind"]) is None:
+            return {"refuse": "bad_signature"}
         return {"ok": entry["state"]}
     if entry["state"] in ("open", "challenged") and now_ms >= req["expires_ms"]:
         entry["state"] = "expired"
@@ -2439,8 +2492,10 @@ def relay_bridge_request(state, raw, epoch, now_ms, cursor):
             return {"refuse": "rid_conflict"}
         if any(c["n"] > cursor and now_ms < c["expires_ms"] for c in state["copies"]):
             return {"ok": "coalesced"}
-        if state["requeues"] >= 8 or now_ms < state["last_requeue_ms"] + 10_000:
+        if state["requeues"] >= 8:
             return {"refuse": "retry_exhausted"}
+        if now_ms < state["last_requeue_ms"] + 10_000:
+            return {"refuse": "rate_limited", "retry_after": (state["last_requeue_ms"] + 10_000 - now_ms + 999) // 1000}
         state["requeues"] += 1
         state["last_requeue_ms"] = now_ms
     n = max([cursor, *[c["n"] for c in state["copies"]]]) + 1
@@ -2453,7 +2508,7 @@ def relay_bridge_chunk(state, raw, epoch, now_ms):
     """P3-D22. Caller has checked shape, current membership and holder; one known rid."""
     h = Header.decode(raw)
     if not state or now_ms >= state["keep_until_ms"]:
-        return {"refuse": "stale_epoch", "epoch": epoch}
+        return {"refuse": "expired"}  # (G0a review 8)
     key, d = str(h.seq), H(raw).hex()
     old = state["chunks"].get(key)
     if old:
@@ -2467,12 +2522,14 @@ def relay_bridge_chunk(state, raw, epoch, now_ms):
     return {"ok": "stored"}
 
 
-def relay_recovery_quota(state, raw, now_ms, valid_signature, already_revoked, revocation=True):
+def relay_recovery_quota(state, raw, now_ms, valid_signature, already_revoked, revocation=True, changes_state=True):
     """P3-D5 person quota only (the independent address window is checked before this).
     Exact retries and invalid signatures cannot spend it; eight of 32/day are reserved.
     """
     if not valid_signature:
         return {"refuse": "bad_signature"}
+    if not changes_state:
+        return {"ok": "unchanged"}  # (G0a review 5)
     d = H(raw).hex()
     if d in state.get("accepted", []):
         return {"ok": "retry"}
@@ -2503,6 +2560,10 @@ def relay_session_login(suite, state, origin, challenge, kind, ident, sig, subje
         return {"status": 403, "error": "revoked"}
     if subject.get("expires_ms") is not None and now_ms >= subject["expires_ms"]:
         return {"status": 400, "error": "cert_expired"}
+    live = [t["expires_ms"] for t in state.get("tokens", {}).values()
+            if t["kind"] == kind and t["id"] == ident.hex() and now_ms < t["expires_ms"]]
+    if kind == "device" and len(live) >= 8:  # (G0a review 10)
+        return {"status": 429, "error": "quota_exceeded", "retry_after": (min(live) - now_ms + 999) // 1000}
     state.setdefault("tokens", {})[H(token).hex()] = {"kind": kind, "id": ident.hex(), "expires_ms": now_ms + 900_000}
     return {"status": 200, "token": b64u(token), "expires_ms": now_ms + 900_000}
 

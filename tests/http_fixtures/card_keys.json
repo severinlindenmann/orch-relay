@@ -44,47 +44,11 @@
       }
     },
     {
-      "name": "refusal_400_cert_expired",
-      "given": {
-        "scenario": "cert_expired",
-        "now_ms": 1790000000000,
-        "condition": "Device certificate expires at the request-time clock; session admission or publication recheck fails."
-      },
-      "request": {
-        "method": "PUT",
-        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card-keys",
-        "query": {},
-        "headers": {
-          "Authorization": "Bearer FAKE-workspace",
-          "Orch-Holder": "1",
-          "Content-Type": "application/json"
-        },
-        "json": {
-          "card_seq": 1,
-          "wraps": [
-            {
-              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
-              "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
-            }
-          ]
-        }
-      },
-      "response": {
-        "status": 400,
-        "headers": {
-          "Content-Type": "application/json"
-        },
-        "json": {
-          "error": "cert_expired"
-        }
-      }
-    },
-    {
       "name": "refusal_400_malformed",
       "given": {
         "scenario": "malformed",
         "now_ms": 1790000000000,
-        "condition": "Unknown query parameter; strict route parsing refuses before dispatch."
+        "condition": "card_keys: Unknown query parameter; strict route parsing refuses before dispatch."
       },
       "request": {
         "method": "PUT",
@@ -122,7 +86,7 @@
       "given": {
         "scenario": "unauthenticated",
         "now_ms": 1790000000000,
-        "condition": "Authorization header is absent; no valid bearer session."
+        "condition": "card_keys: Authorization header is absent; no valid bearer session."
       },
       "request": {
         "method": "PUT",
@@ -157,7 +121,7 @@
       "given": {
         "scenario": "not_eligible",
         "now_ms": 1790000000000,
-        "condition": "Principal fails current membership/person/workspace gate; for account creation, invite is unknown, used or expired."
+        "condition": "Principal lacks the person or workspace authority required by card_keys."
       },
       "request": {
         "method": "PUT",
@@ -193,7 +157,7 @@
       "given": {
         "scenario": "not_for_this_device",
         "now_ms": 1790000000000,
-        "condition": "Authenticated device/addressee differs from the header or request target; for grants/wraps, target is outside the proposed list."
+        "condition": "Target device/request binding required by card_keys fails."
       },
       "request": {
         "method": "PUT",
@@ -225,47 +189,11 @@
       }
     },
     {
-      "name": "refusal_403_revoked",
-      "given": {
-        "scenario": "revoked",
-        "now_ms": 1790000000000,
-        "condition": "The authenticated or publication-target device has a verified permanent revocation in the directory."
-      },
-      "request": {
-        "method": "PUT",
-        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card-keys",
-        "query": {},
-        "headers": {
-          "Authorization": "Bearer FAKE-workspace",
-          "Orch-Holder": "1",
-          "Content-Type": "application/json"
-        },
-        "json": {
-          "card_seq": 1,
-          "wraps": [
-            {
-              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
-              "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
-            }
-          ]
-        }
-      },
-      "response": {
-        "status": 403,
-        "headers": {
-          "Content-Type": "application/json"
-        },
-        "json": {
-          "error": "revoked"
-        }
-      }
-    },
-    {
       "name": "refusal_409_fenced",
       "given": {
         "scenario": "fenced",
         "now_ms": 1790000000000,
-        "condition": "Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
+        "condition": "card_keys: Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
       },
       "request": {
         "method": "PUT",
@@ -301,7 +229,7 @@
       "given": {
         "scenario": "stale_card",
         "now_ms": 1790000000000,
-        "condition": "Card sequence is behind held state (or an unequal card at the same sequence); wraps name an old card sequence."
+        "condition": "card_keys: Card sequence is behind held state (or an unequal card at the same sequence); wraps name an old card sequence."
       },
       "request": {
         "method": "PUT",
@@ -329,6 +257,75 @@
         },
         "json": {
           "error": "stale_card"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_wrap_conflict",
+      "given": {
+        "scenario": "wrap_conflict",
+        "now_ms": 1790000000000,
+        "condition": "card_keys: A different wrap is committed for the same device and card sequence."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card-keys",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card_seq": 1,
+          "wraps": [
+            {
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "wrap_conflict"
+        }
+      }
+    },
+    {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "card_keys: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card-keys",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 65537,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
         }
       }
     },

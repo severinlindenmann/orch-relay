@@ -69,72 +69,11 @@
       }
     },
     {
-      "name": "refusal_400_cert_expired",
-      "given": {
-        "scenario": "cert_expired",
-        "now_ms": 1790000000000,
-        "condition": "Device certificate expires at the request-time clock; session admission or publication recheck fails."
-      },
-      "request": {
-        "method": "PUT",
-        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
-        "query": {},
-        "headers": {
-          "Authorization": "Bearer FAKE-workspace",
-          "Orch-Holder": "1",
-          "Content-Type": "application/json"
-        },
-        "json": {
-          "card": {
-            "delegation": {
-              "o": {
-                "v": 2,
-                "suite": 2,
-                "kind": "ws_delegation",
-                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
-                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
-                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
-                "client_hosted": false,
-                "issued_ms": 1789913600000
-              },
-              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
-            },
-            "o": {
-              "v": 2,
-              "suite": 2,
-              "kind": "card",
-              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
-              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
-              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
-              "wxk_version": 1,
-              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
-              "relay_url": "https://relay.dev.severin.io",
-              "card_seq": 1,
-              "issued_ms": 1790000000000,
-              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
-              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
-            },
-            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
-            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
-          }
-        }
-      },
-      "response": {
-        "status": 400,
-        "headers": {
-          "Content-Type": "application/json"
-        },
-        "json": {
-          "error": "cert_expired"
-        }
-      }
-    },
-    {
       "name": "refusal_400_delegation_mismatch",
       "given": {
         "scenario": "delegation_mismatch",
         "now_ms": 1790000000000,
-        "condition": "The supplied card's delegation binds a different workspace or WSK than its card."
+        "condition": "card_put: The supplied card's delegation binds a different workspace or WSK than its card."
       },
       "request": {
         "method": "PUT",
@@ -195,7 +134,7 @@
       "given": {
         "scenario": "malformed",
         "now_ms": 1790000000000,
-        "condition": "Unknown query parameter; strict route parsing refuses before dispatch."
+        "condition": "card_put: Unknown query parameter; strict route parsing refuses before dispatch."
       },
       "request": {
         "method": "PUT",
@@ -258,7 +197,7 @@
       "given": {
         "scenario": "wrong_suite",
         "now_ms": 1790000000000,
-        "condition": "Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
+        "condition": "card_put: Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
       },
       "request": {
         "method": "PUT",
@@ -319,7 +258,7 @@
       "given": {
         "scenario": "bad_signature",
         "now_ms": 1790000000000,
-        "condition": "Trusted directory verification key differs from the artifact's signing key; artifact remains valid under its fixture key."
+        "condition": "card_put: Trusted directory verification key differs from the artifact's signing key; artifact remains valid under its fixture key."
       },
       "request": {
         "method": "PUT",
@@ -380,7 +319,7 @@
       "given": {
         "scenario": "unauthenticated",
         "now_ms": 1790000000000,
-        "condition": "Authorization header is absent; no valid bearer session."
+        "condition": "card_put: Authorization header is absent; no valid bearer session."
       },
       "request": {
         "method": "PUT",
@@ -440,7 +379,7 @@
       "given": {
         "scenario": "not_eligible",
         "now_ms": 1790000000000,
-        "condition": "Principal fails current membership/person/workspace gate; for account creation, invite is unknown, used or expired."
+        "condition": "Principal lacks the person or workspace authority required by card_put."
       },
       "request": {
         "method": "PUT",
@@ -501,7 +440,7 @@
       "given": {
         "scenario": "other_person",
         "now_ms": 1790000000000,
-        "condition": "No account for the signed person, or certificate/request person is neither owner nor authorized person."
+        "condition": "card_put: No account for the signed person, or certificate/request person is neither owner nor authorized person."
       },
       "request": {
         "method": "PUT",
@@ -558,72 +497,11 @@
       }
     },
     {
-      "name": "refusal_403_revoked",
-      "given": {
-        "scenario": "revoked",
-        "now_ms": 1790000000000,
-        "condition": "The authenticated or publication-target device has a verified permanent revocation in the directory."
-      },
-      "request": {
-        "method": "PUT",
-        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
-        "query": {},
-        "headers": {
-          "Authorization": "Bearer FAKE-workspace",
-          "Orch-Holder": "1",
-          "Content-Type": "application/json"
-        },
-        "json": {
-          "card": {
-            "delegation": {
-              "o": {
-                "v": 2,
-                "suite": 2,
-                "kind": "ws_delegation",
-                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
-                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
-                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
-                "client_hosted": false,
-                "issued_ms": 1789913600000
-              },
-              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
-            },
-            "o": {
-              "v": 2,
-              "suite": 2,
-              "kind": "card",
-              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
-              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
-              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
-              "wxk_version": 1,
-              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
-              "relay_url": "https://relay.dev.severin.io",
-              "card_seq": 1,
-              "issued_ms": 1790000000000,
-              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
-              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
-            },
-            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
-            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
-          }
-        }
-      },
-      "response": {
-        "status": 403,
-        "headers": {
-          "Content-Type": "application/json"
-        },
-        "json": {
-          "error": "revoked"
-        }
-      }
-    },
-    {
       "name": "refusal_409_bad_wxk_version",
       "given": {
         "scenario": "bad_wxk_version",
         "now_ms": 1790000000000,
-        "condition": "Held card's WXK version does not allow the submitted version/key transition."
+        "condition": "card_put: Held card's WXK version does not allow the submitted version/key transition."
       },
       "request": {
         "method": "PUT",
@@ -684,7 +562,7 @@
       "given": {
         "scenario": "delegation_changed",
         "now_ms": 1790000000000,
-        "condition": "Held card's delegation differs from this card's delegation."
+        "condition": "card_put: Held card's delegation differs from this card's delegation."
       },
       "request": {
         "method": "PUT",
@@ -745,7 +623,7 @@
       "given": {
         "scenario": "fenced",
         "now_ms": 1790000000000,
-        "condition": "Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
+        "condition": "card_put: Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
       },
       "request": {
         "method": "PUT",
@@ -806,7 +684,7 @@
       "given": {
         "scenario": "other_workspace",
         "now_ms": 1790000000000,
-        "condition": "Authenticated/route workspace differs from the signed object's workspace."
+        "condition": "card_put: Authenticated/route workspace differs from the signed object's workspace."
       },
       "request": {
         "method": "PUT",
@@ -867,7 +745,7 @@
       "given": {
         "scenario": "stale_card",
         "now_ms": 1790000000000,
-        "condition": "Card sequence is behind held state (or an unequal card at the same sequence); wraps name an old card sequence."
+        "condition": "card_put: Card sequence is behind held state (or an unequal card at the same sequence); wraps name an old card sequence."
       },
       "request": {
         "method": "PUT",
@@ -928,7 +806,7 @@
       "given": {
         "scenario": "wsk_changed",
         "now_ms": 1790000000000,
-        "condition": "Held card has another WSK; replacement is forbidden."
+        "condition": "card_put: Held card has another WSK; replacement is forbidden."
       },
       "request": {
         "method": "PUT",
@@ -989,7 +867,7 @@
       "given": {
         "scenario": "wxk_changed_without_version",
         "now_ms": 1790000000000,
-        "condition": "Held card has this WXK version but a different exchange key."
+        "condition": "card_put: Held card has this WXK version but a different exchange key."
       },
       "request": {
         "method": "PUT",
@@ -1046,11 +924,44 @@
       }
     },
     {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "card_put: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 65537,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
       "name": "refusal_429_rate_limited",
       "given": {
         "scenario": "rate_limited",
         "now_ms": 1790000000000,
-        "condition": "Applicable full-duration address/person rate window or outstanding challenge cap is full."
+        "condition": "card_put: Applicable full-duration address/person rate window or outstanding challenge cap is full."
       },
       "request": {
         "method": "PUT",

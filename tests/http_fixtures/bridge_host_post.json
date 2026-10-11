@@ -34,39 +34,11 @@
       }
     },
     {
-      "name": "refusal_400_cert_expired",
-      "given": {
-        "scenario": "cert_expired",
-        "now_ms": 1790000000000,
-        "condition": "Device certificate expires at the request-time clock; session admission or publication recheck fails."
-      },
-      "request": {
-        "method": "POST",
-        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/bridge/fde154f24ef24b8eccff1cb87c930438",
-        "query": {},
-        "headers": {
-          "Authorization": "Bearer FAKE-workspace",
-          "Orch-Holder": "1",
-          "Content-Type": "application/octet-stream"
-        },
-        "body_b64u": "T1JCMgICAQJwXUCru4wckDVKGsqpTJNcQXeyfY5KwYLo04iyR9KxNv3hVPJO8kuOzP8cuHyTBDgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGgxFBsAAAAAAFkwvC2Ae-BJ7La_ZRDQpQjCABgPY3Ue9UMfXvaJ6ycLTHhfZWH-fBp-FUpGu1MUtw50qJzUzdaA6P09rdzpCO_c2YigOzC3_gBix3mo104oEbIK5ZpNOcIbbVwQT-h5JWS7WSfQObecGXP2v3J59E-HQ"
-      },
-      "response": {
-        "status": 400,
-        "headers": {
-          "Content-Type": "application/json"
-        },
-        "json": {
-          "error": "cert_expired"
-        }
-      }
-    },
-    {
       "name": "refusal_400_malformed",
       "given": {
         "scenario": "malformed",
         "now_ms": 1790000000000,
-        "condition": "Unknown query parameter; strict route parsing refuses before dispatch."
+        "condition": "bridge_host_post: Unknown query parameter; strict route parsing refuses before dispatch."
       },
       "request": {
         "method": "POST",
@@ -96,7 +68,7 @@
       "given": {
         "scenario": "too_large",
         "now_ms": 1790000000000,
-        "condition": "Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+        "condition": "bridge_host_post: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
       },
       "request": {
         "method": "POST",
@@ -129,7 +101,7 @@
       "given": {
         "scenario": "wrong_suite",
         "now_ms": 1790000000000,
-        "condition": "Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
+        "condition": "bridge_host_post: Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
       },
       "request": {
         "method": "POST",
@@ -157,7 +129,7 @@
       "given": {
         "scenario": "unauthenticated",
         "now_ms": 1790000000000,
-        "condition": "Authorization header is absent; no valid bearer session."
+        "condition": "bridge_host_post: Authorization header is absent; no valid bearer session."
       },
       "request": {
         "method": "POST",
@@ -184,7 +156,7 @@
       "given": {
         "scenario": "not_eligible",
         "now_ms": 1790000000000,
-        "condition": "Principal fails current membership/person/workspace gate; for account creation, invite is unknown, used or expired."
+        "condition": "Principal lacks the person or workspace authority required by bridge_host_post."
       },
       "request": {
         "method": "POST",
@@ -212,7 +184,7 @@
       "given": {
         "scenario": "revoked",
         "now_ms": 1790000000000,
-        "condition": "The authenticated or publication-target device has a verified permanent revocation in the directory."
+        "condition": "The target device for bridge_host_post is revoked."
       },
       "request": {
         "method": "POST",
@@ -240,7 +212,7 @@
       "given": {
         "scenario": "chunk_conflict",
         "now_ms": 1790000000000,
-        "condition": "The same workspace/device/rid/chunk index has another stored envelope digest."
+        "condition": "bridge_host_post: The same workspace/device/rid/chunk index has another stored envelope digest."
       },
       "request": {
         "method": "POST",
@@ -268,7 +240,7 @@
       "given": {
         "scenario": "fenced",
         "now_ms": 1790000000000,
-        "condition": "Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
+        "condition": "bridge_host_post: Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
       },
       "request": {
         "method": "POST",
@@ -296,7 +268,7 @@
       "given": {
         "scenario": "stale_epoch",
         "now_ms": 1790000000000,
-        "condition": "New request epoch differs from current epoch 2, or response fails the known-rid/request-epoch/old-chunk rule."
+        "condition": "bridge_host_post: New request epoch differs from current epoch 2, or response fails the known-rid/request-epoch/old-chunk rule."
       },
       "request": {
         "method": "POST",
@@ -321,11 +293,39 @@
       }
     },
     {
+      "name": "refusal_410_expired",
+      "given": {
+        "scenario": "expired",
+        "now_ms": 1790000000000,
+        "condition": "Response rid is unknown or its keep_until_ms has elapsed."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/bridge/fde154f24ef24b8eccff1cb87c930438",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/octet-stream"
+        },
+        "body_b64u": "T1JCMgICAQJwXUCru4wckDVKGsqpTJNcQXeyfY5KwYLo04iyR9KxNv3hVPJO8kuOzP8cuHyTBDgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGgxFBsAAAAAAFkwvC2Ae-BJ7La_ZRDQpQjCABgPY3Ue9UMfXvaJ6ycLTHhfZWH-fBp-FUpGu1MUtw50qJzUzdaA6P09rdzpCO_c2YigOzC3_gBix3mo104oEbIK5ZpNOcIbbVwQT-h5JWS7WSfQObecGXP2v3J59E-HQ"
+      },
+      "response": {
+        "status": 410,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "expired"
+        }
+      }
+    },
+    {
       "name": "refusal_429_quota_exceeded",
       "given": {
         "scenario": "quota_exceeded",
         "now_ms": 1790000000000,
-        "condition": "Applicable device/workspace storage, concurrent poll, chunk or open-request cap is full."
+        "condition": "bridge_host_post: Applicable device/workspace storage, concurrent poll, chunk or open-request cap is full."
       },
       "request": {
         "method": "POST",
@@ -354,7 +354,7 @@
       "given": {
         "scenario": "rate_limited",
         "now_ms": 1790000000000,
-        "condition": "Applicable full-duration address/person rate window or outstanding challenge cap is full."
+        "condition": "bridge_host_post: Applicable full-duration address/person rate window or outstanding challenge cap is full."
       },
       "request": {
         "method": "POST",
@@ -383,7 +383,7 @@
       "given": {
         "scenario": "overloaded",
         "now_ms": 1790000000000,
-        "condition": "Global queued-body or concurrent-poll budget is full; existing state is not evicted."
+        "condition": "bridge_host_post: Global queued-body or concurrent-poll budget is full; existing state is not evicted."
       },
       "request": {
         "method": "POST",

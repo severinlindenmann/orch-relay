@@ -104,106 +104,11 @@
       }
     },
     {
-      "name": "refusal_400_cert_expired",
-      "given": {
-        "scenario": "cert_expired",
-        "now_ms": 1790000000000,
-        "condition": "Device certificate expires at the request-time clock; session admission or publication recheck fails."
-      },
-      "request": {
-        "method": "PUT",
-        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/membership",
-        "query": {},
-        "headers": {
-          "Authorization": "Bearer FAKE-workspace",
-          "Orch-Holder": "1",
-          "Content-Type": "application/json"
-        },
-        "json": {
-          "member_list": {
-            "o": {
-              "v": 2,
-              "suite": 2,
-              "kind": "member_list",
-              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
-              "epoch": 1,
-              "list_seq": 1,
-              "issued_ms": 1790000000000,
-              "persons": [
-                "42f83168aabd846982483297b14e7301"
-              ],
-              "members": [
-                {
-                  "device_id": "4177b27d8e4ac182e8d388b247d2b136",
-                  "person_id": "5c0574d08d9b869beaa7b630cc83893d",
-                  "scopes": [
-                    "look"
-                  ]
-                },
-                {
-                  "device_id": "443532523e2513433ce3e2a6d35b0654",
-                  "person_id": "42f83168aabd846982483297b14e7301",
-                  "scopes": [
-                    "look"
-                  ]
-                }
-              ]
-            },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
-          },
-          "grants": [
-            {
-              "o": {
-                "v": 2,
-                "suite": 2,
-                "kind": "wk_grant",
-                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
-                "device_id": "4177b27d8e4ac182e8d388b247d2b136",
-                "epoch": 1,
-                "sealed": "BFOD_F0Wv0lLCiUj1w--BzcHI3acUUD8gx6pUF98AdlWHsQV-_4-_JtxYrMi_oLz2mER1SnDFSOBRnPvHSVVGCN0_urrUHSuD6ZOTF7XjqXoTsaNwG2OrseShIX21GEJFgqyzrhXDKLM8S8ThBpMRiw"
-              },
-              "sig": "4pgxPG_bcF9_nV9ktmaGP4PXKe9SFsdAnFubIFOx9TcX8n9sGg5mfYLdBaZM2tbSdMZA6UvXHw_3Ph2qhi8aqA"
-            },
-            {
-              "o": {
-                "v": 2,
-                "suite": 2,
-                "kind": "wk_grant",
-                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
-                "device_id": "443532523e2513433ce3e2a6d35b0654",
-                "epoch": 1,
-                "sealed": "BNO4twdkGEYWOJpoDceiYC3P5Iw0ucQoxiKlvh3hEUuz463yogL_slVw89LK6R41wclh1usIyG7F9on1S8UJU7x6g99d2yACILBZjZbV03e8aZ5S7ISTt7IraTbYV1hY9Fc_SvqChdl4h1oB8rM2u3w"
-              },
-              "sig": "0qMi1uVCM0eIidXPFOZk7wOMhn2UyeGCLtTbWoAcZdFMCPNL7m4e1QCJOtjlwpildohtBjS90-vS6gWqN5_Fqw"
-            }
-          ],
-          "card_key_wraps": {
-            "card_seq": 1,
-            "wraps": [
-              {
-                "device_id": "4177b27d8e4ac182e8d388b247d2b136",
-                "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
-              }
-            ]
-          }
-        }
-      },
-      "response": {
-        "status": 400,
-        "headers": {
-          "Content-Type": "application/json"
-        },
-        "json": {
-          "error": "cert_expired"
-        }
-      }
-    },
-    {
       "name": "refusal_400_cert_invalid",
       "given": {
         "scenario": "cert_invalid",
         "now_ms": 1790000000000,
-        "condition": "Directory certificate validation fails (certificate absent, invalid shape, key or PK binding)."
+        "condition": "membership: Directory certificate validation fails (certificate absent, invalid shape, key or PK binding)."
       },
       "request": {
         "method": "PUT",
@@ -298,7 +203,7 @@
       "given": {
         "scenario": "malformed",
         "now_ms": 1790000000000,
-        "condition": "Unknown query parameter; strict route parsing refuses before dispatch."
+        "condition": "membership: Unknown query parameter; strict route parsing refuses before dispatch."
       },
       "request": {
         "method": "PUT",
@@ -391,44 +296,11 @@
       }
     },
     {
-      "name": "refusal_400_too_large",
-      "given": {
-        "scenario": "too_large",
-        "now_ms": 1790000000000,
-        "condition": "Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
-      },
-      "request": {
-        "method": "PUT",
-        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/membership",
-        "query": {},
-        "headers": {
-          "Authorization": "Bearer FAKE-workspace",
-          "Orch-Holder": "1",
-          "Content-Type": "application/json"
-        },
-        "body_recipe": {
-          "prefix_b64u": "",
-          "byte": 32,
-          "count": 2097153,
-          "suffix_b64u": ""
-        }
-      },
-      "response": {
-        "status": 400,
-        "headers": {
-          "Content-Type": "application/json"
-        },
-        "json": {
-          "error": "too_large"
-        }
-      }
-    },
-    {
       "name": "refusal_400_wrong_suite",
       "given": {
         "scenario": "wrong_suite",
         "now_ms": 1790000000000,
-        "condition": "Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
+        "condition": "membership: Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
       },
       "request": {
         "method": "PUT",
@@ -523,7 +395,7 @@
       "given": {
         "scenario": "bad_signature",
         "now_ms": 1790000000000,
-        "condition": "Trusted directory verification key differs from the artifact's signing key; artifact remains valid under its fixture key."
+        "condition": "membership: Trusted directory verification key differs from the artifact's signing key; artifact remains valid under its fixture key."
       },
       "request": {
         "method": "PUT",
@@ -618,7 +490,7 @@
       "given": {
         "scenario": "unauthenticated",
         "now_ms": 1790000000000,
-        "condition": "Authorization header is absent; no valid bearer session."
+        "condition": "membership: Authorization header is absent; no valid bearer session."
       },
       "request": {
         "method": "PUT",
@@ -712,7 +584,7 @@
       "given": {
         "scenario": "cert_expired",
         "now_ms": 1790000000000,
-        "condition": "Device certificate expires at the request-time clock; session admission or publication recheck fails."
+        "condition": "A proposed member certificate has expired; publication is refused with 403."
       },
       "request": {
         "method": "PUT",
@@ -807,7 +679,7 @@
       "given": {
         "scenario": "not_eligible",
         "now_ms": 1790000000000,
-        "condition": "Principal fails current membership/person/workspace gate; for account creation, invite is unknown, used or expired."
+        "condition": "Principal lacks the person or workspace authority required by membership."
       },
       "request": {
         "method": "PUT",
@@ -902,7 +774,7 @@
       "given": {
         "scenario": "not_for_this_device",
         "now_ms": 1790000000000,
-        "condition": "Authenticated device/addressee differs from the header or request target; for grants/wraps, target is outside the proposed list."
+        "condition": "Target device/request binding required by membership fails."
       },
       "request": {
         "method": "PUT",
@@ -997,7 +869,7 @@
       "given": {
         "scenario": "other_person",
         "now_ms": 1790000000000,
-        "condition": "No account for the signed person, or certificate/request person is neither owner nor authorized person."
+        "condition": "membership: No account for the signed person, or certificate/request person is neither owner nor authorized person."
       },
       "request": {
         "method": "PUT",
@@ -1092,7 +964,7 @@
       "given": {
         "scenario": "revoked",
         "now_ms": 1790000000000,
-        "condition": "The authenticated or publication-target device has a verified permanent revocation in the directory."
+        "condition": "The target device for membership is revoked."
       },
       "request": {
         "method": "PUT",
@@ -1187,7 +1059,7 @@
       "given": {
         "scenario": "scope_exceeded",
         "now_ms": 1790000000000,
-        "condition": "Member scopes exceed its certificate's prefix or certificate is a scoped agent."
+        "condition": "membership: Member scopes exceed its certificate's prefix or certificate is a scoped agent."
       },
       "request": {
         "method": "PUT",
@@ -1282,7 +1154,7 @@
       "given": {
         "scenario": "bad_epoch",
         "now_ms": 1790000000000,
-        "condition": "Proposed epoch violates first-list or adjacent publication rules."
+        "condition": "membership: Proposed epoch violates first-list or adjacent publication rules."
       },
       "request": {
         "method": "PUT",
@@ -1377,7 +1249,7 @@
       "given": {
         "scenario": "fenced",
         "now_ms": 1790000000000,
-        "condition": "Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
+        "condition": "membership: Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
       },
       "request": {
         "method": "PUT",
@@ -1472,7 +1344,7 @@
       "given": {
         "scenario": "grant_conflict",
         "now_ms": 1790000000000,
-        "condition": "Another sealed grant is committed for this device and epoch; this is not an exact publication retry."
+        "condition": "membership: Another sealed grant is committed for this device and epoch; this is not an exact publication retry."
       },
       "request": {
         "method": "PUT",
@@ -1567,7 +1439,7 @@
       "given": {
         "scenario": "missing_grant",
         "now_ms": 1790000000000,
-        "condition": "Publication omits a proposed member's grant at its epoch."
+        "condition": "membership: Publication omits a proposed member's grant at its epoch."
       },
       "request": {
         "method": "PUT",
@@ -1650,7 +1522,7 @@
       "given": {
         "scenario": "other_workspace",
         "now_ms": 1790000000000,
-        "condition": "Authenticated/route workspace differs from the signed object's workspace."
+        "condition": "membership: Authenticated/route workspace differs from the signed object's workspace."
       },
       "request": {
         "method": "PUT",
@@ -1745,7 +1617,7 @@
       "given": {
         "scenario": "rotation_required",
         "now_ms": 1790000000000,
-        "condition": "A device is removed but the submitted epoch equals the held epoch."
+        "condition": "membership: A device is removed but the submitted epoch equals the held epoch."
       },
       "request": {
         "method": "PUT",
@@ -1840,7 +1712,7 @@
       "given": {
         "scenario": "stale_card",
         "now_ms": 1790000000000,
-        "condition": "Card sequence is behind held state (or an unequal card at the same sequence); wraps name an old card sequence."
+        "condition": "membership: Card sequence is behind held state (or an unequal card at the same sequence); wraps name an old card sequence."
       },
       "request": {
         "method": "PUT",
@@ -1935,7 +1807,7 @@
       "given": {
         "scenario": "stale_list",
         "now_ms": 1790000000000,
-        "condition": "Held member-list sequence is at least this sequence, and bytes differ from any committed publication retry."
+        "condition": "membership: Held member-list sequence is at least this sequence, and bytes differ from any committed publication retry."
       },
       "request": {
         "method": "PUT",
@@ -2022,6 +1894,228 @@
         },
         "json": {
           "error": "stale_list"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_wrap_conflict",
+      "given": {
+        "scenario": "wrap_conflict",
+        "now_ms": 1790000000000,
+        "condition": "membership: A different wrap is committed for the same device and card sequence."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/membership",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "member_list": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "member_list",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "epoch": 1,
+              "list_seq": 1,
+              "issued_ms": 1790000000000,
+              "persons": [
+                "42f83168aabd846982483297b14e7301"
+              ],
+              "members": [
+                {
+                  "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                  "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                  "scopes": [
+                    "look"
+                  ]
+                },
+                {
+                  "device_id": "443532523e2513433ce3e2a6d35b0654",
+                  "person_id": "42f83168aabd846982483297b14e7301",
+                  "scopes": [
+                    "look"
+                  ]
+                }
+              ]
+            },
+            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+          },
+          "grants": [
+            {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "wk_grant",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                "epoch": 1,
+                "sealed": "BFOD_F0Wv0lLCiUj1w--BzcHI3acUUD8gx6pUF98AdlWHsQV-_4-_JtxYrMi_oLz2mER1SnDFSOBRnPvHSVVGCN0_urrUHSuD6ZOTF7XjqXoTsaNwG2OrseShIX21GEJFgqyzrhXDKLM8S8ThBpMRiw"
+              },
+              "sig": "4pgxPG_bcF9_nV9ktmaGP4PXKe9SFsdAnFubIFOx9TcX8n9sGg5mfYLdBaZM2tbSdMZA6UvXHw_3Ph2qhi8aqA"
+            },
+            {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "wk_grant",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "device_id": "443532523e2513433ce3e2a6d35b0654",
+                "epoch": 1,
+                "sealed": "BNO4twdkGEYWOJpoDceiYC3P5Iw0ucQoxiKlvh3hEUuz463yogL_slVw89LK6R41wclh1usIyG7F9on1S8UJU7x6g99d2yACILBZjZbV03e8aZ5S7ISTt7IraTbYV1hY9Fc_SvqChdl4h1oB8rM2u3w"
+              },
+              "sig": "0qMi1uVCM0eIidXPFOZk7wOMhn2UyeGCLtTbWoAcZdFMCPNL7m4e1QCJOtjlwpildohtBjS90-vS6gWqN5_Fqw"
+            }
+          ],
+          "card_key_wraps": {
+            "card_seq": 1,
+            "wraps": [
+              {
+                "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
+              }
+            ]
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "wrap_conflict"
+        }
+      }
+    },
+    {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "membership: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/membership",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 2097153,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
+      "name": "victim_person_without_member",
+      "given": {
+        "condition": "persons names a victim with no member device in this publication."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/membership",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "member_list": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "member_list",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "epoch": 1,
+              "list_seq": 1,
+              "issued_ms": 1790000000000,
+              "persons": [
+                "42f83168aabd846982483297b14e7301",
+                "d62ddaafae9b0f46af981646edddf348"
+              ],
+              "members": [
+                {
+                  "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                  "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                  "scopes": [
+                    "look"
+                  ]
+                },
+                {
+                  "device_id": "443532523e2513433ce3e2a6d35b0654",
+                  "person_id": "42f83168aabd846982483297b14e7301",
+                  "scopes": [
+                    "look"
+                  ]
+                }
+              ]
+            },
+            "sig": "6rV0BitQyKRg3xyAExiE-SEcQ_csXYdas9PP8Z5f1ZqJyWXB2nQcUHCLnZ_ZsNRDv3zSIUJM0iQkFoww-eS8aA"
+          },
+          "grants": [
+            {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "wk_grant",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                "epoch": 1,
+                "sealed": "BFOD_F0Wv0lLCiUj1w--BzcHI3acUUD8gx6pUF98AdlWHsQV-_4-_JtxYrMi_oLz2mER1SnDFSOBRnPvHSVVGCN0_urrUHSuD6ZOTF7XjqXoTsaNwG2OrseShIX21GEJFgqyzrhXDKLM8S8ThBpMRiw"
+              },
+              "sig": "4pgxPG_bcF9_nV9ktmaGP4PXKe9SFsdAnFubIFOx9TcX8n9sGg5mfYLdBaZM2tbSdMZA6UvXHw_3Ph2qhi8aqA"
+            },
+            {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "wk_grant",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "device_id": "443532523e2513433ce3e2a6d35b0654",
+                "epoch": 1,
+                "sealed": "BNO4twdkGEYWOJpoDceiYC3P5Iw0ucQoxiKlvh3hEUuz463yogL_slVw89LK6R41wclh1usIyG7F9on1S8UJU7x6g99d2yACILBZjZbV03e8aZ5S7ISTt7IraTbYV1hY9Fc_SvqChdl4h1oB8rM2u3w"
+              },
+              "sig": "0qMi1uVCM0eIidXPFOZk7wOMhn2UyeGCLtTbWoAcZdFMCPNL7m4e1QCJOtjlwpildohtBjS90-vS6gWqN5_Fqw"
+            }
+          ],
+          "card_key_wraps": {
+            "card_seq": 1,
+            "wraps": [
+              {
+                "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
+              }
+            ]
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "other_person"
         }
       }
     },

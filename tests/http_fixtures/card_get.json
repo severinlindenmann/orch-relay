@@ -68,7 +68,7 @@
       "given": {
         "scenario": "cert_expired",
         "now_ms": 1790000000000,
-        "condition": "Device certificate expires at the request-time clock; session admission or publication recheck fails."
+        "condition": "Device certificate used by card_get has expired (400)."
       },
       "request": {
         "method": "GET",
@@ -93,7 +93,7 @@
       "given": {
         "scenario": "malformed",
         "now_ms": 1790000000000,
-        "condition": "Unknown query parameter; strict route parsing refuses before dispatch."
+        "condition": "card_get: Unknown query parameter; strict route parsing refuses before dispatch."
       },
       "request": {
         "method": "GET",
@@ -120,7 +120,7 @@
       "given": {
         "scenario": "unauthenticated",
         "now_ms": 1790000000000,
-        "condition": "Authorization header is absent; no valid bearer session."
+        "condition": "card_get: Authorization header is absent; no valid bearer session."
       },
       "request": {
         "method": "GET",
@@ -143,7 +143,7 @@
       "given": {
         "scenario": "not_eligible",
         "now_ms": 1790000000000,
-        "condition": "Principal fails current membership/person/workspace gate; for account creation, invite is unknown, used or expired."
+        "condition": "Principal lacks the person or workspace authority required by card_get."
       },
       "request": {
         "method": "GET",
@@ -168,7 +168,7 @@
       "given": {
         "scenario": "revoked",
         "now_ms": 1790000000000,
-        "condition": "The authenticated or publication-target device has a verified permanent revocation in the directory."
+        "condition": "The device authenticating card_get is revoked."
       },
       "request": {
         "method": "GET",
@@ -193,7 +193,7 @@
       "given": {
         "scenario": "not_found",
         "now_ms": 1790000000000,
-        "condition": "Authorized resource is absent, or certificate request retention has ended."
+        "condition": "card_get: Authorized resource is absent, or certificate request retention has ended."
       },
       "request": {
         "method": "GET",
