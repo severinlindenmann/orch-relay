@@ -264,6 +264,34 @@
       }
     },
     {
+      "name": "refusal_409_retry_exhausted",
+      "given": {
+        "scenario": "retry_exhausted",
+        "now_ms": 1790000000000,
+        "condition": "This identical chunk's copy has expired and it was already stored again eight times (P3-D27); terminal."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/bridge/fde154f24ef24b8eccff1cb87c930438",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/octet-stream"
+        },
+        "body_b64u": "T1JCMgICAQJwXUCru4wckDVKGsqpTJNcQXeyfY5KwYLo04iyR9KxNv3hVPJO8kuOzP8cuHyTBDgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGgxFBsAAAAAAFkwvC2Ae-BJ7La_ZRDQpQjCABgPY3Ue9UMfXvaJ6ycLTHhfZWH-fBp-FUpGu1MUtw50qJzUzdaA6P09rdzpCO_c2YigOzC3_gBix3mo104oEbIK5ZpNOcIbbVwQT-h5JWS7WSfQObecGXP2v3J59E-HQ"
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "retry_exhausted"
+        }
+      }
+    },
+    {
       "name": "refusal_409_stale_epoch",
       "given": {
         "scenario": "stale_epoch",
@@ -297,7 +325,7 @@
       "given": {
         "scenario": "expired",
         "now_ms": 1790000000000,
-        "condition": "Response rid is unknown or its keep_until_ms has elapsed."
+        "condition": "Response rid is unknown or its keep_until_ms has elapsed, or an identical chunk's copy expired after first receipt + 900 s (P3-D27)."
       },
       "request": {
         "method": "POST",
@@ -405,6 +433,31 @@
         "json": {
           "error": "overloaded"
         }
+      }
+    },
+    {
+      "name": "expired_identical_chunk_restored",
+      "given": {
+        "scenario": "expired_identical_chunk",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/bridge/fde154f24ef24b8eccff1cb87c930438",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/octet-stream"
+        },
+        "body_b64u": "T1JCMgICAQJwXUCru4wckDVKGsqpTJNcQXeyfY5KwYLo04iyR9KxNv3hVPJO8kuOzP8cuHyTBDgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGgxFBsAAAAAAFkwvC2Ae-BJ7La_ZRDQpQjCABgPY3Ue9UMfXvaJ6ycLTHhfZWH-fBp-FUpGu1MUtw50qJzUzdaA6P09rdzpCO_c2YigOzC3_gBix3mo104oEbIK5ZpNOcIbbVwQT-h5JWS7WSfQObecGXP2v3J59E-HQ"
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {}
       }
     }
   ]

@@ -33,7 +33,7 @@ ROUTES = [
     ("bridge_device_poll", "GET", "/v2/workspaces/{ws}/bridge/{rid}", "device", "D(m)", "401:unauthenticated 403:not_eligible 429:quota_exceeded 503:overloaded"),
     ("host_hold", "POST", "/v2/workspaces/{ws}/host/hold", "host", "W", "409:holder_conflict,fenced"),
     ("host_poll", "GET", "/v2/workspaces/{ws}/host/poll", "host", "W(g)", "409:fenced 401:unauthenticated 503:overloaded"),
-    ("bridge_host_post", "POST", "/v2/workspaces/{ws}/bridge/{rid}", "host", "W(g)", "400:wrong_suite 403:not_eligible,revoked 409:chunk_conflict,stale_epoch,fenced 410:expired 429:rate_limited,quota_exceeded 503:overloaded"),
+    ("bridge_host_post", "POST", "/v2/workspaces/{ws}/bridge/{rid}", "host", "W(g)", "400:wrong_suite 403:not_eligible,revoked 409:chunk_conflict,stale_epoch,fenced,retry_exhausted 410:expired 429:rate_limited,quota_exceeded 503:overloaded"),
     ("pair_device_post", "POST", "/v2/workspaces/{ws}/pair/{offer}/{rid}", "device", "none", "400:wrong_suite 401:unknown_workspace 429:rate_limited,quota_exceeded 503:overloaded"),
     ("pair_host_post", "POST", "/v2/workspaces/{ws}/pair/{offer}/{rid}", "host", "W(g)", "400:wrong_suite 401:unknown_workspace 429:rate_limited,quota_exceeded 503:overloaded"),
     ("pair_poll", "GET", "/v2/workspaces/{ws}/pair/{offer}/{rid}", "device", "none", "429:rate_limited 503:overloaded"),
@@ -138,7 +138,7 @@ def condition_for(name, code):
     if code == "quota_exceeded" and name == "session_login":
         return "Eight live device tokens exist; the earliest expires in 20 seconds."
     if code == "expired":
-        return {"bridge_host_post": "Response rid is unknown or its keep_until_ms has elapsed.",
+        return {"bridge_host_post": "Response rid is unknown or its keep_until_ms has elapsed, or an identical chunk's copy expired after first receipt + 900 s (P3-D27).",
                 "accounts": "The fresh login challenge has expired.",
                 "session_login": "The single-use login challenge has expired."}.get(name, f"The certificate request for {name} has expired.")
     if code == "not_for_this_device":
@@ -147,6 +147,8 @@ def condition_for(name, code):
         return "Held list is (list_seq 1, epoch 2); this list's epoch 1 falls below it. Epochs may skip, never fall."
     if name == "membership" and code == "wk_commit_changed":
         return "Held list (list_seq 1, epoch 1) carries wk_commit A; this list (list_seq 2) keeps epoch 1 with wk_commit B."
+    if code == "retry_exhausted" and name == "bridge_host_post":
+        return "This identical chunk's copy has expired and it was already stored again eight times (P3-D27); terminal."
     if code == "rate_limited" and name == "bridge_device_post":
         return "Acknowledged rid has no live copy; 1001 ms remain before another requeue (Retry-After: 2)."
     return f"{name}: {CONDITIONS[code]}"
@@ -348,6 +350,8 @@ def build(vectors=None):
                 extra(state, response_json={"state": state, "challenge": objs["challenge"] if state == "signed" else None,
                                            "cert": objs["cert"] if state == "signed" else None,
                                            "rejection": objs["cert_rejection"] if state == "rejected" else None})
+        if name == "bridge_host_post":
+            extra("expired_identical_chunk_restored", given="expired_identical_chunk")
         if name in {"bridge_device_poll", "pair_poll"}:
             extra("after_first_chunk", {"query": {"after": "0", "wait": "0"}}, {"chunks": []})
         if name == "host_poll":
