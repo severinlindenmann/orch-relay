@@ -1,0 +1,330 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "PUT",
+    "path": "/v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/manifest",
+    "role": "host",
+    "auth": "W(g)"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000,
+        "vector": {
+          "section": "checkpoints",
+          "name": "first_checkpoint_full_proof",
+          "step": 1
+        }
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/staging/null/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155/manifest",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pages": [
+            {
+              "kind": "appended",
+              "log": "workspace",
+              "after_seq": 0,
+              "digest": "sha256:2d59421a7142b87e0ea55337953f616a67d4c7924115ccdb445cbf6ee789d18b",
+              "i": 0,
+              "count": 4
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "complete": true,
+          "missing": []
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "staging_manifest: Unknown query parameter; strict route parsing refuses before dispatch.",
+        "vector": {
+          "section": "checkpoints",
+          "name": "staging_manifest_order_and_contiguity",
+          "step": 0
+        }
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/staging/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155/sha256:98eaa7ce81c3f624c4a8e90f918b3f3c8a44450c24e100c1c3a5b5d9864b5190/manifest",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pages": [
+            {
+              "kind": "appended",
+              "log": "workspace",
+              "after_seq": 5,
+              "digest": "sha256:02e35a5e50df624299f3c08410e7784774d238de36c8c04b847ab869615be954",
+              "i": 1,
+              "count": 1
+            },
+            {
+              "kind": "appended",
+              "log": "workspace",
+              "after_seq": 4,
+              "digest": "sha256:bbca783e7a0eadf4c91ae011cb5c025a394c776e0957c2e00a89c480ffb7a260",
+              "i": 0,
+              "count": 1
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "staging_manifest: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/staging/null/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155/manifest",
+        "query": {},
+        "headers": {
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pages": [
+            {
+              "kind": "appended",
+              "log": "workspace",
+              "after_seq": 0,
+              "digest": "sha256:2d59421a7142b87e0ea55337953f616a67d4c7924115ccdb445cbf6ee789d18b",
+              "i": 0,
+              "count": 4
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by staging_manifest."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/staging/null/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155/manifest",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pages": [
+            {
+              "kind": "appended",
+              "log": "workspace",
+              "after_seq": 0,
+              "digest": "sha256:2d59421a7142b87e0ea55337953f616a67d4c7924115ccdb445cbf6ee789d18b",
+              "i": 0,
+              "count": 4
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_fenced",
+      "given": {
+        "scenario": "fenced",
+        "now_ms": 1790000000000,
+        "condition": "staging_manifest: Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/staging/null/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155/manifest",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "0",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pages": [
+            {
+              "kind": "appended",
+              "log": "workspace",
+              "after_seq": 0,
+              "digest": "sha256:2d59421a7142b87e0ea55337953f616a67d4c7924115ccdb445cbf6ee789d18b",
+              "i": 0,
+              "count": 4
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "fenced"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_staging_conflict",
+      "given": {
+        "scenario": "staging_conflict",
+        "now_ms": 1790000000000,
+        "condition": "staging_manifest: This page index or manifest already has different canonical content.",
+        "vector": {
+          "section": "checkpoints",
+          "name": "staging_immutable_page_and_manifest",
+          "step": 4
+        }
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/staging/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155/sha256:98eaa7ce81c3f624c4a8e90f918b3f3c8a44450c24e100c1c3a5b5d9864b5190/manifest",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pages": []
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "staging_conflict"
+        }
+      }
+    },
+    {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "staging_manifest: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/staging/null/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155/manifest",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 4194305,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_quota_exceeded",
+      "given": {
+        "scenario": "quota_exceeded",
+        "now_ms": 1790000000000,
+        "condition": "staging_manifest: Applicable device/workspace storage, concurrent poll, chunk or open-request cap is full.",
+        "vector": {
+          "section": "checkpoints",
+          "name": "staging_quota_two_open_sets",
+          "step": 2
+        }
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/staging/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155/sha256:dbc1b4c900ffe48d575b5da5c638040125f65db0fe3e24494b76ea986457d986/manifest",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pages": []
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "quota_exceeded"
+        }
+      }
+    }
+  ]
+}

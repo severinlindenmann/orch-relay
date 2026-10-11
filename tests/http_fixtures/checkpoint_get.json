@@ -1,0 +1,293 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "GET",
+    "path": "/v2/workspaces/{ws}/checkpoint",
+    "role": "client",
+    "auth": "D(m)|W"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1792592000000,
+        "vector": {
+          "section": "checkpoints",
+          "name": "historical_proof_abandoned_branch",
+          "step": 2
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/checkpoint",
+        "query": {
+          "hash": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "genesis": {
+            "pin": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "genesis_pin",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "genesis": "sha256:0b8218975f6951f4eeec4fb4913c0818dbd79faa78e0cfef0712b3422031cc4c"
+              },
+              "sig": "m1b-uVHeP3iUTp9wFbG29CMgQaKkjP0BceaMjPkvKt_zU86bc_vV1IHFPrQh782qQ76F1cAjQpfoU8Jc_UwzBg"
+            },
+            "cert": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "device_cert",
+                "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+                "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+                "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+                "created_ms": 1789913600000,
+                "expires_ms": null,
+                "scopes_max": [
+                  "look",
+                  "decide",
+                  "operate",
+                  "type"
+                ]
+              },
+              "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+            }
+          },
+          "checkpoint": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "workspace_checkpoint",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "genesis": "sha256:0b8218975f6951f4eeec4fb4913c0818dbd79faa78e0cfef0712b3422031cc4c",
+              "n": 1,
+              "at": "2026-09-21T14:13:20Z",
+              "workspace_log": {
+                "seq": 4,
+                "head": "sha256:a3acc61dece91142d46355a1c411db852d40960d82ec61a5c1d2509f0d81df73",
+                "acc": "sha256:433506170b48ff770593c73d8e7389d37425f759103d1998b662abeefd3ed3b8"
+              },
+              "tickets": {}
+            },
+            "sig": "Wyj9L4v1g339ZcDQcKluix1aCSMJmJqtrKQ-E6_3wGtLDyKkW-uhGWWyqH0-1xaPnQxVobrIkG_pQICFxVJlSg"
+          },
+          "transitions_head": 0
+        }
+      }
+    },
+    {
+      "name": "refusal_400_cert_expired",
+      "given": {
+        "scenario": "cert_expired",
+        "now_ms": 1790000000000,
+        "condition": "Device certificate used by checkpoint_get has expired (400)."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/checkpoint",
+        "query": {
+          "hash": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "cert_expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "checkpoint_get: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/checkpoint",
+        "query": {
+          "hash": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "checkpoint_get: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/checkpoint",
+        "query": {
+          "hash": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155"
+        },
+        "headers": {}
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by checkpoint_get."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/checkpoint",
+        "query": {
+          "hash": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_revoked",
+      "given": {
+        "scenario": "revoked",
+        "now_ms": 1790000000000,
+        "condition": "The device authenticating checkpoint_get is revoked."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/checkpoint",
+        "query": {
+          "hash": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "revoked"
+        }
+      }
+    },
+    {
+      "name": "refusal_404_not_found",
+      "given": {
+        "scenario": "not_found",
+        "now_ms": 1790000000000,
+        "condition": "checkpoint_get: Authorized resource is absent, or certificate request retention has ended.",
+        "vector": {
+          "section": "checkpoints",
+          "name": "read_missing_and_bad_limits",
+          "step": 0
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/checkpoint",
+        "query": {
+          "hash": "sha256:12921e6fef63aed5c679382b095cbc248fb2e21723845babe2aad14a80c765df"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_found"
+        }
+      }
+    },
+    {
+      "name": "refusal_410_checkpoint_gone",
+      "given": {
+        "scenario": "checkpoint_gone",
+        "now_ms": 1790086400000,
+        "condition": "checkpoint_get: The requested immutable checkpoint endpoint expired after supersession.",
+        "vector": {
+          "section": "checkpoints",
+          "name": "checkpoint_gone_all_endpoint_routes",
+          "step": 2
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/checkpoint",
+        "query": {
+          "hash": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 410,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "checkpoint_gone"
+        }
+      }
+    }
+  ]
+}

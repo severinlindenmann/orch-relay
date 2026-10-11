@@ -1,0 +1,254 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "GET",
+    "path": "/v2/workspaces/{ws}/transitions",
+    "role": "client",
+    "auth": "D(m)|W"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000,
+        "vector": {
+          "section": "checkpoints",
+          "name": "pagination_endpoint_while_relay_advances",
+          "step": 5
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/transitions",
+        "query": {
+          "to": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+          "after_n": "0"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "transitions": [],
+          "next": null
+        }
+      }
+    },
+    {
+      "name": "refusal_400_cert_expired",
+      "given": {
+        "scenario": "cert_expired",
+        "now_ms": 1790000000000,
+        "condition": "Device certificate used by transitions has expired (400)."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/transitions",
+        "query": {
+          "after_n": "0",
+          "to": "sha256:981e1c8ef339396512fef1cba3abad1d0ac976defb5b47d3012869b855f823b1",
+          "limit": "16"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "cert_expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "transitions: Unknown query parameter; strict route parsing refuses before dispatch.",
+        "vector": {
+          "section": "checkpoints",
+          "name": "read_missing_and_bad_limits",
+          "step": 2
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/transitions",
+        "query": {
+          "to": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+          "after_n": "-1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "transitions: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/transitions",
+        "query": {
+          "after_n": "0",
+          "to": "sha256:981e1c8ef339396512fef1cba3abad1d0ac976defb5b47d3012869b855f823b1",
+          "limit": "16"
+        },
+        "headers": {}
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by transitions."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/transitions",
+        "query": {
+          "after_n": "0",
+          "to": "sha256:981e1c8ef339396512fef1cba3abad1d0ac976defb5b47d3012869b855f823b1",
+          "limit": "16"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_revoked",
+      "given": {
+        "scenario": "revoked",
+        "now_ms": 1790000000000,
+        "condition": "The device authenticating transitions is revoked."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/transitions",
+        "query": {
+          "after_n": "0",
+          "to": "sha256:981e1c8ef339396512fef1cba3abad1d0ac976defb5b47d3012869b855f823b1",
+          "limit": "16"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "revoked"
+        }
+      }
+    },
+    {
+      "name": "refusal_404_not_found",
+      "given": {
+        "scenario": "not_found",
+        "now_ms": 1790000000000,
+        "condition": "transitions: Authorized resource is absent, or certificate request retention has ended."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/transitions",
+        "query": {
+          "after_n": "0",
+          "to": "sha256:981e1c8ef339396512fef1cba3abad1d0ac976defb5b47d3012869b855f823b1",
+          "limit": "16"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_found"
+        }
+      }
+    },
+    {
+      "name": "refusal_410_checkpoint_gone",
+      "given": {
+        "scenario": "checkpoint_gone",
+        "now_ms": 1790086400000,
+        "condition": "transitions: The requested immutable checkpoint endpoint expired after supersession.",
+        "vector": {
+          "section": "checkpoints",
+          "name": "checkpoint_gone_all_endpoint_routes",
+          "step": 4
+        }
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/transitions",
+        "query": {
+          "to": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+          "after_n": "0"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 410,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "checkpoint_gone"
+        }
+      }
+    }
+  ]
+}
