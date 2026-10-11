@@ -78,6 +78,14 @@ def build() -> dict:
     return out
 
 
+def _strict_parse_case(n, t, ok):
+    """`canonical` (the `cj` bytes of the parsed value, as text) is stated for the cases that exist to show it."""
+    c = {"name": n, "text": t, "ok": ok}
+    if ok and n in ("depth_16", "depth_16_objects", "minus_zero"):
+        c["canonical"] = cj(R.parse_json(t.encode())).decode()
+    return c
+
+
 def _encodings():
     good = {"a": 1, "b": [True, None, "ü"], "Z": {"y": -3}}
     return {
@@ -86,7 +94,7 @@ def _encodings():
             {"name": "astral_and_escapes", "value": {"t": "a\"\\\n 😀"}, "bytes": cj({"t": "a\"\\\n 😀"}).hex()},
         ],
         "strict_parse": [
-            {"name": n, "text": t, "ok": ok} for n, t, ok in (
+            _strict_parse_case(n, t, ok) for n, t, ok in (
                 ("valid", '{"a":1}', True),
                 ("duplicate_key", '{"a":1,"a":2}', False),
                 ("nan", '{"a":NaN}', False),
@@ -97,6 +105,11 @@ def _encodings():
                 ("largest_safe_integer", '{"a":9007199254740991}', True),
                 ("non_ascii_key", '{"ä":1}', False),
                 ("lone_surrogate", '{"a":"\\ud800"}', False),
+                ("depth_16", "[" * 16 + "]" * 16, True),
+                ("depth_17", "[" * 17 + "]" * 17, False),
+                ("depth_16_objects", '{"a":' * 15 + '{"a":1}' + "}" * 15, True),
+                ("depth_17_objects", '{"a":' * 16 + '{"a":1}' + "}" * 16, False),
+                ("minus_zero", "[-0]", True),
             )],
         "b64u": [
             {"name": n, "text": t, "bytes": b} for n, t, b in (

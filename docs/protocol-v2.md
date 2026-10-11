@@ -172,7 +172,8 @@ form.
 - **No floating-point numbers at all.** `1.0` and `1e3` are refused, even though they denote integers.
 - Object keys are non-empty ASCII.
 - Strings are Unicode scalar values only: no lone surrogates.
-- Nesting is at most 16 levels.
+- Nesting is at most 16 levels: the root container is level 1, so 16 nested containers are accepted and 17 are
+  refused (a scalar adds no level).
 
 **DECIDED HERE:** the subset rules (no floats, ASCII keys, safe integers). With them, JavaScript and
 Python produce the same bytes without special cases: with ASCII keys, sorting by code point and sorting by
@@ -190,7 +191,8 @@ UTF-16 unit agree.
 - a non-ASCII key;
 - invalid UTF-8.
 
-Vectors: `encodings.strict_parse`, `encodings.canonical_json`.
+Vectors: `encodings.strict_parse` (including `depth_16`, `depth_17` and `minus_zero`, where `-0` parses to the
+integer `0` and is written `0`), `encodings.canonical_json`.
 
 **Signatures cover `cj(o)`, not the received bytes.** The verifier re-serialises the strictly parsed object
 and verifies over that. Because the subset has one canonical form, a signer that signs `cj(o)` and a
@@ -280,6 +282,10 @@ Every derivation, signature, AEAD associated data, hash and MAC has its own labe
 | `sig_webauthn_bind` | `orch/v2/sig/webauthn-bind\|` | signature | `dk_sig` | binds a passkey to a device |
 | `sig_relay_auth` | `orch/v2/sig/relay-auth\|` | signature | `dk_sig` or `WSK` | relay session login |
 | `sig_publish` | `orch/v2/publish\|` | signature | `WSK` | publish request (spec §10, literal) |
+| `sig_ticket_event` | `orch/v2/sig/ticket-event\|` | signature | `dk_sig` | a person event in a ticket log (ticket format F1 §5.3) |
+| `sig_ws_event` | `orch/v2/sig/ws-event\|` | signature | `dk_sig` | a person event in the workspace log (F1 §5.3) |
+| `sig_host_event` | `orch/v2/sig/host-event\|` | signature | `WSK` | the host's signature over a log line (F1 §5.5) |
+| `sig_checkpoint` | `orch/v2/sig/checkpoint\|` | signature | `WSK` | a checkpoint (F1 §5.10) |
 | `h_device_id` | `orch/v2/id/device\|` | hash | | device id |
 | `h_person_id` | `orch/v2/id/person\|` | hash | | person id |
 | `h_pin_person` | `orch/v2/pin/person\|` | hash | | `pk_pin` |
@@ -291,9 +297,20 @@ Every derivation, signature, AEAD associated data, hash and MAC has its own labe
 | `h_drop_parent` | `orch/v2/drop-parent\|` | hash | | a document version's parent link |
 | `h_ws_envelope` | `orch/v2/ws-envelope-hash\|` | hash | | what a co-signature covers |
 | `h_question` | `orch/v2/question\|` | hash | | a question's `content_hash` |
+| `h_section` | `orch/v2/section\|` | hash | | a ticket section's text (F1 §5.6) |
+| `h_value` | `orch/v2/value\|` | hash | | `cj` of a `ticket.json` value (F1 §5.6) |
+| `h_gate` | `orch/v2/gate\|` | hash | | a gate hash (F1 §5.7) |
+| `h_policy` | `orch/v2/policy\|` | hash | | an effective gate policy (F1 §5.6) |
+| `h_people` | `orch/v2/people\|` | hash | | the ticket roles a gate depends on (F1 §5.6) |
+| `h_question_id` | `orch/v2/question-id\|` | hash | | a question's `qid`, first 16 bytes (F1 §5.6) |
+| `h_event` | `orch/v2/event\|` | hash | | an event head: `prev`, `based_on`, genesis (F1 §5.5) |
+| `h_grant_secret` | `orch/v2/grant-secret\|` | hash | | the stored hash of a grant secret (F1 §5.6) |
 | `h_assert` | `orch/v2/assert\|` | hash | | WebAuthn assertion challenge |
 | `h_webauthn_reg` | `orch/v2/webauthn-reg\|` | hash | | WebAuthn registration challenge |
 | `mac_enroll` | `orch/v2/enroll\|` | HMAC-SHA-256 | the enrolment code | scoped agent enrolment |
+
+The `sig_ticket_event` … `h_grant_secret` rows come from orch-core's ticket format F1 (§5.6); the table stays
+prefix-free with them, and `h_question` is the same label F1 calls the question hash.
 
 The spec writes two signature domains without a trailing `"|"` (`orch/v2/ws-envelope`,
 `orch/v2/publish`). **DECIDED HERE:** both get the trailing `"|"` like every other domain, so that the table
