@@ -1171,6 +1171,11 @@ HTTP fixture.
   signer's revocation lookup fails closed. L3: `checkpoint_bound` is dropped (restore signers are current
   list members, members are registered devices, devices are never deleted).
 
+- *Workspace revocations (round 2, F1 #387 / orch-52, provisional).* `checkpoint_revocations` holds this
+  workspace's chain pairs `(device, person)`; completeness, carried-evidence binding and the provisional
+  `unpublished` result fields follow protocol-v2 §19.8 transport detail 8. Out-of-band (global) revocations
+  are hints, never refusals.
+
 **Pre-public-deploy gates.** Acceptable on the invite-only dev relay; each must be closed before any
 public deployment.
 

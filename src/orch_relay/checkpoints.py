@@ -482,6 +482,7 @@ class Relay:
         self.nodes = {}
         self.wake = set()
         self.visits = 0  # staged descriptors folded by this publication (work bound, review R1)
+        self.unpublished = []
 
     def log(self, name):
         if name not in self.nodes:
@@ -892,6 +893,11 @@ class Relay:
                 root = self.log(log).at_seq(entry, 1)
                 need(root["head"] == o["genesis"], "genesis_mismatch", 409)
         need(used == {d["i"] for d in stage["manifest"]["pages"]}, "chain_diverged", 409)
+        if self.unpublished:
+            # Provisional (orch-52, F1 #387 revocation.unpublished): hints and authenticated
+            # references to the evidence; stored durably in checkpoint_unpublished.
+            result["unpublished"] = sorted({"d_" + u["device_id"] for u in self.unpublished})
+            result["unpublished_refs"] = self.unpublished
         con = self.con
         if held:
             con.execute(
@@ -970,28 +976,37 @@ class Relay:
         P.unb64u(line["host_sig"], 64)
         need(isinstance(line["revocations"], list))
 
-    def known_holder(self, device):
-        """(person, key or None) the relay binds to a device; None for a wholly unknown device.
+    def known_persons(self, device):
+        """{person: key or None} a carried revocation of `device` must come from; {} for a wholly
+        unknown device (self-certified evidence, review 5).
 
-        The first accepted binding wins: a held revocation's person comes before the live
-        registry (§19.8 R4, review A/B). The reference's verified-signer binding needs no table
-        here: a restore signer is a current list member, list members are registered devices,
-        and devices are never deleted (review L3)."""
-        row = self.con.execute(
-            "SELECT person_id FROM revocations WHERE device_id=?", (device,)
-        ).fetchone()
-        if row is None:
+        Bindings come from this workspace's own chain pairs first (the first accepted binding wins,
+        review A/B), then the live device registry (§19.1, written under the person's account
+        key). Out-of-band evidence (the global revocation table) never binds (orch-52, F1 #387
+        provisional). A restore signer is a list member and so a registered device (review L3)."""
+        persons = [
+            r[0]
+            for r in self.con.execute(
+                "SELECT person_id FROM checkpoint_revocations WHERE workspace_id=? AND device_id=?",
+                (self.ws, device),
+            )
+        ]
+        if not persons:
             row = self.con.execute(
                 "SELECT person_id FROM devices WHERE device_id=?", (device,)
             ).fetchone()
-        if row is None:
-            return None
-        key = self.con.execute(
-            "SELECT pk_pub FROM accounts WHERE person_id=?", (row[0],)
-        ).fetchone()
-        return row[0], key[0] if key else None
+            persons = [row[0]] if row else []
+        out = {}
+        for person in persons:
+            key = self.con.execute(
+                "SELECT pk_pub FROM accounts WHERE person_id=?", (person,)
+            ).fetchone()
+            out[person] = key[0] if key else None
+        return out
 
     def evidence(self, line, log):
+        """Verified entries keyed by (device, person): a restore may carry one entry per pair,
+        sorted by (device_id, person_id) (orch-52 decision point 4, provisional)."""
         need(log == "workspace" or line["revocations"] == [], "restore_invalid", 409)
         listed, order = {}, []
         for item in line["revocations"]:
@@ -1006,45 +1021,68 @@ class Relay:
             need("ok" in checked, "restore_invalid", 409)
             rev = P.verify_revocation(item["revocation"], pk, checked["ok"])
             need("ok" in rev, "restore_invalid", 409)
-            device = rev["ok"]["device_id"]
-            holder = self.known_holder(device)
+            pair = (rev["ok"]["device_id"], rev["ok"]["person_id"])
+            persons = self.known_persons(pair[0])
             need(
-                holder is None
-                or (rev["ok"]["person_id"] == holder[0] and holder[1] in (None, item["pk_pub"])),
+                not persons or (pair[1] in persons and persons[pair[1]] in (None, item["pk_pub"])),
                 "restore_invalid",
                 409,
             )
-            need(device not in listed, "restore_invalid", 409)
-            order.append(device)
-            listed[device] = item
+            need(pair not in listed, "restore_invalid", 409)
+            order.append(pair)
+            listed[pair] = item
         need(order == sorted(order), "restore_invalid", 409)
         return listed
 
     def coverage(self, listed, signer, log):
+        """R4 completeness, per (device, person) pair, from this workspace's own chain only
+        (F1 #387): each chain pair of a device in ever_devices (G2 and checkpoint) or in this
+        restore needs a carried entry of the same pair at the same or a stronger reason.
+
+        Returns the `unpublished` hints: revocations the relay holds globally (out of band for
+        this workspace) of a device this workspace knows, which the restore does not carry at
+        their strength under the same pair. They never refuse (provisional, orch-52)."""
         if log != "workspace":
-            return
-        held = {
-            r[0]: r[1]
+            return []
+        carried = {
+            pair: STRENGTH[item["revocation"]["o"]["reason"]] for pair, item in listed.items()
+        }
+        devices = {d for d, _ in listed} | {signer}
+        known = {
+            r[0]
             for r in self.con.execute(
-                "SELECT device_id,reason FROM revocations WHERE device_id IN ("
                 "SELECT device_id FROM ever_devices WHERE workspace_id=?1 UNION "
-                "SELECT device_id FROM checkpoint_ever_devices WHERE workspace_id=?1)",
+                "SELECT device_id FROM checkpoint_ever_devices WHERE workspace_id=?1",
                 (self.ws,),
             )
+        } | devices
+        chain = {
+            (d, p): reason
+            for d, p, reason in self.con.execute(
+                "SELECT device_id,person_id,reason FROM checkpoint_revocations WHERE workspace_id=?",
+                (self.ws,),
+            )
+            if d in known
         }
-        for device in {*listed, signer} - set(held):
-            row = self.con.execute(
-                "SELECT reason FROM revocations WHERE device_id=?", (device,)
-            ).fetchone()
-            if row:
-                held[device] = row[0]
         missing = sorted(
-            d
-            for d, reason in held.items()
-            if d not in listed
-            or STRENGTH[listed[d]["revocation"]["o"]["reason"]] < STRENGTH[reason]
+            {d for (d, p), reason in chain.items() if carried.get((d, p), 0) < STRENGTH[reason]}
         )
         need(not missing, "restore_missing_revocation", 409, devices=missing)
+        unpublished = []
+        for d, p, reason, cursor, record in self.con.execute(
+            "SELECT device_id,person_id,reason,cursor,record FROM revocations ORDER BY device_id"
+        ):
+            if d in known and (d, p) not in chain and carried.get((d, p), 0) < STRENGTH[reason]:
+                unpublished.append(
+                    {
+                        "device_id": d,
+                        "person_id": p,
+                        "reason": reason,
+                        "cursor": cursor,
+                        "digest": digest(bytes(record)),
+                    }
+                )
+        return unpublished
 
     def restore(self, w, genesis, body, target, held, stage, used):
         bundle = body["restore"]
@@ -1080,8 +1118,8 @@ class Relay:
             409,
         )
         listed = self.evidence(line, log)
-        cert = self.owner_policy(w, bundle, listed)
-        self.coverage(listed, cert["device_id"], log)
+        cert = self.owner_policy(w, bundle, {d for d, _ in listed})
+        self.unpublished = self.coverage(listed, cert["device_id"], log)
         at = timestamp(line["at"])
         need(
             (not held or timestamp(held["o"]["at"]) <= at) and at <= timestamp(target["o"]["at"]),
@@ -1129,14 +1167,29 @@ class Relay:
             need(root["head"] == genesis["pin"]["o"]["genesis"], "restore_invalid", 409)
         result = nodes.extend(retained, [event_head(line)])
         need(entries(target).get(log) == result, "restore_invalid", 409)
-        self.apply_evidence(listed)
+        target_hash = checkpoint_hash(target)
+        self.apply_evidence(listed, line["id"], target_hash)
         con, ws = self.con, self.ws
-        for device in {*listed, cert["device_id"]}:
+        for row in self.unpublished:
+            con.execute(
+                "INSERT INTO checkpoint_unpublished VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    ws,
+                    line["id"],
+                    target_hash,
+                    row["device_id"],
+                    row["person_id"],
+                    row["reason"],
+                    row["cursor"],
+                    row["digest"],
+                ),
+            )
+        for device in {d for d, _ in listed} | {cert["device_id"]}:
             con.execute("INSERT OR IGNORE INTO checkpoint_ever_devices VALUES (?,?)", (ws, device))
         transition = {
             "restore_id": line["id"],
             "source_hash": body["source_hash"],
-            "target_hash": checkpoint_hash(target),
+            "target_hash": target_hash,
             "target_n": target["o"]["n"],
             **bundle,
         }
@@ -1151,12 +1204,39 @@ class Relay:
             )
         return log
 
-    def apply_evidence(self, listed):
-        """§19.5 intake in this transaction. A wholly unknown device is registered from its
-        self-certified evidence first, so the registry never contradicts the binding (review
-        A/B); a held revocation is never deleted, only upgraded (§6.2 "no un-revoke")."""
+    def apply_evidence(self, listed, restore_id, target_hash):
+        """§19.5 intake and this workspace's chain pairs, in this transaction. A wholly unknown
+        device is registered from its self-certified evidence first, so the registry never
+        contradicts the binding (review A/B). Neither table ever loses a revocation: the
+        global one only upgrades (§6.2 "no un-revoke"), a chain pair keeps its first evidence
+        and provenance until a stronger reason replaces them (F1 #387: monotonic)."""
         con = self.con
-        for device, item in listed.items():
+        for (device, person), item in listed.items():
+            reason = item["revocation"]["o"]["reason"]
+            row = con.execute(
+                "SELECT reason FROM checkpoint_revocations WHERE workspace_id=? AND device_id=? "
+                "AND person_id=?",
+                (self.ws, device, person),
+            ).fetchone()
+            if row is None or STRENGTH[reason] > STRENGTH[row[0]]:
+                con.execute(
+                    "INSERT INTO checkpoint_revocations VALUES (?,?,?,?,?,?,?,?,?) "
+                    "ON CONFLICT(workspace_id,device_id,person_id) DO UPDATE SET "
+                    "reason=excluded.reason,record=excluded.record,device_cert=excluded.device_cert,"
+                    "pk_pub=excluded.pk_pub,restore_id=excluded.restore_id,"
+                    "target_hash=excluded.target_hash",
+                    (
+                        self.ws,
+                        device,
+                        person,
+                        reason,
+                        P.cj(item["revocation"]),
+                        P.cj(item["device_cert"]),
+                        item["pk_pub"],
+                        restore_id,
+                        target_hash,
+                    ),
+                )
             rev, cert = item["revocation"], item["device_cert"]
             if not con.execute("SELECT 1 FROM devices WHERE device_id=?", (device,)).fetchone():
                 person = cert["o"]["person_id"]

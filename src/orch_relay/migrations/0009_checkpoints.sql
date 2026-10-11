@@ -72,6 +72,24 @@ CREATE INDEX checkpoint_failure_window ON checkpoint_failures(workspace_id, at_m
 CREATE TABLE checkpoint_ever_devices (
     workspace_id TEXT NOT NULL, device_id TEXT NOT NULL, PRIMARY KEY(workspace_id, device_id)
 );
+-- Revocations learned through THIS workspace's accepted restores (F1 #387: completeness never uses
+-- out-of-band evidence), one row per verified (device, person) pair at its strongest reason, with
+-- the evidence and the restore that carried it. Never deleted; a reason only upgrades.
+CREATE TABLE checkpoint_revocations (
+    workspace_id TEXT NOT NULL, device_id TEXT NOT NULL, person_id TEXT NOT NULL,
+    reason TEXT NOT NULL, record BLOB NOT NULL, device_cert BLOB NOT NULL, pk_pub TEXT NOT NULL,
+    restore_id TEXT NOT NULL, target_hash TEXT NOT NULL,
+    PRIMARY KEY(workspace_id, device_id, person_id)
+);
+-- revocation.unpublished (provisional, orch-52): globally held revocations an accepted workspace
+-- restore did not carry, with an authenticated reference (the §19.5 feed cursor and the record's
+-- digest) for later retrieval. Durable; the retrieval route is designed separately.
+CREATE TABLE checkpoint_unpublished (
+    workspace_id TEXT NOT NULL, restore_id TEXT NOT NULL, target_hash TEXT NOT NULL,
+    device_id TEXT NOT NULL, person_id TEXT NOT NULL, reason TEXT NOT NULL,
+    cursor INTEGER NOT NULL, digest TEXT NOT NULL,
+    PRIMARY KEY(workspace_id, restore_id, device_id, person_id)
+);
 -- P3-D29: a person first known from self-certified restore evidence. The account row exists
 -- only so the revoked device and its revocation can be stored; it grants nothing until the
 -- person creates the account by invite.

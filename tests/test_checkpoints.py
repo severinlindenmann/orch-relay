@@ -756,3 +756,186 @@ def test_owner_check_fails_closed_when_the_revocation_lookup_errors(tmp_path, mo
         relay = Relay(None, con, WS, 1790000000000)
         with pytest.raises(sqlite3.OperationalError):
             relay.owner(relay.workspace(), bundle["cert"], 1790000000000)
+
+
+# --- per-workspace chain revocations and revocation.unpublished (F1 #387, orch-52; provisional) ---
+
+LAPTOP = "146f7f5f8b446934e01b8bdee16426fa"
+ALICE = "5c0574d08d9b869beaa7b630cc83893d"
+BOB = "42f83168aabd846982483297b14e7301"
+
+
+def revocation_of(person, reason, key, ms=1789990000000):
+    from directory_support import signed
+
+    return signed(
+        {
+            "v": 2,
+            "suite": 2,
+            "kind": "revocation",
+            "person_id": person,
+            "device_id": LAPTOP,
+            "revoked_ms": ms,
+            "reason": reason,
+        },
+        key,
+    )
+
+
+def run_case(tmp_path, name, prepare):
+    """Seed a vector case, apply `prepare(con)` and replay its steps; the last step's result."""
+    from checkpoint_support import CORPUS, seed, step
+    from fastapi.testclient import TestClient
+
+    from orch_relay.app import create_app
+
+    case = next(c for c in CORPUS["suites"]["2"]["checkpoints"]["cases"] if c["name"] == name)
+    with TestClient(create_app(tmp_path)) as client:
+        path = tmp_path / db.DB_NAME
+        seed(path, case["state"], case)
+        with closing(db.connect(path)) as con, con:
+            prepare(con)
+        for s in case["steps"]:
+            result = step(client, path, s["input"], case)
+        with closing(db.connect(path)) as con:
+            tables = {
+                t: sorted(con.execute(f"SELECT * FROM {t}"))
+                for t in ("checkpoint_revocations", "checkpoint_unpublished")
+            }
+        return result, tables
+
+
+def global_revocation(con, person, reason, key, cert=None):
+    from orch_relay import proto as P
+
+    if cert is not None:
+        o = cert["o"]
+        con.execute(
+            "INSERT OR IGNORE INTO devices VALUES (?,?,?,?,?,?,?)",
+            (
+                LAPTOP,
+                person,
+                P.cj(cert),
+                o["dk_sig_pub"],
+                o["dk_kx_pub"],
+                P.cj(o["scopes_max"]),
+                o["expires_ms"],
+            ),
+        )
+    rev = revocation_of(person, reason, key)
+    con.execute(
+        "INSERT INTO revocations VALUES (?,?,?,?,?,"
+        "(SELECT coalesce(max(cursor),0)+1 FROM revocations))",
+        (LAPTOP, person, P.cj(rev), reason, 0),
+    )
+
+
+@pytest.mark.parametrize("where", ["g2_ever", "checkpoint_ever", "unknown"])
+def test_out_of_band_revocation_is_never_demanded_and_reported_unpublished(tmp_path, where):
+    # A revocation the relay holds globally (another workspace's restore, the §19.5 feed) is out of
+    # band for this workspace: the restore that omits it is accepted, never restore_missing_revocation,
+    # and a device this workspace knows is reported in `unpublished` with a reference.
+    from directory_support import V
+
+    def prepare(con):
+        global_revocation(
+            con, ALICE, "compromised", "person_alice.sig", V["certs"]["signed"]["laptop"]
+        )
+        if where == "g2_ever":  # a revoked former list member
+            con.execute("INSERT INTO ever_devices VALUES (?,?,1)", (WS, LAPTOP))
+        elif where == "checkpoint_ever":
+            con.execute("INSERT INTO checkpoint_ever_devices VALUES (?,?)", (WS, LAPTOP))
+
+    result, tables = run_case(tmp_path, "workspace_restore_and_exact_retry", prepare)
+    assert result["status"] == 200 and result["result"] == "accepted", result
+    if where == "unknown":  # unknown-device evidence is not forwarded
+        assert "unpublished" not in result and tables["checkpoint_unpublished"] == []
+    else:
+        assert result["unpublished"] == ["d_" + LAPTOP]
+        (ref,) = result["unpublished_refs"]
+        assert (ref["device_id"], ref["person_id"], ref["reason"]) == (LAPTOP, ALICE, "compromised")
+        (row,) = tables["checkpoint_unpublished"]
+        assert row[3:6] == (LAPTOP, ALICE, "compromised") and row[6] == ref["cursor"]
+    assert tables["checkpoint_revocations"] == []  # out of band never becomes a chain pair
+
+
+def test_listed_weaker_than_held_out_of_band_is_unpublished(tmp_path):
+    # A carried entry weaker than the relay's global revocation of that pair is accepted (it is not
+    # this workspace's chain) and reported; the global row is not downgraded.
+    from directory_support import V
+
+    result, tables = run_case(
+        tmp_path,
+        "B1_evidence_sorted_pair",
+        lambda con: global_revocation(
+            con, ALICE, "compromised", "person_alice.sig", V["certs"]["signed"]["laptop"]
+        ),
+    )
+    assert result["result"] == "accepted" and result["unpublished"] == ["d_" + LAPTOP], result
+    chain = {(r[1], r[2]): r[3] for r in tables["checkpoint_revocations"]}
+    assert chain[(LAPTOP, ALICE)] == "lost"
+
+
+def test_completeness_is_per_device_and_person_pair(tmp_path):
+    # Two chain pairs for one device: carrying alice's entry does not satisfy bob's pair.
+    from directory_support import V, signed
+
+    from orch_relay import proto as P
+
+    bob_cert = signed({**V["certs"]["signed"]["laptop"]["o"], "person_id": BOB}, "person_bob.sig")
+    bob_pk = P.b64u(bytes.fromhex(V["keys"]["person_bob.sig"]["pub"]))
+
+    def prepare(con):
+        con.execute(
+            "INSERT INTO checkpoint_revocations VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                WS,
+                LAPTOP,
+                BOB,
+                "lost",
+                P.cj(revocation_of(BOB, "lost", "person_bob.sig")),
+                P.cj(bob_cert),
+                bob_pk,
+                "seed",
+                "seed",
+            ),
+        )
+
+    result, _ = run_case(tmp_path, "B1_stronger", prepare)
+    assert result == {"status": 409, "error": "restore_missing_revocation", "devices": [LAPTOP]}
+
+
+def test_chain_pairs_are_monotonic_and_keep_their_first_evidence(tmp_path):
+    from orch_relay import proto as P
+
+    before = {}
+
+    def prepare(con):
+        before.update(
+            {(r[1], r[2]): r for r in con.execute("SELECT * FROM checkpoint_revocations")}
+        )
+
+    # Same strength, other bytes: the stored pair keeps its reason, record and provenance.
+    result, tables = run_case(tmp_path / "same", "B1_same_strength_other_bytes", prepare)
+    assert result["result"] == "accepted"
+    after = {(r[1], r[2]): r for r in tables["checkpoint_revocations"]}
+    assert after[(LAPTOP, ALICE)] == before[(LAPTOP, ALICE)]
+    # Stronger: upgraded, with the carrying restore as provenance; never deleted either way.
+    result, tables = run_case(tmp_path / "stronger", "B1_stronger", lambda con: None)
+    row = {(r[1], r[2]): r for r in tables["checkpoint_revocations"]}[(LAPTOP, ALICE)]
+    assert row[3] == "compromised" and row[7] != "seed"
+    assert P.parse_json(row[4])["o"]["reason"] == "compromised"
+
+
+def test_ticket_restores_report_nothing_unpublished(tmp_path):
+    from directory_support import V
+
+    def prepare(con):
+        global_revocation(
+            con, ALICE, "compromised", "person_alice.sig", V["certs"]["signed"]["laptop"]
+        )
+        con.execute("INSERT INTO checkpoint_ever_devices VALUES (?,?)", (WS, LAPTOP))
+
+    result, tables = run_case(tmp_path, "ticket_restore", prepare)
+    assert result["result"] == "accepted" and "unpublished" not in result
+    assert tables["checkpoint_unpublished"] == []

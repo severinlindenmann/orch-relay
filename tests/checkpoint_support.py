@@ -185,6 +185,30 @@ def seed(path, state, case, now=None, ws=WS):
                 "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
                 (d, rev["o"]["person_id"], P.cj(rev), rev["o"]["reason"], 0, cursor),
             )
+        # The reference's held (workspace) revocations are this workspace's chain pairs.
+        provenance = {}
+        for t in state["transitions"]:
+            for item in t["line"]["revocations"]:
+                o = item["revocation"]["o"]
+                provenance.setdefault(
+                    (o["device_id"], o["person_id"]), (t["restore_id"], t["target_hash"])
+                )
+        for d, rev in state["revocations"].items():
+            person = rev["o"]["person_id"]
+            ref = provenance.get((d, person), ("seed", "seed"))
+            con.execute(
+                "INSERT INTO checkpoint_revocations VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    ws,
+                    d,
+                    person,
+                    rev["o"]["reason"],
+                    P.cj(rev),
+                    P.cj(certificate(pool, d, person)),
+                    pool["pks"][person],
+                    *ref,
+                ),
+            )
         if state["genesis"]:
             con.execute("INSERT INTO checkpoint_genesis VALUES (?,?)", (ws, P.cj(state["genesis"])))
         for h, c in state["checkpoints"].items():
@@ -412,6 +436,9 @@ def project_state(state, now):
             if b["until_ms"] > now
         },
         "revocations": {d: (r["o"]["person_id"], r["o"]["reason"]) for d, r in revs.items()},
+        "chain": {
+            (d, r["o"]["person_id"]): r["o"]["reason"] for d, r in state["revocations"].items()
+        },
         "ever": set(state["ever_devices"]),
         "staging": {
             tuple(k.split("/")): (
@@ -493,6 +520,13 @@ def project_db(path, now, ws=WS):
             "revocations": {
                 d: (p, r)
                 for d, p, r in con.execute("SELECT device_id,person_id,reason FROM revocations")
+            },
+            "chain": {
+                (d, p): r
+                for d, p, r in con.execute(
+                    "SELECT device_id,person_id,reason FROM checkpoint_revocations WHERE workspace_id=?",
+                    (ws,),
+                )
             },
             "ever": {
                 r[0]

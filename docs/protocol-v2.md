@@ -3060,6 +3060,21 @@ rules and must be confirmed before G4 ships:
    Parsing and the checks that need no database state run after authorization and before the directory lock;
    their refusals are raised in the transaction at the position above, so codes and charging are unchanged.
    Failure rows stop at the budget.
+8. **Workspace revocations and `unpublished` (G4 round 2; provisional against orch-core's coming F1 PR after
+   #387 and orch-52's decision of 11 Oct).** R4 completeness uses only revocations learned through this
+   workspace's own accepted restores: the relay keeps them in `checkpoint_revocations`, one row per verified
+   `(device_id, person_id)` pair at its strongest reason with the carried evidence and the carrying restore and
+   target, written in the restore's transaction and never deleted. Each pair of a device in this workspace's
+   ever-devices or in the restore needs a carried entry of the **same pair** at the same or a stronger reason;
+   another person's entry never satisfies it. A restore's `revocations` are unique and sorted per
+   `(device_id, person_id)`. Bindings for carried evidence come from this workspace's pairs, then the device
+   registry; out-of-band evidence never binds. A revocation the relay holds globally (the §19.5 feed, another
+   workspace's restore) never causes `restore_missing_revocation`: when an accepted workspace restore omits it
+   or carries it weaker under the same pair, and the device is known to this workspace, the result carries
+   `unpublished: ["d_<device>", ...]` and `unpublished_refs: [{device_id, person_id, reason, cursor, digest}]`
+   (the §19.5 revocation cursor and the record's digest), stored durably in `checkpoint_unpublished`. Both
+   fields are additive and absent when empty; ticket restores report none. The retrieval route is designed
+   separately. The signer refusal still uses every revocation the relay holds, by device id.
    **P3-D29:** self-certified evidence for a person the relay has no account for creates an evidence-only
    account row (needed to store the device and its revocation); it registers no device, owns no card and
    joins no list until the person redeems an invite, which turns it into the account.
