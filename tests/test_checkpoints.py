@@ -118,3 +118,139 @@ def test_proof_source_must_be_on_the_endpoint_branch(history, tmp_path):
         with pytest.raises(Refusal):
             nodes.page(accs[200], fork["acc"], 10)
         con.rollback()
+
+
+# --- P3-D29: a person first known from self-certified restore evidence gains no account powers ---
+
+
+def publish_self_certified_restore(client, path):
+    """Accepted H(n=1); a workspace restore whose evidence revokes a device of a person the relay
+    has no account for (the intruder key, review A/B); returns that person's id."""
+    from checkpoint_support import CORPUS, http, seed
+
+    from ref import checkpoints as C
+
+    cs = {c["name"]: c for c in CORPUS["suites"]["2"]["checkpoints"]["cases"]}
+    accepted = cs["B1_unknown_device_self_certifying"]["state"]
+    after = cs["B1_self_certified_registers_globally"]["state"]
+    t = after["transitions"][0]
+    target = after["checkpoints"][t["target_hash"]]["checkpoint"]
+    nodes = accepted["nodes"]["workspace"]
+    by_seq = {n["seq"]: n for n in nodes.values()}
+    page = {
+        "kind": "abandoned",
+        "log": "workspace",
+        "after_seq": 2,
+        "from_acc": by_seq[2]["acc"],
+        "heads": [by_seq[3]["head"], by_seq[4]["head"]],
+    }
+    page["digest"] = C.page_digest(page)
+    seed(path, accepted, cs["B1_self_certified_registers_globally"])
+    client.app.state.directory.clock = lambda: 1790000000000
+    host = {"Authorization": "Bearer FAKE-workspace", "Orch-Holder": "1"}
+    base = f"/v2/workspaces/{WS}/staging/{t['source_hash']}/{t['target_hash']}"
+    assert http(client, "PUT", base + "/pages/0", host, body=page)["status"] == 200
+    manifest = {"pages": [C.descriptor(0, page)]}
+    assert http(client, "PUT", base + "/manifest", host, body=manifest)["complete"] is True
+    bundle = {k: t[k] for k in ("line", "cert", "authz", "log")}
+    body = {"checkpoint": target, "source_hash": t["source_hash"], "restore": bundle}
+    result = http(client, "PUT", f"/v2/workspaces/{WS}/checkpoint", host, body=body)
+    assert result["result"] == "accepted", result
+    return t["line"]["revocations"][0]["revocation"]["o"]["person_id"]
+
+
+def test_evidence_only_person_cannot_register_devices_or_cards(tmp_path):
+    from directory_support import V, sign, signed
+    from fastapi.testclient import TestClient
+
+    from orch_relay import proto as P
+    from orch_relay.app import create_app
+
+    with TestClient(create_app(tmp_path)) as client:
+        path = tmp_path / db.DB_NAME
+        person = publish_self_certified_restore(client, path)
+        with closing(db.connect(path)) as con:
+            assert con.execute(
+                "SELECT 1 FROM evidence_persons WHERE person_id=?", (person,)
+            ).fetchone()
+            assert con.execute(
+                "SELECT reason FROM revocations WHERE person_id=?", (person,)
+            ).fetchone()
+        # A fresh device certified by the intruder's PK: without the guard this registers a live
+        # device for a person who never redeemed an invite.
+        fresh = signed(
+            {**V["certs"]["signed"]["primary"]["o"], "person_id": person}, "intruder.sig"
+        )
+        r = client.put(f"/v2/devices/{fresh['o']['device_id']}", json={"cert": fresh})
+        assert (r.status_code, r.json()) == (403, {"error": "other_person"}), r.text
+        # Redeeming an invite turns the evidence-only row into the person's account.
+        from orch_relay.directory import digest as hexdigest
+
+        with closing(db.connect(path)) as con, con:
+            con.execute(
+                "INSERT INTO invites(code_hash,expires_ms) VALUES (?,?)",
+                (hexdigest(b"FAKE-invite-q"), 1790000100000),
+            )
+        client.app.state.directory.origin = "https://relay.example"
+        challenge = client.post("/v2/session/challenge", json={}).json()["challenge"]
+        pk = P.b64u(bytes.fromhex(V["keys"]["intruder.sig"]["pub"]))
+        sig = sign(
+            "primary.sig",
+            P.auth_bytes(
+                "https://relay.example", P.unb64u(challenge), "device", fresh["o"]["device_id"]
+            ),
+        )
+        r = client.post(
+            "/v2/accounts",
+            json={
+                "invite": "FAKE-invite-q",
+                "pk_pub": pk,
+                "device_cert": fresh,
+                "challenge": challenge,
+                "sig": sig,
+            },
+        )
+        assert (r.status_code, r.json()) == (200, {"person_id": person}), r.text
+        with closing(db.connect(path)) as con:
+            assert not con.execute("SELECT 1 FROM evidence_persons").fetchone()
+
+
+@pytest.mark.parametrize("manifest_first", [False, True])
+def test_staging_page_put_cost_does_not_grow_with_staged_pages(tmp_path, manifest_first):
+    # Many small pages must not make each PUT re-read the whole set or the manifest (O(n^2)).
+    from orch_relay import proto as P
+    from orch_relay.checkpoints import Relay, descriptor, page_digest
+
+    path = tmp_path / db.DB_NAME
+    db.migrate(path)
+    target = digest(b"FAKE target")
+    costs = {}
+    with closing(db.connect(path)) as con, con:
+        relay = Relay(None, con, WS, 1790000000000)
+        pages = []
+        for i in range(1200):
+            page = {
+                "kind": "appended",
+                "log": "workspace",
+                "after_seq": i,
+                "from_acc": ZERO,
+                "heads": [digest(f"FAKE staged {i}".encode())],
+            }
+            page["digest"] = page_digest(page)
+            pages.append(page)
+        if manifest_first:
+            manifest = {"pages": [descriptor(i, p) for i, p in enumerate(pages)]}
+            relay.put_staging(None, target, None, manifest, P.cj(manifest), 1 << 40)
+        for i, page in enumerate(pages):
+            wire = P.cj(page)
+            steps = [0]
+
+            def tick():
+                steps[0] += 1
+                return 0
+
+            con.set_progress_handler(tick, 16)
+            relay.put_staging(None, target, i, page, wire, 1 << 40)
+            con.set_progress_handler(None, 0)
+            costs[i] = steps[0]
+    assert costs[1199] <= 2 * costs[5] + 20, (costs[5], costs[1199])
