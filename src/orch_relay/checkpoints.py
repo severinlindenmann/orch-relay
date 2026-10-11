@@ -1008,7 +1008,7 @@ class Relay:
         """Verified entries keyed by (device, person): a restore may carry one entry per pair,
         sorted by (device_id, person_id) (orch-52 decision point 4, provisional)."""
         need(log == "workspace" or line["revocations"] == [], "restore_invalid", 409)
-        listed, order = {}, []
+        listed, order, unknown = {}, [], {}
         for item in line["revocations"]:
             need(
                 isinstance(item, dict) and set(item) == {"revocation", "device_cert", "pk_pub"},
@@ -1023,8 +1023,14 @@ class Relay:
             need("ok" in rev, "restore_invalid", 409)
             pair = (rev["ok"]["device_id"], rev["ok"]["person_id"])
             persons = self.known_persons(pair[0])
+            if not persons:
+                # A wholly unknown device is self-certified by exactly one person per restore: its
+                # first entry binds it (registered globally on acceptance), so another person's
+                # entry for it in the same restore is contradicting evidence, as it would be in
+                # the next restore (review: identity binding).
+                persons = unknown.setdefault(pair[0], {pair[1]: item["pk_pub"]})
             need(
-                not persons or (pair[1] in persons and persons[pair[1]] in (None, item["pk_pub"])),
+                pair[1] in persons and persons[pair[1]] in (None, item["pk_pub"]),
                 "restore_invalid",
                 409,
             )
