@@ -19,6 +19,7 @@ def add_checkpoints_g4(out):
     cs = {c['name']: c for c in v['checkpoints']['cases']}
     accepted = cs['checkpoint_gone_all_endpoint_routes']['state']
     pinned = cs['first_checkpoint_full_proof']['state']
+    root = pinned['genesis']['pin']['o']['genesis']
     base_h = C.checkpoint_hash(accepted['held'])
     unknown = C.digest(b'FAKE G4 unknown endpoint')
     cases = []
@@ -69,6 +70,31 @@ def add_checkpoints_g4(out):
     alternate = out['suites']['1']['checkpoints']['objects']['checkpoint']
     run(c, st, {'op': 'publish', 'now_ms': NOW, 'body': {'checkpoint': alternate, 'source_hash': None}},
         'wrong_suite')
+
+    # A staged page the final publication never uses is refused (no unused evidence, §19.8).
+    missing = cs['staging_missing_page']['steps']
+    target = missing[-1]['input']['body']['checkpoint']
+    used = cs['staging_immutable_page_and_manifest']['steps'][0]['input']
+    extra = {'kind': 'retained', 'log': 'workspace', 'after_seq': 0, 'from_acc': C.ZERO, 'heads': [root]}
+    extra['digest'] = C.page_digest(extra)
+    c, st = new('unused_staged_page_refused', accepted)
+    run(c, st, used)
+    run(c, st, {**used, 'i': 1, 'body': extra})
+    manifest_input = {k: x for k, x in used.items() if k != 'i'}
+    manifest_input.update(op='manifest', body={'pages': [C.descriptor(0, used['body']), C.descriptor(1, extra)]})
+    run(c, st, manifest_input)
+    run(c, st, {'op': 'publish', 'now_ms': NOW, 'body': {'checkpoint': target, 'source_hash': base_h}},
+        'chain_diverged')
+
+    # A proof source at the endpoint's height on another branch is not on E's branch (404),
+    # even though no head separates them.
+    restored = cs['historical_proof_abandoned_branch']['state']
+    held = restored['held']
+    other = next(n['acc'] for n in restored['nodes']['workspace'].values()
+                 if n['seq'] == held['o']['workspace_log']['seq'] and n['acc'] != held['o']['workspace_log']['acc'])
+    c, st = new('proof_source_other_branch_same_height', restored)
+    run(c, st, {'op': 'proof', 'now_ms': NOW, 'to': C.checkpoint_hash(held), 'log': 'workspace', 'from': other},
+        'not_found')
 
     # Cross-workspace isolation. Workspace A holds n=1, a pinned baseline and one staged page; B is
     # another workspace of the same owner whose only member is Bob's phone. A's hashes mean nothing

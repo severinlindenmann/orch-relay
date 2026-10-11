@@ -393,3 +393,77 @@ def test_workspace_b_cannot_touch_workspace_a_objects(tmp_path):
             {"Authorization": "Bearer FAKE-workspace-b", "Orch-Holder": "1"},
         )
         assert r == {"status": 403, "error": "not_eligible"}
+
+
+# --- W(g) is the workspace session only; quotas count real bytes -----------------------------------
+
+
+@pytest.mark.parametrize(
+    "fixture", ["genesis", "staging_page", "staging_manifest", "baseline_post", "checkpoint_put"]
+)
+def test_member_device_cannot_use_w_routes_even_with_the_holder_generation(tmp_path, fixture):
+    import json
+    from pathlib import Path
+
+    from checkpoint_support import prepare_fixture
+    from fastapi.testclient import TestClient
+
+    from orch_relay import proto as P
+    from orch_relay.app import create_app
+
+    cases = json.loads(Path(f"tests/http_fixtures/{fixture}.json").read_text())["cases"]
+    success = cases[0]
+    with TestClient(create_app(tmp_path)) as client:
+        path = tmp_path / db.DB_NAME
+        prepare_fixture(client, path, success, success)
+        with closing(db.connect(path)) as con, con:  # the phone is a member with operate
+            con.execute(
+                "UPDATE members SET scopes=? WHERE device_id=?",
+                (P.cj(["look", "decide", "operate"]), "4177b27d8e4ac182e8d388b247d2b136"),
+            )
+        request = success["request"]
+        headers = {**request["headers"], "Authorization": "Bearer FAKE-device"}
+        r = client.request(
+            request["method"],
+            request["path"],
+            params=request["query"],
+            headers=headers,
+            content=P.cj(request["json"]),
+        )
+        assert (r.status_code, r.json()) == (403, {"error": "not_eligible"}), r.text
+
+
+def test_staging_byte_quota_counts_pages_and_manifest_and_retries_are_free(tmp_path, monkeypatch):
+    from orch_relay import checkpoints
+    from orch_relay import proto as P
+    from orch_relay.checkpoints import Relay, descriptor, page_digest
+    from orch_relay.directory import Refusal
+
+    path = tmp_path / db.DB_NAME
+    db.migrate(path)
+    page = {
+        "kind": "appended",
+        "log": "workspace",
+        "after_seq": 0,
+        "from_acc": ZERO,
+        "heads": [digest(b"FAKE quota")],
+    }
+    page["digest"] = page_digest(page)
+    wire = P.cj(page)
+    manifest = {"pages": [descriptor(0, page)]}
+    target = digest(b"FAKE quota target")
+    monkeypatch.setattr(checkpoints, "STAGE_CAP", len(wire) + len(P.cj(manifest)) - 1)
+    with closing(db.connect(path)) as con, con:
+        relay = Relay(None, con, WS, 1790000000000)
+        relay.put_staging(None, target, 0, page, wire, 1 << 40)
+        relay.put_staging(None, target, 0, page, wire, 1 << 40)  # identical retry: not charged
+        with pytest.raises(Refusal) as refused:
+            relay.put_staging(None, target, None, manifest, P.cj(manifest), 1 << 40)
+        assert (refused.value.code, refused.value.status) == ("quota_exceeded", 429)
+        assert con.execute("SELECT bytes, manifest FROM checkpoint_staging").fetchone() == (
+            len(wire),
+            None,
+        )
+        other = digest(b"FAKE quota other")
+        with pytest.raises(Refusal):  # a second set shares the same workspace bytes
+            relay.put_staging(None, other, 0, page, wire, 1 << 40)
