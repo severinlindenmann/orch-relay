@@ -1,7 +1,7 @@
 """P3-D12/13/18–25 checkpoint relay contract; test support, never server code.
 
 State is JSON-portable. dispatch preflights on a copy and commits only a success.
-F1 event/checkpoint encodings are pinned to orch-core 4f00d9ce (the merge of #377).
+F1 event/checkpoint encodings and the receiver are pinned to orch-core e9a26d95 (#387, on top of #377).
 """
 import copy
 import re
@@ -599,7 +599,7 @@ def baseline(state, body, now, delete=False, role=None):
 
 # ---------------------------------------------------------------------------------------------
 # Device side (§19.8 "Device synchronisation"): the checkpoint-only receiver and its sync walk.
-# judge_offer ports orch-core 4f00d9ce (#377) store/checkpoints.judge_offer with the relay's primitives and
+# judge_offer ports orch-core e9a26d95 (#387) store/checkpoints.judge_offer with the relay's primitives and
 # returns F1's codes, so F1's transition_cases/workspace_n_offers run against it unchanged.
 # ---------------------------------------------------------------------------------------------
 DIVERGED, INCOMPLETE, FUTURE = 'chain.diverged', 'sync.incomplete', 'checkpoint.future'
@@ -642,70 +642,82 @@ def offer_ok(S, o):
         return False
 
 
-def judge_offer(S, held, offered, *, genesis, workspace_id, now, wsk_pub, known_devices, restore=None, applied=(),
-                proofs=None, known=(), revoked=(), card=None, learned_later=(), initial_proof=False):
-    """held/offered are checkpoint `o` objects; now is the receiver clock in ms.
-    Returns (code, recorded id, alarms), orch-core's Verdict.
+def verdict(code, recorded=None, alarms=(), unpublished=()):
+    """orch-core's Verdict as a tuple: (code, restore_id, alarms, unpublished)."""
+    return code, recorded, alarms, unpublished
 
-    Ports orch-core judge_offer at 4f00d9ce (#377: ReceiverView, Verdict), F1 codes included.
-    known_devices ({device_id: {person_id, pk_pub?}}) is required, as every ReceiverView field is (B1): {} says
-    the receiver knows no device; it binds carried evidence for every device the receiver knows, active or
-    revoked. learned_later are revocations first learned after this judgment (a higher-n bundle of the walk):
-    they never refuse; a compromised one of an accepted restore's signer is reported in alarms (C3).
-    Relay additions: `revoked` (device ids learned out of band; they refuse a signer but are not demanded in
-    a restore's evidence, protocol-v2 §19.8) and initial_proof (full proof from acc_0 for a first checkpoint,
-    where F1 accepts it without ancestry). The walk passes the pairing-pinned owner PK as restore['pk_pub']."""
+
+def judge_offer(S, held, offered, *, genesis, workspace_id, now, wsk_pub, known_devices, known, local, learned_later,
+                restore=None, applied=(), proofs=None, card=None, initial_proof=False):
+    """held/offered are checkpoint `o` objects; now is the receiver clock in ms.
+    Returns (code, recorded id, alarms, unpublished), orch-core's Verdict.
+
+    Ports orch-core judge_offer at e9a26d95 (#387: ReceiverView.local_revocations, Verdict.unpublished), F1 codes
+    included. Like F1's ReceiverView, every view field is required (B1): known_devices ({device_id: {person_id,
+    pk_pub?}}; {} says the receiver knows no device), known (the chain-learned revocations held when judging:
+    signer refusal, evidence identity, completeness), local (every other verified revocation held when judging, out
+    of band: signer refusal and evidence identity only, never completeness; never filtered) and learned_later
+    (revocations first learned after this judgment: never refuse; a compromised one of an accepted restore's signer,
+    matched by device and person, is reported in alarms, C3). Entries of known/local/learned_later are
+    {revocation, pk_pub?, ...}; further fields (device_cert, provenance) are ignored here. A held revocation refuses
+    the signer only when it names the signer's device and person. An accepted workspace restore reports in
+    unpublished the sorted, de-duplicated d_ ids of local revocations it does not carry, or carries weaker
+    (revocation.unpublished, non-blocking). Relay addition: initial_proof (full proof from acc_0 for a first
+    checkpoint, where F1 accepts it without ancestry). The walk passes the pairing-pinned owner PK as
+    restore['pk_pub']."""
     if not offer_ok(S, offered):
-        return DIVERGED, None, ()
+        return verdict(DIVERGED)
     if offered['genesis'] != genesis:
-        return 'trust.genesis_mismatch', None, ()
+        return verdict('trust.genesis_mismatch')
     if offered['workspace_id'] != workspace_id or (held and held['workspace_id'] != workspace_id):
-        return DIVERGED, None, ()
+        return verdict(DIVERGED)
     h = {'workspace': held['workspace_log'], **held['tickets']} if held else {}
     o = {'workspace': offered['workspace_log'], **offered['tickets']}
     proofs = {} if proofs is None else proofs
     if held and offered['n'] == held['n']:
-        return ('ok' if offered == held else DIVERGED), None, ()
+        return verdict('ok' if offered == held else DIVERGED)
     if held and offered['n'] < held['n']:
         bad = any(k not in h or v['seq'] > h[k]['seq'] or (v['seq'] == h[k]['seq'] and v != h[k]) for k, v in o.items())
-        return (DIVERGED if bad else 'ignored'), None, ()
+        return verdict(DIVERGED if bad else 'ignored')
     if timestamp(offered['at']) > now + SKEW:
-        return FUTURE, None, ()
+        return verdict(FUTURE)
     if held and (offered['at'] < held['at'] or h.keys() - o.keys()):
-        return DIVERGED, None, ()
+        return verdict(DIVERGED)
     if not isinstance(proofs, dict):
-        return INCOMPLETE, None, ()
+        return verdict(INCOMPLETE)
     restored = None
     if restore is not None:
         code, restored = judge_restore(S, held, offered, h, o, restore, proofs, genesis, applied, wsk_pub,
-                                       known, revoked, card, known_devices)
+                                       known, local, card, known_devices)
         if code != 'ok':
-            return code, None, ()
+            return verdict(code)
     if held is None and restore is None and not initial_proof:
-        return 'ok', None, ()
+        return verdict('ok')
     for log, entry in o.items():
         if restored and log == restored[0]:
             continue
         old = h.get(log, EMPTY)
         if entry['seq'] < old['seq'] or (entry['seq'] == old['seq'] and entry != old):
-            return DIVERGED, None, ()
+            return verdict(DIVERGED)
         heads = proofs.get(log, [])
         if not extension(old, entry, heads):
-            return INCOMPLETE, None, ()
+            return verdict(INCOMPLETE)
         if initial_proof and log == 'workspace' and old['seq'] == 0 and heads[0] != genesis:
-            return INCOMPLETE, None, ()
+            return verdict(INCOMPLETE)
     if not restored:
-        return 'ok', None, ()
-    _, restore_id, signer = restored
-    # C3: learned after the judgment, a compromised revocation of the signer alarms and never refuses.
+        return verdict('ok')
+    _, restore_id, signer, signer_person, unpublished = restored
+    # C3: learned after the judgment, a compromised revocation of the signer (device and person) alarms, never refuses.
     alarms = tuple(sorted({'d_' + signer for later in learned_later
                            if later['revocation']['o']['device_id'] == signer and
+                           later['revocation']['o']['person_id'] == signer_person and
                            later['revocation']['o']['reason'] == 'compromised'}))
-    return 'ok', restore_id, alarms
+    return verdict('ok', restore_id, alarms, unpublished)
 
 
-def judge_restore(S, held, offered, h, o, restore, proofs, genesis, applied, wsk_pub, known, revoked, card,
+def judge_restore(S, held, offered, h, o, restore, proofs, genesis, applied, wsk_pub, known, local, card,
                   known_devices):
+    """The restore half of judge_offer: ('ok', (log, id, signer, signer person, unpublished)) or (code, None)."""
     diverged = DIVERGED, None
     try:
         ev, log, c, target = restore['event'], restore['log'], restore['C'], restore['T']
@@ -751,28 +763,31 @@ def judge_restore(S, held, offered, h, o, restore, proofs, genesis, applied, wsk
         if log != 'workspace' and ev['ws_seq'] > offered['workspace_log']['seq']:
             return diverged
         carried = {item['revocation']['o']['device_id']: item for item in ev['revocations']}
-        revocation_evidence(S, None, ev, log)  # the device binds evidence through known_devices below
-        signer = cert['device_id']
-        if signer in carried or signer in revoked:
-            return diverged
-        for d, item in carried.items():
-            # Evidence for a device the receiver knows (active or revoked) is from its person and key.
-            kd = known_devices.get(d)
-            if kd is not None and (item['revocation']['o']['person_id'] != kd['person_id'] or
-                                   (kd.get('pk_pub') is not None and item['pk_pub'] != kd['pk_pub'])):
+        revocation_evidence(S, None, ev, log)  # the device binds evidence through its knowledge below
+        signer, signer_person = cert['device_id'], cert['person_id']  # the delegation owner (checked above)
+        if signer in carried:
+            return diverged  # the bundle revokes its own signer: a log-free receiver cannot place the revocation
+        # Evidence identity (F1 §5.10, orch-core #377/#387): a listed entry for a device the receiver knows, active or
+        # revoked, from known_devices or either revocation collection, is of that device's person (and stored key).
+        held_revs = [*known, *local]
+        knowledge = [(d, kd['person_id'], kd.get('pk_pub')) for d, kd in known_devices.items()]
+        knowledge += [(k['revocation']['o']['device_id'], k['revocation']['o']['person_id'], k.get('pk_pub'))
+                      for k in held_revs]
+        for d, person, pk_pub in knowledge:
+            got = carried.get(d)
+            if got is not None and (got['revocation']['o']['person_id'] != person or
+                                    (pk_pub is not None and got['pk_pub'] != pk_pub)):
                 return diverged
-        for item in known:
+        # C3: a held revocation of the signer, chain-learned or out of band, refuses at any reason and any host-chosen
+        # position; it must name the signer's device and person (another person's "revocation" of this device id is
+        # not a revocation of this signing identity, orch-core #387).
+        if any(k['revocation']['o']['device_id'] == signer and k['revocation']['o']['person_id'] == signer_person
+               for k in held_revs):
+            return diverged
+        for item in known:  # completeness: chain-learned evidence only, a workspace restore carries it at its strength
             rev = item['revocation']['o']
             got = carried.get(rev['device_id'])
-            # Review 1: any revocation held when judging refuses its signer, whatever the reason.
-            if rev['device_id'] == signer:
-                return diverged
-            # Evidence for a device the receiver knows is from its known person (and stored key).
-            if got is not None and (got['revocation']['o']['person_id'] != rev['person_id'] or
-                                    (item.get('pk_pub') is not None and got['pk_pub'] != item['pk_pub'])):
-                return diverged
-            if log == 'workspace' and (got is None or (
-                    rev['reason'] == 'compromised' and got['revocation']['o']['reason'] != 'compromised')):
+            if log == 'workspace' and (got is None or STRENGTH[got['revocation']['o']['reason']] < STRENGTH[rev['reason']]):
                 return diverged
         acc = restore.get('acc_from')
         try:
@@ -807,7 +822,18 @@ def judge_restore(S, held, offered, h, o, restore, proofs, genesis, applied, wsk
         # A consistent proof whose first head is another event: T is signed over another head (orch-core #377).
         if tail[0] != event_head(ev):
             return diverged
-        return 'ok', (log, ev['id'], signer)
+        unpublished = set()
+        if log == 'workspace':  # out-of-band evidence the accepted restore does not carry at its strength
+            for item in local:
+                rev = item['revocation']['o']
+                if rev['device_id'] == signer:
+                    # a same-person one refused above; what is left is another person's, contradicting the binding
+                    # this restore's certificate establishes: dropped, neither refusal nor unpublished (#387)
+                    continue
+                got = carried.get(rev['device_id'])
+                if got is None or STRENGTH[rev['reason']] > STRENGTH[got['revocation']['o']['reason']]:
+                    unpublished.add('d_' + rev['device_id'])
+        return 'ok', (log, ev['id'], signer, signer_person, tuple(sorted(unpublished)))
     except (KeyError, TypeError, ValueError, IndexError, AttributeError, Refusal):
         return diverged
 
@@ -817,50 +843,133 @@ DEVICE_MAX_HEADS = 1 << 22
 
 
 def device_initial(ws, wsk_pub, owner_pk, genesis, card, devices, held=None):
-    """A paired device: pairing-pinned owner PK, WSK, genesis and card delegation; held is its verified
-    baseline or None. devices ({device_id: {person_id, pk_pub?}}) is what it knows of devices and their
-    persons: the pairing member list, then applied signers and chain evidence. revocations are learned from
-    the checkpoint chain (with their pk_pub); local are learned out of band (member list, §19.5): both refuse
-    signers, only chain ones are demanded as restore evidence. signers records each applied transition's
-    signer device and person, across walks."""
+    """A paired device: pairing-pinned owner PK, WSK, genesis and card delegation; held is its verified baseline or
+    None. devices ({device_id: {person_id, pk_pub?}}) is what it knows of this workspace's devices and their persons:
+    the pairing member list, then applied signers and chain evidence.
+
+    Revocations (F1 §5.10 at orch-core e9a26d95, #387): `revocations` are chain-learned for this workspace, each
+    {revocation, device_cert, pk_pub, provenance}: the strongest reason whose occurrence (an accepted restore's
+    entry) the device authenticated against this workspace's accepted history; provenance names that occurrence
+    (checkpoint n and hash, log, event id, seq, head and accumulator node), never a height alone. They are monotonic:
+    later restores, abandoned suffixes and failed walks never remove them. `local` is the out-of-band evidence
+    (device_learn, another workspace, a failed walk), each {revocation, device_cert, pk_pub} verified under the
+    named person's key, with its own strongest reason. Both refuse a signer of the same device and person; only
+    chain-learned ones are demanded as restore evidence. `forward` lists devices whose local evidence an accepted
+    workspace restore did not carry (revocation.unpublished) and that this workspace knows: the runtime forwards
+    them to the host and retries until an accepted restore carries them at that strength (an acknowledgement is
+    not publication). `pending` holds the same for devices unknown to this workspace: kept, never forwarded.
+    `signers` records each applied transition's signer device and person, across walks; `alarms` the C3 alarms."""
     return {'ws': ws, 'wsk_pub': wsk_pub, 'owner_pk': owner_pk, 'genesis': genesis, 'card': card, 'held': held,
-            'devices': dict(devices), 'applied': [], 'signers': {}, 'revocations': {}, 'local': {}, 'alarms': []}
+            'devices': dict(devices), 'applied': [], 'signers': {}, 'revocations': {}, 'local': {}, 'alarms': [],
+            'forward': [], 'pending': []}
 
 
 def raise_alarms(dev, revocations):
-    """P3-D24: a compromised revocation of a device that signed any applied transition alarms."""
-    # Round-2 device state stored the signer device id as a string; both forms are read.
-    signed = {s['device'] if isinstance(s, dict) else s for s in dev['signers'].values()}
-    for d in sorted(signed):
-        rev = revocations.get(d)
-        if rev is not None and rev['o']['reason'] == 'compromised' and d not in dev['alarms']:
+    """P3-D24, F1 row 150: a compromised revocation of a device that signed a committed transition, matched by device
+    and person (#387), raises the alarm. revocations are revocation objects. Round-2 device state stored the signer
+    as a bare device id: such a signer has no recorded person and matches by device (more alarms, never fewer)."""
+    signed = sorted({(s, '') if isinstance(s, str) else (s['device'], s.get('person_id') or '')
+                     for s in dev['signers'].values()})
+    for d, person in signed:
+        if d not in dev['alarms'] and any(
+                r['o']['reason'] == 'compromised' and r['o']['device_id'] == d and person in ('', r['o']['person_id'])
+                for r in revocations):
             dev['alarms'].append(d)
 
 
-def device_learn(dev, rev):
-    """An out-of-band revocation (already verified by the caller). Alarms at once, independent of any
-    sync, so a relay that fails every walk cannot suppress it (review F6)."""
-    dev = copy.deepcopy(dev)
-    d = rev['o']['device_id']
+def evidence_ok(S, item):
+    """Protocol §6.2: a {revocation, device_cert, pk_pub} item verifies under the person key it names, against a device
+    certificate of that same person (verify_cert binds person_id = H(pk_pub)). Returns the device id or None."""
+    try:
+        if not isinstance(item, dict) or set(item) - {'provenance'} != {'revocation', 'device_cert', 'pk_pub'}:
+            return None
+        pk = R.unb64u(item['pk_pub'])
+        checked = R.verify_cert(S, item['device_cert'], pk, item['device_cert']['o']['created_ms'])
+        rev = R.verify_revocation(S, item['revocation'], pk, checked['ok']) if 'ok' in checked else {}
+        return rev['ok']['device_id'] if 'ok' in rev else None
+    except (KeyError, TypeError, ValueError, AttributeError, IndexError, Refusal):
+        return None
+
+
+def binding(dev, d, extra=None):
+    """(person_id, pk_pub or None) the device already binds to device d, or None (F1 row 151: a device id's person
+    binding, once known, is never replaced; for an unbound device the first verified evidence wins). extra are
+    bindings a failed walk established before it failed (verified signers, earlier evidence)."""
+    for src in (dev['revocations'].get(d), dev['local'].get(d)):
+        if src is not None:
+            return src['revocation']['o']['person_id'], src.get('pk_pub')
+    kd = dev['devices'].get(d) or (extra or {}).get(d)
+    return (kd['person_id'], kd.get('pk_pub')) if kd else None
+
+
+def admit_local(S, dev, item, extra=None):
+    """Admit verified out-of-band evidence into dev['local'] (strongest reason kept). Evidence that does not verify,
+    or contradicts the device's known person binding, is not admitted and is never an input to judgment."""
+    d = evidence_ok(S, item)
+    if d is None:
+        return False
+    known = binding(dev, d, extra)
+    person = item['revocation']['o']['person_id']
+    if known is not None and (known[0] != person or (known[1] is not None and known[1] != item['pk_pub'])):
+        return False
     old = dev['local'].get(d)
-    if old is None or STRENGTH[rev['o']['reason']] > STRENGTH[old['o']['reason']]:
-        dev['local'][d] = rev
-    dev['devices'].setdefault(d, {'person_id': rev['o']['person_id']})
-    raise_alarms(dev, dev['local'])
+    if old is None or STRENGTH[item['revocation']['o']['reason']] > STRENGTH[old['revocation']['o']['reason']]:
+        dev['local'][d] = {k: item[k] for k in ('revocation', 'device_cert', 'pk_pub')}
+    return True
+
+
+def device_learn(S, dev, item):
+    """Out-of-band evidence {revocation, device_cert, pk_pub} (the relay's feed, another workspace, the owner).
+    Verified and admitted here, never trusted from the caller. Alarms at once, independent of any sync, so a relay
+    that fails every walk cannot suppress it (review F6)."""
+    dev = copy.deepcopy(dev)
+    need(evidence_ok(S, item) is not None, 'malformed', 400)
+    need(admit_local(S, dev, item), 'revocation_conflict', 409)
+    raise_alarms(dev, [x['revocation'] for x in dev['local'].values()])
     return {'device': dev}
 
 
-def stronger(revocations, item):
+def chain_learn(learned, item, provenance):
+    """A chain occurrence of verified evidence: the strongest reason wins, an equal one keeps its first occurrence."""
     d = item['revocation']['o']['device_id']
-    old = revocations.get(d)
+    old = learned.get(d)
     if old is None or STRENGTH[item['revocation']['o']['reason']] > STRENGTH[old['revocation']['o']['reason']]:
-        revocations[d] = {'revocation': item['revocation'], 'pk_pub': item['pk_pub']}
+        learned[d] = {'revocation': item['revocation'], 'device_cert': item['device_cert'], 'pk_pub': item['pk_pub'],
+                      'provenance': provenance}
+
+
+def keep_failed_walk(S, committed, seen):
+    """F1 rows 149/150: a walk that fails commits nothing (no H, applied id, signer or chain provenance), but every
+    revocation it verified stays as local evidence, admitted in walk order; a compromised one of the signer of an
+    already committed transition raises and persists the alarm. Alarms about the uncommitted transitions are dropped."""
+    kept, extra = copy.deepcopy(committed), {}
+    for kind, value in seen:
+        if kind == 'signer':
+            extra.setdefault(value[0], {'person_id': value[1], 'pk_pub': value[2]})
+        else:
+            admit_local(S, kept, value, extra)
+    raise_alarms(kept, [x['revocation'] for x in [*kept['revocations'].values(), *kept['local'].values()]])
+    return kept
 
 
 def sync_walk(S, dev, relay, now, endpoint=None, script=None, max_heads=None):
-    """§19.8 device synchronisation against an immutable endpoint E. relay is read only through the
-    public GET routes. The device commits only after the whole walk verifies; any refusal leaves it as is."""
-    dev = copy.deepcopy(dev)
+    """§19.8 device synchronisation against an immutable endpoint E. relay is read only through the public GET routes.
+    The walk commits only after it verifies completely, in one atomic replacement of the device state (judgments as
+    applied ids and signers, walk position H, chain evidence with provenance, local evidence, forwarding, alarms). A
+    refusal commits none of that; it only keeps the evidence the walk verified and the alarms it causes (F1 rows
+    149/150), returned as `device` with the refusal when anything changed."""
+    committed, seen = dev, []
+    try:
+        return _walk(S, copy.deepcopy(dev), relay, now, endpoint, script, max_heads, seen)
+    except (Refusal, KeyError, TypeError, ValueError, AttributeError, IndexError) as exc:
+        failure = exc if isinstance(exc, Refusal) else Refusal('malformed', 400)
+        kept = keep_failed_walk(S, committed, seen)
+        if kept != committed:
+            failure.result['device'] = kept
+        raise failure from (None if failure is exc else exc)
+
+
+def _walk(S, dev, relay, now, endpoint, script, max_heads, seen):
     ws, genesis = dev['ws'], dev['genesis']
     budget = [DEVICE_MAX_HEADS if max_heads is None else max_heads]
     # A scripted relay (vectors only): queued responses per read op served before the real ones.
@@ -904,17 +1013,12 @@ def sync_walk(S, dev, relay, now, endpoint=None, script=None, max_heads=None):
                 for log, e in entries(x).items() if log != skip and e['seq'] > old.get(log, EMPTY)['seq']}
 
     def judge(work, x, **kw):
-        # (code, recorded): the walk raises C3 alarms itself, across walks, from every learned revocation.
+        # One transition against the serialized snapshot: chain evidence of the bundles accepted so far in this walk
+        # and before it, and the local evidence. The walk raises C3 alarms itself, across walks (raise_alarms).
         return judge_offer(S, work['o'] if work else None, x['o'], genesis=genesis, workspace_id=ws, now=now,
-                           wsk_pub=dev['wsk_pub'], applied=dev['applied'],
-                           card=dev['card'], revoked=set(dev['local']), initial_proof=True,
-                           known_devices=known_devices(), **kw)[:2]
-
-    def known_devices():
-        out = dict(dev['devices'])
-        for d, rev in dev['local'].items():
-            out.setdefault(d, {'person_id': rev['o']['person_id']})
-        return out  # chain revocations bind through `known` (person and stored key)
+                           wsk_pub=dev['wsk_pub'], applied=dev['applied'], card=dev['card'], initial_proof=True,
+                           known_devices=dev['devices'], known=list(learned.values()),
+                           local=list(dev['local'].values()), learned_later=(), **kw)
 
     def refuse_unless(code, wanted):
         need(code == wanted, WALK_CODES.get(code, 'chain_diverged'), 409)
@@ -925,7 +1029,8 @@ def sync_walk(S, dev, relay, now, endpoint=None, script=None, max_heads=None):
         need(checkpoint_hash(end) == endpoint, 'chain_diverged', 409)
     end_hash = checkpoint_hash(end)
     work = dev['held']
-    learned = dict(dev['revocations'])
+    learned = copy.deepcopy(dev['revocations'])  # monotonic: only ever grows or strengthens
+    flagged = set()
     after = work['o']['n'] if work else 0
     walked = False
     while work is None or end['o']['n'] > work['o']['n']:
@@ -933,6 +1038,10 @@ def sync_walk(S, dev, relay, now, endpoint=None, script=None, max_heads=None):
         for b in page['transitions']:
             need(isinstance(b, dict) and set(b) == BUNDLE_FIELDS and b['restore_id'] == b['line']['id'],
                  'chain_diverged', 409)
+            # Evidence the walk verifies stays local evidence even if this bundle or the walk fails (F1 row 150).
+            listed = b['line'].get('revocations') if isinstance(b['line'], dict) else None
+            seen.extend(('evidence', item) for item in (listed if isinstance(listed, list) else [])
+                        if evidence_ok(S, item) is not None)
             # Ascending order and the E bound follow from T.n == target_n and each judged step (n grows,
             # and the final judge refuses a work state above E); they need no separate check.
             need(type(b['target_n']) is int, 'chain_diverged', 409)
@@ -949,9 +1058,8 @@ def sync_walk(S, dev, relay, now, endpoint=None, script=None, max_heads=None):
             fs = line['from_seq']
             restore = {'event': line, 'log': log, 'C': work, 'T': t, 'pk_pub': dev['owner_pk'],
                        'device_cert': b['cert'], 'delegation': b['authz']['delegation']}
-            known = list(learned.values())
             # Signatures, source binding, owner policy and revocations first; only then fetch proofs.
-            refuse_unless(judge(work, t, restore=restore, known=known)[0], INCOMPLETE)
+            refuse_unless(judge(work, t, restore=restore)[0], INCOMPLETE)
             top_seq = entries(t).get(log, EMPTY)['seq']
             if type(fs) is int and 1 <= fs < old['seq']:
                 full = heads(log, ZERO, b['target_hash'], top_seq)
@@ -966,16 +1074,23 @@ def sync_walk(S, dev, relay, now, endpoint=None, script=None, max_heads=None):
                 restore['forward_heads'], tail = seg[:k], seg[k:]
                 restore['acc_from'] = fold(old['acc'], seg[:k])
             proofs = {**growth(work, t, skip=log), log: tail}
-            code, recorded = judge(work, t, restore=restore, proofs=proofs, known=known)
+            code, recorded, _, unpublished = judge(work, t, restore=restore, proofs=proofs)
             refuse_unless(code, 'ok')
             need(recorded == line['id'], 'chain_diverged', 409)
+            # The occurrence of every listed entry, authenticated in accepted history: T (WSK-signed, accepted) commits
+            # event_head(line) at from_seq + 1 of `log`, reached from acc_from by the verified tail proof.
+            head = event_head(line)
+            provenance = {'checkpoint': reference(t), 'log': log, 'event': line['id'], 'seq': fs + 1, 'head': head,
+                          'acc': log_acc(restore['acc_from'], head)}
             for item in line['revocations']:
-                stronger(learned, item)
+                chain_learn(learned, item, provenance)
                 dev['devices'].setdefault(item['revocation']['o']['device_id'], {
                     'person_id': item['revocation']['o']['person_id'], 'pk_pub': item['pk_pub']})
+            flagged.update(d[2:] for d in unpublished)
             signer = b['cert']['o']
             dev['signers'][line['id']] = {'device': signer['device_id'], 'person_id': signer['person_id']}
             dev['devices'].setdefault(signer['device_id'], {'person_id': signer['person_id'], 'pk_pub': dev['owner_pk']})
+            seen.append(('signer', (signer['device_id'], signer['person_id'], dev['owner_pk'])))
             dev['applied'].append(line['id'])
             work, walked = t, True
         if page['next'] is None:
@@ -986,17 +1101,25 @@ def sync_walk(S, dev, relay, now, endpoint=None, script=None, max_heads=None):
         after = cursor
     result = 'ok'
     if work is None or checkpoint_hash(work) != end_hash:
-        code, _ = judge(work, end, proofs=growth(work, end) if not work or end['o']['n'] > work['o']['n'] else {})
+        code = judge(work, end, proofs=growth(work, end) if not work or end['o']['n'] > work['o']['n'] else {})[0]
         if code == 'ignored' and not walked:
             result = 'ignored'  # a lagging relay: keep H, never downgrade
         else:
             refuse_unless(code, 'ok')
             work = end
-    # P3-D24 / review N3: a compromised revocation of any device that signed an applied transition, in this
-    # walk or an earlier one, raises an alarm; history stays valid. Idempotent across walks.
-    raise_alarms(dev, {d: item['revocation'] for d, item in learned.items()})
-    raise_alarms(dev, dev['local'])
-    dev['held'], dev['revocations'] = work, learned
+    # revocation.unpublished (F1 §5.10): retained across walks until an accepted restore carries the evidence at
+    # its local strength (then it is chain-learned: published); forwarded only for devices this workspace knows.
+    forward, pending = [], []
+    for d in sorted(set(dev['forward']) | set(dev['pending']) | flagged):
+        item, chain = dev['local'].get(d), learned.get(d)
+        if item is None or (chain is not None and
+                            STRENGTH[chain['revocation']['o']['reason']] >= STRENGTH[item['revocation']['o']['reason']]):
+            continue
+        (forward if d in dev['devices'] or d in learned else pending).append(d)
+    dev['held'], dev['revocations'], dev['forward'], dev['pending'] = work, learned, forward, pending
+    # P3-D24 / review N3: a compromised revocation of any device that signed an applied transition, in this walk or an
+    # earlier one, raises an alarm; history stays valid. Idempotent across walks.
+    raise_alarms(dev, [x['revocation'] for x in [*learned.values(), *dev['local'].values()]])
     return {'result': result, 'device': dev}
 
 
@@ -1048,7 +1171,7 @@ def _dispatch(S, state, op, body, now_ms, **args):
         elif op == 'register_device':
             result = register_device(trial, body)
         elif op == 'device_learn':
-            result = device_learn(body['device'], body['revocation'])
+            result = device_learn(S, body['device'], body['evidence'])
         elif op == 'device_sync':
             result = sync_walk(S, body, trial, now_ms, args.get('endpoint'), args.get('script'), args.get('max_heads'))
         else:

@@ -736,12 +736,16 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
                  'person_id': x['cert']['o']['person_id'], 'device_id': device, 'revoked_ms': NOW - 30 * C.DAY, 'reason': reason})
         sync(f'walk_known_{reason}_signer_refused_workspace', restored,
              dev(base, {device: {'revocation': known, 'pk_pub': x['pk']}}), error='chain_diverged')
-        sync(f'walk_local_{reason}_signer_refused_ticket', tickets, dev(ticket_base, local={device: known}),
+        own = {'revocation': known, 'device_cert': x['cert'], 'pk_pub': x['pk']}
+        sync(f'walk_local_{reason}_signer_refused_ticket', tickets, dev(ticket_base, local={device: own}),
              error='chain_diverged')
     # Review N4: an out-of-band revocation of another device does not strand the device behind an older
     # genuine workspace restore that could not list it; a chain-learned one is demanded (F1 completeness).
     laptop_rev = x['rev']('lost')
-    sync('walk_local_revocation_not_demanded_as_evidence', restored, dev(base, local={laptop_id: laptop_rev}))
+    laptop_item = {'revocation': laptop_rev, 'device_cert': laptop, 'pk_pub': x['pk']}
+    out = sync('walk_local_revocation_not_demanded_as_evidence', restored, dev(base, local={laptop_id: laptop_item}))
+    # revocation.unpublished for a device this workspace does not know: kept pending, never forwarded (F1 §5.10).
+    assert out['device']['pending'] == [laptop_id] and out['device']['forward'] == []
     sync('walk_chain_revocation_demanded_as_evidence', restored,
          dev(base, {laptop_id: {'revocation': laptop_rev, 'pk_pub': x['pk']}}), error='chain_diverged')
 
@@ -757,7 +761,10 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
                      modifications={'ws_seq': 3})
     publish(early, tl, [page('abandoned', UID, entry(heads[:2]), heads[2:])], bl)
     early['revocations'][laptop_id] = hidden  # forged: the relay accepted a revoked signer
-    sync('walk_signer_revoked_earlier_in_walk_refused', early, dev(ticket_base), error='chain_diverged')
+    failed_early = sync('walk_signer_revoked_earlier_in_walk_refused', early, dev(ticket_base), error='chain_diverged')
+    # F1 row 149: the failed walk commits nothing, but the evidence it verified (laptop lost) stays local.
+    assert failed_early['device']['held'] == ticket_base and failed_early['device']['applied'] == []
+    assert list(failed_early['device']['local']) == [laptop_id] and failed_early['device']['revocations'] == {}
     late = copy.deepcopy(ticket_held)
     late['members'] = members
     t1, b1 = restore(2, source=ticket_base, log=UID, ident='01KKKKKKKKKKKKKKKKKKKKKKKK', cert_=laptop, key='laptop.sig')
@@ -779,13 +786,13 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     c, st = new('walk_local_compromised_alarms_for_applied_signer', late)
     first = run(c, st, 'device_sync', dev(ticket_base), endpoint=C.checkpoint_hash(t1))
     told = copy.deepcopy(first['device'])
-    told['local'] = {laptop_id: laptop_bad['revocation']}
+    told['local'] = {laptop_id: laptop_bad}
     again = run(c, st, 'device_sync', told, endpoint=C.checkpoint_hash(t1))
     assert again['device']['alarms'] == [laptop_id]
     # Review F6: learning it out of band alarms at once, without any walk.
     c, st = new('device_learn_compromised_alarms_at_once', late)
     first = run(c, st, 'device_sync', dev(ticket_base), endpoint=C.checkpoint_hash(t1))
-    learned = run(c, st, 'device_learn', {'device': first['device'], 'revocation': laptop_bad['revocation']})
+    learned = run(c, st, 'device_learn', {'device': first['device'], 'evidence': laptop_bad})
     assert learned['device']['alarms'] == [laptop_id]
     # Review F2: the device applied t1 signed by the laptop; a forged bundle then carries another person's
     # compromised revocation of the laptop.
@@ -889,7 +896,7 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
                    device_=paired)
     forged_restore('walk_evidence_for_unknown_device_self_certifying', error=None, revocations=[bob_laptop])
     forged_restore('walk_evidence_for_locally_revoked_device_from_another_person', revocations=[bob_laptop],
-                   device_=dev(base, local={laptop_id: x['rev']('lost')}))
+                   device_=dev(base, local={laptop_id: laptop_item}))
     # Review F5/J35: chain-held evidence binds to the stored key, not only the person.
     covered = copy.deepcopy(accepted)
     covered['ever_devices'] = sorted(covered['ever_devices'] + [laptop_id])
@@ -938,3 +945,83 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     ahead = cp(2, time=NOW + 400000)
     forge(future, ahead, 'workspace', entry(heads), [])
     sync('walk_endpoint_beyond_clock_ceiling', future, dev(base), error='checkpoint_time')
+
+    # --- F1 §5.10 at orch-core e9a26d95 (#387): the receiver runtime's revocation rules --------------------------
+    # revocation.unpublished: an accepted workspace restore without a held out-of-band revocation (or carrying it
+    # weaker) is accepted; the device forwards the evidence for a device this workspace knows and retries until an
+    # accepted restore carries it at that strength (publication), never on an acknowledgement.
+    laptop_known = {laptop_id: {'person_id': x['cert']['o']['person_id'], 'pk_pub': x['pk']}}
+    out = sync('walk_unpublished_forwarded_for_known_device', restored,
+               dev(base, local={laptop_id: laptop_item}, devices=laptop_known))
+    assert out['device']['forward'] == [laptop_id] and out['device']['pending'] == []
+    out = sync('walk_chain_lost_local_compromised_accepted_and_forwarded', covered,
+               dev(base, local={laptop_id: laptop_bad}))
+    assert out['device']['revocations'][laptop_id]['revocation']['o']['reason'] == 'lost'
+    assert out['device']['forward'] == [laptop_id]
+    waiting = dev(base, local={laptop_id: laptop_bad}, devices=laptop_known)
+    waiting['forward'] = [laptop_id]
+    out = sync('walk_growth_keeps_forwarding', grown, waiting)
+    assert out['device']['forward'] == [laptop_id]
+    carried_bad = copy.deepcopy(accepted)
+    rc, rbc = restore(2, ident='01GGGGGGGGGGGGGGGGGGGGGGGG', revocations=[laptop_bad])
+    publish(carried_bad, rc, ab, rbc)
+    out = sync('walk_carried_at_local_strength_is_published', carried_bad, waiting)
+    assert out['device']['forward'] == [] and out['device']['revocations'][laptop_id]['provenance']['event'] == rbc['line']['id']
+
+    # Chain-learned provenance is monotonic: a later restore that abandons the restore carrying the revocation
+    # neither erases it nor its completeness obligation; an equal-strength later occurrence keeps the first one.
+    carrying = copy.deepcopy(accepted)
+    rk, rbk = restore(2, ident='01EEEEEEEEEEEEEEEEEEEEEEEE', revocations=[laptop_lost])
+    publish(carrying, rk, ab, rbk)
+    learned_first = sync('walk_chain_learned_with_provenance', carrying, dev(base))
+    prov = learned_first['device']['revocations'][laptop_id]['provenance']
+    assert prov == {'checkpoint': C.reference(rk), 'log': 'workspace', 'event': rbk['line']['id'], 'seq': 3,
+                    'head': C.event_head(rbk['line']), 'acc': entry(heads[:2] + [C.event_head(rbk['line'])])['acc']}
+    after_rk = heads[:2] + [C.event_head(rbk['line'])]
+    abandoning = copy.deepcopy(carrying)
+    ra, rba = restore(3, source=rk, ident='01FFFFFFFFFFFFFFFFFFFFFFFF')
+    forge(abandoning, ra, 'workspace', entry(heads[:2]), [C.event_head(rba['line'])], rba, rk)
+    sync('walk_chain_provenance_survives_abandoning_restore', abandoning, learned_first['device'],
+         error='chain_diverged')
+    honest = copy.deepcopy(carrying)
+    rh, rbh = restore(3, source=rk, ident='01FFFFFFFFFFFFFFFFFFFFFFFG', revocations=[laptop_lost])
+    publish(honest, rh, [page('abandoned', 'workspace', entry(heads[:2]), after_rk[2:])], rbh)
+    out = sync('walk_chain_provenance_keeps_first_occurrence', honest, learned_first['device'])
+    assert out['device']['revocations'][laptop_id]['provenance'] == prov
+
+    # F1 rows 149/150, failed walks: the laptop signed t1 (a ticket restore), t2 carries the laptop's compromised
+    # revocation, and a forged t3 by the laptop makes the walk fail after t2 was judged.
+    failing = copy.deepcopy(late)
+    after_t2 = heads[:2] + [C.event_head(b2['line'])]
+    t3, b3_ = restore(4, source=t2, prefix=after_t2, ident='01ZZZZZZZZZZZZZZZZZZZZZZZZ', cert_=laptop, key='laptop.sig')
+    forge(failing, t3, 'workspace', entry(after_t2), [C.event_head(b3_['line'])], b3_, t2)
+    # Committed t1 first: the failed walk keeps the compromise evidence and raises the alarm for t1's signer.
+    c, st = new('walk_failed_walk_keeps_evidence_and_alarms_committed_signer', failing)
+    first = run(c, st, 'device_sync', dev(ticket_base), endpoint=C.checkpoint_hash(t1))
+    assert first['device']['alarms'] == [] and first['device']['applied'] == [b1['line']['id']]
+    failed = run(c, st, 'device_sync', first['device'], error='chain_diverged')
+    assert failed['device']['alarms'] == [laptop_id] and failed['device']['held'] == t1
+    assert failed['device']['local'][laptop_id]['revocation']['o']['reason'] == 'compromised'
+    assert failed['device']['applied'] == [b1['line']['id']] and failed['device']['revocations'] == {}
+    # t1 never committed: the alarm about it is dropped, the evidence stays local, and a retry refuses t1 (C3).
+    dropped = sync('walk_failed_walk_drops_alarm_of_uncommitted_transition', failing, dev(ticket_base),
+                   error='chain_diverged')
+    assert dropped['device']['alarms'] == [] and dropped['device']['applied'] == []
+    assert dropped['device']['held'] == ticket_base and list(dropped['device']['local']) == [laptop_id]
+    sync('walk_retry_after_failed_walk_refuses_former_alarm', late, dropped['device'], error='chain_diverged')
+    # Local evidence kept from a failed walk is promoted when an accepted occurrence is established.
+    early_ok = copy.deepcopy(ticket_held)
+    early_ok['members'] = members
+    publish(early_ok, ta, ab, ba)
+    out = sync('walk_failed_walk_evidence_promoted_on_retry', early_ok, failed_early['device'])
+    assert out['device']['revocations'][laptop_id]['provenance']['event'] == ba['line']['id']
+    assert list(out['device']['local']) == [laptop_id]
+
+    # Out-of-band intake verifies and admits: another person's evidence for a device bound to its person is not
+    # admitted (F1 row 151), first verified evidence binds an unbound device, unverifiable evidence is refused.
+    c, st = new('device_learn_admission', accepted)
+    run(c, st, 'device_learn', {'device': paired, 'evidence': bob_laptop}, error='revocation_conflict')
+    run(c, st, 'device_learn', {'device': dev(base), 'evidence': {**bob_laptop, 'pk_pub': x['pk']}}, error='malformed')
+    taken = run(c, st, 'device_learn', {'device': dev(base), 'evidence': bob_laptop})
+    assert taken['device']['local'][laptop_id]['revocation']['o']['person_id'] == x['bob_id']
+    run(c, st, 'device_learn', {'device': taken['device'], 'evidence': laptop_bad}, error='revocation_conflict')
