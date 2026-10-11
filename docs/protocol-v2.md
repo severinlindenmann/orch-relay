@@ -2307,12 +2307,16 @@ devices. Boundary limits remain 64 certificates/day, 64 open requests/person, 64
 
 ### 19.8 Checkpoints, genesis and restore transport (P3-D12/D13/D18–D25)
 
-This section uses F1 §5.3/5.6/5.10 at orch-core `f1094b3fc2a4c3e5ae16dc8fd23162b8360bba09`. The relay's F1
-vector snapshot `tests/vectors/f1` is re-synced to that commit separately (PR #41); until then
-`tests/vectors/f1_receiver_f1094b3.json` carries F1's 25 `transition_cases` and 12 `workspace_n_offers`, byte-equal
-to that commit, and they run against the reference device judge. `tests/vectors/f1_receiver_orch52.json` carries
-orch-52's newer receiver cases (branch `fix/restore-receiver-vectors` at 24305776, unmerged: 86 transition cases,
-30 offers); the reference judge follows them and is re-pinned when they merge.
+This section uses F1 §5.3/5.6/5.10 at orch-core `4f00d9ce32e8e512366c908c36b43f35142747c9` (develop, the merge
+of orch-core #377: receiver vectors with an explicit receiver view, `Verdict` with alarms, honest recovery for a host
+that lost its checkpoints). The relay's F1 vector snapshot `tests/vectors/f1` pins the same commit, and
+`tests/vectors/f1_receiver_4f00d9c.json` extracts its receiver cases (88 `transition_cases`, 30
+`workspace_n_offers`, sha256 of the source file recorded), which run unchanged against the reference device judge.
+The earlier extracts (f1094b3, and orch-52's unmerged branch head) are retired: every case they carried is in the
+merged set. Each shared case gives the receiver's whole view: its clock `now`, the `pinned_delegation`,
+`known_devices` (every device it knows, active or revoked, with its person and optional key), `known_revocations`
+(held when judging) and `learned_later_in_walk`. `known_devices` is a required input of the judge (orch-core B1):
+an empty map says the receiver knows no device, and a missing one is an error, never "nothing known".
 F1 defines event/checkpoint bytes; the relay adds storage, transport and present-authority checks.
 **P3-D12:** only `workspace_checkpoint` objects are published, never `ticket_checkpoint` objects.
 
@@ -2401,7 +2405,7 @@ in that one context only, never by trying T's entries.
 - **R0 (P3-D13):** exact F1 restore fields, person actor, `v=2`, `hash_v=1`, `sig`, `auth`, `roster_v`,
   `host_sig`; `ws_seq` exactly when `log` is a ticket. Strict JSON, schema and line-size checks precede effects.
   The bundle's delegation MUST have the card's delegation content (`o` equal) and verify under the owner PK (card
-  binding; orch-52 24305776: an owner re-signing the same content is the same delegation).
+  binding; orch-core #377: an owner re-signing the same content is the same delegation).
 - **R1 (P3-D24):** verify both host and person signatures using F1's `{workspace_id, log}` context.
   Verify the card's PK-signed delegation and PK-certified device; actor person/device IDs must match,
   scope levels include operate and no `drop:` scope. Certificate validity is checked at `line.at` and,
@@ -2479,7 +2483,7 @@ a lower-n bundle in this walk, refuses that transition (`chain_diverged`), whate
 learned out of band (the §19.5 revocation feed, the member list, the owner's own action). The **signer check**
 uses both sets: every revocation the device holds refuses its signer. The **person/key binding** of carried
 evidence uses everything the device knows of a device's person: chain revocations, local revocations and known
-active devices (the pairing member list, applied signers, accepted evidence; review F2, orch-52 #377).
+active devices (the pairing member list, applied signers, accepted evidence; review F2, orch-core #377).
 A member added after pairing is bound on first sight: its first accepted evidence or applied signature on the
 chain. The device does not take bindings from later member lists, because those are WSK-signed and a WSK holder
 could pre-bind persons with them; P8's owner-signed roster closes this. Only the
@@ -2491,8 +2495,10 @@ Consequences, stated in full: a device that learned an *unrelated* device's revo
 stranded behind an older genuine workspace restore that could not list it. A device that learned the *signer's*
 revocation out of band (any reason) while behind an older genuine restore by that signer stays refused at that
 restore until the owner re-pairs it from a fresh baseline; this is accepted, because refusing is the only rule a
-WSK holder holding a revoked device's key cannot exploit. F1's receiver takes one `known` list for both checks;
-the split is a relay-side refinement flagged to stream A (orch-52) for F1 §5.10.
+WSK holder holding a revoked device's key cannot exploit. F1's receiver (orch-core #377 `ReceiverView`) takes one
+`known_revocations` list for both the signer and the completeness check; the split is a relay-side refinement,
+still to be raised with stream A (orch-52) for F1 §5.10. A `compromised` revocation of an accepted restore's signer
+that F1 reports as learned later (`Verdict.alarms`) is the alarm the walk raises below, for this walk and later ones.
 
 **Reads, retention and pairing (P3-D13/D19/D20).** A GET returns an immutable endpoint E. Page transitions
 with `after_n=k&to=E`, ordered by target_n, exclusively after k and no later than E.n; k does not need to
@@ -2535,7 +2541,7 @@ leaves the device exactly as it was.
      heads, folding to C's acc, `abandoned` covering C); otherwise the forward heads from C's entry. The restored
      entry of T MUST be reached from `{from_seq, head, acc_from}` by a consistent proof (else `sync_incomplete`)
      whose first head is `event_head(line)`; a consistent proof whose first head is another event means T is
-     signed over another head and is `chain_diverged` (orch-52's decision; `sync_incomplete` is only for missing
+     signed over another head and is `chain_diverged` (orch-core #377; `sync_incomplete` is only for missing
      or malformed proofs).
      Every other log of T MUST extend work exactly. A workspace log with from_seq 1 starts at the pinned genesis.
    - Record `line.id`, add B's revocations (strongest reason wins), `work = T`.
