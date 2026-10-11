@@ -512,3 +512,144 @@ def test_long_poll_wait_releases_lock_and_transaction(client, monkeypatch, path,
     assert response.status_code == 200
     assert calls, "long poll must check wait safety before sleeping"
     assert client.app.state.bridge.polls == {}
+
+
+def forged_pair(client, ws, rid=RID, size=65536):
+    raw = bytearray(binary("pair_device_post"))
+    raw[8:24] = bytes.fromhex(ws)
+    raw[24:40] = bytes.fromhex(DEVICE)
+    raw[40:56] = bytes.fromhex(rid)
+    raw[-64:] = bytes(64)  # No victim signature or credentials.
+    raw.extend(bytes(size - len(raw)))
+    return client.post(
+        f"/v2/workspaces/{ws}/pair/{raw[56:72].hex()}/{rid}",
+        content=bytes(raw),
+        headers={"Content-Type": "application/octet-stream"},
+    )
+
+
+def other_pair_workspace(client):
+    other = V["ids"]["workspace_b"]
+    sql(
+        client,
+        "INSERT INTO workspaces SELECT ?,owner_person_id,wsk_pub,delegation,card,card_seq,"
+        "wxk_version,client_hosted FROM workspaces WHERE workspace_id=?",
+        (other, WS),
+    )
+    return other
+
+
+def test_pair_forged_device_rate_isolation(client):
+    other = other_pair_workspace(client)
+    for _ in range(20):
+        assert forged_pair(client, other).status_code == 202
+    assert post_raw(client, binary("bridge_device_post")).status_code == 202
+    # Anonymous retries still exhaust the workspace/address pairing limit.
+    for _ in range(40):
+        assert forged_pair(client, other).status_code == 202
+    response = forged_pair(client, other)
+    assert response.status_code == 429
+    assert response.json() == {"error": "rate_limited"}
+
+
+@pytest.mark.parametrize("direction", [1, 2])
+def test_pair_forged_device_storage_isolation(client, direction):
+    other = other_pair_workspace(client)
+    assert forged_pair(client, other).status_code == 202
+    if direction == 2:
+        # A workspace response to the forged device must also remain pairing state.
+        sql(client, "INSERT INTO holders VALUES (?,1,?,0,NULL)", (other, NOW + 40000))
+        sql(
+            client,
+            "INSERT INTO sessions VALUES (?,?,?,?)",
+            (token_hash("FAKE-other-workspace"), "workspace", other, NOW + 900000),
+        )
+        raw = bytearray(binary("pair_host_post"))
+        raw[8:24] = bytes.fromhex(other)
+        raw[24:40] = bytes.fromhex(DEVICE)
+        response = client.post(
+            f"/v2/workspaces/{other}/pair/{raw[56:72].hex()}/{RID}",
+            content=bytes(raw),
+            headers={
+                "Authorization": "Bearer FAKE-other-workspace",
+                "Orch-Holder": "1",
+                "Content-Type": "application/octet-stream",
+            },
+        )
+        assert response.status_code == 202
+        sql(client, "DELETE FROM bridge_msgs WHERE workspace_id=? AND direction=1", (other,))
+    assert sql(client, "SELECT device_id FROM queue_totals WHERE workspace_id=?", (other,)) == [
+        ("",)
+    ]
+    # Fill authenticated storage exactly to its boundary after the next request.
+    raw = binary("bridge_device_post" if direction == 1 else "bridge_host_post")
+    cap = (8 if direction == 1 else 2) * 1024 * 1024
+    sql(
+        client,
+        "INSERT INTO queue_totals VALUES (?,?,?,?,?,1)",
+        (WS, DEVICE, direction, cap - len(raw), cap - len(raw)),
+    )
+    if direction == 2:
+        assert post_raw(client, binary("bridge_device_post")).status_code == 202
+    assert post_raw(client, raw, host=direction == 2).status_code == 202
+    # Delivery and deletion use the same anonymous accounting key.
+    sql(client, "UPDATE bridge_msgs SET delivered=1 WHERE workspace_id=?", (other,))
+    assert sql(client, "SELECT pending,count FROM queue_totals WHERE workspace_id=?", (other,)) == [
+        (0, 0)
+    ]
+    sql(client, "DELETE FROM bridge_msgs WHERE workspace_id=?", (other,))
+    assert sql(client, "SELECT * FROM queue_totals WHERE workspace_id=?", (other,)) == []
+
+
+def test_pair_forged_device_replay_isolation_and_bound(client):
+    other = other_pair_workspace(client)
+    assert forged_pair(client, other).status_code == 202
+    with closing(db.connect(client.app.state.directory.path)) as con, con:
+        con.executemany(
+            "INSERT INTO rid_seen VALUES (?,?,?,'digest',0,?,0,?,?,?)",
+            ((other, DEVICE, f"{i:032x}", NOW, NOW, NOW + 900000, CRID) for i in range(4095)),
+        )
+    assert post_raw(client, binary("bridge_device_post")).status_code == 202
+    r = forged_pair(client, other, rid="ab" * 16)
+    assert r.status_code == 429 and r.json() == {"error": "quota_exceeded"}
+
+
+def test_pair_mailboxes_do_not_charge_device_and_are_bounded(client):
+    with closing(db.connect(client.app.state.directory.path)) as con, con:
+        for i in range(128):
+            rid = f"{i:032x}"
+            con.execute(
+                "INSERT INTO rid_seen VALUES (?,?,?,'digest',0,?,0,?,?,?)",
+                (WS, DEVICE, rid, NOW, NOW, NOW + 900000, CRID),
+            )
+            con.execute(
+                "INSERT INTO request_mailboxes VALUES (?,?,?,?)", (WS, DEVICE, rid, NOW + 60000)
+            )
+    assert post_raw(client, binary("bridge_device_post")).status_code == 202
+    r = forged_pair(client, WS, rid="ab" * 16)
+    assert r.status_code == 429 and r.json() == {"error": "quota_exceeded"}
+
+
+def test_pair_accounting_migrates_retained_bodies(tmp_path):
+    from bridge_support import queue_body
+
+    migrations = Path("src/orch_relay/migrations")
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    for source in sorted(migrations.glob("*.sql")):
+        if source.name < "0005":
+            (legacy / source.name).write_bytes(source.read_bytes())
+    path = tmp_path / "old.sqlite3"
+    db.migrate(path, legacy)
+    with closing(db.connect(path)) as con, con:
+        queue_body(con, binary("pair_device_post"))
+        queue_body(con, binary("bridge_device_post"))
+    assert db.migrate(path) == ["0005_pair_accounting"]
+    with closing(db.connect(path)) as con:
+        rows = con.execute(
+            "SELECT device_id,pending,count FROM queue_totals ORDER BY device_id"
+        ).fetchall()
+    assert rows == [
+        ("", len(binary("pair_device_post")), 1),
+        (DEVICE, len(binary("bridge_device_post")), 1),
+    ]

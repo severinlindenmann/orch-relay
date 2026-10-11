@@ -190,7 +190,10 @@ class Bridge:
         ).fetchone()
         epoch = current[0] if current else 0
         hashed = digest(raw)
-        self.d.rate("bridge-post", device, 1000, 20, now)
+        # Pairing headers name an unproven device; transaction() charges
+        # pairing address/workspace/global limits, never device quotas.
+        if offer is None:
+            self.d.rate("bridge-post", device, 1000, 20, now)
         if direction == 1:
             if seen:
                 if seen["req_digest"] != hashed or seen["offer"] != offer:
@@ -210,7 +213,10 @@ class Bridge:
                     refuse("stale_epoch", 409, epoch=epoch)
                 if (
                     con.execute(
-                        "SELECT count(*) FROM rid_seen WHERE device_id=?", (device,)
+                        "SELECT count(*) FROM rid_seen WHERE device_id=? AND offer IS NULL"
+                        if offer is None
+                        else "SELECT count(*) FROM rid_seen WHERE workspace_id=? AND offer IS NOT NULL",
+                        (device if offer is None else ws,),
                     ).fetchone()[0]
                     >= 4096
                 ):
@@ -222,13 +228,19 @@ class Bridge:
             if (
                 not exists
                 and con.execute(
-                    "SELECT count(*) FROM request_mailboxes WHERE workspace_id=? AND device_id=?",
-                    (ws, device),
+                    "SELECT count(*) FROM request_mailboxes m WHERE workspace_id=? AND device_id=? "
+                    "AND NOT EXISTS (SELECT 1 FROM rid_seen s WHERE s.workspace_id=m.workspace_id "
+                    "AND s.device_id=m.device_id AND s.rid=m.rid AND s.offer IS NOT NULL)"
+                    if offer is None
+                    else "SELECT count(*) FROM request_mailboxes m WHERE workspace_id=? "
+                    "AND EXISTS (SELECT 1 FROM rid_seen s WHERE s.workspace_id=m.workspace_id "
+                    "AND s.device_id=m.device_id AND s.rid=m.rid AND s.offer IS NOT NULL)",
+                    (ws, device) if offer is None else (ws,),
                 ).fetchone()[0]
                 >= 128
             ):
                 fail("quota_exceeded")
-            self.budget(con, ws, device, 1, len(raw))
+            self.budget(con, ws, device if offer is None else None, 1, len(raw))
             if seen:
                 con.execute(
                     "UPDATE rid_seen SET requeues=requeues+1,last_requeue_ms=?,keep_until_ms=max(keep_until_ms,?) WHERE workspace_id=? AND device_id=? AND rid=?",
@@ -266,7 +278,7 @@ class Bridge:
                 >= 64
             ):
                 fail("quota_exceeded")
-            self.budget(con, ws, device, 2, len(raw))
+            self.budget(con, ws, device if offer is None else None, 2, len(raw))
             con.execute("INSERT INTO rid_chunks VALUES (?,?,?,?,?)", (*key, h["idx"], hashed))
             con.execute(
                 "UPDATE rid_seen SET keep_until_ms=max(keep_until_ms,?) WHERE workspace_id=? AND device_id=? AND rid=?",
