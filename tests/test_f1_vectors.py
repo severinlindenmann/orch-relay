@@ -640,7 +640,7 @@ def test_vector_files_match_the_recorded_sha256():
         for line in (F1 / "SOURCE").read_text().splitlines()
         if line.startswith("sha256:")
     )
-    assert "Commit: a168474f166b9f5da3a60f4f61274d0f2db5b1a6" in (F1 / "SOURCE").read_text()
+    assert "Commit: 908f2511125b46c09a40383fa4f8f61f72ca6a98" in (F1 / "SOURCE").read_text()
     assert {p.name for p in F1.iterdir()} == {n + ".json" for n in FILE_KEYS} | {"SOURCE"}
     files = sorted(p.name for p in F1.glob("*.json"))
     assert files == sorted(rec) and set(files) == {name + ".json" for name in FILE_KEYS}
@@ -851,12 +851,15 @@ def test_host_signature_required():
 # §5.7: raw config values, no URL library normalization or insteadOf expansion.
 def map_remote(raw, name, additional=()):
     local = "local:" + name
-    if not raw or additional:
+    if not raw or additional or not raw.isascii():
         return local
     m = re.fullmatch(r"(https|ssh)://([^/]+)(/.*)", raw)
     if m:
         scheme, authority, path = m.groups()
-        authority = authority.rsplit("@", 1)[-1]
+        if "@" in authority:
+            user, authority = authority.split("@", 1)
+            if scheme != "ssh" or user != "git":
+                return local
         hp = authority.split(":")
         host = hp[0].lower()
         if len(hp) > 2:
@@ -865,7 +868,7 @@ def map_remote(raw, name, additional=()):
         if port == ("443" if scheme == "https" else "22"):
             port = None
     else:
-        m = re.fullmatch(r"(?:[^/@]+@)?([^/:]+):([^/].*)", raw)
+        m = re.fullmatch(r"(?:git@)?([^/@:]+):([^/].*)", raw)
         if not m:
             return local
         host, path = m.groups()
@@ -873,6 +876,121 @@ def map_remote(raw, name, additional=()):
     path = path.removesuffix("/").removesuffix(".git")
     mapped = "https://" + host + (":" + port if port is not None else "") + path
     return mapped if canonical_identity(mapped) else local
+
+
+def branch_ok(branch):
+    """F1 §3: git branch names, with the additional reserved names and Unicode exclusions."""
+    return (
+        isinstance(branch, str)
+        and bool(branch)
+        and not branch.startswith(("-", "refs/"))
+        and branch not in {"HEAD", "@"}
+        and not branch.endswith(".")
+        and not any(x in branch for x in ("..", "@{"))
+        and not any(c in " ~^:?*[\\" or unicodedata.category(c) in {"Cc", "Cf"} for c in branch)
+        and all(
+            part and not part.startswith(".") and not part.endswith(".lock")
+            for part in branch.split("/")
+        )
+    )
+
+
+@pytest.mark.parametrize("branch", ["main", "feature/x", "café", "a.locked", "a@b"])
+def test_branch_names_accepted(branch):
+    assert branch_ok(branch)
+
+
+@pytest.mark.parametrize(
+    "branch",
+    [
+        "",
+        "-x",
+        "HEAD",
+        "@",
+        "refs/heads/main",
+        "a..b",
+        "a@{b",
+        "/a",
+        "a/",
+        "a//b",
+        ".a",
+        "a/.b",
+        "a.lock",
+        "a.",
+        "a b",
+        "a~b",
+        "a^b",
+        "a:b",
+        "a?b",
+        "a*b",
+        "a[b",
+        "a\\b",
+        "a\x00b",
+        "a\x85b",
+        "a\u200db",
+        "a\u00adb",
+    ],
+)
+def test_branch_names_refused(branch):
+    assert not branch_ok(branch)
+
+
+def links_branches_ok(links):
+    """The branch-name part of the §3 links schema shares the settings rule."""
+    return (
+        isinstance(links, dict)
+        and isinstance(links.get("branches"), dict)
+        and all(branch_ok(branch) for branch in links["branches"].values())
+    )
+
+
+@pytest.mark.parametrize(
+    "branch, ok", [("feature/x", True), ("a\u200db", False), ("a\u00adb", False)]
+)
+def test_branch_rule_applies_to_links_and_settings(branch, ok):
+    assert links_branches_ok({"branches": {"a": branch}}) == ok
+    assert settings_schema_ok({"repos": {"a": {"path": "../a", "default_branch": branch}}}) == ok
+
+
+def settings_schema_ok(values):
+    """F1 §2 / §5.4.2: validate declarations without repairing their values."""
+    if not isinstance(values, dict) or not values.keys() <= {
+        "repos",
+        "grant_hours",
+        "claim_ttl_min",
+        "lease_ttl_min",
+    }:
+        return False
+    for key, low, high in (
+        ("grant_hours", 1, 24),
+        ("claim_ttl_min", 15, 1440),
+        ("lease_ttl_min", 5, 1440),
+    ):
+        if key in values and (type(values[key]) is not int or not low <= values[key] <= high):
+            return False
+    repos = values.get("repos", {})
+    if not isinstance(repos, dict):
+        return False
+    for name, repo in repos.items():
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", name):
+            return False
+        if repo is None:
+            continue
+        if not isinstance(repo, dict) or not {"path"} <= repo.keys() <= {
+            "path",
+            "remote",
+            "default_branch",
+        }:
+            return False
+        if not isinstance(repo["path"], str) or not repo["path"]:
+            return False
+        if "remote" in repo and (
+            not isinstance(repo["remote"], str) or not canonical_identity(repo["remote"])
+        ):
+            return False
+        if "default_branch" in repo and not branch_ok(repo["default_branch"]):
+            return False
+    return True
 
 
 @by_name(R_ID["mapping"])
@@ -929,6 +1047,8 @@ def chain_break(events, log, ws, wsk, certs, ws_height):
     certs = dict(certs)
     prev, order = None, (0, "")
     for pos, e in enumerate(events, 1):
+        if e["type"] == "settings.changed" and not settings_schema_ok(e.get("set")):
+            return pos
         if e["seq"] != pos or e["prev"] != prev or not host_ok_event(e, wsk, ws, log):
             return pos
         # §5.2: sig, auth and roster_v belong to person events only; a host event carrying one breaks the chain.
@@ -1140,7 +1260,9 @@ class F1State:
         self.restore_start = None
         self.restore_end = None
         self.restore_open = False
+        self.log_order = {}
         self.last_order = None
+        self.repos = {}
 
     def cert_valid(self, cert, at):
         o = cert["o"]
@@ -1151,12 +1273,20 @@ class F1State:
             and "ok" in R.verify_cert(S, cert, R.unb64u(member["pk_pub"]), milliseconds(at))
         )
 
-    def judge(self, e, log):
+    def judge(self, e, log, replay=False):
         t, a = e["type"], e["actor"]
         lines = self.logs.get(log, [])
         # §5.11 step 0 at append: field set (`validation.*`). sig, auth and roster_v are person-only (§5.2).
         if a["kind"] != "person" and any(k in e for k in ("sig", "auth", "roster_v")):
-            return "validation.field_set"
+            return "chain.broken" if replay else "validation.field_set"
+        if t == "settings.changed" and not settings_schema_ok(e.get("set")):
+            return "chain.broken" if replay else "validation.event"
+        if (
+            t == "ticket.updated"
+            and "ticket.links" in e.get("set", {})
+            and not links_branches_ok(e["set"]["ticket.links"])
+        ):
+            return "chain.broken" if replay else "validation.event"
         # §5.11 steps 1–4, in order. At append, person signature is step 5.
         if e["seq"] != len(lines) + 1 or e["prev"] != (head(lines[-1]) if lines else None):
             return "chain.broken"
@@ -1167,7 +1297,11 @@ class F1State:
             current = (e["ws_seq"], e["at"], log, e["seq"])
             if (
                 e["ws_seq"] > len(self.logs.get("workspace", []))
-                or (self.last_order and current < self.last_order)
+                or (not replay and e["ws_seq"] < len(self.logs.get("workspace", [])))
+                or (not replay and self.last_order and current < self.last_order)
+                # §5.5 holds on replay too, per log: ws_seq never decreases along a ticket log, and at never
+                # goes back within one ws_seq. Only the cross-log merged order above is append-only.
+                or (log in self.log_order and (e["ws_seq"], e["at"]) < self.log_order[log])
                 or (
                     self.restore_start is not None
                     and self.restore_start <= e["ws_seq"] < self.restore_end
@@ -1271,6 +1405,18 @@ class F1State:
         role = self.members.get(a.get("id"), {}).get("role")
         if t in {"settings.changed", "restore"} and role != "owner":
             return "role.denied"
+        if t == "settings.changed":
+            repos = self.updated_repos(e)
+            identities = set()
+            for name, repo in repos.items():
+                remote = repo.get("remote")
+                if remote is None:
+                    continue
+                if remote.startswith("local:") and remote != "local:" + name:
+                    return "settings.invalid"
+                if remote.lower() in identities:
+                    return "settings.invalid"
+                identities.add(remote.lower())
         if t == "member.added":
             if role != "owner" and not (role == "maintainer" and e["role"] in {"member", "viewer"}):
                 return "role.denied"
@@ -1340,13 +1486,24 @@ class F1State:
             return "device.scope"
         return "ok"
 
-    def append(self, e, log):
-        result = self.judge(e, log)
+    def updated_repos(self, e):
+        repos = dict(self.repos)
+        for name, repo in e["set"].get("repos", {}).items():
+            if repo is None:
+                repos.pop(name, None)
+            else:
+                repos[name] = repo
+        return repos
+
+    def append(self, e, log, replay=False):
+        result = self.judge(e, log, replay)
         if result != "ok":
             return result
         self.logs.setdefault(log, []).append(e)
         self.seen.setdefault(log, set()).add(e["id"])
         t = e["type"]
+        if t == "settings.changed":
+            self.repos = self.updated_repos(e)
         if t == "workspace.created":
             self.wsk = e["wsk_pub"]
             self.members[e["owner"]["person"]] = e["owner"] | {"role": "owner"}
@@ -1390,6 +1547,7 @@ class F1State:
                 self.restore_open = True
         if log != "workspace":
             self.last_order = (e["ws_seq"], e["at"], log, e["seq"])
+            self.log_order[log] = (e["ws_seq"], e["at"])
         return result
 
 
@@ -1400,11 +1558,41 @@ SCENARIOS = [
 ] + [load("replay")]
 
 
+def check_scenario_step(state, step, index, replay=False):
+    """Vector index notes: schema refusals never advance state; replay-only steps test both paths.
+
+    `expect` on older schema-refused steps names the model rule, not a store schema code.
+    Keep checking that rule independently; `replay_expect` explicitly pins a replay result.
+    """
+    from copy import deepcopy
+
+    e, log = step["event"], step["log"]
+    if step.get("replay_only"):
+        assert state.judge(e, log) == "chain.bad_ws_seq"
+        replay = True
+    if "replay_expect" in step:
+        assert state.judge(e, log, replay=True) == step["replay_expect"]
+        if step["replay_expect"] == "chain.broken":
+            lines = state.logs.get(log, [])
+            assert (
+                chain_break(
+                    lines + [e], log, state.ws, state.wsk, state.certs, len(state.logs["workspace"])
+                )
+                == len(lines) + 1
+            )
+    before = deepcopy(state.__dict__) if step.get("schema_refused") else None
+    result = state.append(e, log, replay=replay)
+    assert result == step["expect"], (index, step.get("note"))
+    if step.get("schema_refused"):
+        assert result != "ok"
+        assert state.__dict__ == before
+
+
 @by_name(SCENARIOS)
 def test_protocol_scenario(c):
     state = F1State(c["workspace_id"])
     for i, step in enumerate(c["steps"]):
-        assert state.append(step["event"], step["log"]) == step["expect"], (i, step.get("note"))
+        check_scenario_step(state, step, i)
     assert head(state.logs["workspace"][0]) == c["genesis"]
     if "qid" in c:
         asked = next(iter(state.questions.values()))
@@ -1468,7 +1656,7 @@ def test_revocation_identity_checks(c):
             if identity == "ok" and e["reason"] != e["revocation"]["o"]["reason"]:
                 identity = "device.reason_mismatch"
             assert identity == checks[i]
-        state.append(e, step["log"])
+        check_scenario_step(state, step, i)
 
 
 def test_first_checkpoint_requires_signature_and_pinned_genesis():
@@ -1518,7 +1706,8 @@ def test_restore_window_replayed_workspace_first():
     ordered = [s for s in c["steps"] if s["log"] == "workspace"] + [
         s for s in c["steps"] if s["log"] != "workspace"
     ]
-    assert [state.append(s["event"], s["log"]) for s in ordered] == [s["expect"] for s in ordered]
+    for i, step in enumerate(ordered):
+        check_scenario_step(state, step, i, replay=True)
 
 
 def test_agent_event_with_person_fields_refused_at_append():
