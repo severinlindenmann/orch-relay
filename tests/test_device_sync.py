@@ -95,6 +95,40 @@ def test_judge_requires_the_receivers_known_devices():
         judge(F1, F1["workspace_n_held"], c["checkpoint"], c["now"])
 
 
+def _evidence_case():
+    c = copy.deepcopy(
+        next(
+            x
+            for x in F1["transition_cases"]
+            if x["name"] == "own_evidence_for_a_known_active_device"
+        )
+    )
+    assert judge(F1, c["held"], c["offered"], c["now"], **view(c))[0] == "ok"
+    return c
+
+
+def test_judge_with_explicit_none_known_devices_refuses():
+    """An explicit None is not "no devices" ({} is): it fails closed instead of skipping evidence binding."""
+    c = _evidence_case()
+    got = judge(F1, c["held"], c["offered"], c["now"], **{**view(c), "known_devices": None})
+    assert got == ("chain.diverged", None, ())
+
+
+def test_known_device_without_a_stored_key_binds_the_person_only():
+    """orch-core binds person and, only when it stores one, the key: a None pk_pub is "no key", not a value."""
+    c = _evidence_case()
+    device, kd = next(iter(c["known_devices"].items()))
+    keyless = {device: {"person_id": kd["person_id"], "pk_pub": None}}
+    got = judge(F1, c["held"], c["offered"], c["now"], **{**view(c), "known_devices": keyless})
+    assert got[0] == "ok"
+    absent = {device: {"person_id": kd["person_id"]}}
+    got = judge(F1, c["held"], c["offered"], c["now"], **{**view(c), "known_devices": absent})
+    assert got[0] == "ok"
+    other = {device: {"person_id": "ff" * 16, "pk_pub": None}}
+    got = judge(F1, c["held"], c["offered"], c["now"], **{**view(c), "known_devices": other})
+    assert got == ("chain.diverged", None, ())
+
+
 def test_walk_alarm_case_alarms_through_the_device_state():
     """The walk raises C3 alarms itself (raise_alarms over every learned revocation, across walks): the
     shared alarm case, replayed as device state, alarms for the signer and keeps the transition."""

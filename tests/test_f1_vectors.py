@@ -1722,6 +1722,18 @@ def receiver_verdict(
         if result != "ok":
             return result, None, ()
         restored = restore["log"], retained, signer
+        # orch-core checks the restored log's tail first, before the other logs.
+        log, e, tail = restore["log"], restore["event"], proofs.get(restore["log"])
+        if (
+            not isinstance(tail, list)
+            or not tail
+            or log not in new
+            or not growth_ok(retained, new[log], tail)
+        ):
+            return "sync.incomplete", None, ()
+        if tail[0] != head(e):
+            # A WSK-signed T whose entry at from_seq + 1 is another event than this restore (orch-core #377).
+            return diverged
     elif held is None:
         return "ok", None, ()
     for log, target in new.items():
@@ -1734,19 +1746,8 @@ def receiver_verdict(
             return "sync.incomplete", None, ()
     if not restored:
         return "ok", None, ()
-    log, retained, signer = restored
+    signer = restored[2]
     e = restore["event"]
-    tail = proofs.get(log)
-    if (
-        not isinstance(tail, list)
-        or not tail
-        or log not in new
-        or not growth_ok(retained, new[log], tail)
-    ):
-        return "sync.incomplete", None, ()
-    if tail[0] != head(e):
-        # A WSK-signed T whose entry at from_seq + 1 is another event than this restore (orch-core #377).
-        return diverged
     # C3: a `compromised` revocation of the signer learned only later in the walk never refuses; it raises an alarm.
     alarms = tuple(
         sorted(
@@ -3230,6 +3231,24 @@ def test_ticket_restore_ws_seq_is_committed_by_the_target(ws_seq, ok):
     assert offer_local_transition(c) == (accepted(c) if ok else ("chain.diverged", None))
 
 
+def test_restore_tail_is_checked_before_the_other_logs():
+    """orch-core #377 checks the restored log's tail first: a ticket restore whose T also conflicts on the
+    workspace head, with the restore's tail proof removed, is incomplete, not diverged."""
+    c = local_transition("ticket_restore_accepted_with_held_revocations")
+    log = c["restore"]["log"]
+    assert log != "workspace" and offer_local_transition(c) == accepted(c)
+    target = c["offered"]
+    target["o"]["workspace_log"]["head"] = "sha256:" + "55" * 32
+    target["sig"] = sign_checkpoint(target["o"])["sig"]
+    c["restore"]["T"] = target
+    assert height_conflict(c["held"]["o"]["workspace_log"], target["o"]["workspace_log"])
+    assert offer_local_transition(c) == ("chain.diverged", None)  # tail present: the conflict shows
+    del c["proofs"][log]
+    assert offer_local_transition(c) == ("sync.incomplete", None)
+    c["proofs"][log] = []
+    assert offer_local_transition(c) == ("sync.incomplete", None)
+
+
 @pytest.mark.parametrize("reason", ["compromised", "lost", "retired"])
 def test_ticket_restore_signer_known_revoked(reason):
     """§19.8 R1: the signer must be unrevoked by every held revocation, on the ticket path too (round 2, 1)."""
@@ -3325,8 +3344,14 @@ def test_restore_seq_true_is_not_seq_one():
     assert not restore_schema_ok(e, "workspace")
     e["seq"] = 1
     assert not restore_schema_ok(e, "workspace")
-    # The integer rule on its own: True equals from_seq + 1 when from_seq is 0, which the schema also refuses.
+    # True == from_seq + 1 only when from_seq is 0, which the from_seq >= 1 rule refuses (so this is not the
+    # integer rule on its own).
     e.update(seq=True, from_seq=0)
+    assert not restore_schema_ok(e, "workspace")
+    # The integer rule on its own: a float seq equal to from_seq + 1 passes the equality and from_seq >= 1.
+    e = local_transition()["restore"]["event"]
+    e["seq"] = float(e["from_seq"] + 1)
+    assert e["seq"] == e["from_seq"] + 1 and e["from_seq"] >= 1
     assert not restore_schema_ok(e, "workspace")
 
 
