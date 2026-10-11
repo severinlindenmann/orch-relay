@@ -59,6 +59,11 @@ def sql(client, statement, args=()):
         return con.execute(statement, args).fetchall()
 
 
+def sql_path(path, statement):
+    with closing(db.connect(path)) as con:
+        return con.execute(statement).fetchall()
+
+
 def host_poll(client, **query):
     return client.get(f"/v2/workspaces/{WS}/host/poll", params=query, headers=HOST)
 
@@ -99,6 +104,12 @@ def test_replay_ttl_conflict_and_response_nonconsuming(client):
     assert client.get(url, headers=headers, params={"after": 0}).json() == {"chunks": []}
     assert sql(client, "SELECT pending FROM queue_totals WHERE direction=2") == [(0,)]
     advance(client, 60000)
+    # P3-D27: the exact bytes of an expired current-epoch chunk are stored again...
+    assert post_raw(client, binary("bridge_host_post"), True).status_code == 202
+    assert client.get(url, headers=headers).json() == first.json()
+    # ...but old-epoch data is never restored (P3-D22).
+    sql(client, "UPDATE member_lists SET epoch=2")
+    advance(client, 120000)
     assert post_raw(client, binary("bridge_host_post"), True).status_code == 202
     assert client.get(url, headers=headers).json() == {"chunks": []}
 
@@ -648,7 +659,18 @@ def test_pair_accounting_migrates_retained_bodies(tmp_path):
     with closing(db.connect(path)) as con, con:
         queue_body(con, binary("pair_device_post"))
         queue_body(con, binary("bridge_device_post"))
-    assert db.migrate(path) == ["0005_pair_accounting", "0006_holder_notices"]
+        con.execute(
+            "INSERT INTO rid_seen VALUES (?,?,?,'d',1,?,0,?,?,NULL)",
+            (WS, DEVICE, RID, NOW, NOW, NOW),
+        )
+        con.execute("INSERT INTO rid_chunks VALUES (?,?,?,0,'d')", (WS, DEVICE, RID))
+    assert db.migrate(path) == [
+        "0005_pair_accounting",
+        "0006_holder_notices",
+        "0007_chunk_restores",
+    ]
+    # P3-D27: chunks retained across the upgrade start with no restorations.
+    assert sql_path(path, "SELECT idx,restores FROM rid_chunks") == [(0, 0)]
     with closing(db.connect(path)) as con:
         rows = con.execute(
             "SELECT device_id,pending,count FROM queue_totals ORDER BY device_id"
@@ -783,3 +805,90 @@ def test_identical_resends_do_not_spend_post_rate(client):
     new[72:80] = (1).to_bytes(8, "big")
     r = post_raw(client, bytes(new), True)
     assert r.status_code == 429 and r.json() == {"error": "rate_limited"}
+
+
+# P3-D27: bounded exact-bytes re-store of expired response chunks.
+
+
+def restore_setup(client):
+    assert post_raw(client, binary("bridge_device_post")).status_code == 202
+    assert post_raw(client, binary("bridge_host_post"), True).status_code == 202
+
+
+def mailbox(client):
+    url = f"/v2/workspaces/{WS}/bridge/{RID}"
+    return client.get(url, headers={"Authorization": "Bearer FAKE-device"}).json()["chunks"]
+
+
+def test_restore_after_expiry_capped_and_durable_across_restart(tmp_path):
+    with TestClient(create_app(tmp_path)) as client:
+        seed(client.app.state.directory)
+        restore_setup(client)
+        for i in range(1, 9):
+            advance(client, i * 60000 + 1)
+            assert mailbox(client) == []
+            assert post_raw(client, binary("bridge_host_post"), True).status_code == 202
+            assert len(mailbox(client)) == 1
+        assert sql(client, "SELECT restores FROM rid_chunks") == [(8,)]
+        assert sql(client, "SELECT first_ms,keep_until_ms FROM rid_seen") == [(NOW, NOW + 900000)]
+    with TestClient(create_app(tmp_path)) as client:  # a relay restart keeps the counter
+        advance(client, 9 * 60000 + 1)
+        r = post_raw(client, binary("bridge_host_post"), True)
+        assert r.status_code == 409 and r.json() == {"error": "retry_exhausted"}
+        assert mailbox(client) == []
+
+
+def test_restore_is_charged_and_wakes_live_duplicate_is_free(client, monkeypatch):
+    restore_setup(client)
+    windows = client.app.state.directory.windows
+    advance(client, 30000)
+    windows[("bridge-host-post", (WS, DEVICE), 1000)] = (NOW + 31000, 20)
+    # A live duplicate is a free no-op that keeps its TTL.
+    before = sql(client, "SELECT n,expires_ms FROM bridge_msgs WHERE direction=2")
+    assert post_raw(client, binary("bridge_host_post"), True).status_code == 202
+    assert sql(client, "SELECT n,expires_ms FROM bridge_msgs WHERE direction=2") == before
+    advance(client, 60000)
+    windows[("bridge-host-post", (WS, DEVICE), 1000)] = (NOW + 61000, 20)
+    r = post_raw(client, binary("bridge_host_post"), True)
+    assert r.status_code == 429 and r.json() == {"error": "rate_limited"}
+    assert sql(client, "SELECT restores FROM rid_chunks") == [(0,)]
+    del windows[("bridge-host-post", (WS, DEVICE), 1000)]
+    woken = []
+    monkeypatch.setattr(client.app.state.bridge, "wake", lambda *keys: woken.extend(keys))
+    assert post_raw(client, binary("bridge_host_post"), True).status_code == 202
+    assert woken == [("rid", WS, RID, DEVICE)]
+    assert windows[("bridge-host-post", (WS, DEVICE), 1000)][1] == 1
+    assert sql(client, "SELECT expires_ms FROM bridge_msgs WHERE direction=2") == [(NOW + 120000,)]
+
+
+def test_restore_refused_after_revocation_cleanup(client):
+    restore_setup(client)
+    advance(client, 60000)
+    sql(
+        client,
+        "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
+        (DEVICE, PERSON, P.cj(RECORD), "lost", NOW, 1),
+    )
+    r = post_raw(client, binary("bridge_host_post"), True)
+    assert r.status_code == 403 and r.json() == {"error": "revoked"}
+    live = "SELECT count(*) FROM bridge_msgs WHERE direction=2 AND expires_ms>?"
+    assert sql(client, live, (NOW + 60000,)) == [(0,)]
+    assert sql(client, "SELECT restores FROM rid_chunks") == [(0,)]
+
+
+def test_pair_answers_are_never_restored(client):
+    # An epoch-0 LAST | REFUSAL answer would pass the epoch rule, so only the pairing exclusion
+    # keeps it from being stored again.
+    host = fixture_request("pair_host_post")
+    refusal = bytearray(P.unb64u(host["body_b64u"]))
+    refusal[6] = 5
+    assert post_fixture(client, "pair_device_post").status_code == 202
+    answer = client.post(host["path"], content=bytes(refusal), headers=host["headers"])
+    assert answer.status_code == 202
+    poll = fixture_request("pair_poll")["path"]
+    assert len(client.get(poll).json()["chunks"]) == 1
+    advance(client, 60000)
+    answer = client.post(host["path"], content=bytes(refusal), headers=host["headers"])
+    assert answer.status_code == 202
+    assert client.get(poll).json() == {"chunks": []}
+    assert sql(client, "SELECT restores FROM rid_chunks") == [(0,)]
