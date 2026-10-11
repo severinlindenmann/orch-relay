@@ -10,6 +10,7 @@ Not verifiable from the F1 text alone, or not in the shared files at all, is lis
 
 import hashlib
 import json
+import os
 import re
 import unicodedata
 from pathlib import Path
@@ -30,10 +31,16 @@ def by_name(cases):
 
 
 needs_unicode_16 = pytest.mark.skipif(
-    unicodedata.unidata_version != "16.0.0",
-    reason=f"F1 §11.3 pins Unicode 16.0; this Python has {unicodedata.unidata_version} and the relay "
+    unicodedata.unidata_version != "16.0.0" and not os.environ.get("CI"),
+    reason=f"F1 section 11.3 pins Unicode 16.0; this Python has {unicodedata.unidata_version} and the relay "
     "does not bundle 16.0 tables (CI runs Python 3.14, which has 16.0)",
 )
+
+
+def test_unicode_tables_are_16_0_in_ci():
+    """A skip is not a pass: in CI the text tests must run, so other Unicode data fails here."""
+    if os.environ.get("CI"):
+        assert unicodedata.unidata_version == "16.0.0"
 
 
 def sha(b: bytes) -> str:
@@ -141,6 +148,13 @@ def policy_canon(p: dict) -> dict:
 
 def policy_hash(gate: str, p: dict) -> str:
     return hl(L["h_policy"], cjt({"gate": gate, "policy": policy_canon(p)}))
+
+
+def grant_secret_hash(secret: bytes) -> str:
+    """F1 section 10.1 A3 / 10.8: the grant secret is 32 random bytes; any other length is refused."""
+    if len(secret) != 32:
+        raise ValueError("grant secret must be 32 bytes")
+    return hl(L["h_grant_secret"], secret)
 
 
 def question_id(workspace_id: str, ticket: str, question: str) -> str:
@@ -268,17 +282,16 @@ def test_artifact_digest_is_plain_sha256(c):
 
 @pytest.mark.parametrize("c", H["grant_secret_hash"], ids=lambda c: c["hash"][7:15])
 def test_grant_secret_hash(c):
-    assert hl(L["h_grant_secret"], bytes.fromhex(c["secret_hex"])) == c["hash"]
+    assert grant_secret_hash(bytes.fromhex(c["secret_hex"])) == c["hash"]
 
 
 @pytest.mark.parametrize(
     "secret_hex", H["grant_secret_hash_refused"], ids=lambda s: f"{len(s) // 2}_bytes"
 )
 def test_grant_secret_must_be_32_bytes(secret_hex):
-    """The vectors refuse 0, 31 and 33 bytes. F1 §5.6 says `secret bytes` only; the 32-byte length is not
-    stated in the section (it follows from N4's `gr_<ULID>.<secret>` only if the secret is 256 bits), so this
-    asserts the vectors' own rule: every refused case is not 32 bytes."""
-    assert len(bytes.fromhex(secret_hex)) != 32
+    """F1 section 10.1 A3 and 10.8 state the 32-byte secret; the hash helper refuses any other length."""
+    with pytest.raises(ValueError):
+        grant_secret_hash(bytes.fromhex(secret_hex))
 
 
 @pytest.mark.parametrize("c", H["section_hash"], ids=lambda c: c["hash"][7:15])
@@ -505,10 +518,10 @@ def test_lines_are_cj_plus_lf():
         assert R.cj(R.parse_json(bytes.fromhex(hx))) + b"\n" == bytes.fromhex(hx)
 
 
-@pytest.mark.parametrize("i", range(4))
-def test_non_cj_lines_are_refused(i):
+@pytest.mark.parametrize("hx", CH["non_cj_lines"], ids=lambda h: h[:16] + str(len(h)))
+def test_non_cj_lines_are_refused(hx):
     """§5.5: strictly parse each line and check that it is `cj`. These parse, but are not `cj` plus one LF."""
-    raw = bytes.fromhex(CH["non_cj_lines"][i])
+    raw = bytes.fromhex(hx)
     try:
         obj = R.parse_json(raw)
     except ValueError:
@@ -516,12 +529,25 @@ def test_non_cj_lines_are_refused(i):
     assert R.cj(obj) + b"\n" != raw
 
 
-def test_tampered_event_changes_its_head_and_breaks_the_chain():
-    """The file names no tamper recipe; the head matches events[1] with `gate` changed to `plan` (found by
-    search, not stated), and any such change breaks `prev` of the next line."""
-    tampered = CH["events"][1] | {"gate": "plan"}
+def verify_chain(events):
+    """The reader's rule (F1 section 5.5): seq counts from 1, prev of seq 1 is null, every other prev is the head
+    of the line before. Returns the seq of the first broken line, or None."""
+    prev = None
+    for n, e in enumerate(events, start=1):
+        if e["seq"] != n or e["prev"] != prev:
+            return n
+        prev = head(e)
+    return None
+
+
+def test_a_tampered_line_breaks_the_chain_at_its_successor():
+    """The file names no tamper recipe (core should add one); the head matches events[1] with `gate` set to `plan`,
+    found by search. A reader stops at seq 3, whose prev no longer matches the head of line 2."""
+    e1, e2, e3 = CH["events"]
+    assert verify_chain([e1, e2, e3]) is None
+    tampered = e2 | {"gate": "plan"}
     assert head(tampered) == CH["tampered_event_head"] != CH["heads"][1]
-    assert CH["events"][2]["prev"] != CH["tampered_event_head"]
+    assert verify_chain([e1, tampered, e3]) == 3
 
 
 # --- repo identity (F1 §5.7) ---------------------------------------------------------------------------------
@@ -588,3 +614,44 @@ def test_repo_identities_compare_ignoring_ascii_case(pair):
 )
 def test_repo_identity_mapping_from_raw_remote_urls():
     raise AssertionError
+
+
+# --- byte identity, the reference's own question hash, deep input -----------------------------------------------
+
+
+def test_vector_files_match_the_recorded_sha256():
+    """SOURCE records the orch-core commit and the sha256 of each copy: a hand edit of a copied file fails."""
+    rec = dict(
+        line.split()[::-1]
+        for line in (F1 / "SOURCE").read_text().splitlines()
+        if line.startswith("sha256:")
+    )
+    files = sorted(p.name for p in F1.glob("*.json"))
+    assert files == sorted(rec) and len(files) == 7
+    for name in files:
+        assert "sha256:" + hashlib.sha256((F1 / name).read_bytes()).hexdigest() == rec[name]
+
+
+def test_canon_depth_cases_are_in_the_protocol_vectors():
+    proto = json.loads(R.VECTORS.read_text(encoding="utf-8"))["encodings"]["strict_parse"]
+    by = {c["name"]: c for c in proto}
+    for c in load("canon")["depth"]:
+        assert by[c["name"]]["text"] == c["text"] and by[c["name"]]["ok"] == c["ok"]
+
+
+@pytest.mark.parametrize("c", H["question_hash"], ids=lambda c: c["hash"][7:15])
+def test_reference_question_hash_is_the_f1_question_hash(c):
+    """Protocol section 13's content_hash digest and F1's question hash are one hash (F1 writes it as sha256:hex)."""
+    content = {
+        "question_id": c["qid"],
+        "ticket": c["ticket"],
+        "text": c["text"],
+        "options": c["options"],
+    }
+    assert "sha256:" + R.question_hash(content).hex() == c["hash"]
+
+
+def test_very_deep_input_is_a_value_error_not_a_recursion_error():
+    deep = b"[" * 200000 + b"]" * 200000
+    with pytest.raises(ValueError):
+        R.parse_json(deep)

@@ -119,8 +119,11 @@ def parse_json(raw: bytes):
     """Strict parse (§2.3): UTF-8, no duplicate key, no NaN/Infinity, no float, the subset only."""
     if not isinstance(raw, (bytes, bytearray)):
         raise ValueError("bytes expected")
-    v = json.loads(bytes(raw).decode("utf-8"), object_pairs_hook=_no_dupes, parse_constant=_no_constant,
-                   parse_float=_no_float)
+    try:
+        v = json.loads(bytes(raw).decode("utf-8"), object_pairs_hook=_no_dupes, parse_constant=_no_constant,
+                       parse_float=_no_float)
+    except RecursionError:
+        raise ValueError("too deep") from None
     _check_json(v)
     return v
 
@@ -1951,7 +1954,7 @@ def _verify_cosig(suite: Suite, cos: dict, peer: dict, hb: bytes, body: bytes, n
         ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), cred_pub).verify(
             unb64u(cos["signature"]), ad + H(cdj), ec.ECDSA(hashes.SHA256()))
         return True
-    except (ValueError, KeyError, TypeError, InvalidSignature, AttributeError):
+    except (ValueError, KeyError, TypeError, InvalidSignature, AttributeError, RecursionError):
         return False
 
 

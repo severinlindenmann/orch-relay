@@ -310,7 +310,8 @@ Every derivation, signature, AEAD associated data, hash and MAC has its own labe
 | `mac_enroll` | `orch/v2/enroll\|` | HMAC-SHA-256 | the enrolment code | scoped agent enrolment |
 
 The `sig_ticket_event` … `h_grant_secret` rows come from orch-core's ticket format F1 (§5.6); the table stays
-prefix-free with them, and `h_question` is the same label F1 calls the question hash.
+prefix-free with them, and `h_question` is the same label F1 calls the question hash (same preimage; F1 writes the digest as
+`sha256:` + hex, §13 as b64u).
 
 The spec writes two signature domains without a trailing `"|"` (`orch/v2/ws-envelope`,
 `orch/v2/publish`). **DECIDED HERE:** both get the trailing `"|"` like every other domain, so that the table
@@ -1475,7 +1476,9 @@ kind, another key, an unknown kind).
 
 ## 13. Questions (spec §8)
 
-- `question_id` is 16 random bytes (hex).
+- `question_id` of a ticket question is the F1-derived id: the first 16 bytes, in hex, of
+  `H("orch/v2/question-id|" || cj({"workspace_id", "ticket", "question"}))` (ticket format F1 §5.6, row
+  `h_question_id`). It is not random; a question of another origin may use 16 random bytes (hex).
 - `content_hash = b64u(H("orch/v2/question|" || cj({question_id, ticket, text, options})))`.
 - A decision is the bridge op
   `{"op":"decision", "decision_id": hex, "question_id": hex, "content_hash": b64u, "answer": <JSON>,
@@ -1492,6 +1495,9 @@ kind, another key, an unknown kind).
   to a peer the question came from. `workspace_id` binds it to one workspace. The host checks the field
   set → `malformed`, then the signature with the sender's certificate → `bad_signature`, before
   compare-and-set.
+- A decision is single-use by `decision_id`. Because the qid is derived, the same question id and text can
+  recur (for example after a `restore`); whether a decision bound to an abandoned chain is refused is **open
+  for P3** (F1 §5.10 `abandoned_decisions`), not defined here.
 
 The host applies the first valid decision by compare-and-set, then:
 
