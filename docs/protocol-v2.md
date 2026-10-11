@@ -2310,7 +2310,9 @@ devices. Boundary limits remain 64 certificates/day, 64 open requests/person, 64
 This section uses F1 §5.3/5.6/5.10 at orch-core `f1094b3fc2a4c3e5ae16dc8fd23162b8360bba09`. The relay's F1
 vector snapshot `tests/vectors/f1` is re-synced to that commit separately (PR #41); until then
 `tests/vectors/f1_receiver_f1094b3.json` carries F1's 25 `transition_cases` and 12 `workspace_n_offers`, byte-equal
-to that commit, and they run against the reference device judge.
+to that commit, and they run against the reference device judge. `tests/vectors/f1_receiver_orch52.json` carries
+orch-52's newer receiver cases (branch `fix/restore-receiver-vectors` at 24305776, unmerged: 86 transition cases,
+30 offers); the reference judge follows them and is re-pinned when they merge.
 F1 defines event/checkpoint bytes; the relay adds storage, transport and present-authority checks.
 **P3-D12:** only `workspace_checkpoint` objects are published, never `ticket_checkpoint` objects.
 
@@ -2321,7 +2323,7 @@ F1 defines event/checkpoint bytes; the relay adds storage, transport and present
 | `PUT /v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/manifest` | W(g) | `{pages: [{i, kind, log, after_seq, count, digest}]}` → `{complete, missing}` | JSON cap 4 MiB; immutable terminal marker | 409 `staging_conflict`; 429 `quota_exceeded` | P3-D20 |
 | `POST /v2/workspaces/{ws}/baselines` | W(g) | `{hash, offer_id}` → `{until_ms}` | JSON cap 16 KiB; 7 days, at most 16 pins | 404 `not_found`; 410 `checkpoint_gone`; 429 `quota_exceeded` | P3-D13/D20 |
 | `DELETE /v2/workspaces/{ws}/baselines/{hash}[?offer_id=o]` | W(g), or D(m) after initialization naming `offer_id` | no body → `{}` | idempotent release; W(g) releases any pin, D(m) only the pin whose `offer_id` it names, otherwise a no-op | — | P3-D13/D20 |
-| `PUT /v2/workspaces/{ws}/checkpoint` | W(g) | `{checkpoint, source_hash, restore?}` with `restore = {line, cert, authz, log}` → `{result: "accepted" or "ignored", n, hash}` | JSON cap 2624 KiB; atomic; exact retry returns prior result; 16 failed publications per workspace per hour | 400 `wrong_suite`, `too_large`; 401 `bad_signature`; 409 `no_genesis`, `genesis_mismatch`, `chain_diverged`, `checkpoint_time`, `staging_incomplete`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation`; 429 `quota_exceeded` | P3-D13/D20/D24/D25 |
+| `PUT /v2/workspaces/{ws}/checkpoint` | W(g) | `{checkpoint, source_hash, restore?}` with `restore = {line, cert, authz, log}` → `{result: "accepted" or "ignored", n, hash}` | JSON cap 2624 KiB; atomic; exact retry returns prior result; `Orch-Holder` required; at most 16 refusals per holder generation and 48 per workspace in any rolling hour | 400 `wrong_suite`, `too_large`; 401 `bad_signature`; 409 `fenced`, `no_genesis`, `genesis_mismatch`, `chain_diverged`, `checkpoint_time`, `staging_incomplete`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation`; 429 `quota_exceeded` | P3-D13/D20/D24/D25 |
 | `GET /v2/workspaces/{ws}/checkpoint[?hash=h]` | D(m) or W | `{genesis: {pin, cert}, checkpoint, transitions_head}` | held H or immutable hash h | 404 `not_found`; 410 `checkpoint_gone` | P3-D18/D19 |
 | `GET /v2/workspaces/{ws}/transitions?after_n=k&to=E&limit=` | D(m) or W | `{transitions: [bundle], next}` | ascending target_n; default/max 16, at most 4 MiB | 404 `not_found`; 410 `checkpoint_gone` | P3-D13/D19 |
 | `GET /v2/workspaces/{ws}/proof?log=L&from=acc&to=E&limit=` | D(m) or W | `{heads: [head], next}` | default/max 65 536, at most 4 MiB | 404 `not_found`; 410 `checkpoint_gone` | P3-D19 |
@@ -2379,8 +2381,11 @@ every fold, all sizes and R0–R5 before effects, and rejects unused evidence. T
 revocations, the transition and checkpoint, then advances H together. Refusals record no restore IDs.
 **Failure budget (review 3, amended N5).** A refused final publication is charged only after the request passed
 W(g) authentication and the holder-generation check: a 401 or a 409 `fenced` (stale holder) is never charged.
-The budget is per holder generation: at most 16 refusals per rolling hour, and a takeover by a newer generation
-starts an empty budget, so a compromised former holder cannot delay its successor. Order: size cap and parse, then
+The `Orch-Holder` generation is required (a missing one is 400 `malformed`, uncharged). Each holder generation
+may spend at most 16 refusals per rolling hour, so a compromised former holder cannot use up its successor's
+slice; across generations the workspace is capped at 48 refusals per rolling hour (review F1). Takeovers are not
+rate limited, because P3-D10 lets a WSK holder (and an honest host restarting after a crash) always take over; the
+workspace ceiling is what bounds a WSK holder that takes over from itself repeatedly. Order: size cap and parse, then
 an exact retry of an accepted publication returns its stored result (also with the budget spent), then the budget
 check (429 `quota_exceeded`, not charged), then signature and fold work. `ignored` lower-n publications are not
 charged; they cost one signature check and one canonicalisation of at most 2 MiB.
@@ -2392,7 +2397,8 @@ in that one context only, never by trying T's entries.
 
 - **R0 (P3-D13):** exact F1 restore fields, person actor, `v=2`, `hash_v=1`, `sig`, `auth`, `roster_v`,
   `host_sig`; `ws_seq` exactly when `log` is a ticket. Strict JSON, schema and line-size checks precede effects.
-  The bundle's delegation MUST be byte-identical (`cj`) to the card's delegation on file (card binding).
+  The bundle's delegation MUST have the card's delegation content (`o` equal) and verify under the owner PK (card
+  binding; orch-52 24305776: an owner re-signing the same content is the same delegation).
 - **R1 (P3-D24):** verify both host and person signatures using F1's `{workspace_id, log}` context.
   Verify the card's PK-signed delegation and PK-certified device; actor person/device IDs must match,
   scope levels include operate and no `drop:` scope. Certificate validity is checked at `line.at` and,
@@ -2412,18 +2418,24 @@ in that one context only, never by trying T's entries.
   conflicting abandoned head is refused.
 - **R3a (P3-D25):** `C.o.at <= line.at <= T.o.at`, `T.o.at >= H.o.at`, and
   `T.o.at <= relay clock + 300 s`. The two constraints on T itself apply to every publication, restores included,
-  with 409 `checkpoint_time`. A `line.at` outside `[C.o.at, T.o.at]` is 409 `restore_invalid`.
+  with 409 `checkpoint_time`, at the relay and on the device alike (inclusive at +300 s). A `line.at` outside
+  `[C.o.at, T.o.at]` is 409 `restore_invalid`. There is no separate ceiling on `line.at`: past the ceiling it is
+  either `checkpoint_time` (T is too) or `restore_invalid` (`line.at > T.o.at`) (review F7).
   The host clamps checkpoint at to max(clock, previous at), and restore at to max(clock, source at,
   last merged-order at). `at` is a host-chosen position, not a person-signed timestamp. Rewriting it
   within the anchored window remains possible and is explicitly tested.
 - **R4 (P3-D13, F1 B1):** workspace restores carry all effective host-held revocations; ticket restores
   carry `[]`. Validate every `{revocation, device_cert, pk_pub}` first; the certificate's `person_id` must equal
-  `H(h_person_id || suite || pk_pub)`. **Device binding (review N1, as F1 `model/workspace.restore`):** for a device
-  the relay already binds to a person (the member list's person, an earlier accepted restore signer, or the person
-  of a held revocation), the revocation's `person_id` MUST be that person and `pk_pub` MUST equal the key the relay
-  stored for it (the owner PK, or the key that came with the held revocation); otherwise `restore_invalid`. Only a
-  device the relay has never bound (an abandoned-only or v1-imported member's) is accepted self-certifying (review
-  5), and acceptance binds it. Entries are sorted and unique by device. For each held revocation of an ever-device,
+  `H(h_person_id || suite || pk_pub)`. **Device binding (review N1/F3, as F1 `model/workspace.restore`):** the
+  relay binds a device to a person authoritatively from its global device registry (§19.1/§6.2, live at check
+  time, so a member added later is bound) or from a restore signer it verified under the owner PK; the person's
+  key is the directory account key. Evidence for an authoritatively bound device MUST carry that person and key.
+  A device with no authoritative binding but earlier self-certified evidence is bound to that person and key.
+  Only a wholly unknown device (an abandoned-only or v1-imported member's) is accepted self-certifying (review 5),
+  and that binding is recorded as self-certified. When an authoritative binding later contradicts a self-certified
+  one, the relay discards the self-certified binding and its held revocation (and logs the event) before judging,
+  so attacker-made evidence for a not-yet-registered device cannot brick the device's real person's restores.
+  Otherwise `restore_invalid`. Entries are sorted and unique by device. For each held revocation of an ever-device,
   require the same or stronger reason: compromised > lost = retired. Missing/weaker coverage returns
   `restore_missing_revocation` with sorted `devices`. Byte identity with the earliest chain evidence
   is an F1 host rule, not a relay rule. Preserve strongest reasons; grow ever_devices atomically.
@@ -2455,9 +2467,13 @@ a lower-n bundle in this walk, refuses that transition (`chain_diverged`), whate
 **Where a device's revocations come from, and what each is used for (review N4).** A device holds two sets:
 *chain* revocations, learned from accepted restore bundles (with the bundle's `pk_pub`), and *local* revocations,
 learned out of band (the §19.5 revocation feed, the member list, the owner's own action). The **signer check**
-uses both sets: every revocation the device holds refuses its signer. The **completeness check** (a workspace
-restore must list every held revocation, a `compromised` one as `compromised`) and the person/key binding of
-carried evidence use only chain revocations. Both sets are durable and both feed the resurrection rule.
+uses both sets: every revocation the device holds refuses its signer. The **person/key binding** of carried
+evidence uses everything the device knows of a device's person: chain revocations, local revocations and known
+active devices (the pairing member list, applied signers, accepted evidence; review F2, orch-52 #377). Only the
+**completeness check** (a workspace restore must list every held revocation, a `compromised` one as
+`compromised`) uses chain revocations alone. Both sets are durable and both feed the resurrection rule. A local
+`compromised` revocation of a device that signed an applied transition raises the alarm when it is learned,
+independent of any sync (review F6).
 Consequences, stated in full: a device that learned an *unrelated* device's revocation out of band is not
 stranded behind an older genuine workspace restore that could not list it. A device that learned the *signer's*
 revocation out of band (any reason) while behind an older genuine restore by that signer stays refused at that
@@ -2492,15 +2508,15 @@ leaves the device exactly as it was.
      log of C (step 5). Then `work = C`.
    - Fetch T by `B.target_hash`; `T.o.n` MUST equal `B.target_n`.
    - Judge B before fetching its proofs: R0 shape, the person and host signatures in `B.log`'s context, the
-     delegation byte-identical to the pinned card's, the certificate and delegation under the pinned owner PK
+     delegation content equal to the pinned card's (`o`), the certificate and delegation under the pinned owner PK
      (actor = delegation owner = certificate person and device, operate, no `drop:` scope, valid at `line.at`), the
      signed `source` MUST equal `{n: work.o.n, hash: h_checkpoint(work)}` (the R2 equivalent; a null `source`
      only when the device has no `work`, so an initialized device refuses every null-source bundle),
      `line.id` not already applied, `work.o.at <= line.at <= T.o.at`, a ticket `ws_seq` at most T's workspace
      height, the signer not revoked inside B, and the revocation rules above (every revocation the device holds,
-     chain or local, including those learned from earlier bundles of this walk, refuses its signer; a workspace
-     restore MUST list every chain revocation, a `compromised` one as `compromised`, with evidence from the known
-     person and stored key).
+     chain or local, including those learned from earlier bundles of this walk, refuses its signer; carried
+     evidence for any device the device knows, active or revoked, MUST come from its known person and key; a
+     workspace restore MUST list every chain revocation, a `compromised` one as `compromised`).
    - Then prove R3 from GET proof pages bound to C and T: from_seq below C's height takes the retained prefix
      from T's branch (from `acc_0`) and the abandoned suffix from `acc_from` to C (exactly `C.seq − from_seq`
      heads, folding to C's acc, `abandoned` covering C); otherwise the forward heads from C's entry. The restored
