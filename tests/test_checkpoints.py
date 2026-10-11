@@ -643,3 +643,88 @@ def test_transport_refusals_are_charged_only_after_auth_and_stop_at_the_budget(t
         for _ in range(3):  # the window is full: refused, but no further rows (L1)
             assert client.put(url, content=big, headers=host).status_code == 400
         assert failures() == 16
+
+
+# --- review G2: stateless parsing and checks happen before the global lock ----------------------
+
+
+class TimedLock:
+    """directory.lock with the time it is held recorded (re-entrant like the real one)."""
+
+    def __init__(self, lock):
+        self.lock, self.depth, self.held, self.since = lock, 0, 0.0, 0.0
+
+    def __enter__(self):
+        self.lock.acquire()
+        if self.depth == 0:
+            self.since = time.perf_counter()
+        self.depth += 1
+        return self
+
+    def __exit__(self, *exc):
+        self.depth -= 1
+        if self.depth == 0:
+            self.held += time.perf_counter() - self.since
+        self.lock.release()
+
+    def _is_owned(self):
+        return self.lock._is_owned()
+
+
+@pytest.mark.parametrize("kind", ["page_bad_digest", "checkpoint_bad_signature"])
+def test_large_stateless_refusals_do_not_hold_the_lock(tmp_path, kind):
+    import json
+
+    from checkpoint_support import CORPUS, seed
+    from fastapi.testclient import TestClient
+
+    from orch_relay import proto as P
+    from orch_relay.app import create_app
+
+    case = next(
+        c
+        for c in CORPUS["suites"]["2"]["checkpoints"]["cases"]
+        if c["name"] == "checkpoint_gone_all_endpoint_routes"
+    )
+    host = {
+        "Authorization": "Bearer FAKE-workspace",
+        "Orch-Holder": "1",
+        "Content-Type": "application/json",
+    }
+    with TestClient(create_app(tmp_path)) as client:
+        path = tmp_path / db.DB_NAME
+        seed(path, case["state"], case)
+        d = client.app.state.directory
+        d.clock = lambda: 1790000000000
+        timed = TimedLock(d.lock)
+        d.lock = timed
+        if kind == "page_bad_digest":
+            heads = [digest(f"FAKE g2 {i}".encode()) for i in range(55_000)]
+            body = {
+                "kind": "appended",
+                "log": "workspace",
+                "after_seq": 0,
+                "from_acc": ZERO,
+                "heads": heads,
+                "digest": ZERO,
+            }
+            url = f"/v2/workspaces/{WS}/staging/null/{digest(b'FAKE g2')}/pages/0"
+            expected = (400, {"error": "malformed"})
+        else:
+            held = case["state"]["held"]
+            tickets = {f"01{t:024d}": held["o"]["workspace_log"] for t in range(9000)}
+            cp = {"o": {**held["o"], "n": 2, "tickets": tickets}, "sig": held["sig"]}
+            body = {"checkpoint": cp, "source_hash": None}
+            url = f"/v2/workspaces/{WS}/checkpoint"
+            expected = (401, {"error": "bad_signature"})
+        raw = P.cj(body)
+        began = time.perf_counter()
+        r = client.put(url, content=raw, headers=host)
+        wall = time.perf_counter() - began
+        assert (r.status_code, r.json()) == expected, r.text
+        assert len(raw) > 1_000_000 and json.loads(raw)
+        # Parsing and validating megabytes happens outside; the transaction only looks up state.
+        assert timed.held <= 0.25 * wall, (timed.held, wall)
+        if kind == "checkpoint_bad_signature":  # still charged, inside the transaction
+            with closing(db.connect(path)) as con:
+                assert con.execute("SELECT count(*) FROM checkpoint_failures").fetchone()[0] == 1
