@@ -420,18 +420,33 @@ challenge is consumed.
 - **Authorization first (G3 review 3):** every bridge, pair, holder and certificate request is
   authenticated, authorized and fenced by a read-only check before it takes the directory lock, a
   write transaction, a rate window, a poll slot or a wakeup; only anonymous pairing is admitted
-  without a session, and it is charged only to its own windows. Host pair answers use separate
+  without a session, and it is charged only to its own windows. Refusal codes match the
+  transaction's, with one deliberate exception: a non-device session posting a cert challenge or
+  rejection gets 403 `not_eligible` before the request lookup, even for an unknown request id
+  (never 404), so it learns nothing about request ids. Host pair answers use separate
   pairing windows with the same caps, and host response chunks are rate-limited per (workspace,
   target device), never against the device's own 20 posts/s.
 - **Waiting long polls** hold no lock, transaction or worker thread. Commits that insert or change
   rows wake only the affected polls (new requests → that workspace's host; responses → that rid;
   revocation, logout, certificate store → that device's polls and the hosts of its workspaces;
   membership → that workspace). Each poll also re-checks at its session/certificate expiry and on a
-  jittered 5–7 s tick, using a read-only check on the event loop; only a ready check, and the
-  deadline, re-run the full fenced transaction. Identical resends and replays wake nobody.
+  jittered 5–7 s tick, using a read-only check on the event loop; only a ready or refused check
+  re-runs the full fenced transaction. At the deadline host polls rebuild their response with the
+  transaction; device, pair and cert polls re-check on the event loop and answer empty unless ready
+  or refused. Waits of 5 s or more end up to 10 % (≤ 1 s) early, so polls admitted together do not
+  time out together. Identical resends and replays wake nobody.
 - **Host poll notices** make a poll ready only when they differ from the notices last delivered to
   the current holder generation (a new generation receives them once); a past revocation alone does
   not keep a host poll from waiting.
+- **Pre-public-deploy gate (G3 review D4, open):** `Directory.handle` still takes the global
+  `Directory.lock`, opens a fresh connection and runs `BEGIN IMMEDIATE` before authenticating or
+  validating anything (about 1.3 ms of lock time per unauthenticated request; ~750 bad-token
+  requests/s from one client saturate the lock that bridge transactions share). Before any public
+  deploy: reuse per-thread connections in `Directory`, add a read-only pre-check outside the lock
+  for authenticated directory routes and `rate(..., charge=False)` pre-checks for unauthenticated
+  ones, and add a no-lock test for directory routes like the bridge's. The dev relay needs a Caddy
+  per-IP rate limit (or connection cap) meanwhile. Anonymous pair requests to an existing workspace
+  likewise reach the lock before their pairing windows refuse them.
 - **Client addresses.**
   - The peer address is used, or Caddy's `X-Forwarded-For` only when the peer is the configured proxy.
   - Addresses are canonicalized: IPv4-mapped IPv6 becomes IPv4, and IPv6 is grouped by /64.

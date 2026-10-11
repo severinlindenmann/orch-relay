@@ -167,7 +167,10 @@ class Bridge:
             con = db.connect(self.d.path, check_same_thread=False)
             con.row_factory = sqlite3.Row
             if purpose == "read":
+                # Used on the event loop: never block it waiting for a lock (recovery or an
+                # external exclusive lock); callers fall back to the full transaction.
                 con.execute("PRAGMA query_only=ON")
+                con.execute("PRAGMA busy_timeout=0")
             with self.connections_lock:
                 self.connections.append(con)
             cache[purpose] = con
@@ -644,8 +647,11 @@ class Bridge:
     def preauthorize(self, route, method, params, headers, raw):
         """Read-only authorization before any lock, write transaction, slot or waiter.
 
-        Mirrors the transaction's refusal order up to fencing, so codes are unchanged; the
-        transaction re-checks everything. Returns (session or None, expiry_ms or None).
+        Mirrors the transaction's refusal order up to fencing, with one deliberate
+        difference: a non-device session posting a cert challenge or rejection gets 403
+        `not_eligible` before the request lookup, so it learns nothing about request ids
+        (the transaction alone would answer 404 for unknown ids). The transaction
+        re-checks everything. Returns (session or None, expiry_ms or None).
         """
         d = self.d
         con = self.connection("read")
@@ -749,7 +755,7 @@ class Bridge:
     @staticmethod
     def wait_keys(route, params, subject):
         if route == "host_poll":
-            return [("ws", params["ws"])]
+            return [("ws", params["ws"]), ("subject", params["ws"])]  # logout wakes subject
         if route == "cert_requests":
             return [("person", params["person"]), ("subject", subject)]
         if route == "pair":
@@ -808,7 +814,12 @@ class Bridge:
                 P.unhex(value)
             # Authorize first: a refused request takes no lock, write transaction, budget,
             # slot or waiter (anonymous pairing is charged only to its own windows).
-            session, expiry = self.preauthorize(route, request.method, params, headers, raw)
+            try:
+                session, expiry = self.preauthorize(route, request.method, params, headers, raw)
+            except sqlite3.Error:
+                # The full transaction authorizes on its own; without a pre-check there is
+                # no admission key, so answer once instead of waiting.
+                session, expiry, wait = None, None, 0
             if wait:
                 subject = None
                 if route == "pair":
@@ -829,15 +840,22 @@ class Bridge:
                 wake_keys = keys
                 for wake_key in wake_keys:
                     self.waiters.setdefault(wake_key, set()).add(event)
-            token, deadline = secrets.token_hex(16), time.monotonic() + wait
+            # Long waits end up to 10% (at most 1 s) early, so polls admitted together (e.g.
+            # after a restart) do not all time out in the same instant. Clients re-poll anyway.
+            spread = random.uniform(0, min(1.0, wait / 10)) if wait >= 5 else 0
+            token, deadline = secrets.token_hex(16), time.monotonic() + wait - spread
             step = (route, params, request.method, bytes(raw), query, headers, peer, token)
             result, ready = await run_in_threadpool(self.transaction, *step, True)
             self.committed(route, params, request.method, raw, ready)
             while wait and not ready:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    # Rebuild (and re-authorize) rather than return the first step's result.
-                    result, ready = await run_in_threadpool(self.transaction, *step, False)
+                    # Re-authorize at the deadline. Host polls rebuild (fresh notices; one live
+                    # poll per workspace). Others answer empty from a cheap check unless it is
+                    # ready or refused, so polls admitted together do not expire as a herd of
+                    # write transactions under the directory lock.
+                    if route == "host_poll" or self.probe(route, params, query, headers, token)[0]:
+                        result, ready = await run_in_threadpool(self.transaction, *step, False)
                     break
                 timeout = min(remaining, random.uniform(*POLL_TICK))
                 if expiry is not None:
