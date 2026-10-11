@@ -6,11 +6,13 @@ from contextlib import closing
 
 import pytest
 from bridge_support import CRID, HOST, RID, binary
-from directory_support import DEVICE, NOW, PERSON, RECORD, WS, seed
+from directory_support import DEVICE, NOW, PERSON, PRIMARY, RECORD, WS, seed
 from fastapi.testclient import TestClient
 
 from orch_relay import db
+from orch_relay import proto as P
 from orch_relay.app import create_app
+from orch_relay.directory import token_hash
 
 PROXY = "10.9.9.9"
 PAIR = f"/v2/workspaces/{WS}/pair/{CRID}/{RID}"
@@ -24,6 +26,8 @@ def client(tmp_path):
         seed(client.app.state.directory)
         client.app.state.directory.trusted_proxy = PROXY
         yield client
+        # Every finished poll unregisters its wakeups (an unbounded map would grow fan-outs).
+        assert client.app.state.bridge.waiters == {}
 
 
 def sql(client, statement, args=()):
@@ -82,13 +86,22 @@ def test_idle_long_poll_does_not_run_write_transactions(client, monkeypatch):
         calls.append(args[-1])
         return original(*args)
 
+    probes = []
+    probe = bridge.probe
+
+    def counted_probe(*args):
+        probes.append(True)
+        return probe(*args)
+
     monkeypatch.setattr(bridge, "transaction", counted)
+    monkeypatch.setattr(bridge, "probe", counted_probe)
     started = time.monotonic()
     r = client.get(DEVICE_POLL, params={"wait": 2}, headers={"Authorization": "Bearer FAKE-device"})
     assert r.status_code == 200 and r.json() == {"chunks": []}
     assert time.monotonic() - started >= 1.9
-    # Only the admitting transaction runs; idle checks use read-only snapshots.
-    assert calls == [True]
+    # The admitting step and the deadline rebuild; idle checks are read-only and rare.
+    assert calls == [True, False]
+    assert len(probes) <= 3
 
 
 def test_device_poll_wakes_on_response(client):
@@ -172,22 +185,169 @@ def test_device_poll_ends_promptly_on_revocation(client):
     assert client.app.state.bridge.polls == {}
 
 
-def test_device_poll_reauthorizes_on_slow_tick(client):
-    # Session expiry has no commit to wake on; the slow tick (<= 1 s) re-checks it.
+def device_poll_pending(pool, client, wait=10):
+    future = pool.submit(
+        client.get,
+        DEVICE_POLL,
+        params={"wait": wait},
+        headers={"Authorization": "Bearer FAKE-device"},
+    )
+    wait_admitted(client)
+    time.sleep(0.3)  # let the admitting step finish, so only a wakeup can notice
+    return future
+
+
+def test_device_poll_ends_at_session_expiry(client):
+    # Session expiry has no commit to wake on; the poll's expiry timer re-checks it.
+    d = client.app.state.directory
+    started = time.monotonic()
+    d.clock = lambda: NOW + int((time.monotonic() - started) * 1000)
+    sql(client, "UPDATE sessions SET expires_ms=? WHERE kind='device'", (NOW + 1000,))
     with ThreadPoolExecutor() as pool:
-        pending = pool.submit(
-            client.get,
-            DEVICE_POLL,
-            params={"wait": 10},
-            headers={"Authorization": "Bearer FAKE-device"},
+        pending = device_poll_pending(pool, client)
+        assert pending.result(timeout=5).status_code == 401
+        assert 0.9 <= time.monotonic() - started < 1.6
+
+
+def test_device_poll_ends_promptly_on_logout(client):
+    with ThreadPoolExecutor() as pool:
+        pending = device_poll_pending(pool, client)
+        out = time.monotonic()
+        r = client.post(
+            "/v2/session/logout", json={}, headers={"Authorization": "Bearer FAKE-device"}
         )
-        wait_admitted(client)
-        time.sleep(0.3)  # let the admitting step finish, so only the tick can notice
-        expired = time.monotonic()
+        assert r.status_code == 200
+        assert pending.result(timeout=5).status_code == 401
+        assert time.monotonic() - out < 0.5
+
+
+def test_device_poll_rechecks_membership_on_wake(client):
+    bridge = client.app.state.bridge
+    with ThreadPoolExecutor() as pool:
+        pending = device_poll_pending(pool, client)
+        sql(client, "DELETE FROM members WHERE device_id=?", (DEVICE,))
+        removed = time.monotonic()
+        client.portal.call(bridge.wake, ("members", WS))
+        assert pending.result(timeout=5).status_code == 403
+        assert time.monotonic() - removed < 0.5
+
+
+def test_timed_out_poll_reauthorizes_at_deadline(client):
+    with ThreadPoolExecutor() as pool:
+        pending = device_poll_pending(pool, client, wait=1)
         sql(client, "UPDATE sessions SET expires_ms=? WHERE kind='device'", (NOW,))
         assert pending.result(timeout=5).status_code == 401
-        assert time.monotonic() - expired < 1.6
-    assert client.app.state.bridge.polls == {}
+
+
+@pytest.mark.slow
+def test_device_poll_reauthorizes_on_slow_tick(client):
+    # An out-of-band change with no wakeup and no known expiry is seen within the tick.
+    with ThreadPoolExecutor() as pool:
+        pending = device_poll_pending(pool, client, wait=20)
+        expired = time.monotonic()
+        sql(client, "UPDATE sessions SET expires_ms=? WHERE kind='device'", (NOW,))
+        assert pending.result(timeout=15).status_code == 401
+        assert 4.5 <= time.monotonic() - expired < 7.6
+
+
+def host_poll(client, wait):
+    return client.get(f"/v2/workspaces/{WS}/host/poll", params={"wait": wait}, headers=HOST)
+
+
+def test_host_poll_waits_despite_past_revocation(client):
+    sql(
+        client,
+        "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
+        (DEVICE, PERSON, P.cj(RECORD), "lost", NOW, 1),
+    )
+    # The first response delivers the durable notice to this holder generation.
+    started = time.monotonic()
+    assert host_poll(client, 2).json()["notices"]["revocations_cursor"] == 1
+    assert time.monotonic() - started < 0.5
+    started = time.monotonic()
+    r = host_poll(client, 2)
+    assert time.monotonic() - started >= 1.9
+    assert r.json()["items"] == [] and r.json()["notices"]["revocations_cursor"] == 1
+    # A new holder generation gets the current notices once again.
+    client.post(
+        f"/v2/workspaces/{WS}/host/hold", headers=HOST, json={"gen": None, "take_over": True}
+    )
+    gen2 = {**HOST, "Orch-Holder": "2"}
+    started = time.monotonic()
+    r = client.get(f"/v2/workspaces/{WS}/host/poll", params={"wait": 2}, headers=gen2)
+    assert r.json()["notices"]["revocations_cursor"] == 1
+    assert time.monotonic() - started < 0.5
+
+
+def test_host_poll_wakes_on_new_revocation(client):
+    assert host_poll(client, 0).status_code == 200
+    with ThreadPoolExecutor() as pool:
+        pending = pool.submit(host_poll, client, 10)
+        wait_admitted(client)
+        time.sleep(0.3)
+        revoked = time.monotonic()
+        assert client.post("/v2/revocations", json={"record": RECORD}).status_code == 200
+        r = pending.result(timeout=5)
+        assert time.monotonic() - revoked < 0.5
+    notices = r.json()["notices"]
+    assert notices["revocations_cursor"] == 1
+    assert [row["device_id"] for row in notices["rotation_due"]] == [DEVICE]
+
+
+def test_host_poll_returns_undelivered_notice_change_at_once(client):
+    assert host_poll(client, 0).status_code == 200
+    sql(client, "INSERT INTO rotation_due VALUES (?,?,?,?)", (WS, DEVICE, 1, 1))
+    started = time.monotonic()
+    r = host_poll(client, 5)
+    assert time.monotonic() - started < 0.5
+    assert r.json()["notices"]["rotation_due"] == [
+        {"device_id": DEVICE, "revocation_cursor": 1, "epoch": 1}
+    ]
+    started = time.monotonic()
+    assert host_poll(client, 1).json()["items"] == []
+    assert time.monotonic() - started >= 0.9
+
+
+def test_timed_out_host_poll_rebuilds_notices(client):
+    with ThreadPoolExecutor() as pool:
+        pending = pool.submit(host_poll, client, 1)
+        wait_admitted(client)
+        time.sleep(0.3)
+        # No wakeup: the deadline must rebuild rather than return the first step's result.
+        sql(client, "INSERT INTO rotation_due VALUES (?,?,?,?)", (WS, DEVICE, 1, 1))
+        r = pending.result(timeout=5)
+    assert r.json()["notices"]["rotation_due"] == [
+        {"device_id": DEVICE, "revocation_cursor": 1, "epoch": 1}
+    ]
+
+
+def test_host_poll_wakes_on_cert_challenge(client):
+    from bridge_support import OBJECTS
+
+    sql(
+        client,
+        "INSERT INTO sessions VALUES (?,?,?,?)",
+        (token_hash("FAKE-primary"), "device", PRIMARY, NOW + 900000),
+    )
+    r = client.post(
+        f"/v2/persons/{PERSON}/cert-requests", json={"request": OBJECTS["request"]}, headers=HOST
+    )
+    assert r.status_code == 200
+    assert host_poll(client, 0).json()["notices"]["cert_requests"] == []
+    with ThreadPoolExecutor() as pool:
+        pending = pool.submit(host_poll, client, 10)
+        wait_admitted(client)
+        time.sleep(0.3)
+        challenged = time.monotonic()
+        r = client.post(
+            f"/v2/cert-requests/{CRID}/challenge",
+            json={"challenge": OBJECTS["challenge"]},
+            headers={"Authorization": "Bearer FAKE-primary"},
+        )
+        assert r.status_code == 200
+        r = pending.result(timeout=5)
+        assert time.monotonic() - challenged < 0.5
+    assert r.json()["notices"]["cert_requests"] == [CRID]
 
 
 def test_host_poll_fenced_promptly_after_takeover(client):
@@ -224,7 +384,7 @@ def test_idle_long_polls_do_not_starve_other_routes(client):
         pending = [
             pool.submit(
                 client.get,
-                PAIR,
+                f"/v2/workspaces/{WS}/pair/{CRID}/{i:032x}",  # <= 16 waiters per rid
                 params={"wait": 6},
                 headers={"X-Forwarded-For": f"198.51.{i // 4}.{i % 4 + 1}"},
             )
@@ -240,60 +400,49 @@ def test_idle_long_polls_do_not_starve_other_routes(client):
     assert loaded >= baseline / 2
 
 
-def test_directory_receipt_replays_do_not_wake_polls(client, monkeypatch):
-    # Exact receipt replays are unthrottled 200s; they must not fan out to every waiter.
+def test_directory_wakes_only_affected_polls_and_only_on_change(client, monkeypatch):
+    # Exact receipt replays are unthrottled 200s; they must not wake anything.
     from directory_support import CERT
 
     calls = []
-    monkeypatch.setattr(client.app.state.directory, "changed", lambda: calls.append(True))
+    monkeypatch.setattr(client.app.state.directory, "changed", lambda *keys: calls.append(keys))
     for _ in range(3):
         assert client.put(f"/v2/devices/{DEVICE}", json={"cert": CERT}).status_code == 200
-    assert len(calls) == 1  # only the first PUT stored a receipt
+    assert calls == [(("subject", DEVICE),)]  # only the first PUT stored a receipt
     for _ in range(3):
         assert client.post("/v2/revocations", json={"record": RECORD}).status_code == 200
-    assert len(calls) == 2  # only the first revocation changed state
+    # The revoked device's polls and the hosts of workspaces it was ever in.
+    assert calls[1:] == [(("subject", DEVICE), ("ws", WS))]
 
 
-def test_wake_all_fan_outs_are_coalesced(client):
-    import asyncio
-
-    from orch_relay.bridge import Bridge
-
-    class Counter:
-        sets = 0
-
-        def set(self):
-            Counter.sets += 1
-
-    async def burst():
-        bridge = Bridge(client.app.state.directory)
-        bridge.waiters[("ws", WS)] = {Counter()}
-        for _ in range(200):
-            bridge.wake_all()
-            await asyncio.sleep(0.001)
-        await asyncio.sleep(0.3)
-
-    started = time.monotonic()
-    asyncio.run(burst())
-    elapsed = time.monotonic() - started
-    assert 1 <= Counter.sets <= elapsed / 0.25 + 2
-
-
-def test_pair_poll_ipv6_parent_cap(client):
+@pytest.mark.parametrize(
+    "groups,address",
+    [
+        ({"198.51.100.0/24": 32}, "198.51.100.77"),
+        ({"2001:db8:0:100::/56": 32}, "2001:db8:0:1ab::1"),
+        ({"2001:db8::/48": 64}, "2001:db8:0:1ab::1"),
+    ],
+)
+def test_pair_poll_allocation_caps(client, groups, address):
     bridge = client.app.state.bridge
-    bridge.pair_parents["2001:db8:0:100::/56"] = 32
-    r = client.get(PAIR, params={"wait": 1}, headers={"X-Forwarded-For": "2001:db8:0:1ab::1"})
+    bridge.pair_groups.update(groups)
+    r = client.get(PAIR, params={"wait": 1}, headers={"X-Forwarded-For": address})
     assert r.status_code == 429 and r.json() == {"error": "quota_exceeded"}
-    assert bridge.polls == {} and bridge.pair_parents == {"2001:db8:0:100::/56": 32}
-    del bridge.pair_parents["2001:db8:0:100::/56"]
+    assert bridge.polls == {} and bridge.pair_groups == groups
+    bridge.pair_groups.clear()
     with ThreadPoolExecutor() as pool:
         pending = pool.submit(
-            client.get, PAIR, params={"wait": 1}, headers={"X-Forwarded-For": "2001:db8:0:1ab::1"}
+            client.get, PAIR, params={"wait": 1}, headers={"X-Forwarded-For": address}
         )
         wait_admitted(client)
-        assert bridge.pair_parents == {"2001:db8:0:100::/56": 1}
+        expected = (
+            {"198.51.100.0/24": 1}
+            if "." in address
+            else {"2001:db8:0:100::/56": 1, "2001:db8::/48": 1}
+        )
+        assert bridge.pair_groups == expected
         assert pending.result(timeout=5).status_code == 200
-    assert bridge.polls == {} and bridge.pair_parents == {}
+    assert bridge.polls == {} and bridge.pair_groups == {}
 
 
 def test_anonymous_pair_request_wakes_only_host_polls(client, monkeypatch):
@@ -311,3 +460,129 @@ def test_anonymous_pair_request_wakes_only_host_polls(client, monkeypatch):
     )
     assert r.status_code == 202, r.text
     assert woken == [("ws", WS)]
+
+
+def test_identical_resends_and_replays_wake_nobody(client, monkeypatch):
+    woken = []
+    monkeypatch.setattr(client.app.state.bridge, "wake", lambda *keys: woken.append(keys))
+    for _ in range(3):
+        assert post(client, binary("bridge_device_post")).status_code == 202
+    for _ in range(3):
+        assert post(client, binary("bridge_host_post"), True).status_code == 202
+    assert woken == [(("ws", WS),), (("rid", WS, RID),)]
+
+
+@pytest.mark.parametrize(
+    "path,headers",
+    [
+        (PAIR, {"X-Forwarded-For": "198.51.100.7"}),
+        (DEVICE_POLL, {"Authorization": "Bearer FAKE-device"}),
+    ],
+)
+def test_waiting_polls_per_rid_are_capped(client, path, headers):
+    bridge = client.app.state.bridge
+    crowd = {object() for _ in range(16)}
+    bridge.waiters[("rid", WS, RID)] = crowd
+    r = client.get(path, params={"wait": 1}, headers=headers)
+    assert r.status_code == 429 and r.json() == {"error": "quota_exceeded"}
+    assert bridge.polls == {} and bridge.waiters == {("rid", WS, RID): crowd}
+    bridge.waiters.clear()
+
+
+@pytest.mark.slow
+def test_long_poll_ceiling_does_not_starve_other_routes(tmp_path, monkeypatch):
+    """4,096 waiting device polls (the real POLL_CEILING) in one process and event loop.
+
+    One seeded device stands in for 683 devices (the per-device cap of 6 is lifted); each
+    poll still authenticates on every check. Before the event-loop probes, expiry timers
+    and the jittered tick, this setup cut the other route from ~118 to ~2 req/s.
+    """
+    import asyncio
+
+    import httpx
+
+    from orch_relay import bridge as B
+
+    monkeypatch.setattr(B, "DEVICE_POLLS", B.POLL_CEILING)
+    app = create_app(tmp_path)
+    db.migrate(app.state.data_dir / db.DB_NAME)
+    seed(app.state.directory)
+    polls = B.POLL_CEILING
+
+    async def run():
+        transport = httpx.ASGITransport(app=app, client=(PROXY, 50000))
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://relay", timeout=120
+        ) as c:
+
+            async def throughput(seconds):
+                count, end = 0, time.perf_counter() + seconds
+                while time.perf_counter() < end:
+                    r = await c.get(
+                        f"/v2/workspaces/{WS}/card", headers={"Authorization": "Bearer FAKE-device"}
+                    )
+                    assert r.status_code == 200
+                    count += 1
+                return count / seconds
+
+            await throughput(0.3)
+            baseline = await throughput(2)
+            tasks = [
+                asyncio.create_task(
+                    c.get(
+                        f"/v2/workspaces/{WS}/bridge/{i:032x}",
+                        params={"wait": 25},
+                        headers={"Authorization": "Bearer FAKE-device"},
+                    )
+                )
+                for i in range(polls)
+            ]
+            deadline = time.monotonic() + 90
+            while sum(app.state.bridge.polls.values()) < polls:
+                assert time.monotonic() < deadline, "polls were not admitted"
+                await asyncio.sleep(0.05)
+            await asyncio.sleep(1)  # let every admitting step finish
+            loaded = await throughput(8)  # spans more than one jittered tick (5-7 s)
+            assert not any(task.done() for task in tasks)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            return baseline, loaded
+
+    try:
+        baseline, loaded = asyncio.run(run())
+    finally:
+        app.state.bridge.close()
+    print(f"other route: {baseline:.0f} req/s idle, {loaded:.0f} req/s with {polls} waiting polls")
+    assert app.state.bridge.polls == {} and app.state.bridge.waiters == {}
+    assert loaded >= baseline / 2
+
+
+def test_membership_publish_wakes_that_workspace(tmp_path):
+    from members_support import BODY, HEADERS, load_state
+
+    with TestClient(create_app(tmp_path)) as c:
+        load_state(c.app.state.directory)
+        calls = []
+        c.app.state.directory.changed = lambda *keys: calls.append(keys)
+        r = c.put(f"/v2/workspaces/{WS}/membership", content=P.cj(BODY), headers=HEADERS)
+        assert r.status_code == 200, r.text
+        assert calls == [(("ws", WS), ("members", WS))]
+
+
+def test_deadline_rebuild_reauthorizes_without_a_prior_check(client, monkeypatch):
+    # The admitting step outlasts the wait, so no read-only check runs before the
+    # deadline; the deadline step itself must re-authorize.
+    bridge = client.app.state.bridge
+    original = bridge.transaction
+
+    def slow_first(*args):
+        result = original(*args)
+        if args[-1]:
+            sql(client, "UPDATE sessions SET expires_ms=? WHERE kind='device'", (NOW,))
+            time.sleep(1.2)
+        return result
+
+    monkeypatch.setattr(bridge, "transaction", slow_first)
+    r = client.get(DEVICE_POLL, params={"wait": 1}, headers={"Authorization": "Bearer FAKE-device"})
+    assert r.status_code == 401

@@ -114,7 +114,7 @@ def test_fence_vectors(tmp_path, case):
                 tuple(state[k] for k in ("gen", "lease_until_ms", "cursor", "poll_token")),
             )
             con.execute(
-                "INSERT INTO holder_delivery VALUES (?,?)",
+                "INSERT INTO holder_delivery(workspace_id,delivered) VALUES (?,?)",
                 (WS, a.get("delivered", state["cursor"])),
             )
             try:

@@ -1,7 +1,9 @@
 """Durable ORB2 mailboxes and holder transactions (protocol §19.3–19.6)."""
 
 import asyncio
+import ipaddress
 import math
+import random
 import secrets
 import sqlite3
 import struct
@@ -23,6 +25,7 @@ from .directory import (
     fields,
     integer,
     ipv6_parent,
+    token_hash,
 )
 
 MIB = 1024 * 1024
@@ -75,6 +78,18 @@ def collect(con, now):
     con.execute("DELETE FROM cert_requests WHERE expires_ms+60000<=?", (now,))
 
 
+EMPTY_NOTICES = {"revocations_cursor": 0, "cert_requests": [], "rotation_due": []}
+
+
+def notices_stamp(updates):
+    return digest(P.cj(updates))
+
+
+def last_stamp(delivered):
+    """Digest of the notices last delivered in this holder generation."""
+    return (delivered["notices"] if delivered else None) or notices_stamp(EMPTY_NOTICES)
+
+
 def notices(con, ws):
     cursor = con.execute(
         "SELECT coalesce(max(r.cursor),0) FROM revocations r JOIN ever_devices e ON e.device_id=r.device_id WHERE e.workspace_id=?",
@@ -101,30 +116,45 @@ def notices(con, ws):
 
 POLL_CEILING = 4096  # all concurrent long polls (protocol §19, P3-D17)
 PAIR_POLL_CEILING = 512  # anonymous pair polls, a separate share of POLL_CEILING
-PAIR_POLLS_PER_ADDRESS = 4  # per canonical client address (IPv6 /64)
-PAIR_POLLS_PER_PARENT = 32  # per IPv6 /56, so one allocation cannot fill the pair pool
-WAKE_ALL_INTERVAL = 0.25  # directory-wide wakeups are coalesced to at most 4/s
+PAIR_POLLS_PER_ADDRESS = 4  # per canonical client address (IPv4 or IPv6 /64)
+# Per allocation, so one cheap prefix cannot fill the pair pool: IPv4 /24, IPv6 /56 and /48.
+PAIR_POLL_GROUPS = ((4, 24, 32), (6, 56, 32), (6, 48, 64))
 DEVICE_POLLS = 6
-POLL_TICK = 1.0  # slow re-authorization tick for waiting polls, in seconds
+RID_POLLS = 16  # waiting polls per (workspace, rid): bounds one response's wake fan-out
+# Waiting polls re-check authorization at their earliest known expiry (session or
+# certificate) and otherwise on a jittered slow tick; commits wake them by key.
+POLL_TICK = (5.0, 7.0)
+
+
+def pair_group_caps(address):
+    try:
+        network = ipaddress.ip_network(address, strict=False)
+    except ValueError:
+        return []
+    return [
+        (str(network.supernet(new_prefix=prefix)), cap)
+        for version, prefix, cap in PAIR_POLL_GROUPS
+        if network.version == version and network.prefixlen >= prefix
+    ]
 
 
 class Bridge:
     """Long polls wait on in-memory wakeups, never on the directory lock.
 
     The first step of a poll is the full write transaction. While waiting, a poll is
-    woken by commits that may make it ready (see wake()) or by the slow tick, and then
-    runs probe(): a read-only snapshot without collect() that re-checks authorization,
-    fencing and whether anything is ready. Only a ready probe re-runs the full
-    transaction, which re-checks everything again before handing data over.
+    woken by commits that may make it ready (see committed() and the directory's wake
+    keys), at its earliest session/certificate expiry, or by the jittered slow tick. It
+    then runs probe() on the event loop: a read-only snapshot without collect() that
+    re-checks authorization, fencing and whether anything is ready. Only a ready probe
+    re-runs the full transaction, which re-checks everything again before handing data
+    over; the deadline also re-runs it, so a timed-out poll returns a fresh response.
     """
 
     def __init__(self, directory):
         self.d = directory
         self.polls = {}
         self.waiters = {}  # wake key -> set of asyncio.Event; touched on the event loop only
-        self.pair_parents = {}  # IPv6 /56 -> admitted pair polls
-        self.wake_all_pending = False
-        self.wake_all_last = -math.inf
+        self.pair_groups = {}  # address group -> admitted pair polls
         self.local = threading.local()
         self.connections = []
         self.connections_lock = threading.Lock()
@@ -155,29 +185,6 @@ class Bridge:
     def wake(self, *keys):
         for key in keys:
             for event in self.waiters.get(key, ()):
-                event.set()
-
-    def wake_all(self):
-        """Revocations, membership and other directory commits may end any poll.
-
-        A fan-out costs one probe per waiter, so fan-outs are coalesced: however many
-        commits notify, every waiter is woken at most 1/WAKE_ALL_INTERVAL times a second.
-        """
-        if self.wake_all_pending:
-            return
-        loop = asyncio.get_running_loop()
-        delay = self.wake_all_last + WAKE_ALL_INTERVAL - loop.time()
-        if delay <= 0:
-            self.fan_out()
-        else:
-            self.wake_all_pending = True
-            loop.call_later(delay, self.fan_out)
-
-    def fan_out(self):
-        self.wake_all_pending = False
-        self.wake_all_last = asyncio.get_running_loop().time()
-        for events in self.waiters.values():
-            for event in events:
                 event.set()
 
     def sweep(self):
@@ -240,7 +247,7 @@ class Bridge:
         )
         if row is None or gen != row["gen"]:
             con.execute(
-                "INSERT INTO holder_delivery VALUES (?,?) ON CONFLICT(workspace_id) DO UPDATE SET delivered=excluded.delivered",
+                "INSERT INTO holder_delivery(workspace_id,delivered) VALUES (?,?) ON CONFLICT(workspace_id) DO UPDATE SET delivered=excluded.delivered,notices=NULL",
                 (ws, cursor),
             )
         return {"gen": gen, "lease_s": 40, "cursor": cursor}
@@ -285,7 +292,7 @@ class Bridge:
                     (*key, ws),
                 ).fetchone()
                 if live:
-                    return {}
+                    return {}, False  # coalesced: nothing new to wake for
                 if seen["requeues"] >= 8:
                     refuse("retry_exhausted", 409)
                 if now < seen["last_requeue_ms"] + 10000:
@@ -349,7 +356,7 @@ class Bridge:
             if chunk:
                 if chunk[0] != hashed:
                     refuse("chunk_conflict", 409)
-                return {}
+                return {}, False  # stored replay
             charge()
             if h["epoch"] != seen["req_epoch"] or (
                 offer is None and epoch != h["epoch"] and h["flags"] & 5 != 5
@@ -373,13 +380,13 @@ class Bridge:
             "INSERT INTO bridge_msgs(workspace_id,device_id,rid,direction,offer,idx,flags,stream,body,expires_ms) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (*key, direction, offer, h["idx"], h["flags"], h["stream"], raw, now + 60000),
         )
-        return {}
+        return {}, True
 
     def host_poll(self, con, ws, query, token, first, now):
         holder = con.execute("SELECT * FROM holders WHERE workspace_id=?", (ws,)).fetchone()
         after = integer(query.get("after", "0"))
         delivered = con.execute(
-            "SELECT delivered FROM holder_delivery WHERE workspace_id=?", (ws,)
+            "SELECT delivered,notices FROM holder_delivery WHERE workspace_id=?", (ws,)
         ).fetchone()
         if after > (delivered[0] if delivered else 0):
             fail("malformed")
@@ -436,13 +443,20 @@ class Bridge:
             size += item_size
         if items:
             con.execute(
-                "INSERT INTO holder_delivery VALUES (?,?) ON CONFLICT(workspace_id) DO UPDATE SET delivered=max(delivered,excluded.delivered)",
+                "INSERT INTO holder_delivery(workspace_id,delivered) VALUES (?,?) ON CONFLICT(workspace_id) DO UPDATE SET delivered=max(delivered,excluded.delivered)",
                 (ws, items[-1]["n"]),
             )
+        # Durable notices (a past revocation cursor, rotation_due, cert request states)
+        # make a poll ready only when they changed since the last delivered response.
+        stamp = notices_stamp(updates)
+        ready = bool(items) or stamp != last_stamp(delivered)
+        if ready:
+            con.execute(
+                "INSERT INTO holder_delivery(workspace_id,notices) VALUES (?,?) ON CONFLICT(workspace_id) DO UPDATE SET notices=excluded.notices",
+                (ws, stamp),
+            )
         nxt = P.b64u(P.cj({"ws": ws, "after": after, "n": items[-1]["n"]})) if more else None
-        return {"items": items, "notices": updates, "next": nxt}, bool(
-            items or any(updates.values())
-        )
+        return {"items": items, "notices": updates, "next": nxt}, ready
 
     def transaction(self, route, params, method, raw, query, headers, peer, token, first):
         d = self.d
@@ -505,7 +519,8 @@ class Bridge:
                 if route == "hold":
                     return self.hold(con, ws, P.parse_json(raw), now), True
                 if method == "POST":
-                    return self.post(con, ws, rid, offer, raw, session, now), True
+                    # For posts the flag means "inserted": only new bodies wake polls.
+                    return self.post(con, ws, rid, offer, raw, session, now)
                 if route == "host_poll":
                     return self.host_poll(con, ws, query, token, first, now)
                 if session and session["kind"] != "device":
@@ -590,15 +605,32 @@ class Bridge:
                 return True
             except Refusal:
                 continue
-        return any(notices(con, ws).values())
+        delivered = con.execute(
+            "SELECT delivered,notices FROM holder_delivery WHERE workspace_id=?", (ws,)
+        ).fetchone()
+        return notices_stamp(notices(con, ws)) != last_stamp(delivered)
+
+    def expiry(self, con, headers):
+        """Earliest time (ms) the poll's authorization lapses without any commit."""
+        session = con.execute(
+            "SELECT s.expires_ms,d.expires_ms FROM sessions s LEFT JOIN devices d "
+            "ON s.kind='device' AND d.device_id=s.subject_id WHERE s.token_hash=?",
+            (token_hash(headers.get("authorization", "")[7:]),),
+        ).fetchone()
+        return min(x for x in session if x is not None) if session else None
 
     def probe(self, route, params, query, headers, token):
+        """Runs on the event loop: a 10-30 µs read, cheaper than a thread-pool hop.
+
+        Returns (ready, expiry_ms). WAL readers never wait for writers.
+        """
         con = self.connection("read")
-        con.execute("BEGIN")
         try:
-            return self.ready(con, route, params, query, headers, token, self.d.clock())
-        except Refusal:
-            return True  # the full transaction raises the authoritative refusal
+            con.execute("BEGIN")
+            ready = self.ready(con, route, params, query, headers, token, self.d.clock())
+            return ready, None if ready or route == "pair" else self.expiry(con, headers)
+        except (Refusal, sqlite3.Error):
+            return True, None  # the full transaction gives the authoritative answer
         finally:
             con.rollback()
 
@@ -606,7 +638,7 @@ class Bridge:
         con = self.connection("read")
         con.execute("BEGIN")
         try:
-            return self.d.authenticate(con, headers, self.d.clock())
+            return self.d.authenticate(con, headers, self.d.clock()), self.expiry(con, headers)
         finally:
             con.rollback()
 
@@ -614,34 +646,66 @@ class Bridge:
         """Concurrency caps; callers run on the event loop, so no lock is needed."""
         if sum(self.polls.values()) >= POLL_CEILING:
             refuse("overloaded", 503, 1)
-        parent = ipv6_parent(key[1]) if key[0] == "pair" else None
+        groups = pair_group_caps(key[1]) if key[0] == "pair" else []
         if key[0] == "pair":
             if sum(v for k, v in self.polls.items() if k[0] == "pair") >= PAIR_POLL_CEILING:
                 refuse("overloaded", 503, 1)
-            if self.polls.get(key, 0) >= PAIR_POLLS_PER_ADDRESS or (
-                parent and self.pair_parents.get(parent, 0) >= PAIR_POLLS_PER_PARENT
+            if self.polls.get(key, 0) >= PAIR_POLLS_PER_ADDRESS or any(
+                self.pair_groups.get(group, 0) >= cap for group, cap in groups
             ):
                 fail("quota_exceeded")
-            if parent:
-                self.pair_parents[parent] = self.pair_parents.get(parent, 0) + 1
+            for group, _cap in groups:
+                self.pair_groups[group] = self.pair_groups.get(group, 0) + 1
         if key[0] == "device" and self.polls.get(key, 0) >= DEVICE_POLLS:
             fail("quota_exceeded")
         self.polls[key] = self.polls.get(key, 0) + 1
 
-    def committed(self, route, params, method, raw):
+    def release(self, key):
+        self.polls[key] -= 1
+        if not self.polls[key]:
+            del self.polls[key]
+        for group, _cap in pair_group_caps(key[1]) if key[0] == "pair" else []:
+            self.pair_groups[group] -= 1
+            if not self.pair_groups[group]:
+                del self.pair_groups[group]
+
+    def committed(self, route, params, method, raw, ready):
         """Wake waiting polls a successful transaction may have made ready.
 
         Each key wakes only polls the commit can ready: requests (direction 1, possibly
         anonymous pairing) wake the workspace's host polls; responses (direction 2, from
-        the fenced holder only) wake device and pair polls on that rid.
+        the fenced holder only) wake device and pair polls on that rid. Cert challenges
+        and rejections change the requesting workspace's host notices.
         """
         ws, rid = params.get("ws"), params.get("rid")
         if route in ("bridge", "pair") and method == "POST":
-            self.wake(("rid", ws, rid) if raw[5] == 2 else ("ws", ws))
+            if ready:  # identical resends and replays insert nothing and wake nothing
+                self.wake(("rid", ws, rid) if raw[5] == 2 else ("ws", ws))
         elif route in ("hold", "host_poll"):
             self.wake(("ws", ws))  # new generation fences; a new poll replaces the old one
         elif route == "cert_requests" and method == "POST":
             self.wake(("person", params["person"]))
+        elif route in ("cert_challenge", "cert_rejection"):
+            con = self.connection("read")
+            try:
+                row = con.execute(
+                    "SELECT workspace_id FROM cert_requests WHERE request_id=?", (params["ident"],)
+                ).fetchone()
+            finally:
+                con.rollback()
+            if row:
+                self.wake(("ws", row[0]))
+
+    @staticmethod
+    def wait_keys(route, params, subject):
+        if route == "host_poll":
+            return [("ws", params["ws"])]
+        if route == "cert_requests":
+            return [("person", params["person"]), ("subject", subject)]
+        keys = [("rid", params["ws"], params["rid"])]
+        if route == "bridge":
+            keys += [("subject", subject), ("members", params["ws"])]
+        return keys
 
     async def handle(self, request, route):
         binary = route in ("bridge", "pair") and request.method == "POST"
@@ -652,7 +716,8 @@ class Bridge:
         )
         key = None
         event = None
-        wake_key = None
+        wake_keys = []
+        expiry = None
         try:
             if len(request.query_params.multi_items()) != len(request.query_params):
                 fail("malformed")
@@ -686,43 +751,51 @@ class Bridge:
             params, headers = dict(request.path_params), dict(request.headers)
             peer = request.client.host if request.client else "unknown"
             if wait:
+                subject = None
                 if route == "pair":
                     address = canonical_address(
                         peer, headers.get("x-forwarded-for"), self.d.trusted_proxy
                     )
                     candidate = ("pair", address)
                 else:
-                    session = await run_in_threadpool(self.admission_session, headers)
-                    candidate = (session["kind"], session["subject_id"])
+                    session, expiry = self.admission_session(headers)
+                    subject = session["subject_id"]
+                    candidate = (session["kind"], subject)
+                keys = self.wait_keys(route, params, subject)
+                if len(self.waiters.get(keys[0], ())) >= RID_POLLS and route in (
+                    "bridge",
+                    "pair",
+                ):
+                    fail("quota_exceeded")
                 self.admit(candidate)
                 key = candidate
                 # Register before the first step so a commit racing it still wakes us.
-                wake_key = (
-                    ("ws", params["ws"])
-                    if route == "host_poll"
-                    else ("person", params["person"])
-                    if route == "cert_requests"
-                    else ("rid", params["ws"], params["rid"])
-                )
                 event = asyncio.Event()
-                self.waiters.setdefault(wake_key, set()).add(event)
+                wake_keys = keys
+                for wake_key in wake_keys:
+                    self.waiters.setdefault(wake_key, set()).add(event)
             token, deadline = secrets.token_hex(16), time.monotonic() + wait
             step = (route, params, request.method, bytes(raw), query, headers, peer, token)
             result, ready = await run_in_threadpool(self.transaction, *step, True)
-            self.committed(route, params, request.method, raw)
+            self.committed(route, params, request.method, raw, ready)
             while wait and not ready:
                 remaining = deadline - time.monotonic()
-                if remaining > 0:
-                    self.d.assert_can_wait()
-                    try:
-                        await asyncio.wait_for(event.wait(), min(POLL_TICK, remaining))
-                    except TimeoutError:
-                        pass
-                    event.clear()
-                if await run_in_threadpool(self.probe, route, params, query, headers, token):
-                    result, ready = await run_in_threadpool(self.transaction, *step, False)
                 if remaining <= 0:
+                    # Rebuild (and re-authorize) rather than return the first step's result.
+                    result, ready = await run_in_threadpool(self.transaction, *step, False)
                     break
+                timeout = min(remaining, random.uniform(*POLL_TICK))
+                if expiry is not None:
+                    timeout = min(timeout, max(0.01, (expiry - self.d.clock()) / 1000 + 0.01))
+                self.d.assert_can_wait()
+                try:
+                    await asyncio.wait_for(event.wait(), timeout)
+                except TimeoutError:
+                    pass
+                event.clear()
+                probed, expiry = self.probe(route, params, query, headers, token)
+                if probed:
+                    result, ready = await run_in_threadpool(self.transaction, *step, False)
             return JSONResponse(result, status_code=202 if binary else 200)
         except Refusal as error:
             return JSONResponse(
@@ -735,7 +808,7 @@ class Bridge:
         except (ValueError, TypeError, KeyError, AttributeError):
             return JSONResponse({"error": "malformed"}, status_code=400)
         finally:
-            if event is not None:
+            for wake_key in wake_keys:
                 events = self.waiters[wake_key]
                 events.discard(event)
                 if not events:
@@ -743,21 +816,11 @@ class Bridge:
             if key is not None:
                 self.release(key)
 
-    def release(self, key):
-        self.polls[key] -= 1
-        if not self.polls[key]:
-            del self.polls[key]
-        parent = ipv6_parent(key[1]) if key[0] == "pair" else None
-        if parent:
-            self.pair_parents[parent] -= 1
-            if not self.pair_parents[parent]:
-                del self.pair_parents[parent]
-
 
 def install(app):
     bridge = Bridge(app.state.directory)
     app.state.bridge = bridge
-    app.state.directory.changed = bridge.wake_all
+    app.state.directory.changed = bridge.wake
 
     def endpoint(route):
         async def handle(request: Request):

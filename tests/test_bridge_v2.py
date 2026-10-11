@@ -648,7 +648,7 @@ def test_pair_accounting_migrates_retained_bodies(tmp_path):
     with closing(db.connect(path)) as con, con:
         queue_body(con, binary("pair_device_post"))
         queue_body(con, binary("bridge_device_post"))
-    assert db.migrate(path) == ["0005_pair_accounting"]
+    assert db.migrate(path) == ["0005_pair_accounting", "0006_holder_notices"]
     with closing(db.connect(path)) as con:
         rows = con.execute(
             "SELECT device_id,pending,count FROM queue_totals ORDER BY device_id"

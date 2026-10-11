@@ -413,11 +413,19 @@ challenge is consumed.
   polls, ≤ 8 MiB of queued requests.
 - **Per workspace:** ≤ 1 024 queued requests, ≤ 16 MiB queued requests, ≤ 16 MiB undelivered responses.
 - **Global:** ≤ 256 MiB of queued bodies and ≤ 4 096 concurrent long polls (503 `overloaded`).
-- **Anonymous pair long polls (G3 review 2):** ≤ 4 concurrent per canonical client address and ≤ 32
-  per IPv6 /56 (429 `quota_exceeded`), and ≤ 512 in total, a separate share of the 4 096 (503
-  `overloaded`). Waiting polls hold no lock or transaction: commits that change rows wake them
-  (directory-wide wakeups coalesced to ≤ 4/s), a read-only check re-authorizes at least every
-  second, and only a ready check re-runs the full fenced transaction.
+- **Anonymous pair long polls (G3 review 2/3):** ≤ 4 concurrent per canonical client address, ≤ 32 per
+  IPv4 /24, ≤ 32 per IPv6 /56 and ≤ 64 per IPv6 /48 (429 `quota_exceeded`), and ≤ 512 in total, a
+  separate share of the 4 096 (503 `overloaded`). At most 16 polls (device or pair) wait on one
+  `(ws, rid)` (429 `quota_exceeded`).
+- **Waiting long polls** hold no lock, transaction or worker thread. Commits that insert or change
+  rows wake only the affected polls (new requests → that workspace's host; responses → that rid;
+  revocation, logout, certificate store → that device's polls and the hosts of its workspaces;
+  membership → that workspace). Each poll also re-checks at its session/certificate expiry and on a
+  jittered 5–7 s tick, using a read-only check on the event loop; only a ready check, and the
+  deadline, re-run the full fenced transaction. Identical resends and replays wake nobody.
+- **Host poll notices** make a poll ready only when they differ from the notices last delivered to
+  the current holder generation (a new generation receives them once); a past revocation alone does
+  not keep a host poll from waiting.
 - **Client addresses.**
   - The peer address is used, or Caddy's `X-Forwarded-For` only when the peer is the configured proxy.
   - Addresses are canonicalized: IPv4-mapped IPv6 becomes IPv4, and IPv6 is grouped by /64.
