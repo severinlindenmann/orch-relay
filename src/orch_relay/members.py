@@ -142,9 +142,7 @@ def publish(con, ws, body, raw, workspace, now):
     if previous and o["list_seq"] <= previous["list_seq"]:
         fail("stale_list")
     if o["epoch"] not in ((epoch, epoch + 1) if previous else (1,)):
-        error = Refusal("stale_epoch")
-        error.details = {"epoch": epoch}
-        raise error
+        fail("bad_epoch")
     if not previous and o["list_seq"] != 1:
         fail("bad_epoch")
     old_ids = {

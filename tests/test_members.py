@@ -119,7 +119,7 @@ def test_first_epoch_adjacency(tmp_path, epoch):
         load_state(c.app.state.directory)
         r = put(c, changed(epoch=epoch))
         assert r.status_code == 409
-        assert r.json() == {"error": "stale_epoch", "epoch": 0}
+        assert r.json() == {"error": "bad_epoch"}
 
 
 def test_revocation_rotation_and_mailbox_cleanup(tmp_path):
@@ -211,7 +211,7 @@ def test_device_reads_only_own_grants_from_first_epoch(tmp_path):
 
 
 @pytest.mark.parametrize("patch", [{"epoch": 4}, {"epoch": 1, "list_seq": 3}])
-def test_current_epoch_hint(tmp_path, patch):
+def test_publication_epoch_adjacency(tmp_path, patch):
     with TestClient(create_app(tmp_path)) as c:
         load_state(c.app.state.directory)
         assert put(c, BODY).status_code == 200
@@ -221,7 +221,7 @@ def test_current_epoch_hint(tmp_path, patch):
             if "list_seq" not in patch
             else put(c, changed(**patch))
         )
-        assert r.status_code == 409 and r.json() == {"error": "stale_epoch", "epoch": 2}
+        assert r.status_code == 409 and r.json() == {"error": "bad_epoch"}
 
 
 def test_expired_holder_and_session_gate_exact_retry(tmp_path):
@@ -266,3 +266,109 @@ def test_departure_prunes_workspace_queues_only(tmp_path):
             ).status_code
             == 403
         )
+
+
+@pytest.mark.parametrize("scoped_agent", [False, True], ids=["above_cert", "drop_agent"])
+def test_member_certificate_scope_limit(tmp_path, scoped_agent):
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        load_state(d)
+        maximum = ["drop:" + WS] if scoped_agent else ["look"]
+        scopes = maximum if scoped_agent else ["look", "decide", "operate"]
+        cert = signed(
+            {**V["certs"]["signed"]["phone"]["o"], "scopes_max": maximum, "expires_ms": NOW + 10000}
+        )
+        with closing(db.connect(d.path)) as con, con:
+            con.execute("UPDATE devices SET cert=? WHERE device_id=?", (P.cj(cert), DEVICE))
+        members = copy.deepcopy(BODY["member_list"]["o"]["members"])
+        next(m for m in members if m["device_id"] == DEVICE)["scopes"] = scopes
+        before = snapshot(d)
+        r = put(c, changed(members=members))
+        assert r.status_code == 403 and r.json() == {"error": "scope_exceeded"}
+        assert snapshot(d) == before
+
+
+@pytest.mark.parametrize("invalid", ["cert_expired", "revoked"])
+def test_card_keys_rechecks_certificate_after_publication(tmp_path, invalid):
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        load_state(d)
+        if invalid == "cert_expired":
+            cert = signed({**V["certs"]["signed"]["phone"]["o"], "expires_ms": NOW + 1000})
+            with closing(db.connect(d.path)) as con, con:
+                con.execute(
+                    "UPDATE devices SET cert=?,expires_ms=? WHERE device_id=?",
+                    (P.cj(cert), NOW + 1000, DEVICE),
+                )
+        body = copy.deepcopy(BODY)
+        del body["card_key_wraps"]
+        assert put(c, body).status_code == 200
+        if invalid == "revoked":
+            assert c.post("/v2/revocations", json={"record": RECORD}).status_code == 200
+        else:
+            d.clock = lambda: NOW + 1000
+        before = snapshot(d)
+        r = c.put(f"/v2/workspaces/{WS}/card-keys", json=BODY["card_key_wraps"], headers=HEADERS)
+        assert r.status_code == 403 and r.json() == {"error": invalid}
+        assert snapshot(d) == before
+
+
+def test_membership_receipt_is_workspace_scoped(tmp_path):
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        load_state(d)
+        assert put(c, BODY).status_code == 200
+        with closing(db.connect(d.path)) as con, con:
+            # Relocate an exact-body receipt to isolate the SQL scope predicate.
+            # The signed body normally makes such a cross-workspace match impossible.
+            con.execute("UPDATE membership_receipts SET workspace_id=?", (V["ids"]["workspace_b"],))
+        before = snapshot(d)
+        r = put(c, BODY)
+        assert r.status_code == 409 and r.json() == {"error": "stale_list"}
+        assert snapshot(d) == before
+
+
+@pytest.mark.parametrize("case", V["member_lists"], ids=lambda c: c["name"])
+def test_member_list_vectors_against_production(tmp_path, case):
+    """Replay every suite-2 list with its signature and abstract directory preconditions."""
+    from members_support import BASE
+
+    state = copy.deepcopy(BASE["state"])
+    state["list"] = case["prev"]
+    directory = {
+        "persons": {PERSON: case["directory"]["owner_pk_pub"]},
+        "certs": case["directory"]["certs"],
+        "revoked": case["directory"]["revoked"],
+    }
+    o = case["signed"]["o"]
+    # The list vectors model grant availability as (device, epoch) pairs. Supply
+    # real signed grants for those pairs belonging to the proposed membership.
+    available = {tuple(pair) for pair in case["directory"]["grants"]}
+    grants = [
+        signed(
+            {**BODY["grants"][0]["o"], "device_id": m["device_id"], "epoch": o["epoch"]},
+            "wsk_a.sig",
+        )
+        for m in o["members"]
+        if (m["device_id"], o["epoch"]) in available
+    ]
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        load_state(d, state, directory, case["now_ms"])
+        with closing(db.connect(d.path)) as con, con:
+            con.execute(
+                "UPDATE workspaces SET wsk_pub=?", (P.b64u(bytes.fromhex(case["wsk_pub"])),)
+            )
+        assert case["card_workspace_id"] == WS
+        before = snapshot(d)
+        r = put(c, {"member_list": case["signed"], "grants": grants})
+        if "refuse" in case["expect"]:
+            assert r.status_code >= 400
+            assert r.json() == {"error": case["expect"]["refuse"]}
+            assert snapshot(d) == before
+        else:
+            assert r.status_code == 200, r.text
+            assert r.json() == {"list_seq": o["list_seq"], "epoch": o["epoch"]}
+            stored = c.get(f"/v2/workspaces/{WS}/members", headers=HEADERS).json()
+            assert stored["member_list"] == case["signed"]
+            assert stored["member_list"]["o"] == case["expect"]["ok"]

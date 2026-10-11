@@ -54,6 +54,12 @@ def test_http_example(tmp_path, name, case):
             assert first.status_code == 200, first.text
         response = client.request(request["method"], request["path"], **kwargs)
         expected = case["response"]
+        if name == "membership" and case["given"].get("scenario") == "stale_epoch":
+            # The frozen ref/ generator still emits the former G2 publication code.
+            # G0a keeps bad_epoch here; stale_epoch belongs to bridge requests.
+            assert expected["status"] == 409
+            assert expected["json"] == {"error": "stale_epoch", "epoch": 2}
+            expected = {**expected, "json": {"error": "bad_epoch"}}
         assert response.status_code == expected["status"], response.text
         assert response.headers["content-type"] == "application/json"
         assert set(response.json()) == set(expected["json"])
