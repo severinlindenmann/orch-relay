@@ -640,7 +640,7 @@ def test_vector_files_match_the_recorded_sha256():
         for line in (F1 / "SOURCE").read_text().splitlines()
         if line.startswith("sha256:")
     )
-    assert "Commit: 1c6b3ed34af8e840bb274d1d3591fe1876a21634" in (F1 / "SOURCE").read_text()
+    assert "Commit: a168474f166b9f5da3a60f4f61274d0f2db5b1a6" in (F1 / "SOURCE").read_text()
     assert {p.name for p in F1.iterdir()} == {n + ".json" for n in FILE_KEYS} | {"SOURCE"}
     files = sorted(p.name for p in F1.glob("*.json"))
     assert files == sorted(rec) and set(files) == {name + ".json" for name in FILE_KEYS}
@@ -930,6 +930,9 @@ def chain_break(events, log, ws, wsk, certs, ws_height):
     prev, order = None, (0, "")
     for pos, e in enumerate(events, 1):
         if e["seq"] != pos or e["prev"] != prev or not host_ok_event(e, wsk, ws, log):
+            return pos
+        # §5.2: sig, auth and roster_v belong to person events only; a host event carrying one breaks the chain.
+        if e["actor"]["kind"] != "person" and any(k in e for k in ("sig", "auth", "roster_v")):
             return pos
         if log != "workspace":
             current = (e["ws_seq"], e["at"])
