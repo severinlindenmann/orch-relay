@@ -395,10 +395,13 @@ Shrinking the resend window to 60 s fails on routine iOS suspension. Instead:
   - the chunk has been restored fewer than 8 times (`rid_chunks.restores`, durable across restarts); otherwise 409
     `retry_exhausted`;
   - the host-post rate and response storage budgets admit it (it is charged; a live duplicate stays a free no-op).
+  The epoch rule is checked before the deadline (old-epoch data past it is a 202 no-op), and the cap before the
+  rate and budgets (a capped chunk spends nothing). Removing or revoking a device sets its chunks' `restores` to
+  the cap (rows and digests stay, so `chunk_conflict` still holds): a re-added device gets nothing restored.
   The copy expires at `min(now + 60 s, keep_until_ms)` and `keep_until_ms` never moves, so chunks restored in turn
   cannot keep a rid alive. Pairing answers are never restored.
 - **Device.** A replay keeps its original `ts_ms`: the phone's last automatic resend starts by about 240 s after the
-  first send. A replayed `stale_timestamp` carries the original `host_ms`, so the offset is computed against the
+  first send (best-effort: clock offset and host delay also count; outside the window the device ends `uncertain`). A replayed `stale_timestamp` carries the original `host_ms`, so the offset is computed against the
   first send's device time (proto §8.8).
 - **Not a security boundary.** A hostile relay could always replay bytes it once held; this bounds an honest
   relay's storage and lifetime only. Vectors: `p3.restore`; fixture `bridge_host_post` cases

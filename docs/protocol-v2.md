@@ -1310,7 +1310,10 @@ epoch makes the device fetch grants (`fetch_grants`); any other is dropped (§8.
 **Replayed answers (P3-D27).** A host replays exact posted bytes (§8.6 step 5), so a replayed chunk keeps
 its original `ts_ms`, `host_ms` and `high`:
 - The phone's last automatic resend of a rid should start no later than about 240 s after its **first**
-  send, so that a replayed answer still passes step 10's ±300 s window.
+  send, so that a replayed answer is likely to pass step 10's ±300 s window. This is best-effort, not a
+  guarantee: acceptance also depends on the clock offset and on how long the host took before stamping the
+  original answer's `ts_ms`. A replay outside the window is dropped, and the device ends `uncertain`, the
+  defined outcome (reissue reads; reconcile writes by `idem`).
 - For a `stale_timestamp` answering a rid that was sent more than once, the device computes its clock
   offset as `host_ms` minus its device time of the **first** send, not of the latest resend.
 - A replayed `stale_sequence` carries an old `high`; `max(counter, high + 1)` stays correct.
@@ -2264,6 +2267,11 @@ subject to all of these:
 - **Budgets.** A re-store is charged to the host-post rate and the response storage budgets (P3-D17); 429 and
   503 apply as for a new chunk. A live duplicate stays a free no-op that never changes its TTL.
 - **Pairing answers** (the `pair` route) are never stored again.
+- **Removal.** Removing a device from the workspace (or revoking it) sets its chunks' restoration count to the
+  cap. The rows and digests stay, so `chunk_conflict` still holds, and a re-added device gets nothing
+  restored (409 `retry_exhausted`).
+- **Order.** The epoch rule precedes the deadline (expired old-epoch data past it is a 202 no-op, not 410);
+  the cap precedes the rate and budgets (a capped chunk is 409 and spends nothing).
 
 The device side is in §8.8 (the 240 s resend bound, the `stale_timestamp` offset). This changes only what an
 honest relay stores: a hostile relay could always replay bytes it once held. Vectors: `p3.restore`.
