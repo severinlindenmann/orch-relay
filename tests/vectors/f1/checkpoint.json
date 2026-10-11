@@ -956,6 +956,37 @@
    "expect": "ok",
    "limit": "height-only comparison: a receiver holding only checkpoints cannot see the fork",
    "name": "a_fork_grown_past_the_held_height_is_accepted_without_the_logs"
+  },
+  {
+   "checkpoint": {
+    "o": {
+     "at": "2026-10-10T10:03:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 1,
+     "suite": 2,
+     "tickets": {
+      "01J9ZK4Q7M3R8T2V6X0B5N1C9D": {
+       "head": "sha256:08d494b703090846a430d99f8753f7e56621c0341517a5aeab9ad21deacc2e42",
+       "seq": 4
+      },
+      "01J9ZK4Q7M3R8T2V6X0B5N1C9E": {
+       "head": "sha256:215b81b6c40231c64eafa55fa4ff7ccd3cd933fca0bd849078aa4df36b548449",
+       "seq": 1
+      }
+     },
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "head": "sha256:c5bff55dc4158717ece7433499b52f79b344c00af79a071210a79625d94dbf2f",
+      "seq": 4
+     }
+    },
+    "sig": "hjPa3sSZf0gUxgPzXs6eTmr8e-xUvddsbTNn595WP5vNyLmWw86-V2g2PmPrIjOnp07E98Zd1Wf1fWzmc_wfSw"
+   },
+   "expect": "chain.diverged",
+   "name": "lower_n_extra_uid",
+   "note": "5.10: H has no entry for this uid, so its seq counts as 0"
   }
  ],
  "workspace_offers": [
