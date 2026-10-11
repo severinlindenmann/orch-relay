@@ -467,3 +467,89 @@ def test_staging_byte_quota_counts_pages_and_manifest_and_retries_are_free(tmp_p
         other = digest(b"FAKE quota other")
         with pytest.raises(Refusal):  # a second set shares the same workspace bytes
             relay.put_staging(None, other, 0, page, wire, 1 << 40)
+
+
+# --- review R1: a many-ticket publication folds each staged descriptor once ---------------------
+
+
+def many_ticket_publication(tmp_path, tickets, refused):
+    """Seed the pinned state, stage a first publication of `tickets` ticket logs (one page each)
+    through the production staging code, and run the publication; returns (relay, seconds)."""
+    from checkpoint_support import CORPUS, seed
+    from directory_support import V
+
+    from orch_relay import proto as P
+    from orch_relay.checkpoints import EMPTY as E
+    from orch_relay.checkpoints import Relay, checkpoint_hash, descriptor, log_acc, page_digest
+    from orch_relay.directory import Refusal
+    from ref import orch_protocol_ref as R
+
+    case = next(
+        c
+        for c in CORPUS["suites"]["2"]["checkpoints"]["cases"]
+        if c["name"] == "first_checkpoint_full_proof"
+    )
+    path = tmp_path / db.DB_NAME
+    db.migrate(path)
+    seed(path, case["state"], case)
+    root = case["state"]["genesis"]["pin"]["o"]["genesis"]
+
+    def entry(head):
+        return {"seq": 1, "head": head, "acc": log_acc(ZERO, head)}
+
+    pages = []
+    o = {
+        "v": 2,
+        "suite": 2,
+        "kind": "workspace_checkpoint",
+        "workspace_id": WS,
+        "genesis": root,
+        "n": 1,
+        "at": "2026-09-21T13:46:40Z",
+        "workspace_log": entry(root),
+        "tickets": {},
+    }
+    for log, head in [("workspace", root)] + [
+        (f"01{t:024d}", digest(f"FAKE r1 {t}".encode())) for t in range(tickets)
+    ]:
+        if log != "workspace":
+            o["tickets"][log] = entry(head)
+        page = {"kind": "appended", "log": log, "after_seq": 0, "from_acc": ZERO, "heads": [head]}
+        page["digest"] = page_digest(page)
+        pages.append(page)
+    if refused:  # the last ticket's signed entry disagrees with its proof: refused after all work
+        o["tickets"][log] = entry(digest(b"FAKE wrong"))
+    target = R.sign_object(
+        R.SUITES[2], R.SUITES[2].sig_key(bytes.fromhex(V["keys"]["wsk_a.sig"]["seed"])), o
+    )
+    h = checkpoint_hash(target)
+    pages.sort(key=lambda p: (p["kind"], p["log"], p["after_seq"]))
+    with closing(db.connect(path)) as con, con:
+        relay = Relay(None, con, WS, 1790000000000)
+        for i, page in enumerate(pages):
+            relay.put_staging(None, h, i, page, P.cj(page), 1 << 40)
+        manifest = {"pages": [descriptor(i, p) for i, p in enumerate(pages)]}
+        relay.put_staging(None, h, None, manifest, P.cj(manifest), 1 << 40)
+        relay = Relay(None, con, WS, 1790000000000)
+        began = time.perf_counter()
+        try:
+            result = relay.publish({"checkpoint": target, "source_hash": None}, 1)
+            assert result["result"] == "accepted"
+            assert not refused
+        except Refusal as exc:
+            assert refused and exc.code == "chain_diverged"
+        took = time.perf_counter() - began
+        con.rollback()
+    assert E["seq"] == 0
+    return relay, took, len(pages)
+
+
+@pytest.mark.parametrize("refused", [False, True])
+def test_many_ticket_publication_work_is_linear_in_staged_pages(tmp_path, refused):
+    small, small_s, small_pages = many_ticket_publication(tmp_path / "s", 250, refused)
+    large, large_s, large_pages = many_ticket_publication(tmp_path / "l", 2000, refused)
+    # Each staged descriptor is folded at most once; scanning the manifest per log costs
+    # tickets x pages (2000 tickets: ~4M visits, seconds under the global lock).
+    assert small.visits <= small_pages and large.visits <= large_pages, (small.visits, large.visits)
+    # 8x the tickets: linear is ~8x the time, the quadratic scan ~64x.
+    assert large_s <= 24 * small_s + 0.05, (small_s, large_s)
