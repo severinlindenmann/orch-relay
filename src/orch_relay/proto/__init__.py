@@ -13,6 +13,9 @@ from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 MAX_SAFE_INT = 2**53 - 1
 P256_N = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
 LABELS = {
+    "sig_cert_request": "orch/v2/sig/cert-request|",
+    "sig_cert_challenge": "orch/v2/sig/cert-challenge|",
+    "sig_cert_rejection": "orch/v2/sig/cert-rejection|",
     "sig_member_list": "orch/v2/sig/member-list|",
     "sig_wk_grant": "orch/v2/sig/wk-grant|",
     "sig_device_cert": "orch/v2/sig/device-cert|",

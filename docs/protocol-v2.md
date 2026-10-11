@@ -2135,6 +2135,31 @@ private half; the publicly derived reference key is only a test artifact.
 - **Per workspace:** ≤ 1 024 queued requests, ≤ 16 MiB queued requests, ≤ 16 MiB undelivered responses. (G0a review 10) Each device may consume at most
   2 MiB of that response budget across its sessions; excess is 429 `quota_exceeded`, without eviction.
 - **Global:** ≤ 256 MiB of queued bodies and ≤ 4 096 concurrent long polls (503 `overloaded`).
+- **Anonymous pair long polls (G3 review 2/3):** ≤ 4 concurrent per canonical client address, ≤ 32 per
+  IPv4 /24, ≤ 32 per IPv6 /56 and ≤ 64 per IPv6 /48 (429 `quota_exceeded`), and ≤ 512 in total, a
+  separate share of the 4 096 (503 `overloaded`). At most 16 pair polls wait on one
+  `(ws, offer, rid)` (429 `quota_exceeded`).
+- **Authorization first (G3 review 3):** every bridge, pair, holder and certificate request is
+  authenticated, authorized and fenced by a read-only check before it takes the directory lock, a
+  write transaction, a rate window, a poll slot or a wakeup; only anonymous pairing is admitted
+  without a session, and it is charged only to its own windows. Refusal codes match the
+  transaction's, with one deliberate exception: a non-device session posting a cert challenge or
+  rejection gets 403 `not_eligible` before the request lookup, even for an unknown request id
+  (never 404), so it learns nothing about request ids. Host pair answers use separate
+  pairing windows with the same caps, and host response chunks are rate-limited per (workspace,
+  target device), never against the device's own 20 posts/s.
+- **Waiting long polls** hold no lock, transaction or worker thread. Commits that insert or change
+  rows wake only the affected polls (new requests → that workspace's host; responses → that rid;
+  revocation, logout, certificate store → that device's polls and the hosts of its workspaces;
+  membership → that workspace). Each poll also re-checks at its session/certificate expiry and on a
+  jittered 5–7 s tick, using a read-only check on the event loop; only a ready or refused check
+  re-runs the full fenced transaction. At the deadline host polls rebuild their response with the
+  transaction; device, pair and cert polls re-check on the event loop and answer empty unless ready
+  or refused. Waits of 5 s or more end up to 10 % (≤ 1 s) early, so polls admitted together do not
+  time out together. Identical resends and replays wake nobody.
+- **Host poll notices** make a poll ready only when they differ from the notices last delivered to
+  the current holder generation (a new generation receives them once); a past revocation alone does
+  not keep a host poll from waiting.
 - **Client addresses.**
   - The peer address is used, or Caddy's `X-Forwarded-For` only when the peer is the configured proxy.
   - Addresses are canonicalized: IPv4-mapped IPv6 becomes IPv4, and IPv6 is grouped by /64.
@@ -2168,6 +2193,10 @@ un-revoke.
 ### 19.6 Exact HTTP shapes and common refusals (P3-D1/D2/D10/D17)
 
 `tests/http_fixtures/*.json` is the executable example corpus (one file per route role).
+`tests/http_fixtures/MANIFEST.json` lists the sha256 of every other file in that directory plus an
+aggregate hash (`uv run python tests/http_fixtures/manifest.py --write|--check`; a pytest fails on a stale
+manifest). Bump `revision` whenever any fixture changes. Consumers (orch-mobile, orch-core) vendor the
+corpus at a named commit and verify the manifest in their CI.
 There are no public invite-management routes: invite creation is the admin CLI (P3-D3).
 Checkpoint, restore, genesis, staging, baseline and proof routes wait for the next contract group.
 

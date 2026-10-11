@@ -266,9 +266,6 @@ def test_p3_revocation(tmp_path, case):
                         "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
                         (did, PERSON, P.cj(record), record["o"]["reason"], NOW, state["cursor"]),
                     )
-                con.execute(
-                    "CREATE TABLE bridge_msgs(workspace_id TEXT, device_id TEXT, kind TEXT, envelope BLOB)"
-                )
                 for ws, workspace in state["workspaces"].items():
                     for did, grant in workspace["grants"].items():
                         con.execute(
@@ -282,8 +279,8 @@ def test_p3_revocation(tmp_path, case):
                         for did, entries in workspace[key].items():
                             for entry in entries:
                                 con.execute(
-                                    "INSERT INTO bridge_msgs VALUES (?,?,?,?)",
-                                    (ws, did, key, entry),
+                                    "INSERT INTO bridge_msgs(workspace_id,device_id,rid,direction,idx,flags,stream,body,expires_ms) VALUES (?,?,'rid',?,0,0,'',?,?)",
+                                    (ws, did, 1 if key == "mailboxes" else 2, entry, NOW + 60000),
                                 )
                     for did, due in workspace["rotation_due"].items():
                         con.execute(
@@ -329,9 +326,10 @@ def test_p3_revocation(tmp_path, case):
                 for key in ("mailboxes", "responses"):
                     actual = {}
                     for r in con.execute(
-                        "SELECT * FROM bridge_msgs WHERE workspace_id=? AND kind=?", (ws, key)
+                        "SELECT * FROM bridge_msgs WHERE workspace_id=? AND direction=?",
+                        (ws, 1 if key == "mailboxes" else 2),
                     ):
-                        actual.setdefault(r["device_id"], []).append(r["envelope"])
+                        actual.setdefault(r["device_id"], []).append(r["body"])
                     assert actual == workspace[key]
 
 

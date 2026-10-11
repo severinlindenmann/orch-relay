@@ -183,6 +183,7 @@ class Directory:
         self.window_expiry = []
         self.windows = {}  # (purpose, identity, duration) -> (window end, count)
         self.clock = lambda: time.time_ns() // 1_000_000
+        self.changed = None  # event-loop callback(*keys) after committed writes (wakes polls)
         self.random = secrets.token_bytes
         self.dummy_pub = (
             ec.generate_private_key(ec.SECP256R1())
@@ -340,6 +341,32 @@ class Directory:
         if holder is None or holder["gen"] != gen or holder["lease_until_ms"] <= now:
             fail("fenced")
 
+    def wake_keys(self, con, route, ident, body, logout):
+        """Long polls a committed directory write can end or make ready (bridge keys)."""
+        if route == "revocations":
+            did = body["record"]["o"]["device_id"]
+            return [("subject", did)] + [
+                ("ws", row[0])
+                for row in con.execute(
+                    "SELECT workspace_id FROM ever_devices WHERE device_id=?", (did,)
+                )
+            ]
+        if route == "device":
+            # Certificate completion changes cert_requests notices of the person's hosts.
+            return [("subject", ident)] + [
+                ("ws", row[0])
+                for row in con.execute(
+                    "SELECT DISTINCT workspace_id FROM cert_requests WHERE person_id="
+                    "(SELECT person_id FROM devices WHERE device_id=?)",
+                    (ident,),
+                )
+            ]
+        if route == "membership":
+            return [("ws", ident), ("members", ident)]
+        if route == "logout" and logout:
+            return [("subject", logout[0])]
+        return []
+
     def store_device(self, con, cert):
         o = cert["o"]
         try:
@@ -444,6 +471,8 @@ class Directory:
 
     def recovery(self, con, body, raw, address, now, device=None):
         """Verify and apply recovery; handle() has already enforced the address budget."""
+        from .cert_queue import complete
+
         revocation = device is None
         kind = "revocation" if revocation else "certificate"
         field = "record" if revocation else "cert"
@@ -466,6 +495,7 @@ class Directory:
             if not revocation:
                 stored = con.execute("SELECT * FROM devices WHERE device_id=?", (did,)).fetchone()
                 self.device_status(con, stored, now)
+                complete(con, P.parse_json(stored["cert"]), now)
             return {"device_id": did}
         account = con.execute("SELECT pk_pub FROM accounts WHERE person_id=?", (person,)).fetchone()
         if account is None:
@@ -490,6 +520,8 @@ class Directory:
         ):
             # Cache accepted no-ops too: a byte-identical retry must bypass address budgets.
             con.execute("INSERT INTO recovery_receipts VALUES (?,?,?)", (kind, digest(raw), did))
+            if not revocation:
+                complete(con, signed, now)
             return {"device_id": did}
         self.rate(kind + "-person", person, DAY, 32 if revocation else 64, now, False)
         if revocation and prior:
@@ -501,6 +533,8 @@ class Directory:
             self.revoke(con, signed, now)
         elif stored is None:
             self.store_device(con, signed)
+        if not revocation:
+            complete(con, signed, now)
         con.execute("INSERT INTO recovery_receipts VALUES (?,?,?)", (kind, digest(raw), did))
         return {"device_id": did}
 
@@ -717,10 +751,27 @@ class Directory:
                         ):
                             fail("malformed")
                         body = P.parse_json(raw)
+                    logout = (
+                        con.execute(
+                            "SELECT subject_id FROM sessions WHERE token_hash=?",
+                            (token_hash(headers.get("authorization", "")[7:]),),
+                        ).fetchone()
+                        if route == "logout"
+                        else None
+                    )
                     result = self.dispatch(
                         con, route, ident, method, body, raw, query, headers, address, now
                     )
-            return JSONResponse(result)
+                    # Fresh connection: any row change (incl. triggers) came from this commit.
+                    # Unthrottled receipt replays change nothing and so wake nothing.
+                    wake = (
+                        self.wake_keys(con, route, ident, body, logout)
+                        if con.total_changes > 0 and method != "GET"
+                        else []
+                    )
+            response = JSONResponse(result)
+            response.wake = wake
+            return response
         except Refusal as e:
             return JSONResponse(
                 {"error": e.code, **getattr(e, "details", {})},
@@ -752,7 +803,7 @@ def install(app, data):
                 raw.extend(chunk)
             if len(request.query_params.multi_items()) != len(request.query_params):
                 return JSONResponse({"error": "malformed"}, status_code=400)
-            return await run_in_threadpool(
+            response = await run_in_threadpool(
                 directory.handle,
                 route,
                 request.path_params.get("ident"),
@@ -762,6 +813,11 @@ def install(app, data):
                 dict(request.headers),
                 request.client.host if request.client else "unknown",
             )
+            # Revocations, membership, logout and certificates can end or ready a long poll.
+            # Only commits that changed rows notify, and only the affected polls' keys.
+            if directory.changed and getattr(response, "wake", None):
+                directory.changed(*response.wake)
+            return response
 
         return handle
 

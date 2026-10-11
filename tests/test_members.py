@@ -129,9 +129,8 @@ def test_revocation_rotation_and_mailbox_cleanup(tmp_path):
         assert put(c, BODY).status_code == 200
         with closing(db.connect(d.path)) as con, con:
             con.execute(
-                "CREATE TABLE request_mailboxes(workspace_id TEXT, device_id TEXT, payload BLOB)"
+                "INSERT INTO request_mailboxes VALUES (?,?,?,?)", (WS, DEVICE, "rid", NOW + 60000)
             )
-            con.execute("INSERT INTO request_mailboxes VALUES (?,?,?)", (WS, DEVICE, b"request"))
         assert c.post("/v2/revocations", json={"record": RECORD}).status_code == 200
         s = snapshot(d)
         assert s["rotation_due"] == [(WS, DEVICE, 1, 1)]
@@ -242,11 +241,15 @@ def test_departure_prunes_workspace_queues_only(tmp_path):
         assert put(c, BODY).status_code == 200
         other_ws = V["ids"]["workspace_b"]
         with closing(db.connect(d.path)) as con, con:
-            con.execute("CREATE TABLE bridge_msgs(workspace_id TEXT, device_id TEXT, payload BLOB)")
-            con.execute("CREATE TABLE rid_seen(workspace_id TEXT, device_id TEXT, digest TEXT)")
             for ws in (WS, other_ws):
-                con.execute("INSERT INTO bridge_msgs VALUES (?,?,?)", (ws, DEVICE, b"request"))
-                con.execute("INSERT INTO rid_seen VALUES (?,?,?)", (ws, DEVICE, "receipt"))
+                con.execute(
+                    "INSERT INTO bridge_msgs(workspace_id,device_id,rid,direction,idx,flags,stream,body,expires_ms) VALUES (?,?,'rid',1,0,0,'',?,?)",
+                    (ws, DEVICE, b"request", NOW + 60000),
+                )
+                con.execute(
+                    "INSERT INTO rid_seen VALUES (?,?,'rid','receipt',1,?,0,?,?,NULL)",
+                    (ws, DEVICE, NOW, NOW, NOW + 900000),
+                )
         body = changed(
             list_seq=2,
             epoch=2,
@@ -256,9 +259,9 @@ def test_departure_prunes_workspace_queues_only(tmp_path):
         del body["card_key_wraps"]
         assert put(c, body).status_code == 200
         with closing(db.connect(d.path)) as con:
-            assert [tuple(r) for r in con.execute("SELECT * FROM bridge_msgs")] == [
-                (other_ws, DEVICE, b"request")
-            ]
+            assert [
+                tuple(r) for r in con.execute("SELECT workspace_id,device_id,body FROM bridge_msgs")
+            ] == [(other_ws, DEVICE, b"request")]
             assert con.execute("SELECT COUNT(*) FROM rid_seen").fetchone()[0] == 2
         assert (
             c.get(

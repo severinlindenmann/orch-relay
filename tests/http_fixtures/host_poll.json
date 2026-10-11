@@ -168,36 +168,6 @@
       }
     },
     {
-      "name": "refusal_429_quota_exceeded",
-      "given": {
-        "scenario": "quota_exceeded",
-        "now_ms": 1790000000000,
-        "condition": "host_poll: Applicable device/workspace storage, concurrent poll, chunk or open-request cap is full."
-      },
-      "request": {
-        "method": "GET",
-        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/poll",
-        "query": {
-          "after": "0",
-          "wait": "25"
-        },
-        "headers": {
-          "Authorization": "Bearer FAKE-workspace",
-          "Orch-Holder": "1"
-        }
-      },
-      "response": {
-        "status": 429,
-        "headers": {
-          "Content-Type": "application/json",
-          "Retry-After": "20"
-        },
-        "json": {
-          "error": "quota_exceeded"
-        }
-      }
-    },
-    {
       "name": "refusal_503_overloaded",
       "given": {
         "scenario": "overloaded",

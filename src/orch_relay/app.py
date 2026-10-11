@@ -1,5 +1,6 @@
+import asyncio
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -22,12 +23,22 @@ def create_app(data_dir: Path | str | None = None, instance: str | None = None) 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await run_in_threadpool(db.migrate, data / db.DB_NAME)
-        yield
+        maintenance = asyncio.create_task(app.state.bridge.maintenance())
+        try:
+            yield
+        finally:
+            maintenance.cancel()
+            with suppress(asyncio.CancelledError):
+                await maintenance
+            app.state.bridge.close()
 
     app = FastAPI(title="orch-relay", version=__version__, lifespan=lifespan)
     app.state.data_dir = data
     app.state.instance = name
     install(app, data)
+    from .bridge import install as install_bridge
+
+    install_bridge(app)
 
     @app.get("/healthz")
     def healthz() -> dict:
