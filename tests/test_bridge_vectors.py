@@ -325,3 +325,9 @@ def test_envelope_size_vectors(case):
     with pytest.raises(Refusal) as error:
         envelope(bytes(raw) + b"\0", WS, RID, case["direction"], offer=offer)
     assert error.value.code == case["one_over"]
+
+
+@pytest.mark.parametrize("case", V["cert_binding"]["relay"], ids=lambda c: c["name"])
+def test_cert_binding_vectors(tmp_path, case):
+    """G3b (P3-D28): the queue binds challenges and rejections to the request's attempt and device keys."""
+    test_pair_queue_vectors(tmp_path, case)

@@ -1,5 +1,5 @@
 {
-  "aggregate": "125f8e684e26d02051ac27145b2b5bb3bb3970d9bbf9304b1376e0d1ed06fa6f",
+  "aggregate": "2b3b0f3278257d67d77fbe90a0c119d8175b90de032fffb485db265b00465f49",
   "files": {
     "README.md": "a4a11f1d535366d9fd22bc2d9f913c79010fee55191bc46a361e99e88072be58",
     "accounts.json": "25068c96173a565bfc86917e454136df2dafa9b8642d3badb8ea89a1cc1151cc",
@@ -12,11 +12,11 @@
     "card_key.json": "94c1dd1ebc6984b9a9feedc6ee804756519f0c0a3429a1ef0b552004a2519a9a",
     "card_keys.json": "ddb9bcd383522bc7dcd6d41a208d72c25882057d40329567ad34faed1f7cc6a3",
     "card_put.json": "a57ac8cefd653d093a5f36785bf7fd9a88b8b52fc67f6d622c561b1c4fac1f4e",
-    "cert_challenge.json": "f95005734f6fe03d7dd76de297f5514351b5113f231aeb5bc6db180412529640",
-    "cert_rejection.json": "8d5c50c3effc274378d932d38ccf569d2739edadcc87d27eacd3511bf34699cd",
-    "cert_request_get.json": "7845c1037834a858fbf0ff8d7c99e660020c890b3e59a4de3c5fa42a11ade420",
-    "cert_requests_poll.json": "54de4eef6422a6e1111e46cf5ea3b3e0cf5afcfb8a89c7ad38fd1f06eb391d62",
-    "cert_requests_post.json": "9b114ae439cd5a61866d9a22bb0e94c0679f7a71816cac80a686ebce282b8a8d",
+    "cert_challenge.json": "96aa3c4752d7195d4735f9922298af1d8dfb8dffe9d7431cae58f16677b8182e",
+    "cert_rejection.json": "90b88aeac5e8694b0c025c2886b4f8f10d3e99f5b8832301fa904687da15fea4",
+    "cert_request_get.json": "e2b15f1cc3780fdefefb557ac450586e197d4d7b44d782d7920e1301a98b94b1",
+    "cert_requests_poll.json": "6a0678af2f4eda9f451dc2bc6f88d0595fdaa7a84ea0e9d0a3750a1ff7acfb10",
+    "cert_requests_post.json": "ff6b90d1b7bcf552503358e6a42352e80e91de5401f93b4041eedc72967651f6",
     "checkpoint_get.json": "7d8b4a836f68760e7485e62f15d8ccd56447005f749997b2c565838390a7032c",
     "checkpoint_put.json": "fca7d96026f58c78609120a74504f1870e0f13e1b1d4733a20fdc61a2dd1b32a",
     "device_get.json": "ff37825adf657c46cc4c0b380a86838b16a67875ecabd417901681fc794196a1",
@@ -42,5 +42,5 @@
     "staging_page.json": "7752567049fddccf983c3dbad5af71c5e3c45c842f785b8aa8b4755689728b7a",
     "transitions.json": "a952cbfdc2db199ff1f6cab403fb91bf2b5aee3371fb9a6fd09bbbfacb2a0f92"
   },
-  "revision": 5
+  "revision": 6
 }

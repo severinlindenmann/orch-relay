@@ -15,6 +15,9 @@ from ref import orch_protocol_ref as R
 from ref.orch_protocol_ref import b64u, cj, fake, u32
 
 NOW = 1_790_000_000_000
+# G3b (P3-D28): the phone's attempt nonce and the join anchor of `approved` (FAKE, fixed)
+ATTEMPT = fake("pairing attempt a")[:16].hex()
+ANCHOR = {"list_seq": 3, "card_seq": 2, "baseline": None}
 
 
 def _j(x):
@@ -79,6 +82,8 @@ def build() -> dict:
     add_p3(out)
     from ref._checkpoint_vectors import add_checkpoints
     add_checkpoints(out)
+    from ref._g3b_vectors import add_g3b
+    add_g3b(out)
     return out
 
 
@@ -496,7 +501,7 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
 
     # --- cert request to the primary, its challenge (§8.4) ----------------------------------------------
     inner = {"device_id": dev["phone"].hex(), "dk_sig_pub": b64u(pub["phone.sig"]), "dk_kx_pub": b64u(pub["phone.kx"]),
-             "label": "Severin's iPhone", "scopes_max": full, "offer_id": offer.hex()}
+             "label": "Severin's iPhone", "scopes_max": full, "offer_id": offer.hex(), "attempt": ATTEMPT}
     req_id = fake("cert request id")[:16]
 
     def creq_(inner_=inner, rid=req_id, signer=wsk_a, primary="primary", person=pid):
@@ -919,7 +924,7 @@ def _bridge(S, k, certs, ws, wk1, wk2, dev, offer, secret, pid, grants, challeng
         "aa" * 16: {"device": dev["phone"].hex(), "digest": "00" * 32, "outcome": None, "until": NOW + 1}}))
     # pairing at epoch 0 (§8.3)
     meta_pair = {"op": "pair", "dk_sig_pub": b64u(pub["phone.sig"]), "dk_kx_pub": b64u(pub["phone.kx"]),
-                 "label": "Severin's iPhone", "cert": None}
+                 "label": "Severin's iPhone", "cert": None, "attempt": ATTEMPT}
 
     def preq(signer="phone", meta=None, key=None, device=None, **kw):
         return req(signer=signer, meta=meta or meta_pair, key=key or kp, device=device or dev[signer], epoch=0,
@@ -951,8 +956,8 @@ def _bridge(S, k, certs, ws, wk1, wk2, dev, offer, secret, pid, grants, challeng
     def held(state_):
         return lambda s: s["pending_pairs"].update({dev["phone"].hex(): {
             "offer_id": offer.hex(), "dk_sig_pub": b64u(pub["phone.sig"]), "dk_kx_pub": b64u(pub["phone.kx"]),
-            "label": "Severin's iPhone", "sas_nonce": b64u(fake("sas nonce")), "cert": None, "cert_state": "needed",
-            **state_}}) or s["offers"][offer.hex()].update(used=True)
+            "label": "Severin's iPhone", "attempt": ATTEMPT, "sas_nonce": b64u(fake("sas nonce")), "cert": None,
+            "cert_state": "needed", **state_}}) or s["offers"][offer.hex()].update(used=True)
 
     status = {"op": "pair_status"}
     case("pair_status_pending", preq(meta=status, seq=2), held({"state": "pending"}))
@@ -965,7 +970,7 @@ def _bridge(S, k, certs, ws, wk1, wk2, dev, offer, secret, pid, grants, challeng
     case("pair_status_cert_pending_expired", preq(meta=status, seq=2),
          held({"state": "cert_pending", "cert_pending_since": NOW - R.CERT_PENDING_MS, "primary_label": "MacBook Pro"}))
     case("pair_status_approved", preq(meta=status, seq=2),
-         held({"state": "approved", "scopes": ["look", "decide", "operate"], "cert": certs["phone"]}))
+         held({"state": "approved", "scopes": ["look", "decide", "operate"], "cert": certs["phone"], **ANCHOR}))
     case("pair_status_rejected", preq(meta=status, seq=2), held({"state": "rejected"}))
     case("pair_status_without_pairing", preq(meta=status, seq=2))
     out["host_cases"] = cases
@@ -1017,7 +1022,8 @@ def _bridge(S, k, certs, ws, wk1, wk2, dev, offer, secret, pid, grants, challeng
     pctx = {"suite": S.id, "workspace": ws.hex(), "device": dev["phone"].hex(), "offer": offer.hex(),
             "secret": secret.hex(), "wsk_pin": R.wsk_pin(S, pub["wsk_a.sig"]).hex(),
             "pk_pin": R.pk_pin(S, pub["person_alice.sig"]).hex(), "dk_sig_pub": b64u(pub["phone.sig"]),
-            "dk_kx_pub": b64u(pub["phone.kx"]), "offset_ms": 0, "pending": {fake("pair rid")[:16].hex(): {"next": 0}}}
+            "dk_kx_pub": b64u(pub["phone.kx"]), "attempt": ATTEMPT, "offset_ms": 0,
+            "pending": {fake("pair rid")[:16].hex(): {"next": 0}}}
     pending = {"state": "pending", "wsk_pub": b64u(pub["wsk_a.sig"]), "sas_nonce": b64u(fake("sas nonce")),
                "dk_sig_pub": b64u(pub["phone.sig"]), "dk_kx_pub": b64u(pub["phone.kx"])}
     acases = []
@@ -1034,12 +1040,13 @@ def _bridge(S, k, certs, ws, wk1, wk2, dev, offer, secret, pid, grants, challeng
     ac("pending_signed_by_another_key", pans(pending, signer=k.priv["wsk_intruder.sig"]))
     ac("pending_sealed_under_another_secret", pans(pending, key=R.k_pair(fake("other secret"), ws, offer)))
     ac("approved_with_cert", pans({"state": "approved", "scopes": ["look", "decide", "operate"], "cert": certs["phone"],
-                                   "pk_pub": b64u(pub["person_alice.sig"]), "epoch": 2, "wsk_pub": b64u(pub["wsk_a.sig"])}))
+                                   "pk_pub": b64u(pub["person_alice.sig"]), "epoch": 2, **ANCHOR,
+                                   "wsk_pub": b64u(pub["wsk_a.sig"])}))
     ac("approved_with_a_cert_of_another_person", pans({"state": "approved", "scopes": ["look"], "cert": certs["bob_phone"],
-                                                       "pk_pub": b64u(pub["person_bob.sig"]), "epoch": 2,
+                                                       "pk_pub": b64u(pub["person_bob.sig"]), "epoch": 2, **ANCHOR,
                                                        "wsk_pub": b64u(pub["wsk_a.sig"])}))
     ac("approved_with_a_cert_for_another_device", pans({"state": "approved", "scopes": ["look"], "cert": certs["laptop"],
-                                                        "pk_pub": b64u(pub["person_alice.sig"]), "epoch": 2,
+                                                        "pk_pub": b64u(pub["person_alice.sig"]), "epoch": 2, **ANCHOR,
                                                         "wsk_pub": b64u(pub["wsk_a.sig"])}))
     cp = {"state": "cert_pending", "primary_label": "MacBook Pro", "pk_pub": b64u(pub["person_alice.sig"]),
           "challenge": None, "wsk_pub": b64u(pub["wsk_a.sig"])}
@@ -1094,7 +1101,7 @@ def _raw_meta(text):
 EXPECT_KEYS = ("result", "code", "why", "scopes", "meta", "data", "outcome", "high", "host_ms", "epoch", "status",
                "answer", "label", "sas", "cert_state", "wsk_pub", "stream", "last", "refusal", "offset_ms",
                "clock_wrong", "pin_failure", "fetch_grants", "state", "scopes", "primary_label", "device_id",
-               "alarm", "cert_code")
+               "alarm", "cert_code", "attributed", "anchor")
 
 
 def _strip(r):

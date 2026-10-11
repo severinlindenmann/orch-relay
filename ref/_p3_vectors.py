@@ -163,7 +163,8 @@ def add_p3(out):
         # Cert queue state machine and domain separation.
         cr = v["cert_request"]["cases"][0]["steps"][0]["signed"]
         ch = v["cert_request"]["challenge"]
-        ro = {"v": 2, "suite": S.id, "kind": "cert_rejection", **{k: cr["o"][k] for k in ("request_id", "workspace_id", "person_id")}}
+        ro = {"v": 2, "suite": S.id, "kind": "cert_rejection", **{k: cr["o"][k] for k in (
+            "request_id", "workspace_id", "person_id", "offer_id", "attempt", "device_id", "dk_hash", "expires_ms")}}
         rejection = sign(ro, "person_alice")
         ra = {"signed": rejection, "pk_pub": pub("person_alice"), "request": cr["o"]}
         case("cert_rejection_valid", "rejection", {}, ra, ro)

@@ -40,11 +40,15 @@
                 "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
                 "person_id": "5c0574d08d9b869beaa7b630cc83893d",
                 "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+                "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+                "attempt": "b9d179923176ba29616b3a03e527091b",
+                "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                "dk_hash": "KMPfKGmqmnZdjDcE4WmogkomtBsqXHCgib78OJHP3CI",
                 "created_ms": 1790000000000,
                 "expires_ms": 1790000600000,
-                "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+                "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoeO9JeMZVqb9WQjKziM1zlhtEu--BC3t40ep08L2n51PhPQqUowhQGTrOXY_g71odX100nXRRnzQkZkPgMhUJhVY6BUsuwpnLgUHefDzxOYBRzRChyb0RqrNpDjmt7qjqp088KJVbNY5mpmxgi-bZugz8pPpLCLK726mczllKVBx5GpPlrqT-MvL86CHKEXK3rLq-7NdP2lPW7oy_QNqJEDrWbIcP0EeeuiHPgOUxkIJKrLTWteQuMgjy6poG-OXukKn0df5giO8iL8XfNgP0YA9qdsdSBLJQZfmUVkc7or9XMlbrb_OzVye4hbcpukNbMP8i3lFfewd0g59hNruARb5Kqo_yY72obO650oTl8c8G_a4o0KhhTPI2_Dx5n3KjdmqzvGfZLyJv1NDQ_EfAfIvrkxTLfTGkVl307C83gu363v2xi_dw3m-BhKLIKhWHlnnvlSrGJ26h9sTiTIHhDsVGX5I5l7_53TkAeUZAb4L-CV93w_orDDZAH-bp0Rr3u-H_BqFbVU1XsieBQ5MrdmYnWmrxqQ1OXB9r3X7sO2-ZstMNoimrAa2avIW1lpILQ"
               },
-              "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+              "sig": "LThzgKvn2LuYVgYPa16Pz-DhSr-FnCFsKv68YUuJqnmciH42VmSGfALKkxcFUWaRtXdOsUXp3asvBxkZVidZJA"
             }
           ]
         }

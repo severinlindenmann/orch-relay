@@ -25,6 +25,7 @@ LABELS = {
     "sig_relay_auth": "orch/v2/sig/relay-auth|",
     "h_device_id": "orch/v2/id/device|",
     "h_person_id": "orch/v2/id/person|",
+    "h_dk_hash": "orch/v2/dk-hash|",
 }
 L = {k: v.encode("ascii") for k, v in LABELS.items()}
 
@@ -129,6 +130,20 @@ SUITE = Suite2()
 
 def identifier(kind, pub):
     return hashlib.sha256(L["h_" + kind + "_id"] + b"\x02" + pub).digest()[:16].hex()
+
+
+def dk_hash(dk_sig_pub, dk_kx_pub):
+    """G3b (P3-D28): both keys of one pairing attempt, as named by cert requests and rejections."""
+    return b64u(
+        hashlib.sha256(
+            L["h_dk_hash"]
+            + b"\x02"
+            + len(dk_sig_pub).to_bytes(2, "big")
+            + dk_sig_pub
+            + len(dk_kx_pub).to_bytes(2, "big")
+            + dk_kx_pub
+        ).digest()
+    )
 
 
 def auth_bytes(origin, challenge, kind, ident):

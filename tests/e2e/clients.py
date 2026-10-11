@@ -18,6 +18,7 @@ OFFER = bytes.fromhex("32" * 16)
 SECRET = bytes.fromhex("43" * 32)
 WK = bytes.fromhex("54" * 32)
 SAS_NONCE = bytes.fromhex("65" * 32)
+ATTEMPT = "a7" * 16  # G3b (P3-D28): the pairing attempt nonce (FAKE, fixed)
 WSK = P.b64u(bytes.fromhex(V["keys"]["wsk_a.sig"]["pub"]))
 
 
@@ -72,6 +73,7 @@ class DeviceClient:
                 "dk_sig_pub": CERT["o"]["dk_sig_pub"],
                 "dk_kx_pub": CERT["o"]["dk_kx_pub"],
                 "label": "Test phone",
+                "attempt": ATTEMPT,
             },
             pair=True,
         )
@@ -96,6 +98,7 @@ class DeviceClient:
             "pk_pin": R.pk_pin(SUITE, P.unb64u(PK)).hex(),
             "dk_sig_pub": CERT["o"]["dk_sig_pub"],
             "dk_kx_pub": CERT["o"]["dk_kx_pub"],
+            "attempt": ATTEMPT,
             "pending": {self.pair_rid.hex(): {"next": 0}},
             "offset_ms": 0,
         }
@@ -185,6 +188,9 @@ class HostStub:
                     "cert": CERT,
                     "pk_pub": PK,
                     "epoch": 1,
+                    "list_seq": 1,
+                    "card_seq": 1,
+                    "baseline": None,
                     "wsk_pub": WSK,
                 }
         else:

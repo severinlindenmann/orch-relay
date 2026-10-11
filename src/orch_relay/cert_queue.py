@@ -23,6 +23,22 @@ def context(o, req):
             refuse(code, 409 if field == "workspace_id" else 403)
 
 
+def binding(o, req):
+    """G3b (P3-D28): a challenge or rejection names the stored request's attempt (offer, nonce) and device keys."""
+    keys = (
+        o["dk_hash"]
+        if "dk_hash" in o
+        else P.dk_hash(P.unb64u(o["dk_sig_pub"]), P.unb64u(o["dk_kx_pub"]))
+    )
+    if (o["offer_id"], o["attempt"], o["device_id"], keys) != (
+        req["offer_id"],
+        req["attempt"],
+        req["device_id"],
+        req["dk_hash"],
+    ):
+        fail("not_for_this_device")
+
+
 def certificate_transition(con, row, cert, now, pk):
     """Verify a certificate and transition one queue entry without replacing terminal state."""
     if now >= row["expires_ms"] + 60000:
@@ -96,10 +112,20 @@ def dispatch(d, con, route, params, method, raw, headers, now):
         o = verify(body["request"], workspace["wsk_pub"], "cert_request")
         fields(
             o,
-            "v suite kind request_id workspace_id person_id primary_device_id created_ms expires_ms sealed",
+            "v suite kind request_id workspace_id person_id primary_device_id offer_id attempt device_id"
+            " dk_hash created_ms expires_ms sealed",
         )
-        for key in ("request_id", "workspace_id", "person_id", "primary_device_id"):
+        for key in (
+            "request_id",
+            "workspace_id",
+            "person_id",
+            "primary_device_id",
+            "offer_id",
+            "attempt",
+            "device_id",
+        ):
             P.unhex(o[key])
+        P.unb64u(o["dk_hash"], 32)
         if o["workspace_id"] != ws:
             refuse("other_workspace", 409)
         if o["person_id"] != person or workspace["owner_person_id"] != person:
@@ -182,11 +208,21 @@ def dispatch(d, con, route, params, method, raw, headers, now):
         "SELECT pk_pub FROM accounts WHERE person_id=?", (row["person_id"],)
     ).fetchone()[0]
     o = verify(body[field], pk, "cert_" + field)
-    required = "v suite kind request_id workspace_id person_id"
-    if field == "challenge":
-        required += " device_id dk_sig_pub dk_kx_pub primary_nonce expires_ms"
+    required = (
+        "v suite kind request_id workspace_id person_id offer_id attempt device_id expires_ms"
+    )
+    required += " dk_sig_pub dk_kx_pub primary_nonce" if field == "challenge" else " dk_hash"
     fields(o, required)
-    context(o, P.parse_json(row["request"])["o"])
+    for key in ("request_id", "workspace_id", "person_id", "offer_id", "attempt", "device_id"):
+        P.unhex(o[key])
+    if type(o["expires_ms"]) is not int:
+        fail("malformed")
+    request = P.parse_json(row["request"])["o"]
+    context(o, request)
+    if field == "rejection":
+        P.unb64u(o["dk_hash"], 32)
+        if o["expires_ms"] != row["expires_ms"]:
+            fail("malformed")
     if field == "challenge":
         sig_pub = P.unb64u(o["dk_sig_pub"])
         if (
@@ -197,6 +233,7 @@ def dispatch(d, con, route, params, method, raw, headers, now):
         ):
             fail("malformed")
         P.unb64u(o["primary_nonce"], 32)
+    binding(o, request)
     if row["state"] == "expired":
         refuse("expired", 410)
     if row[field] and P.cj(P.parse_json(row[field])["o"]) == P.cj(o):

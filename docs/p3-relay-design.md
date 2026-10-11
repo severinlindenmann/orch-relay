@@ -361,10 +361,41 @@ exactly-once authority.
 - **When the request becomes `signed`.** Only when a certificate is stored (`PUT devices`) whose `dk_sig_pub`,
   `dk_kx_pub`, `device_id` and person equal the challenge's. Scopes are inside the sealed inner request, so the host
   checks them, not the relay.
-- **Rejection** is a new signed kind, `cert_rejection {v, suite, kind, request_id, workspace_id, person_id}`, under
+- **Rejection** is a new signed kind, `cert_rejection {v, suite, kind, request_id, workspace_id, person_id, offer_id,
+  attempt, device_id, dk_hash, expires_ms}` (the fields after `person_id` since P3-D28), under
   `orch/v2/sig/cert-rejection|`.
 - **FakeRelay change.** The primary must now use a device session; its session-less submission in the FakeRelay
   changes.
+
+**P3-D28 (pairing attempt binding; G3b; F1 Q6–Q9).** F1 found that the PK-signed challenge and rejection were not
+bound to the pairing attempt, and two security challenges (Opus, Codex) agreed on the fix:
+
+- **Attempt.** The device draws a nonce `attempt` per pairing attempt and sends it in the pair request; a resumed
+  attempt keeps it, a new one draws a new one. An uncertified phone MUST use fresh device keys per attempt and
+  remembers its earlier attempts' device ids for at least 10 minutes. The host cannot know either before the
+  attempt starts.
+- **Binding.** The sealed cert-request inner carries `attempt`; the request also carries `offer_id`, `attempt`,
+  `device_id` and `dk_hash` (both keys) in clear, and the primary checks them against the inner. The challenge adds
+  `offer_id` and `attempt`; the rejection adds `offer_id`, `attempt`, `device_id`, `dk_hash` and the request's
+  `expires_ms`. Plain `offer_id`: it is in the pair path, a hash adds nothing.
+- **Relay.** Before storing, the relay requires a posted challenge or rejection to name the stored request's clear
+  binding (403 `not_for_this_device`) and a rejection to carry the request's expiry. Defence in depth only.
+- **Phone order.** Keys and device are checked before the attempt and the offer, also when no challenge was seen,
+  so a host-chosen `offer_id` cannot turn the `not_my_key` alarm into a silent drop. An own earlier attempt's
+  object is dropped without alarm (`stale_attempt`) only when both its `device_id` and `dk_hash` match an earlier
+  attempt the phone persisted before sending that attempt's pair request; an expired foreign object is dropped
+  without alarm; any other foreign object raises the alarm (round 2).
+- **`rejected`.** Two exact forms (short, or with `pk_pub` and the PK-signed rejection). "Denied by the owner" is
+  shown only when everything verifies; it names the pinned owner, never the host's `primary_label`. Anything else
+  is an unattributed refusal; a rejection for a foreign device raises the alarm.
+- **Join anchor (Q6).** `approved` carries `list_seq` and `card_seq` beside `epoch` and G0b's `baseline`; the phone
+  persists them as a floor across join retries and requires its first list and card at or above it, with its own
+  entry present (`not_a_member` otherwise, no retry) and at exactly the approved scopes when the list is at the
+  anchor's `list_seq`. The host fills the anchor from relay-accepted objects only (burned G2b numbers would stall
+  the join).
+- **Q9.** A host pair answer without a held generation is 409 `fenced`, as intended (P3-D10).
+- **Residual.** A hostile host can still refuse (short form, timeout); a hostile relay can drop answers; a
+  compromised primary can sign anything. Withholding newer lists after the floor stays possible (§5.2).
 
 **P3-D16 (scopes).** On the bridge the relay enforces membership only. Ops and scopes are sealed. The typing lease has
 no relay part.
@@ -1232,3 +1263,4 @@ No new decisions.
 | P3-D25 | Position time: documented limit, anchors, non-decreasing checkpoint `at` (tie-break) | §6.1, §6.3 |
 | P3-D26 | One `WK` per epoch, ever; refused publications burn their epoch and `list_seq`; `wk_commit` and `wk_commit_changed` (G2b) | §3.2 |
 | P3-D27 | Bounded exact-bytes re-store of expired response chunks (current epoch or refusal, immutable deadline, ≤ 8 per chunk, budgets) | §3.3 |
+| P3-D28 | Pairing attempt binding: device `attempt` nonce, fresh keys per attempt, bound challenge and rejection, two `rejected` forms, `approved` join anchor (G3b) | §3.3 |
