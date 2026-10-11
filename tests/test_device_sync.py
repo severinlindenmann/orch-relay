@@ -761,3 +761,113 @@ def test_walk_harvest_is_bounded_before_signature_checks(monkeypatch):
     monkeypatch.setattr(C, "LINE_CAP", cap)
     got = C.dispatch(S, copy.deepcopy(case["state"]), **step)
     assert got == {"status": 409, "error": "chain_diverged"} and checks == []
+
+
+def _person_key(n):
+    priv = S.sig_key(hashlib.sha256(b"FAKE member person %d" % n).digest())
+    return priv, R.person_id(S, S.sig_pub(priv)).hex()
+
+
+def _evidence_by(priv, n):
+    """priv's certificate of a fresh device n and its compromised revocation."""
+    pk = S.sig_pub(priv)
+    person = R.person_id(S, pk).hex()
+    dk = S.sig_pub(S.sig_key(hashlib.sha256(b"FAKE member device %d" % n).digest()))
+    bob = CASES["device_learn_admission"]["steps"][2]["input"]["body"]["evidence"]["device_cert"][
+        "o"
+    ]
+    o = {
+        **bob,
+        "dk_sig_pub": R.b64u(dk),
+        "device_id": R.device_id(S, dk).hex(),
+        "person_id": person,
+    }
+    cert = R.sign_object(S, priv, o)
+    rev = R.sign_object(
+        S,
+        priv,
+        {
+            "v": 2,
+            "suite": S.id,
+            "kind": "revocation",
+            "person_id": person,
+            "device_id": o["device_id"],
+            "revoked_ms": o["created_ms"] + 1000,
+            "reason": "compromised",
+        },
+    )
+    return {"revocation": rev, "device_cert": cert, "pk_pub": R.b64u(pk)}
+
+
+def test_member_flood_cannot_bypass_the_caps(monkeypatch):
+    """Background review flag (3), PoC: a member person (here: one the device knows from a known device, as any
+    workspace member or a person of chain-learned evidence is) floods with self-made devices. Member evidence used to
+    be admitted over the cap without limit; the per-person cap bounds it and alice's genuine entry is still stored."""
+    monkeypatch.setattr(C, "MAX_HELD_EVIDENCE", 4)
+    monkeypatch.setattr(C, "MAX_ENTRIES_PER_PERSON", 3)
+    dev, alice = _member_device()
+    priv, mallory = _person_key(1)
+    dev["devices"]["ee" * 16] = {"person_id": mallory}  # mallory is a member
+    for i in range(10):
+        dev = C.device_learn(S, dev, _evidence_by(priv, i))["device"]
+    assert len(_held(dev)) <= 4
+    dev = C.device_learn(S, dev, alice)["device"]
+    assert alice in _held(dev)
+
+
+@pytest.mark.parametrize("binding", ["absent", "other_person"])
+def test_legacy_signer_resolves_to_the_card_owner(binding):
+    """Background review flag (2), PoC: a round-2 bare-id signer whose device is missing from the known devices
+    (state migration) or bound there to another person (a first-come chain binding) must still alarm on the owner's
+    compromised revocation: a restore signer is always the card's owner."""
+    case = CASES["walk_contested_revocation_alarms_committed_signer"]
+    dev, alice = _member_device()
+    laptop = alice["revocation"]["o"]["device_id"]
+    dev["signers"] = {k: v["device"] for k, v in dev["signers"].items()}
+    if binding == "absent":
+        del dev["devices"][laptop]
+    else:
+        dev["devices"][laptop] = {"person_id": "ee" * 16}
+    got = C.device_learn(S, dev, alice)["device"]
+    assert got["alarms"] == [laptop]
+    bob = CASES["device_learn_admission"]["steps"][2]["input"]["body"]["evidence"]
+    other = C.device_learn(S, {**dev, "alarms": []}, bob)["device"]
+    assert other["alarms"] == []
+    assert case  # the vector the device comes from
+
+
+@pytest.mark.parametrize("cap", ["MAX_PERSONS_PER_DEVICE", "MAX_HELD_EVIDENCE"])
+def test_member_evidence_about_another_device_evicts_throwaways(monkeypatch, cap):
+    """Tier 1 (a member person about a device not bound to them) evicts non-member entries at a full cap instead of
+    being dropped: throwaway persons cannot fill a cap to keep a member's revocation out."""
+    monkeypatch.setattr(C, cap, 2)
+    dev, _ = _member_device()
+    priv, mallory = _person_key(2)
+    dev["devices"]["ee" * 16] = {"person_id": mallory}
+    mine = _evidence_by(priv, 50)
+    for i in range(2):
+        dev = C.device_learn(S, dev, _throwaway(300 + i, mine["device_cert"]["o"]))["device"]
+    assert len(_held(dev)) == 2
+    dev = C.device_learn(S, dev, mine)["device"]
+    assert mine in _held(dev) and len(_held(dev)) == 2
+
+
+def test_committed_signer_pair_is_protected_from_the_per_person_cap(monkeypatch):
+    """The owner's revocation of a committed signer device whose known-device binding names another person is still
+    an authenticated pair (the signer record): never dropped by the per-person cap, and it alarms."""
+    monkeypatch.setattr(C, "MAX_ENTRIES_PER_PERSON", 0)
+    dev, alice = _member_device()
+    laptop = alice["revocation"]["o"]["device_id"]
+    dev["devices"][laptop] = {"person_id": "ee" * 16}
+    got = C.device_learn(S, dev, alice)["device"]
+    assert alice in _held(got) and got["alarms"] == [laptop]
+
+
+def test_resubmitting_evidence_never_churns(monkeypatch):
+    """Re-delivering the same (or a weaker) entry needs no room and evicts nothing."""
+    monkeypatch.setattr(C, "MAX_HELD_EVIDENCE", 2)
+    dev, _alice = _member_device()
+    flood = [_throwaway(400 + i) for i in range(2)]
+    for item in [*flood, *flood, *flood]:
+        dev = C.device_learn(S, dev, item)["device"]
+    assert _held(dev) == flood

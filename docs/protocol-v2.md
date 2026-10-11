@@ -2855,11 +2855,17 @@ holds two collections, per workspace:
   revocation of her laptop then contradicts bob's binding and was discarded, and bob's revocation does not match
   the laptop's signer person, so a restore signed with the stolen laptop key was accepted (vector
   `walk_contested_revocation_still_refuses_its_signer`).
-- *Bounds (PR #52 review F2).* Held out-of-band evidence (local plus contested) is capped per device id (8 persons)
-  and in total (4096 entries). Over a cap, evidence of a non-member person (one the device knows neither from its
-  known devices nor from chain-learned evidence) is dropped and evicts nothing; a member's evidence evicts
-  non-member evidence (weaker reason first) and is never evicted by non-member evidence, so a flood of throwaway
-  persons cannot push out the owner's genuine revocation. A walk harvests bundle entries only from lines within
+- *Bounds (PR #52 review F2).* Held out-of-band evidence (local plus contested, counted together) is capped per
+  device id (8 persons), per person (64 entries) and in total (4096). Three tiers: an *authenticated pair* (the
+  device bound to that person by a known device, chain-learned evidence or a committed signer record) is always
+  kept and exempt from the per-person cap (bounded by the device's own knowledge); a *member* person's evidence about
+  another device (the person known from that knowledge) is capped per person, and at a full per-device or total
+  cap evicts non-member entries (weaker reason first) and is otherwise kept; a *non-member*'s new entry is dropped
+  at any full cap and evicts nothing, so arrival order and re-delivery cannot push anything out, and a flood of
+  throwaway persons can neither evict a member's revocation nor keep it out. The per-person cap stops a member
+  (any workspace member, or a person of chain-learned evidence) from growing the state with self-made devices.
+  Accepted: a non-member's genuine evidence dropped at a full cap is lost until it is delivered again; it cannot
+  refuse a restore signer of this workspace (always the owner) and is never forwarded (unknown device). A walk harvests bundle entries only from lines within
   `LINE_CAP` and at most 4096 per walk, both counted before any signature check.
 
 **Open: the row-151 denial of service (F1 at e9a26d95; to be fixed by re-pinning).** Any keypair holder can certify
@@ -2920,8 +2926,8 @@ that F1 reports as learned later (`Verdict.alarms`) is the alarm the walk raises
 **Remaining relay-side differences from F1 (none changes a verdict on a shared case):** (1) the reference walk is
 all-or-nothing over E, so a bundle accepted inside a walk that later fails contributes no chain evidence (F1 lets a
 receiver persist each accepted bundle; both are atomic, the relay's is coarser). (2) A round-2 device state that
-stored a signer as a bare device id resolves its person through the known devices; if that fails the evidence is
-kept but no alarm is raised (matching by device alone let any keypair holder raise a false C3 alarm). (3) The relay server's R1 refuses a signer revoked in any revocation it holds by device id; this equals F1's
+stored a signer as a bare device id resolves its person to the pinned card's owner (a restore signer is always the
+owner), else through the known devices; if that fails the evidence is kept but no alarm is raised (matching by device alone let any keypair holder raise a false C3 alarm). (3) The relay server's R1 refuses a signer revoked in any revocation it holds by device id; this equals F1's
 device-and-person match there because evidence is bound to the registry's first person (R4), so a held revocation of
 a registered owner device is always of that person. (4) The relay server does not report `revocation.unpublished`
 in its publication result (G4 follow-up, transport detail 6 (c)). (5) `contested` evidence (above) refuses its own person's device as a

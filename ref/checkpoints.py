@@ -870,20 +870,27 @@ def device_initial(ws, wsk_pub, owner_pk, genesis, card, devices, held=None):
             'forward': [], 'pending': [], 'contested': {}}
 
 
-def raise_alarms(dev, revocations):
-    """P3-D24, F1 row 150: a compromised revocation of a committed signer pair (device and person, #387) raises the
-    alarm. revocations are revocation objects. A round-2 signer record (a bare device id, or one without a person)
-    resolves its person through the known devices; an unresolvable one raises no alarm (its evidence is still kept):
-    matching by device alone would let any keypair holder raise a false C3 alarm."""
+def signer_pairs(dev):
+    """The committed signer pairs (device, person). A restore signer is always the card's owner (P3-D23: the judge
+    requires actor = delegation owner = certificate person), so a round-2 record (a bare device id) resolves its
+    person to the pinned card's owner, else through the known devices; an unresolvable one yields no pair."""
+    owner = ((dev.get('card') or {}).get('o') or {}).get('owner_person_id')
     devices = dev.get('devices', {})
     pairs = set()
     for s in dev['signers'].values():
         d = s if isinstance(s, str) else s['device']
         person = None if isinstance(s, str) else s.get('person_id')
-        person = person or (devices.get(d) or {}).get('person_id')
+        person = person or owner or (devices.get(d) or {}).get('person_id')
         if person:
             pairs.add((d, person))
-    for d, person in sorted(pairs):
+    return pairs
+
+
+def raise_alarms(dev, revocations):
+    """P3-D24, F1 row 150: a compromised revocation of a committed signer pair (device and person, #387) raises the
+    alarm. revocations are revocation objects. Matching by device alone would let any keypair holder raise a false C3
+    alarm; an unresolvable legacy signer raises none (its evidence is still kept)."""
+    for d, person in sorted(signer_pairs(dev)):
         if d not in dev['alarms'] and any(
                 r['o']['reason'] == 'compromised' and r['o']['device_id'] == d and r['o']['person_id'] == person
                 for r in revocations):
@@ -915,37 +922,50 @@ def binding(dev, d, extra=None):
     return (kd['person_id'], kd.get('pk_pub')) if kd else None
 
 
-# Held out-of-band evidence caps (review F2): per device id (local plus contested persons) and in total. A walk also
-# harvests at most MAX_HELD_EVIDENCE entries, before any signature check.
+# Held out-of-band evidence caps (review F2): per device id (local plus contested persons), per person and in total.
+# A walk also harvests at most MAX_HELD_EVIDENCE entries, before any signature check.
 MAX_PERSONS_PER_DEVICE = 8
+MAX_ENTRIES_PER_PERSON = 64
 MAX_HELD_EVIDENCE = 4096
 
 
-def member_persons(dev):
-    """Persons the device knows from authenticated knowledge: known devices and chain-learned evidence."""
-    return ({kd['person_id'] for kd in dev['devices'].values()} |
-            {x['revocation']['o']['person_id'] for x in dev['revocations'].values()})
+def evidence_tier(dev, d, person):
+    """2: the pair matches an authenticated binding (a known device, chain-learned evidence, a committed signer);
+    1: a member person (known from that knowledge) about another device; 0: a non-member person."""
+    bound = ({(k, kd['person_id']) for k, kd in dev['devices'].items()} |
+             {(k, x['revocation']['o']['person_id']) for k, x in dev['revocations'].items()} | signer_pairs(dev))
+    if (d, person) in bound:
+        return 2
+    return 1 if person in {p for _, p in bound} else 0
 
 
 def make_room(dev, d, person):
-    """May a new held entry for (d, person) be stored? Over a cap, non-member evidence is dropped, never stored by
-    evicting anything; member evidence evicts non-member evidence (weaker reason first, then the oldest), and is
-    kept over the cap when nothing non-member is left. So a flood of throwaway persons never evicts a member's
-    genuine revocation (orch-52)."""
-    members = member_persons(dev)
-    held = [('local', k, x) for k, x in dev['local'].items()] + [('contested', k, x) for k, x in dev['contested'].items()]
+    """May a new held entry for (d, person) be stored (evicting to make room)? Never refuses a walk.
+    - Tier 2 (authenticated pair) is always stored: bounded by the device's own knowledge.
+    - Tiers 0 and 1 are capped per person (MAX_ENTRIES_PER_PERSON): over it the new entry is dropped, so neither a
+      malicious member nor anyone else can grow the state with self-made devices.
+    - Over the per-device or total cap a non-member's new entry is dropped and evicts nothing (no churn: arrival
+      order cannot push anything out); a member's evicts non-member entries (weaker reason first) and is kept over
+      the cap when none is left. So throwaway persons never evict a member's revocation (orch-52)."""
+    tier = evidence_tier(dev, d, person)
+
+    def held():
+        return [(store, k, x) for store in ('local', 'contested') for k, x in dev[store].items()]
+
+    if tier < 2 and sum(1 for _, _, x in held() if x['revocation']['o']['person_id'] == person) >= MAX_ENTRIES_PER_PERSON:
+        return False
     for in_scope, cap in ((lambda x: x['revocation']['o']['device_id'] == d, MAX_PERSONS_PER_DEVICE),
                           (lambda x: True, MAX_HELD_EVIDENCE)):
-        scoped = [e for e in held if in_scope(e[2])]
+        scoped = [e for e in held() if in_scope(e[2])]
         if len(scoped) < cap:
             continue
-        if person not in members:
+        if tier == 0:
             return False
-        victims = [e for e in scoped if e[2]['revocation']['o']['person_id'] not in members]
+        victims = [e for e in scoped if evidence_tier(dev, e[2]['revocation']['o']['device_id'],
+                                                      e[2]['revocation']['o']['person_id']) == 0]
         if victims:
             store, key, _ = min(victims, key=lambda e: STRENGTH[e[2]['revocation']['o']['reason']])
             del dev[store][key]
-            held = [e for e in held if (e[0], e[1]) != (store, key)]
     return True
 
 
