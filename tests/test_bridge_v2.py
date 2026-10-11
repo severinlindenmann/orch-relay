@@ -892,3 +892,55 @@ def test_pair_answers_are_never_restored(client):
     assert answer.status_code == 202
     assert client.get(poll).json() == {"chunks": []}
     assert sql(client, "SELECT restores FROM rid_chunks") == [(0,)]
+
+
+def test_removed_then_readded_device_gets_no_restore(client):
+    """P3-D27 review R1: removal exhausts the device's chunk records; digests stay."""
+    from orch_relay.members import prune_device
+
+    assert post_raw(client, binary("bridge_device_post")).status_code == 202
+    refusal = bytearray(binary("bridge_host_post"))
+    refusal[6] = 5  # LAST | REFUSAL passes the epoch rule after the removal's rotation
+    assert post_raw(client, bytes(refusal), True).status_code == 202
+    member = sql(client, "SELECT * FROM members WHERE device_id=?", (DEVICE,))
+    with closing(db.connect(client.app.state.directory.path)) as con, con:
+        prune_device(con, DEVICE, WS)  # as a publication without the device does
+        con.execute("DELETE FROM members WHERE device_id=?", (DEVICE,))
+        con.execute("UPDATE member_lists SET epoch=epoch+1")
+    advance(client, 30000)
+    r = post_raw(client, bytes(refusal), True)
+    assert r.status_code == 403 and r.json() == {"error": "not_eligible"}
+    sql(client, "INSERT INTO members VALUES (?,?,?,?)", tuple(member[0]))
+    advance(client, 120000)
+    r = post_raw(client, bytes(refusal), True)
+    assert r.status_code == 409 and r.json() == {"error": "retry_exhausted"}
+    assert mailbox(client) == []
+    assert sql(client, "SELECT restores FROM rid_chunks") == [(8,)]
+    # Other bytes at the known index are still a conflict.
+    other = bytearray(refusal)
+    other[-1] ^= 1
+    assert post_raw(client, bytes(other), True).json() == {"error": "chunk_conflict"}
+
+
+def test_restore_order_epoch_before_deadline(client):
+    """P3-D27 review T1: past the deadline, old-epoch data is a 202 no-op, not 410."""
+    restore_setup(client)
+    sql(client, "UPDATE member_lists SET epoch=2")
+    advance(client, 900000)
+    sql(client, "UPDATE rid_seen SET keep_until_ms=?", (NOW + 960000,))
+    r = post_raw(client, binary("bridge_host_post"), True)
+    assert (r.status_code, r.json()) == (202, {})
+    sql(client, "UPDATE member_lists SET epoch=1")
+    assert post_raw(client, binary("bridge_host_post"), True).json() == {"error": "expired"}
+
+
+def test_restore_order_cap_before_rate(client):
+    """P3-D27 review T2: a capped chunk is 409 even with the rate window full; it costs no rate."""
+    restore_setup(client)
+    sql(client, "UPDATE rid_chunks SET restores=8")
+    advance(client, 60001)
+    windows = client.app.state.directory.windows
+    windows[("bridge-host-post", (WS, DEVICE), 1000)] = (NOW + 61000, 20)
+    r = post_raw(client, binary("bridge_host_post"), True)
+    assert r.status_code == 409 and r.json() == {"error": "retry_exhausted"}
+    assert windows[("bridge-host-post", (WS, DEVICE), 1000)] == (NOW + 61000, 20)

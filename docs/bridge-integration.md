@@ -20,6 +20,8 @@ capacity. Bodies remain available for non-consuming retry until their original
 60-second expiry and still count against global retained-byte capacity. Expiry,
 revocation and departure release capacity by deleting rows. Never delete
 `rid_seen` or `rid_chunks` during membership pruning: replay evidence must survive.
+Pruning instead sets the device's `rid_chunks.restores` to the cap (P3-D27), so a
+re-added device never gets an old chunk stored again.
 
 Requests coalesce while a live unacknowledged copy exists. A requeue creates a
 new 60-second copy, at least ten seconds after the last receipt/requeue, up to
