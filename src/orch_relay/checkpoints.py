@@ -346,6 +346,131 @@ class Nodes:
         return [text(r[0]) for r in reversed(rows)], last["acc"] if size < total else None
 
 
+# --- stateless prechecks, run before the directory lock (review G2) ----------------------------------
+
+
+def caught(check, *args):
+    """A check's refusal (or the reference's generic malformed), returned instead of raised."""
+    try:
+        check(*args)
+    except Refusal as exc:
+        return exc
+    except (KeyError, TypeError, ValueError, AttributeError, IndexError):
+        return refusal("malformed", 400)
+    return None
+
+
+def precheck_publication(body, wsk_pub):
+    """Parse, size, shape, receipt digest, signature and entry shapes of a final publication.
+
+    Nothing here reads mutable state (the card's WSK is fixed), so it runs before the lock; the
+    refusals are raised inside the transaction at their reference position, after the exact
+    retry and the budget check, and are charged there."""
+    pre = {"wsk_pub": wsk_pub, "early": None, "stage1": None, "stage2": None}
+
+    def parse():
+        nonlocal body
+        if isinstance(body, (bytes, bytearray)):
+            body = P.parse_json(bytes(body))
+        need(len(P.cj(body)) <= REQUEST_CAP, "too_large", 400)
+        need(
+            isinstance(body, dict)
+            and set(body)
+            in ({"checkpoint", "source_hash"}, {"checkpoint", "source_hash", "restore"})
+        )
+
+    pre["early"] = caught(parse)
+    if pre["early"]:
+        return pre
+    pre["body"], pre["receipt"] = body, digest(P.cj(body))
+    cp = body["checkpoint"]
+
+    def stage1():
+        need(len(P.cj(cp)) <= CP_CAP, "too_large", 400)
+        o = cp["o"]
+        need(o.get("suite") == 2, "wrong_suite", 400)
+        need(set(o) == CHECKPOINT_FIELDS)
+        need(o["kind"] == "workspace_checkpoint" and o["v"] == 2)
+        good = verify_signed(cp, P.unb64u(wsk_pub), "workspace_checkpoint", "sig_checkpoint")
+        need(good is not None, "bad_signature", 401)
+
+    def stage2():
+        o = cp["o"]
+        count(o["n"], 1)
+        timestamp(o["at"])
+        need(isinstance(o["tickets"], dict))
+        for uid in o["tickets"]:
+            need(ULID.fullmatch(uid))
+        for entry in entries(cp).values():
+            need(isinstance(entry, dict) and set(entry) == {"seq", "head", "acc"})
+            count(entry["seq"], 1)
+            hash_bytes(entry["head"])
+            hash_bytes(entry["acc"])
+
+    pre["stage1"] = caught(stage1)
+    pre["stage2"] = None if pre["stage1"] else caught(stage2)
+    if not (pre["stage1"] or pre["stage2"]):
+        pre["hash"] = checkpoint_hash(cp)
+    return pre
+
+
+def precheck_page(body, wire):
+    def check():
+        need(len(wire) <= PAGE_CAP, "too_large", 413)
+        need(isinstance(body, dict))
+        need(set(body) == {"kind", "log", "after_seq", "from_acc", "heads", "digest"})
+        need(body["kind"] in ("appended", "abandoned", "retained"))
+        need(
+            body["log"] == "workspace"
+            or (isinstance(body["log"], str) and TICKET_LOG.fullmatch(body["log"]))
+        )
+        count(body["after_seq"])
+        hash_bytes(body["from_acc"])
+        need(isinstance(body["heads"], list) and bool(body["heads"]))
+        for h in body["heads"]:
+            hash_bytes(h)
+        need(body["digest"] == page_digest(body))
+
+    return {"refusal": caught(check)}
+
+
+def precheck_manifest(body, wire):
+    """{shape: refusal of the whole body, at: index of the first bad descriptor (or None),
+    refusal: that descriptor's refusal, or the order refusal after the loop}."""
+    pre = {"shape": None, "at": None, "refusal": None}
+
+    def shape():
+        need(isinstance(body, dict) and set(body) == {"pages"} and isinstance(body["pages"], list))
+        need(len(wire) <= PAGE_CAP, "too_large", 413)
+
+    pre["shape"] = caught(shape)
+    if pre["shape"]:
+        return pre
+    previous, seen, order = {}, set(), []
+
+    def descriptor_ok(d):
+        need(isinstance(d, dict) and set(d) == {"i", "kind", "log", "after_seq", "count", "digest"})
+        count(d["i"])
+        count(d["after_seq"])
+        count(d["count"], 1)
+        hash_bytes(d["digest"])
+        need(d["kind"] in ("appended", "abandoned", "retained"))
+        need(d["i"] not in seen)
+        seen.add(d["i"])
+        group = (d["kind"], d["log"])
+        need(group not in previous or previous[group] == d["after_seq"])
+        previous[group] = d["after_seq"] + d["count"]
+        order.append((*group, d["after_seq"]))
+
+    for at, d in enumerate(body["pages"]):
+        pre["refusal"] = caught(descriptor_ok, d)
+        if pre["refusal"]:
+            pre["at"] = at
+            return pre
+    pre["refusal"] = caught(need, order == sorted(order))
+    return pre
+
+
 # --- relay state -----------------------------------------------------------------------------------
 
 
@@ -566,7 +691,11 @@ class Relay:
         ]
         return {"complete": not missing, "missing": missing}
 
-    def put_staging(self, source, target, i, body, wire, global_cap):
+    def put_staging(self, source, target, i, body, wire, global_cap, pre=None):
+        """Stateless validation comes precomputed from before the lock (review G2); its refusal
+        is raised here, after the stateful steps that precede it in the reference."""
+        if pre is None:
+            pre = precheck_page(body, wire) if i is not None else precheck_manifest(body, wire)
         key = stage_key(source, target)
         self.con.execute(
             "DELETE FROM checkpoint_staging WHERE workspace_id=? AND expires_ms<=?",
@@ -584,20 +713,8 @@ class Relay:
             )
             stage = {"expires_ms": self.now + HOUR, "manifest": False}
         if i is not None:
-            need(len(wire) <= PAGE_CAP, "too_large", 413)
-            need(isinstance(body, dict))
-            need(set(body) == {"kind", "log", "after_seq", "from_acc", "heads", "digest"})
-            need(body["kind"] in ("appended", "abandoned", "retained"))
-            need(
-                body["log"] == "workspace"
-                or (isinstance(body["log"], str) and TICKET_LOG.fullmatch(body["log"]))
-            )
-            count(body["after_seq"])
-            hash_bytes(body["from_acc"])
-            need(isinstance(body["heads"], list) and bool(body["heads"]))
-            for h in body["heads"]:
-                hash_bytes(h)
-            need(body["digest"] == page_digest(body))
+            if pre["refusal"]:
+                raise pre["refusal"]
             existing = self.staged(
                 "SELECT body FROM checkpoint_staging_pages", key, "i", i
             ).fetchone()
@@ -618,30 +735,15 @@ class Relay:
                 "INSERT INTO checkpoint_staging_pages VALUES (?,?,?,?,?)", (self.ws, *key, i, wire)
             )
             return {}
-        need(isinstance(body, dict) and set(body) == {"pages"} and isinstance(body["pages"], list))
-        need(len(wire) <= PAGE_CAP, "too_large", 413)
+        if pre["shape"]:
+            raise pre["shape"]
         if stage["manifest"]:
             stored = self.staged("SELECT manifest FROM checkpoint_staging", key).fetchone()[0]
             need(stored == wire, "staging_conflict", 409)
             return self.completeness(key)
         staged = {r[0] for r in self.staged("SELECT i FROM checkpoint_staging_pages", key)}
-        previous, seen, order = {}, set(), []
-        for d in body["pages"]:
-            need(
-                isinstance(d, dict)
-                and set(d) == {"i", "kind", "log", "after_seq", "count", "digest"}
-            )
-            count(d["i"])
-            count(d["after_seq"])
-            count(d["count"], 1)
-            hash_bytes(d["digest"])
-            need(d["kind"] in ("appended", "abandoned", "retained"))
-            need(d["i"] not in seen)
-            seen.add(d["i"])
-            group = (d["kind"], d["log"])
-            need(group not in previous or previous[group] == d["after_seq"])
-            previous[group] = d["after_seq"] + d["count"]
-            order.append((*group, d["after_seq"]))
+        pages = body["pages"] if pre["at"] is None else body["pages"][: pre["at"]]
+        for d in pages:
             if d["i"] in staged:
                 raw = self.staged("SELECT body FROM checkpoint_staging_pages", key, "i", d["i"])
                 need(
@@ -649,8 +751,9 @@ class Relay:
                     "staging_conflict",
                     409,
                 )
-        need(order == sorted(order))
-        need(staged <= seen, "staging_conflict", 409)
+        if pre["refusal"]:
+            raise pre["refusal"]
+        need(staged <= {d["i"] for d in pages}, "staging_conflict", 409)
         self.charge_stage(key, len(wire), global_cap)
         self.con.execute(
             "UPDATE checkpoint_staging SET manifest=? WHERE workspace_id=? AND source=? AND target=?",
@@ -664,18 +767,12 @@ class Relay:
 
     # --- publication (P3-D13/D20/D24/D25) ------------------------------------------------------------
 
-    def validate_checkpoint(self, w, cp):
-        need(len(P.cj(cp)) <= CP_CAP, "too_large", 400)
+    def validate_checkpoint(self, cp, pre):
+        """The stateful checkpoint checks, between the two stateless stages computed by
+        precheck_publication (before the lock), in the reference's order."""
+        if pre["stage1"]:
+            raise pre["stage1"]
         o = cp["o"]
-        need(o.get("suite") == 2, "wrong_suite", 400)
-        need(set(o) == CHECKPOINT_FIELDS)
-        need(o["kind"] == "workspace_checkpoint" and o["v"] == 2)
-        need(
-            verify_signed(cp, P.unb64u(w["wsk_pub"]), "workspace_checkpoint", "sig_checkpoint")
-            is not None,
-            "bad_signature",
-            401,
-        )
         genesis = self.genesis()
         need(genesis is not None, "no_genesis", 409)
         need(
@@ -683,16 +780,8 @@ class Relay:
             "genesis_mismatch",
             409,
         )
-        count(o["n"], 1)
-        timestamp(o["at"])
-        need(isinstance(o["tickets"], dict))
-        for uid in o["tickets"]:
-            need(ULID.fullmatch(uid))
-        for entry in entries(cp).values():
-            need(isinstance(entry, dict) and set(entry) == {"seq", "head", "acc"})
-            count(entry["seq"], 1)
-            hash_bytes(entry["head"])
-            hash_bytes(entry["acc"])
+        if pre["stage2"]:
+            raise pre["stage2"]
         return genesis
 
     def proof_pages(self, stage, kind, log, start, used):
@@ -711,17 +800,16 @@ class Relay:
             used.add(d["i"])
         return current
 
-    def publish(self, body, gen):
-        need(len(P.cj(body)) <= REQUEST_CAP, "too_large", 400)
-        need(
-            isinstance(body, dict)
-            and set(body)
-            in ({"checkpoint", "source_hash"}, {"checkpoint", "source_hash", "restore"})
-        )
-        receipt = digest(P.cj(body))
+    def publish(self, body, gen, pre=None):
+        w = self.workspace()
+        if pre is None or pre["wsk_pub"] != w["wsk_pub"]:  # the card's WSK never changes
+            pre = precheck_publication(body, w["wsk_pub"])
+        if pre["early"]:
+            raise pre["early"]
+        body = pre["body"]
         stored = self.con.execute(
             "SELECT result FROM checkpoint_receipts WHERE workspace_id=? AND digest=?",
-            (self.ws, receipt),
+            (self.ws, pre["receipt"]),
         ).fetchone()
         if stored:
             return P.parse_json(stored[0])  # served even with the budget spent (review N5)
@@ -735,10 +823,9 @@ class Relay:
             "quota_exceeded",
             429,
         )
-        w = self.workspace()
         target = body["checkpoint"]
-        genesis = self.validate_checkpoint(w, target)
-        h = checkpoint_hash(target)
+        genesis = self.validate_checkpoint(target, pre)
+        h = pre["hash"]
         held = self.held()
         o = target["o"]
         result = {"result": "accepted", "n": o["n"], "hash": h}
@@ -820,7 +907,8 @@ class Relay:
             (self.ws, h),
         )
         con.execute(
-            "INSERT INTO checkpoint_receipts VALUES (?,?,?)", (self.ws, receipt, P.cj(result))
+            "INSERT INTO checkpoint_receipts VALUES (?,?,?)",
+            (self.ws, pre["receipt"], P.cj(result)),
         )
         con.execute(
             "DELETE FROM checkpoint_staging WHERE workspace_id=? AND source=? AND target=?",
@@ -1228,8 +1316,26 @@ class Checkpoints:
         con.execute("BEGIN")
         try:
             self.authorize(con, route, ws, headers, self.d.clock())
+            row = con.execute(
+                "SELECT wsk_pub FROM workspaces WHERE workspace_id=?", (ws,)
+            ).fetchone()
+            return row[0] if row else None
         finally:
             con.rollback()
+
+    @staticmethod
+    def prepare(route, raw, wsk_pub):
+        """Parse and validate what needs no database state, after authorization and before the
+        lock (review G2). A body that does not parse is refused here, except a final
+        publication's, which is charged in the transaction like every refusal after W(g)."""
+        if route == "checkpoint_put":
+            return None, precheck_publication(raw, wsk_pub) if wsk_pub else None
+        body = P.parse_json(raw) if raw else None
+        if route == "staging_page":
+            return body, precheck_page(body, raw)
+        if route == "staging_manifest":
+            return body, precheck_manifest(body, raw)
+        return body, None
 
     def read(self, route, params, query, headers):
         con = self.bridge.connection("query")
@@ -1242,7 +1348,10 @@ class Checkpoints:
         finally:
             con.rollback()
 
-    def write(self, route, params, query, headers, raw):
+    def write(self, route, params, query, headers, raw, prepared=None):
+        body, pre = prepared if prepared is not None else (None, None)
+        if prepared is None and route != "checkpoint_put":
+            body = P.parse_json(raw) if raw else None
         d = self.d
         with d.lock:
             con = self.bridge.connection("write")
@@ -1258,7 +1367,7 @@ class Checkpoints:
                     con.execute("SAVEPOINT publication")
                     try:
                         try:
-                            result = relay.publish(P.parse_json(raw), gen)
+                            result = relay.publish(raw, gen, pre)
                         except (KeyError, TypeError, ValueError, AttributeError, IndexError) as exc:
                             raise refusal("malformed", 400) from exc
                         con.execute("RELEASE publication")
@@ -1270,7 +1379,6 @@ class Checkpoints:
                             record_failure(con, ws, gen, now)  # after W(g) and fencing (review 3)
                         refused = exc
                 else:
-                    body = P.parse_json(raw) if raw else None
                     if route == "genesis":
                         result = relay.put_genesis(body)
                     elif route in ("staging_page", "staging_manifest"):
@@ -1279,7 +1387,7 @@ class Checkpoints:
                         if route == "staging_page":
                             i = integer(params["i"])
                         result = relay.put_staging(
-                            source, params["target"], i, body, raw, self.global_stage_cap
+                            source, params["target"], i, body, raw, self.global_stage_cap, pre
                         )
                     elif route == "baseline_post":
                         result = relay.baseline_post(body)
@@ -1361,10 +1469,13 @@ class Checkpoints:
                 result = await run_in_threadpool(self.read, route, params, query, headers)
                 return JSONResponse(result)
             try:
-                await run_in_threadpool(self.preauthorize, route, params["ws"], headers)
+                wsk = await run_in_threadpool(self.preauthorize, route, params["ws"], headers)
             except sqlite3.Error:
-                pass  # the transaction authorizes on its own
-            result, wake = await run_in_threadpool(self.write, route, params, query, headers, raw)
+                wsk = None  # the transaction authorizes and validates on its own
+            prepared = await run_in_threadpool(self.prepare, route, raw, wsk)
+            result, wake = await run_in_threadpool(
+                self.write, route, params, query, headers, raw, prepared
+            )
             if wake and self.d.changed:
                 self.d.changed(*wake)
             return JSONResponse(result)
