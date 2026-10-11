@@ -754,3 +754,17 @@ def test_p3_whole_envelope_size_boundaries(sid):
         kwargs = {"offer": h.stream.hex()} if c["pair"] else {}
         assert R.relay_envelope_check(*args, **kwargs) == {"ok": True}
         assert R.relay_envelope_check(S, raw + b"\0", *args[2:], **kwargs) == {"refuse": "too_large"}
+
+
+@pytest.mark.parametrize("sid", SUITES)
+def test_p3_membership_whole_body_size_before_parsing(sid):
+    from ref._p3_vectors import replay
+    source = VEC["suites"][sid]["p3"]["cases"][0]
+    c = copy.deepcopy(source)
+    raw = R.cj(c["args"]["body"]).decode()
+    c["args"]["body_raw"] = raw + " " * (2097152 - len(raw))
+    assert "ok" in replay(R.SUITES[int(sid)], c)["result"]
+    c["args"]["body_raw"] += " "
+    assert replay(R.SUITES[int(sid)], c) == {"result": {"refuse": "too_large"}, "state": c["state"]}
+    c["args"]["body_raw"] = " " * 2097153
+    assert replay(R.SUITES[int(sid)], c) == {"result": {"refuse": "too_large"}, "state": c["state"]}

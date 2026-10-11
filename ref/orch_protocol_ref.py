@@ -2211,12 +2211,12 @@ def relay_membership(suite, wsk_pub, ws, state, directory, body, now_ms):
     """
     try:
         raw = body if isinstance(body, bytes) else cj(body)
+        if len(raw) > 2 * 1024 * 1024:
+            return {"refuse": "too_large"}
         body = parse_json(raw)
         digest_ = H(raw).hex()
         if digest_ in state.get("publications", {}):
             return state["publications"][digest_]
-        if len(raw) > 2 * 1024 * 1024:
-            return {"refuse": "too_large"}
         if set(body) not in ({"member_list", "grants"}, {"member_list", "grants", "card_key_wraps"}):
             return {"refuse": "malformed"}
         o = verify_object(suite, wsk_pub, body["member_list"], "member_list")
