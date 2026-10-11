@@ -1,6 +1,6 @@
 # P3 relay design: directory, bridge v2, members and epochs, checkpoints
 
-Status: **revision 2**, 11 Oct 2026 (stream D, orch-4e), after the Codex challenge; the challenge log is §12. This
+Status: **revision 3**, 11 Oct 2026 (stream D, orch-4e), after two Codex challenges and the Opus tie-break; challenge log §12, decision index §13. This
 document decides and maps. The wire contract stays [`protocol-v2.md`](protocol-v2.md) plus `tests/vectors_v2.json`.
 Every decision below that changes the wire goes into protocol-v2 in group G0 (§10), with shared vectors and HTTP
 fixtures, before any code is written (contract first).
@@ -102,7 +102,8 @@ Tables (`*` marks the primary key; times are integer ms of the relay clock):
 |---|---|---|
 | `member_lists` | `(workspace_id, list_seq)*`, `epoch`, `list` | the highest `list_seq` is current |
 | `members` | `(workspace_id, device_id)*`, `person_id`, `scopes` | the current list, exploded |
-| `ever_devices` | `(workspace_id, device_id)*`, `first_epoch` | every device ever listed, or named in a restore's revocation entries |
+| `ever_devices` | `(workspace_id, device_id)*`, `first_epoch` | grows only from verified evidence: listed devices, verified revocation entries, verified bundle certificates |
+| `rotation_due` | `(workspace_id, device_id)*`, `revocation_cursor`, `epoch` | durable obligation; cleared only by a committed higher-epoch list that excludes the device, serialized with revocation intake (§5.3) |
 | `ever_persons` | `(workspace_id, person_id)*` | the card owner and every person ever in `persons` |
 | `wk_grants` | `(workspace_id, device_id, epoch)*`, `grant` | spec §6.1 calls this `memberships` |
 
@@ -111,8 +112,9 @@ Tables (`*` marks the primary key; times are integer ms of the relay clock):
 | Table | Columns | Notes |
 |---|---|---|
 | `bridge_msgs` | `n*`, `workspace_id`, `device_id`, `rid`, `kind` (`req`, `resp`, `pair_req`, `pair_resp`), `offer_id`, `idx`, `flags`, `epoch`, `envelope`, `digest`, `received_ms`, `expires_ms` | sealed bodies, 60 s from their own receipt (proto §8.9), never extended |
-| `rid_seen` | `(workspace_id, device_id, rid)*`, `req_digest`, `req_epoch`, `first_ms`, `requeues`, `last_requeue_ms`, `chunk_digests` | replay store, 900 s from the first receipt (P3-D9) |
-| `holders` | `workspace_id*`, `gen`, `lease_until_ms`, `cursor` | fencing and the host's acknowledged cursor (P3-D10) |
+| `rid_seen` | `(workspace_id, device_id, rid)*`, `req_digest`, `req_epoch`, `first_ms`, `requeues`, `last_requeue_ms`, `keep_until_ms` | replay store: 900 s from the first receipt, extended only to outlive every dependent queued message (P3-D9); ≤ 4 096 records per device |
+| `rid_chunks` | `(workspace_id, device_id, rid, idx)*`, `digest`, `flags` | chunk identity for conflicts and stored replays, same lifetime as its `rid_seen` row; ≤ 64 chunks per rid |
+| `holders` | `workspace_id*`, `gen`, `lease_until_ms`, `cursor`, `poll_token` | fencing, the contiguous acknowledged cursor and the one live poll (P3-D10) |
 | `cert_requests` | `request_id*`, `workspace_id`, `person_id`, `primary_device_id`, `request`, `expires_ms`, `state`, `challenge`, `cert_device_id`, `rejection` | the transactional state machine (P3-D11) |
 
 **checkpoints**
@@ -120,10 +122,11 @@ Tables (`*` marks the primary key; times are integer ms of the relay clock):
 | Table | Columns | Notes |
 |---|---|---|
 | `genesis_pins` | `workspace_id*`, `pin`, `cert` | owner-device-signed (P3-D18) |
-| `checkpoint_store` | `(workspace_id, n)*`, `checkpoint`, `bytes` | the current H and every checkpoint a transition references |
-| `checkpoint_held` | `workspace_id*`, `n`, `accepted_ms` | points into `checkpoint_store` |
-| `log_heads` | `(workspace_id, log, seq)*`, `head`, `acc` | the heads of each log's current chain; cut back to `from_seq` on a restore; they serve ancestry proofs (P3-D19) |
-| `transitions` | `restore_id*`, `workspace_id`, `log`, `source_n` (null for a bootstrap), `target_n`, `bundle` | permanent, ordered by `target_n`; the bundle holds the line, the certificate, `authz`, `abandoned_heads` and `acc_from` (§6.3) |
+| `checkpoint_store` | `(workspace_id, hash)*`, `n`, `checkpoint`, `bytes`, `superseded_ms`, `pinned` | addressed by `h_checkpoint`; kept 24 h after supersession, permanently when a transition references it or it is a pairing baseline still in use (§6.2) |
+| `checkpoint_held` | `workspace_id*`, `hash`, `accepted_ms` | points into `checkpoint_store` |
+| `log_nodes` | `(workspace_id, log, acc)*`, `seq`, `head`, `prev_acc` | immutable and branch-agnostic, never cut back; abandoned suffixes stay; a proof for any stored checkpoint walks `prev_acc` back from its entry's `acc` (P3-D19); storage O(history) |
+| `staging` | `(workspace_id, source_hash, target_hash, page)*`, `kind`, `body`, `expires_ms` | paged evidence before an atomic commit, 1 h (P3-D20) |
+| `transitions` | `restore_id*`, `workspace_id`, `log`, `source_hash` (null for a bootstrap), `target_hash`, `target_n`, `bundle` | permanent, ordered by `target_n`; the bundle holds the full signed restore line, the certificate and `authz = {delegation}` (P3-D24); proof material lives in `log_nodes` |
 
 Never stored: `WK`, `CK`, pairing secrets, names, labels in clear, bridge plaintext. A test greps the database after a
 full flow for the fixture's names, descriptions and restore `note` text.
@@ -167,9 +170,9 @@ The **Auth** column uses these codes:
 | `POST /v2/session/login` | none | `{challenge, kind, id, sig}` → `{token, expires_ms}` | challenge consumed on every attempt; 15 min; concurrent tokens allowed | 400 `malformed`, `cert_expired`, `cert_invalid`; 401 `unknown_challenge`, `expired`, `bad_signature`; 403 `revoked` | §12.2, §4 |
 | `POST /v2/session/logout` | D or W | `{}` → `{}` | idempotent; safe to retry with an expired token (200) | — | new |
 | `POST /v2/accounts` | none | `{invite, pk_pub, device_cert, challenge, sig}` → `{person_id}` | `sig` is the new device's login signature over a fresh challenge; the exact same request → 200 (by digest) | 400 `malformed`, `cert_invalid`; 401 `bad_signature`, `unknown_challenge`; 403 `not_eligible` (one code for unknown, used or expired); 409 `account_exists` | spec §6.1 (P3-D3) |
-| `PUT /v2/devices/{device}` | none | `{cert}` → `{device_id}` | self-authenticating under the account `PK`; per address 30/h, per person 64/day; same cert → 200 | 400 `cert_invalid`, `cert_expired`; 403 `revoked`, `other_person` (no account); 409 `cert_conflict` | §6.1, §8.3, §8.4 (P3-D5) |
+| `PUT /v2/devices/{device}` | none | `{cert}` → `{device_id}` | self-authenticating under the account `PK`; per address 30/h; per person 64/day, charged only after the signature verifies; an exact retry is free | 400 `cert_invalid`, `cert_expired`; 403 `revoked`, `other_person` (no account); 409 `cert_conflict` | §6.1, §8.3, §8.4 (P3-D5) |
 | `GET /v2/devices/{device}` | D(p), or W whose `ever_persons` contains the person | → `{cert}` | | 403 `not_eligible`; 404 `not_found` | §6.1 |
-| `POST /v2/revocations` | none | `{record}` → `{device_id}` | authority is `PK`; per address 10/min, per person 32/day; same record → 200 | 400 `malformed`; 401 `bad_signature`; 403 `other_person` | §6.2 (P3-D5) |
+| `POST /v2/revocations` | none | `{record}` → `{device_id}` | authority is `PK`; per address 10/min; per person 32/day, charged only after the signature verifies, with 8/day reserved for revocations of devices not yet revoked; an exact retry is free | 400 `malformed`; 401 `bad_signature`; 403 `other_person` | §6.2 (P3-D5) |
 | `GET /v2/devices/{device}/revocation` | none | → `{record}` | per address 60/min | 404; 429 | §6.2, gaps 24 |
 | `GET /v2/persons/{person}/revocations?after=&limit=` | D(p), or W whose `ever_persons` contains the person | → `{revocations, next}` | limit ≤ 256 | 403 | §6.2 |
 | `PUT /v2/workspaces/{ws}/card` | none for the first card; W(g) after | `{card}` → `{card_seq}` | first card: per address 10/h, per owner account 10/h, first writer wins in one transaction; same card → 200 | proto §7.1 codes: 400 `malformed`, `wrong_suite`, `delegation_mismatch`; 401 `bad_signature`; 403 `other_person`; 409 `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version` | §7.1 (P3-D4) |
@@ -194,6 +197,9 @@ on.
 - So a person who kept only the recovery code, and so `PK` (D50), can bootstrap: upload a new device certificate, log
   in with it, and revoke the lost device.
 - The public record route reveals whether a known device id is revoked. §8 states this; login adds no further oracle.
+- **Quota denial (challenge 2, finding 10).** Person quotas are charged only after the signature verifies, exact retries
+  are free, windows are kept for their full duration (hour, day), never idle-pruned, and a reserved share stays
+  available for revocations, so invalid or replayed submissions cannot block a recovery.
 
 ### 3.2 Members and epochs
 
@@ -225,6 +231,9 @@ Consequences:
 - **The rotation-abandon route and label of orch-mobile's FakeRelay amendment are dropped.** Phones already accept
   forward epoch jumps.
 - **`grant_conflict`.** Other bytes for an already-committed `(device, epoch)` are refused.
+- **Retries (challenge 2, finding 11).** An exact-body retry of a committed publication returns its result before any
+  freshness check. The host persists the sealed grants it sent and resends the same bytes, never reseals, so a retry
+  never hits `grant_conflict`.
 
 **P3-D6 (persons, D39; C8).** Each member entry is `{device_id, person_id, scopes}`, and the list carries
 `persons: [person_id]` (sorted, unique). Check 8: the certificate's person is the card owner **or** in `persons`
@@ -271,8 +280,11 @@ never extended:
 - **Same bytes:**
   - If an undelivered copy exists (its `n` is above the holder's acknowledged cursor), the resend is coalesced: 202,
     nothing new queued.
-  - Otherwise it is queued again, at most once per 10 s and at most 8 times per rid. Further resends get 202 and are
-    dropped. A new copy lives 60 s from its own receipt.
+  - Otherwise it is queued again, at most once per 10 s and at most 8 times per rid. After that cap the relay answers
+    409 `retry_exhausted`, so a device never takes a 202 for a delivery promise (challenge 2, finding 9). A new copy
+    lives 60 s from its own receipt, and the `rid_seen` and `rid_chunks` rows are kept until every dependent message
+    has expired, so conflict detection never ends before them. Records and chunk digests are bounded per device
+    (P3-D17).
 - **Other bytes:** 409 `rid_conflict`.
 
 The relay never checks `seq` or `ts_ms`: the host's sealed refusals do that. The host's durable rid store stays the only
@@ -281,13 +293,19 @@ exactly-once authority.
 **P3-D10 (durable host cursor and fencing; C12).** This replaces the consuming poll:
 
 - **Hold.** The host first takes a holder generation `gen` (`host/hold`). A new generation needs an expired lease or
-  `take_over`.
+  an explicit `take_over` (no silent automatic takeover). The lease is 40 s; the host renews it every 15 s (a poll or
+  `host/hold` with its own `gen`).
+- **One live poll per generation.** A new poll cancels the previous one of the same `gen`.
+- **Compare-and-set (challenge 2, finding 8).** Every cursor move and every host write is a compare-and-set on
+  `(gen, lease unexpired)`, re-checked after a long-poll wakeup before data is handed over.
 - **Fencing.** Every host write carries `Orch-Holder: gen`: response chunks, pair answers, membership, card, card keys,
   cert requests and checkpoints. A stale generation is 409 `fenced`, so an old host process that wakes up after a
   takeover cannot interleave writes.
 - **Delivery.** The poll is non-consuming: items have a strictly increasing `n` and stay until their 60 s expiry. The
-  host passes `after` = the highest `n` it has durably processed (recorded in its rid store). A lost HTTP response is
-  harmless: the next poll returns the same items, which is at-least-once delivery.
+  host passes `after` = the end of the **contiguous prefix** of items it has durably completed (recorded in its rid
+  store), never the highest `n` seen; the relay moves the cursor only forward. A lost HTTP response is harmless: the
+  next poll returns the same items. Delivery is **at-least-once within the 60 s retention**; later, the device's
+  resend is the recovery.
 - **Authorization at handoff.** The relay filters each item against membership and revocation in the same transaction
   that reads it. Devices' response polls do the same.
 - **Limit.** Fencing protects an honest host from its own stale twin. It does not protect against a WSK holder, who
@@ -311,21 +329,26 @@ exactly-once authority.
 **P3-D16 (scopes).** On the bridge the relay enforces membership only. Ops and scopes are sealed. The typing lease has
 no relay part.
 
-**P3-D22 (old-epoch responses; C19, Q10).** Defence in depth. A response chunk's epoch must equal its request's
-(`rid_seen.req_epoch`). Once the list epoch has moved past that epoch, the relay accepts a chunk at the old epoch only
-if it is a `REFUSAL` chunk, or if it is byte-identical to a chunk already accepted for that rid (a stored replay;
-`chunk_digests`, 900 s). Everything else is 409 `stale_epoch`. This matches the host's duty in proto §8.5. It cannot
-constrain a compromised relay.
+**P3-D22 (old-epoch responses; C19, Q10; challenge 2, finding 13).** A defence against honest-host mistakes, not a
+confidentiality boundary against a malicious host (the relay sees a flag, not the sealed refusal). A response chunk's
+epoch must equal its request's (`rid_seen.req_epoch`), and the chunk must answer a known request (rid). Once the list
+epoch has moved past that epoch, the relay accepts an old-epoch chunk only if it has the `LAST | REFUSAL` shape, or if it
+is byte-identical to a chunk already accepted for that rid (a stored replay, `rid_chunks`). Everything else is 409
+`stale_epoch`. The device validates the refusal itself (proto §8.8). Replaying stored bytes never extends a chunk's
+TTL. This cannot constrain a compromised relay.
 
 ### 3.4 Checkpoints and transitions
 
+Checkpoints are addressed by `hash` = `h_checkpoint(o)` (lowercase), with `n` alongside.
+
 | Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
 |---|---|---|---|---|---|
-| `PUT /v2/workspaces/{ws}/genesis` | W(g) | `{pin, cert}` → `{}` | once; the same pin → 200 | 401 `bad_signature`; 403 `restore_not_owner`; 409 `genesis_mismatch` | new §7.6 (P3-D18) |
-| `PUT /v2/workspaces/{ws}/checkpoint` | W(g) | `{checkpoint, appended}` or `{checkpoint: T, appended, restore: {line, cert, authz, abandoned_heads, acc_from}}` → `{result: "accepted"\|"ignored", n}` | same → `accepted`; ≤ 2 MiB measured as the `cj` bytes of the body (P3-D20) | 400 `malformed`, `wrong_suite`, `too_large`; 401 `bad_signature`; 409 `no_genesis`, `chain_diverged`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation` (`devices`), `fenced` | new §7.6 |
-| `GET /v2/workspaces/{ws}/checkpoint[?n=k]` | D(m) or W | → `{genesis: {pin, cert}, checkpoint, transitions_head}` | the held H, or a stored checkpoint `k` (a pairing baseline or a bundle source); `transitions_head` is the highest `target_n` | 403; 404 | new §7.6 |
-| `GET /v2/workspaces/{ws}/transitions?after_n=k&to_n=E&limit=` | D(m) or W | → `{transitions: [bundle], next}` | ascending, `k < target_n ≤ E`; bound to the endpoint `E`; limit ≤ 16, ≤ 8 MiB | 403; 409 `chain_diverged` (`E` not held or referenced) | new §7.6 (§6.4) |
-| `GET /v2/workspaces/{ws}/heads?log=L&after_seq=s&to_n=E&limit=` | D(m) or W | → `{heads: [head], next}` | the heads of `L` from `s+1` up to its seq in checkpoint `E`; limit ≤ 65 536 | 403; 404 | new §7.6 (P3-D19) |
+| `PUT /v2/workspaces/{ws}/genesis` | W(g) | `{pin, cert}` → `{}` | once; the same pin → 200; never replaced (§6.1) | 401 `bad_signature`; 403 `restore_not_owner`; 409 `genesis_mismatch` | new §7.6 (P3-D18) |
+| `PUT /v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/{page}` | W(g) | `{kind: "appended"\|"abandoned", log, heads: [head]}` → `{}` | page ≤ 4 MiB; expires after 1 h; the same page → 200 | 400; 409 `fenced`; 429 | new §7.6 (P3-D20) |
+| `PUT /v2/workspaces/{ws}/checkpoint` | W(g) | `{checkpoint, source_hash}` or `{checkpoint: T, source_hash, restore: {line, cert, authz}}` → `{result: "accepted"\|"ignored", n, hash}` | final commit over the staged pages, atomic, preflighted; same → `accepted`; checkpoint ≤ 2 MiB `cj`, line ≤ F1's line limit (P3-D20) | 400 `malformed`, `wrong_suite`, `too_large`; 401 `bad_signature`; 409 `no_genesis`, `chain_diverged`, `checkpoint_time`, `staging_incomplete`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation` (`devices`), `fenced` | new §7.6 |
+| `GET /v2/workspaces/{ws}/checkpoint[?hash=h]` | D(m) or W | → `{genesis: {pin, cert}, checkpoint, transitions_head}` | the held H, or a stored checkpoint `h` (a pairing baseline or a bundle source) | 403; 404; 410 `checkpoint_gone` | new §7.6 |
+| `GET /v2/workspaces/{ws}/transitions?after=h&to=E&limit=` | D(m) or W | → `{transitions: [bundle], next}` | ascending `target_n`, after the device's held checkpoint `h`, up to the endpoint hash `E`; limit ≤ 16, ≤ 8 MiB | 403; 410 `checkpoint_gone` | new §7.6 (§6.4) |
+| `GET /v2/workspaces/{ws}/proof?log=L&from=acc&to=E&limit=` | D(m) or W | → `{heads: [head], next}` | the heads of `L` between the node `acc` and `L`'s entry in checkpoint `E`, walked over `log_nodes`; limit ≤ 65 536 | 403; 404; 410 `checkpoint_gone` | new §7.6 (P3-D19) |
 
 **P3-D12.** The relay stores **workspace** checkpoints only. `ticket_checkpoint` objects are not published to it.
 
@@ -337,8 +360,8 @@ constrain a compromised relay.
 | 401 | `unauthenticated` |
 | 403 | `not_eligible`, `not_for_this_device` (also for the routes here) |
 | 404 | `not_found` |
-| 409 | `account_exists`, `cert_conflict`, `grant_conflict`, `rid_conflict`, `chunk_conflict`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed`, `no_genesis`, `genesis_mismatch`, `chain_diverged`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation` (`devices`) |
-| 410 | `expired` |
+| 409 | `account_exists`, `cert_conflict`, `grant_conflict`, `rid_conflict`, `retry_exhausted`, `chunk_conflict`, `checkpoint_time`, `staging_incomplete`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed`, `no_genesis`, `genesis_mismatch`, `chain_diverged`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation` (`devices`) |
+| 410 | `expired`, `checkpoint_gone` |
 | 429 | `rate_limited`, `quota_exceeded` (both with `Retry-After`) |
 | 503 | `overloaded` (global budget, with `Retry-After`) |
 
@@ -382,7 +405,9 @@ challenge is consumed.
 - **Client addresses.**
   - The peer address is used, or Caddy's `X-Forwarded-For` only when the peer is the configured proxy.
   - Addresses are canonicalized: IPv4-mapped IPv6 becomes IPv4, and IPv6 is grouped by /64.
-  - Window keys expire 2 minutes after their last hit and are pruned on every request.
+  - Windows are kept for their full duration (minute, hour, day) and pruned only after it ends; per-person windows
+    are charged only after a signature verifies (§3.1 P3-D5).
+- **Per device:** at most 4 096 `rid_seen` records and 64 chunk digests per rid.
 
 ## 5. Members and epochs
 
@@ -426,7 +451,10 @@ On a verified revocation, from the route or from a restore's entries, the relay 
 - it refuses the device on every route;
 - it sets `rotation_due` for each workspace whose current list names the device.
 
-The host sees `rotation_due` in its poll until a higher epoch is committed. There is no un-revoke.
+`rotation_due` is durable: one row per obligating device, with the revocation's cursor and epoch. It is cleared only by
+a committed list with a higher epoch that excludes the device, in a transaction serialized with revocation intake, so a
+newer obligation is never cleared by an older publication. The host sees it in its poll until then. There is no
+un-revoke.
 
 ## 6. Signed checkpoints on the relay
 
@@ -441,230 +469,249 @@ device (with `operate`, of the card's owner person) signs:
 ```
 
 - **Why a pin object.** The relay never reads `workspace.created`, which carries the owner's name and the prefix
-  (spec §4). The pin gives the same binding: an owner device signs `{workspace_id, wsk_pub, genesis}`.
-- **Relay.** It verifies the pin under a stored owner certificate and the card's `wsk_pub`. It refuses checkpoints
-  before a pin (`no_genesis`) and checkpoints with another genesis (`genesis_mismatch`).
-- **Devices** verify the pin independently, under the owner `PK` pinned from the pairing link.
+  (spec §4). The pin attests the genesis; it does not prove the genesis is valid. Hosts holding the log check that.
+- **First acceptance at the relay.** The relay checks the certificate's eligibility only when it first accepts the
+  pin: unexpired by the relay clock, not revoked, `operate`, of the owner person. It also checks that `wsk_pub` is the
+  card's. It refuses checkpoints before a pin (`no_genesis`) and checkpoints with another genesis
+  (`genesis_mismatch`).
+- **Later.** Devices verify the pin historically, under the owner `PK` pinned from the pairing link. An established pin
+  is **never replaced** because its certificate later expires or is revoked. A revoked pin certificate raises an alarm
+  and leaves the pin as it is.
 
-**P3-D19 (log accumulators: verified append-only ancestry without logs; source challenge 7).** Heights cannot prove
-ancestry. A relay that withholds a restore can serve a later checkpoint whose heights exceed what a device holds, and a
-height test accepts it, even when the device held heads of the abandoned branch. The fix is a per-log accumulator in
-each workspace checkpoint entry:
+**P3-D19 (log accumulators; decided with stream A).** Each workspace checkpoint entry is `{seq, head, acc}`:
 
 ```
-entry = {"seq", "head", "acc"}
 acc_0 = 32 zero bytes
-acc_k = SHA-256("orch/v2/log-acc|" || acc_{k-1} || raw(head_k))     acc = "sha256:" + lowercase hex
+acc_k = SHA-256("orch/v2/log-acc|" || acc_{k-1} || raw32(head_k))
+acc   = "sha256:" + lowercase hex
 ```
 
-`acc_k` commits to the ordered list of heads 1…k of the log's current chain. After a restore, the chain continues from
-`acc_{from_seq}`. Ancestry from a held entry `(s, acc_s)` to an offered entry `(t, acc_t)` is proved by the heads
-`s+1 … t`: folding them onto `acc_s` must give `acc_t`, and the last one must be the offered `head`.
+- Both inputs are exactly 32 decoded bytes, never their text forms. `seq` is not in the preimage.
+- The new label is `h_log_acc`.
+- An extension from `s` to `t` needs exactly `t − s` heads, the last one equal to the offered entry's `head`, folding
+  to its signed `acc`. An equal `seq` needs the identical `head` and `acc`. Every existing entry is kept.
 
-What it proves:
+**What the accumulator guarantees** (stream A's wording): it **cannot conceal abandonment of the receiver's committed
+prefix**, given an honest host and a withholding relay. It does not prove event validity, latestness, or that every
+restore is disclosed: a restore after the receiver's held prefix can itself be an ordinary extension of that prefix. A
+WSK holder can fabricate accumulators; that stays F1's limit for checkpoint-only receivers. A missing or malformed proof
+means the sync is incomplete. It is not, by itself, proof of equivocation.
 
-- The offered checkpoint extends exactly the head list the held checkpoint committed to.
-- The relay's history cannot be faked by withholding or splicing while the host (`WSK`) is honest. The signed `acc`
-  values pin every list.
+**Storage (challenge 2, finding 2).** The relay keeps the immutable, branch-agnostic table
+`log_nodes(workspace, log, acc) → (seq, head, prev_acc)`:
 
-What it does not prove:
+- Every head the relay ever verified goes in, and nothing is cut back on a restore: abandoned suffixes stay.
+- A proof for any stored checkpoint walks `prev_acc` back from that checkpoint's entry `acc`. Proof pages are keyed by
+  the checkpoint hash.
+- Storage is O(history); fold cost is O(heads).
+- At the host, `acc` is maintained incrementally on append and replay. Unloaded entries are copied forward unchanged
+  and validated when their log loads (stream A).
 
-- That the heads form a valid event chain. Only the event bytes prove that.
-- Anything against a WSK holder, who can sign any `acc`. That stays F1's limit for checkpoint-only receivers.
+**Publication (P3-D20, decided by the tie-break).** Object limits and request limits are separate:
 
-This is a checkpoint-shape change in F1: part 2 of the proposal in §6.4. If stream A rejects it, the fallback is
-heights only, and §8 then states that a withholding relay can hide a transition from a device that held abandoned
-heads.
+- A checkpoint is at most 2 MiB of `cj` bytes. Host admission refuses `ticket.created` above 1.8 MiB
+  (`checkpoint.capacity`).
+- A restore line is limited by F1's line limit. Stream A measures the full signed line; revocations are never
+  truncated.
 
-**Publication.** The host publishes `{checkpoint, appended: {log: [head, …]}}`:
+Evidence goes up in pages:
 
-- `appended` holds the heads of each log that grew since the relay's held H.
-- The relay checks that each fold reproduces the new `acc`, and that logs absent from `appended` are unchanged. So the
-  relay itself enforces append-only growth, not only F1's height rules.
-- It stores the heads per log in `log_heads`. These serve ancestry proofs to devices.
+- The heads appended since the relay's held H (`appended`), and for a restore C's abandoned suffix (`abandoned`), go
+  up in pages of at most 4 MiB into a staging area bound to `(source hash, T hash)`. The staging area expires after
+  1 h.
+- A final small `PUT checkpoint` commits atomically over the staged pages and preflights everything first: every fold,
+  R0–R5, sizes. Missing pages are `staging_incomplete`. Nothing is half-accepted.
+- Capacity is advertised only as G0 measures it. Until then the stated capacity is **about 5 000 tickets**. G0 also
+  measures fold time and `log_nodes` growth. With `acc`, one entry is about 200 bytes and one published head is about
+  74 bytes of JSON.
 
 Publication runs through the host's outbox (§9): after each burst of appends (at most one per 5 s), at startup and
 daily.
 
-**P3-D20 (capacity; C18).** A checkpoint body is at most 2 MiB of `cj` bytes. Measured: one ticket entry with `acc` is
-about 200 bytes, so this is about 10 000 tickets. The host computes the size of the next checkpoint before it appends
-`ticket.created`, and refuses above 1.8 MiB (`checkpoint.capacity`, F1/core). An append can therefore never make the
-state unpublishable. `appended` is paged per request (at most 4 MiB of heads); a long-offline host publishes in
-several steps, each one a valid checkpoint.
+**P3-D25 (position time, decided by the tie-break).** Every published checkpoint has `o.at ≥` the held H's `o.at`, and
+`o.at ≤ relay clock + 300 s`. Otherwise it is 409 `checkpoint_time`. Restores get the anchors of R3a (§6.3). The host
+clamps its writer: `o.at = max(clock, last checkpoint o.at)`. For a restore append it uses
+`at = max(clock, source C.o.at, last at in the merged order)` (stream A).
 
 ### 6.2 How receivers use it
 
-**The host** fetches the relay's H with its workspace session at startup and compares it with its logs. If H's heads
-or accumulators are not those of its logs at the same seqs, that is `chain.diverged`, and the host refuses appends
-until an owner restore. This catches F1 §5.10's "what P1 can't detect". The host accepts the relay's H as its held
-checkpoint by the receiver rules, so its held H is always a checkpoint the relay has accepted or one it has written
-itself (§6.4 (1)).
+**The host** fetches the relay's H with its workspace session at startup and compares H's heads and accumulators with
+its logs at the same seqs. A mismatch is `chain.diverged`, and the host refuses appends until an owner restore. It
+accepts the relay's H as its held checkpoint only after full verification.
 
-**Devices** accept checkpoints only from the relay. The host never shows a device a checkpoint before the relay
-accepted it.
+**Devices** accept checkpoints only from the relay. The host never shows a device a checkpoint the relay has not
+accepted.
 
-- **Bootstrap baseline (source challenge 6).** A newly paired device does not start empty. The host's `approved`
-  pairing answer (WSK-signed, proto §8.3) carries the host's held checkpoint `{n, hash}`. The device fetches that
-  checkpoint from the relay and verifies it (the signature, the genesis pin, the hash). That becomes its baseline,
-  marked `initialized_at = n`. A device that is not yet initialized refuses every restore with `source: null` unless
-  the relay holds nothing at all and the pairing answer said "none". The empty-relay case covers only a workspace that
-  has never published. A relay that falsely claims emptiness is caught by the pairing baseline.
-- **Synchronisation, bound to an endpoint (source challenge 8).**
-  1. `GET checkpoint` gives the endpoint E (its `n` and hash).
-  2. `GET transitions?after_n=held.n&to_n=E.n` pages the transitions with `held.n < target_n ≤ E.n`.
-  3. `GET heads?log=…&after_seq=…&to_n=…` pages the head lists the walk needs, as they stand in the chain up to that
-     checkpoint.
-  4. The device runs the walk of §6.4 (3) and ends at E, or reports `sync.incomplete` and keeps its held H.
+- **Bootstrap baseline (stream A's decision).** The authenticated `approved` pairing answer carries the host's
+  **exact** held workspace checkpoint reference `{n, hash}`, or `null` only when none exists. The relay keeps that
+  checkpoint retrievable (`checkpoint_store`, `pinned` while a baseline uses it). The device stays "initializing"
+  until it has fetched it (`GET checkpoint?hash=`) and verified the signature, the workspace, the genesis pin and the
+  hash. A baseline is never downgraded. A relay's report of emptiness can never override a non-null reference. A device
+  that cannot fetch its baseline within 24 h asks the host over the bridge for its current reference, under the same
+  no-downgrade rule. A `null` baseline is accepted only when the relay holds no checkpoint either; that device is
+  uninitialized and its first checkpoint is the relay's first.
+- **Synchronisation, bound to an immutable endpoint (challenge 2, finding 3).**
+  1. `GET checkpoint` gives the endpoint E (its hash and `n`).
+  2. `GET transitions?after=<held hash>&to=E` and `GET proof?…&to=E` page the transitions and the proofs.
+  3. The device runs the walk of §6.4 (3). It advances its held H **only after complete verification**. A partially
+     fetched sync changes nothing.
 
-  Pages are bound to `to_n`, so a relay cannot shift the endpoint between pages. Gaps in `n` are normal, because
-  continuity is proved by the accumulators, not by consecutive numbers. Missing evidence means an incomplete sync and
-  a retry. It does not mean re-pairing, which would throw away the rollback protection.
-- **`chain.diverged`** (a proved non-ancestry) raises an alarm on the device.
+  Rules for the endpoint:
 
-**The relay** cannot forge or lower a checkpoint, and cannot splice histories while the host is honest. It can only
-withhold, which leaves devices with an incomplete sync, not on a wrong state.
+  - The relay keeps every superseded checkpoint for 24 h after supersession, and permanently when a transition
+    references it.
+  - If E has expired mid-sync, the relay answers 410 `checkpoint_gone`, and the device restarts the walk with a new E,
+    keeping its held H.
+  - Mixed pages fail the final fold against the signed `acc`.
+  - Missing evidence means `sync.incomplete` and a retry. It never means re-pairing, which would throw away the
+    rollback protection.
+- **`chain.diverged`**, a proved non-extension, raises an alarm on the device.
 
-**Delimited guarantee (C15).** Checkpoint-only receivers verify signatures, accumulator ancestry, the exact restore
-binding and the bundle's authorization evidence (§6.3). They do not replay F1 authorization:
+**The relay** cannot forge or lower a checkpoint. With an honest host it cannot conceal abandonment of a device's
+committed prefix. It can withhold, which leaves devices with an incomplete sync, not on a wrong state.
 
-- not event validity;
-- not historical roles beyond §6.3's evidence;
-- not `based_on`.
-
-Hosts holding the logs do all of these.
+**Delimited guarantee (C15).** Checkpoint-only receivers verify signatures, accumulator extensions, the exact restore
+binding and the P3 owner-device policy (P3-D24). They do not replay F1 authorization (event validity, roles, device
+introduction and removal at `from_seq`, `based_on`). Hosts holding the logs do.
 
 ### 6.3 Restores as owner-signed transitions
 
-**The problem (#31 d, C14).** Revision 1's R2 relied on the restore id's ULID time and on `line.at`. Neither holds:
-F1 §5.3 does not sign `at`, and ULIDs are not trusted timestamps. **The fix:** the owner signs the transition's
-baseline. The person-signed restore payload carries `source: {n, hash}`, the workspace checkpoint C it abandons. This
-is decided by stream A; §6.4 has the details.
+**The problem (#31 d, C14).** Revision 1 relied on the restore id's ULID time and on `line.at`. Neither holds: F1 §5.3
+does not sign `at`, and ULIDs are not trusted timestamps. **The fix**, decided with stream A: the person-signed restore
+payload carries `source: {n, hash}`, the workspace checkpoint C it abandons.
 
-**P3-D13 (restore rules at the relay).** A restore arrives as `{line, cert, authz, abandoned_heads}` beside a target
-checkpoint T. The relay checks R0 to R5 **atomically**: compare, validate, persist the bundle, advance H. Of two
-restores signed against the same C, one wins; the other needs a newly signed `source`. An exact retry returns the prior
-result.
+**P3-D13 (restore rules at the relay).** A restore arrives as `{line, cert, authz}` in the final `PUT checkpoint`, beside
+a target T, with the staged pages bound to `(source hash, T hash)`. The relay checks the rules below **atomically**:
+compare, validate, persist the bundle, advance H. Of two restores signed against the same C, one wins; the other needs a
+newly signed `source`. An exact retry returns the prior result.
 
 | Rule | Check | Refusal |
 |---|---|---|
 | **R0 shape (#31 a, g)** | `line` is a strictly parsed F1 `restore` event in stream A's payload shape (no interim fallback). Exact envelope and payload field sets. Person actor; `sig`, `auth` and `roster_v` present (and on no other kind). `v = 2`, `hash_v = 1`. `ws_seq` present exactly for a ticket log. | `restore_invalid` |
-| **R1 signature** | `host_sig` verifies under `wsk_pub`. `sig` verifies under `cert.dk_sig_pub` with the context `{workspace_id, log}` (F1 §5.3). `actor.device == "d_" + cert.device_id`. | `restore_invalid` |
-| **R1 authorization evidence (source challenge 10)** | `authz` = `{delegation, member_list}`. The delegation is the card's (PK-signed, it names `owner_person_id`), and `actor.id == "p_" + owner_person_id`. The certificate is signed by that person's `PK` and its scopes include `operate`. `member_list` is a WSK-signed list of this workspace, no newer than the relay's current one; the signer's device is in it with `operate`, as evidence that the device was introduced to the workspace and not removed. **Present authority** at the relay: the certificate is unexpired now and not revoked, counting the revocations staged from this payload. | `restore_not_owner` |
-| **R2 source (#31 d)** | `source` equals the relay's held H (`n` and `h_checkpoint(H.o)`, lowercase). `null` only in the relay's uninitialized state (no held checkpoint), where T becomes the first. | `restore_source_mismatch` |
-| **R3 binding (#31 d)** | `line.seq == from_seq + 1` and `line.prev == payload.head`. `abandoned_heads` are C's heads of the restored log above `from_seq`, with `acc_from`. Folding them from `acc_from` gives C's `acc`, and T's entry is exactly `{from_seq + 1, head(line), fold(acc_from, head(line))}`. Every other log of T is append-only growth of C (proved by `appended`); every log of C stays present (a ticket restore keeps every existing ticket entry); `T.n > C.n`. A ticket restore also has `ws_seq ≤ T.workspace_log.seq`. | `restore_invalid`, `chain_diverged` |
-| **R4 revocations (#31 e, f; stream A's B1)** | A workspace restore carries **every** host-held revocation of the workspace; a ticket restore carries `[]`. Each entry `{revocation, device_cert, pk_pub}` verifies, and `pk_pub` is the stored account key of its person. All evidence is validated before any effect. Every revocation the relay holds for a device in `ever_devices` must appear with the same or a stronger reason. | `restore_missing_revocation` (`devices`), `restore_invalid` |
+| **R1 signature** | `host_sig` verifies under `wsk_pub`. `sig` verifies under `cert.dk_sig_pub` with the context `{workspace_id, log}` (F1 §5.3). | `restore_invalid` |
+| **R1 authorization (P3 owner-device policy, P3-D24)** | `authz` = `{delegation}`: the card's PK-signed delegation. `actor.id == "p_" + delegation.o.owner_person_id`. `cert` is signed by that person's `PK` (`person_id(pk_pub) == cert.o.person_id`), its `scopes_max` is a level list containing `operate`, it has no `drop:` scope, and `actor.device == "d_" + cert.o.device_id`. **Present authority at the relay only:** the certificate is unexpired by the relay clock and not revoked (counting the revocations staged from this payload), and the device is in the relay's **current** member list with `operate`. This relay-local check is never bundle evidence, and devices do not repeat it. | `restore_not_owner` |
+| **R2 source (#31 d)** | `source` equals the relay's held H (`n` and `h_checkpoint(H.o)`, lowercase). `source: null` follows the bootstrap rules below. | `restore_source_mismatch` |
+| **R3 binding (#31 d; challenge 2, finding 1)** | `line.seq == from_seq + 1`, `line.prev == payload.head`. **Retained prefix:** the proof shows that `from_seq` ends at the owner-signed `payload.head`. If `from_seq < C.seq`: exactly `from_seq − s` heads fold from a stored node `(s, acc_s)` of C's branch, the last one is `payload.head`, and that gives `acc_from`; C's abandoned suffix (exactly `C.seq − from_seq` heads, staged) folds from `acc_from` to C's entry `acc`. If `from_seq ≥ C.seq`: a forward proof from C's entry to `from_seq`, the last head `payload.head`. T's entry for the log is exactly `{from_seq + 1, head(line), fold(acc_from, head(line))}`. Every other log of T is an exact extension of C's (staged `appended` heads, exact counts; equal seq means identical head and `acc`; unchanged logs byte-equal). Every log of C stays present (a ticket restore keeps every existing ticket entry). `T.n > C.n`. A ticket restore has `ws_seq ≤ T.workspace_log.seq`. The signed `abandoned` names the highest known entry above `from_seq`, C's included (stream A); the relay checks that it is at least C's entry when C's seq exceeds `from_seq`, and refuses an equal-height conflicting head. | `restore_invalid`, `chain_diverged` |
+| **R3a position time (P3-D25)** | `C.o.at ≤ line.at ≤ T.o.at`; `T.o.at ≥ H.o.at`; `T.o.at ≤ relay clock + 300 s`. The same `at` rules apply to every published checkpoint (non-decreasing, not more than 300 s ahead of the relay clock). | `restore_invalid`; plain publication: `checkpoint_time` (409) |
+| **R4 revocations (#31 e, f; stream A's B1; challenge 2, finding 12)** | A workspace restore carries **every** host-held revocation of the workspace; a ticket restore carries `[]`. Each entry `{revocation, device_cert, pk_pub}` is verified first, with `pk_pub` the stored account key of its person. All evidence is validated before any effect. The relay then compares **by `(device_id, reason strength)`**: every revocation it holds for a device in `ever_devices` must appear with the same or a stronger reason (compromised > lost = retired). Byte identity with the chain's earliest revocation stays a host/F1 rule: the relay never holds the chain and would refuse honest restores. | `restore_missing_revocation` (`devices`), `restore_invalid` |
 | **R5 single use (#31 b, C16)** | The id is not among the applied transitions. Only applied ids are recorded, never ids from refused offers, so nobody can poison the set. | `restore_reused` |
 
-**On acceptance:** the staged revocations are applied (strongest reason kept, §5.3), their devices join
-`ever_devices`, `log_heads` of the restored log is cut back to `from_seq` and extended by `head(line)`, H becomes T, and
-the bundle is stored.
+**Bootstrap (`source: null`; challenge 2, finding 4).** This is accepted only while the relay holds no checkpoint for
+the workspace. It runs R0, R1, R4 and R5. T becomes the first checkpoint. There is no R2 comparison and no R3 fold
+against a C; T's restored log must hold exactly `{from_seq + 1, head(line)}` with a full proof from `acc_0`. Of R3a
+only `line.at ≤ T.o.at` applies. Devices never apply a `null` bundle once initialized.
 
-**Limits of the authorization evidence.** It is what a checkpoint-only party can verify:
+**On acceptance**, in one transaction:
 
-- The owner is the delegation's owner person. F1 owner roles beyond that (co-owners) come in P8 with a signed roster.
-- Membership in the WSK-signed list stands in for F1's device introduction and removal. A WSK holder could list a
-  removed device, but still needs that owner device's signature.
+- the staged revocations are applied (strongest reason kept, §5.3);
+- `ever_devices` grows from the verified entries and the verified bundle certificate;
+- every verified head enters `log_nodes`;
+- H becomes T;
+- the bundle `{restore_id, log, source hash, line, cert, authz, target hash}` is stored, and C and T are pinned.
 
-The host replays full F1 authorization at `from_seq` (stream A).
+**P3-D24, the P3 owner-device policy** (an agreed deviation from F1 §5.11 for checkpoint-only receivers). Hosts that
+hold the logs replay full F1 authorization at `from_seq`: membership, owner role, device introduction and removal,
+scopes, revocation and roster. The relay and devices cannot replay this without the logs. In P3 they accept a restore
+when the owner person of the card's delegation signed it from a PK-certified, operate-scoped device that isn't revoked.
+
+- **What it guarantees:** a restore cannot leave the host without the signature of a device the owner's `PK` certified
+  for operate, on this exact transition and source.
+- **What it does not guarantee:** that the device was introduced into this workspace and not removed at `from_seq`, or
+  that the person still held the F1 owner role there. Example: an owner device removed from this workspace
+  (`device.removed`) but not revoked can still sign a restore that a WSK holder publishes. This needs WSK plus the
+  owner's own still-trusted device, and revocation closes it.
+- **The relay's current-list check** catches honest-host mistakes only, because a WSK holder signs lists.
+- **Why no member list or roster commitment as evidence:** every restore arrives under a WSK session with a WSK-signed T
+  and `host_sig`, so WSK-signed evidence adds nothing against a WSK holder. A malicious relay cannot create bundles.
+- **P8** replaces this with an owner-signed roster with roles. The roster is committed in checkpoints and verified by
+  checkpoint-only receivers.
 
 **Requirement map (#31).**
 
 | # | Requirement | Mechanism |
 |---|---|---|
-| a | verify the full owner-signed restore event | R0, R1 (signature and authorization evidence) |
+| a | verify the full owner-signed restore event | R0, R1 (signature and the P3-D24 policy) |
 | b | mark every restore id seen | R5: applied ids only, permanent; exact retries idempotent |
-| c | `restore.at > H.at` | **dropped**: `at` is host-chosen and unsigned (C14). R2 replaces it. |
-| d | tie the restore to the chain | R2 (owner-signed source = held H, atomic) + R3 (exact accumulator entry) + endpoint-bound walk with accumulator ancestry |
-| e | never capture a restore without its revocations | revocations inside the payload (stream A); host outbox (§9) |
-| f | own revocation set; refuse a restore lacking any | R4, transactional, strongest reason |
+| c | `restore.at > H.at` | replaced by R3a (P3-D25): `C.o.at ≤ line.at ≤ T.o.at`, with non-decreasing checkpoint `at` |
+| d | tie the restore to the chain | R2 (owner-signed source = held H, atomic), R3 (retained prefix to `payload.head`, exact accumulator entry), and the endpoint-bound walk |
+| e | never capture a restore without its revocations | revocations inside the payload (stream A); host outbox with the full evidence (§9) |
+| f | own revocation set; refuse a restore lacking any | R4, by device and reason strength, transactional |
 | g | field set per actor kind | R0; vector in G0 |
 
-### 6.4 Stream A's source binding, and proposal part 2
+### 6.4 Stream A's decisions, and what each side does
 
-**Decided by stream A** (core restore PR; recorded here as fixed input):
+**Decided by stream A** (core restore PR; one breaking change for checkpoints and restore). This is fixed input:
 
-- `source` is `{n, hash}` or `null`. `hash` is `"sha256:"` + lowercase hex of
-  `SHA-256("orch/v2/checkpoint-hash|" || cj(C.o))` (new label `h_checkpoint`).
-- C is a schema-valid, WSK-signed workspace checkpoint of the pinned workspace and genesis, with `source.n == C.o.n`.
-- `abandoned` still names the highest known checkpoint entry above `from_seq`, C's included; `source` is only the
-  baseline. Equal-height conflicting heads are refused.
-- `null` is accepted only by a receiver in an uninitialized state.
-- Workspace and ticket restores both bind the workspace checkpoint. A ticket restore keeps every existing ticket entry.
-- The owner's authority is checked at `from_seq` against the pre-event replay state.
-- The P1/P2 host uses its last locally accepted workspace checkpoint as `source`, under the append lock (`null` only
-  before any exists). It accepts a restore only if `source == held H`, atomically, and persists transitions locally for
-  publication in P3.
-- Revocations: B1 (Q1 below).
+- **`source`** is `{n, hash}` or `null`. `hash` is `"sha256:"` + lowercase hex of
+  `SHA-256("orch/v2/checkpoint-hash|" || cj(C.o))` (label `h_checkpoint`). C is a schema-valid, WSK-signed workspace
+  checkpoint of the pinned workspace and genesis, with `source.n == C.o.n`.
+- **`abandoned`** names the highest known entry above `from_seq`, C's included. Equal-height conflicting heads are
+  refused. `null` is accepted only by an uninitialized receiver.
+- **Both log kinds** bind the workspace checkpoint. A ticket restore keeps every existing ticket entry. The host checks
+  owner authority at `from_seq` by replay.
+- **The P1/P2 host** takes its last locally accepted workspace checkpoint as `source`, under the append lock. It
+  accepts a restore only if `source == held H`, atomically.
+- **Accumulators** are as in P3-D19, with the guarantee wording above.
+- **Pairing `approved`** carries the exact held checkpoint reference, never downgraded (§6.2).
+- **Persisted transitions** atomically keep C, T, the full signed restore, the certificate and the delegation (the
+  authorization evidence at the pre-event state), plus the branch and proof material. Crash recovery keeps pending
+  transitions. **No member list, and P1 never fabricates relay objects.**
+- **Revocations** are B1. Reasons are closed (`rollback`, `diverged`, `broken`, `other`), with an optional `note`.
 
-**Proposal part 2 to stream A (new; needs core agreement before G0):**
+**Stream A must also** (from the tie-break):
 
-1. **Accumulator in checkpoint entries.** Add `acc` to every `{seq, head}` entry of a workspace checkpoint (and of a
-   ticket checkpoint), computed as in P3-D19, with the new label `h_log_acc` (`orch/v2/log-acc|`). Receivers that hold
-   logs check `acc` against their logs; checkpoint-only receivers use it for ancestry. Vectors: the fold, a restore
-   continuing from `acc_from`, a spliced list refused.
-2. **Bootstrap baseline at pairing.** The `approved` pairing answer carries the host's held checkpoint reference
-   `{n, hash}` or `null` (proto §8.3; host side).
-3. **Locally persisted transitions keep their evidence** (the line, the certificate, the delegation, the member list in
-   force, and C's abandoned heads with `acc_from`), so the P3 bridge client can publish them as bundles.
+1. Amend decided.md's Q4 line to: "Hosts check owner at `from_seq` by replay. Relays and checkpoint-only devices apply
+   P3-D24 (the card's owner person, a PK-certified operate device, not revoked) until P8's signed roster."
+2. Apply the host clamps of P3-D25. Optionally, mirror the receiver rule in F1 §5.10: a higher `n` with a lower `o.at`
+   is refused.
 
-**Answers to stream A's three questions, as revised after the source challenge:**
+**(1) The source when the owner's client holds no checkpoint.** The source is the host's held H under the append lock.
+In P3 that includes the relay's H, which the host accepted after full verification. Before signing, the owner's client
+fetches the relay's H over its own device session, compares it with the host's `source` and with anything it holds,
+and **discloses** the result: "matches the relay", "differs: n=…", or "relay unreachable: freshness unknown". This
+proves nothing about latestness. The relay's atomic R2 is the arbiter: a stale source gets `restore_source_mismatch`,
+and the owner signs again. **Flushing the outbox is not a prerequisite.** The host publishes queued checkpoints of its
+own chain in order. If the relay refuses them as diverged, the host shows the conflict, takes the relay's H as
+`source`, and drops its unpublished ones.
 
-**(1) The source when the owner's client holds no checkpoint.** The source is not the owner device's to choose: it is
-the host's held H under the append lock (stream A's rule). In P3 the host's held H includes the relay's H, fetched with
-its workspace session and accepted under the receiver rules. Before signing, the owner's client:
-
-- fetches the relay's H itself, over its own authenticated device session (a second channel, independent of the
-  host);
-- compares the relay's H with the host's `source` and with any checkpoint the client holds;
-- shows the result: "matches the relay", "differs from the relay: n=…", or "relay unreachable: freshness unknown".
-
-None of this proves that H is the latest (source challenge 3). The relay's R2 is the arbiter: a stale source gets
-`restore_source_mismatch`, and the owner signs again. **Flushing the outbox is not a prerequisite** (source challenge
-4). A rolled-back host's queued checkpoints are exactly what the relay refuses. Instead:
-
-- Queued checkpoints of the host's own chain are published in order before the restore entry.
-- If the relay refuses them as diverged, the host holds two incompatible checkpoints. It shows the conflict, takes
-  the relay's H as `source` (the one that must be abandoned for propagation), and drops its unpublished ones.
-
-**(2) Ticket-log and workspace-log restores.** Both bind the workspace checkpoint, with the exact accumulator entry on
-the restored log (R3):
+**(2) Ticket-log and workspace-log restores.** Both bind the workspace checkpoint, with the retained-prefix proof and the
+exact accumulator entry on the restored log (R3).
 
 - A **workspace restore** carries every revocation, and no ticket entry drops.
-- A **ticket restore** keeps every existing ticket entry, carries `[]`, has `ws_seq ≤ T.workspace_log.seq`, and the
+- A **ticket restore** keeps every existing ticket entry, carries `[]`, and has `ws_seq ≤ T.workspace_log.seq`. The
   host enforces F1 §5.5 order and §5.11 authorization.
 
 **(3) Receivers that missed intermediate restores.** The relay stores:
 
-- every applied transition, permanently, as a bundle `{restore_id, log, source C, line, cert, authz, abandoned_heads,
-  acc_from, target T}`, ordered by `T.n`;
-- every checkpoint a bundle references;
-- `log_heads` per log, so that it can serve ancestry proofs.
+- every applied transition, permanently, ordered by `target_n`, with C and T pinned;
+- every verified head in `log_nodes`, never cut back.
 
-The walk, bound to the endpoint E:
+The device's walk, bound to an immutable endpoint E (§6.2):
 
 ```
-held = baseline                              # bootstrap (6.2) or the last synced H
-for each bundle B in transitions(held.n < target_n <= E.n), ascending:
-    prove ancestry held -> B.source by accumulators (heads served for B.source)  else sync.incomplete or chain.diverged
-    verify B (R0, R1 historically, R3, R4 internal consistency, R5)
-    held = B.target
-prove ancestry held -> E by accumulators                                         else sync.incomplete or chain.diverged
-held = E
+held = baseline (or the last fully verified H)
+for each bundle B in transitions(after = held.hash, to = E), ascending target_n:
+    fetch B.source by hash; check its signature, workspace, genesis pin and h_checkpoint;
+    prove the exact extension held -> B.source by accumulators          (else sync.incomplete / chain.diverged)
+    check B.source == the extended held (R2-equivalent)
+    verify B: R0, R1 signature, R1 P3-D24 signer checks (delegation owner, PK-signed operate cert),
+              R3 (retained prefix to payload.head, exact entries, every log present), R3a, R4 internal
+              consistency, R5 against its own applied ids
+    tentative = B.target                                                 # nothing is committed yet
+prove the exact extension tentative -> E; check E's signature, context and at (P3-D25)
+commit atomically: held = E, record the restore ids, apply the bundles' revocations,
+                   keep local tombstones                                 (else nothing changes)
 ```
 
-- **`source: null` bundles** appear only as the first transition of a workspace. An initialized device skips history
-  below its baseline and never applies them.
-- **Historical verification is recomputed by each device from the bundle** (source challenge 10), never trusted from
-  the relay. Deterministic validity uses bundle content only:
-  - the certificate is valid at `line.at`, F1's event position (`at` is host-chosen, which is F1's own position
-    semantics);
-  - the signer is not revoked by an entry in the bundle's own revocation set;
-  - the `authz` checks pass.
-
-  Expiry today is not required. Device-local knowledge, such as a `compromised` revocation of the signer learned
-  later, raises a separate alarm and does not change validity. All runtimes thereby share the same history semantics.
-- **Catching-up devices keep their durable revocation knowledge and tombstones** (source challenge 9). A restore can
-  never resurrect a device they know to be revoked: they keep refusing it whatever the bundle says.
+- **Historical validity is recomputed by each device from bundle content.** The certificate must be valid at
+  `line.at` (F1's event position: unexpired against `at`). **Position-time anchors (P3-D25):**
+  `B.source.o.at ≤ line.at ≤ B.target.o.at` (skipped for a `source: null` bundle, where only `line.at ≤ target.o.at`
+  applies). Every checkpoint a receiver accepts has `o.at ≥` the held H's `o.at`. The signer must not be revoked by an
+  entry in the bundle's own revocation set, and the R1 P3-D24 signer checks must pass. Expiry today is not required.
+- **Device-local knowledge** (a later `compromised` revocation of the signer) raises an alarm without changing
+  validity, so every runtime has the same history semantics.
+- **Devices keep their durable revocation knowledge and tombstones.** A restore can never resurrect a device they know
+  to be revoked. Bundle absence does not prove historical non-revocation, and no retroactive completeness is demanded.
 
 ## 7. Protocol change #24 (and the #31 relay model)
 
@@ -712,7 +759,8 @@ order, relay URL host rules, `-0`, byte-wise comparison, §2.5 Unicode. Drop cha
   expiry races.
 - **`relay_auth` additions:** revoked after a valid signature, unknown id against the dummy key, expired certificate,
   concurrent tokens.
-- **`genesis_pin`:** valid; signed by a non-owner; by a decide-only device; another `wsk_pub`.
+- **`genesis_pin`:** valid; signed by a non-owner; by a decide-only device; another `wsk_pub`; an established pin whose
+  certificate later expires or is revoked (kept; alarm on revocation).
 - **`checkpoints` and `transitions`:**
   - the F1 offers through the relay rules;
   - a valid workspace restore and a valid ticket restore;
@@ -724,12 +772,28 @@ order, relay URL host rules, `-0`, byte-wise comparison, §2.5 Unicode. Drop cha
   - a bootstrap: a `null` source against an uninitialized receiver (accepted) and against an initialized one
     (refused); a pairing baseline that disagrees with the relay;
   - pagination bound to an endpoint while the relay advances;
-  - `authz` evidence: a signer not in the member list, a list of another workspace, a delegation of another person;
+  - P3-D24 policy: `restore_owner_policy_removed_device_accepted_at_checkpoint_receiver` (documents the limit; the
+    host refuses the same restore at replay), `restore_signer_not_in_current_list_refused_at_relay`,
+    `restore_cert_other_person_refused`, `restore_cert_decide_only_refused`, a delegation of another person;
+  - P3-D25 position time: `restore_at_rewritten_within_window_accepted` (documents host control),
+    `restore_at_before_source_at_refused`, `restore_at_after_target_at_refused`, `checkpoint_at_regression_refused`
+    (at the relay and at a device), `checkpoint_at_future_refused_at_relay`,
+    `restore_expired_cert_signs_against_fresh_source_refused` (refused by the device even when a colluding relay
+    serves it);
+  - accumulator boundaries: the retained prefix not ending at `payload.head`; a wrong head count; equal seq with
+    another head or `acc`; a changed unchanged log; `from_seq ≥ C.seq` with a forward proof; text instead of raw
+    32-byte inputs;
+  - historical proofs from `log_nodes` for a source on an abandoned branch; mixed pages failing the final fold;
+  - an endpoint expiring mid-sync (`checkpoint_gone`, restart with a held H unchanged); a pairing baseline fetched by
+    hash; a baseline downgrade refused; relay emptiness against a non-null baseline;
+  - staging: a missing page (`staging_incomplete`), pages bound to another `(source, T)`, expiry;
+  - bootstrap validation of a `null` bundle without R2/R3;
+  - R4 by device and strength: lost against retired (equal), compromised against lost (stronger), a weaker reason;
   - B1 entries: retained same-reason entries, an upgrade, a weaker reason, a ticket restore with entries;
   - P1-to-P3 publication of a locally persisted transition;
   - a source with a forged hash;
   - `source: null` against a held H;
-  - T not exactly `from_seq + 1`; `line.prev` ≠ `payload.head`; a WSK-rewritten `at` (no effect);
+  - T not exactly `from_seq + 1`; `line.prev` ≠ `payload.head`;
   - signers: a non-owner, a decide-only device, a revoked device, a device revoked inside the payload;
   - revocations: a missing one, a weaker reason, a stronger reason (upgrade);
   - a reused id, an exact retry, an id from a refused offer (not recorded);
@@ -742,9 +806,13 @@ order, relay URL host rules, `-0`, byte-wise comparison, §2.5 Unicode. Drop cha
 - **`bridge.relay_cases`:**
   - header device ≠ session; a non-member;
   - the epoch hint; an identical resend after rotation (skips the hint);
-  - rid conflict; coalescing; the requeue cap;
-  - fencing; cursor redelivery after a lost response;
-  - chunk conflict; old-epoch data chunk refused, refusal chunk accepted;
+  - rid conflict; coalescing; the requeue cap answering `retry_exhausted`; rid metadata outliving its last copy;
+  - fencing; a second poll cancelling the first; a cursor that never skips an unfinished lower item; a write after
+    lease expiry refused; redelivery after a lost response;
+  - chunk conflict; old-epoch data chunk refused; a `LAST | REFUSAL` chunk for a known rid accepted, for an unknown rid
+    refused; a stored replay not extending its TTL;
+  - recovery quotas: invalid signatures not charging the person, an exact retry free, the reserved revocation share;
+  - durable `rotation_due` surviving a restart, cleared only by a higher-epoch list that excludes the device;
   - whole-envelope limits.
 - **HTTP fixtures** for every route, consumed by orch-mobile's adapter and its FakeRelay.
 
@@ -781,13 +849,20 @@ This means a stolen key, a client-hosted admin (D29), or a host-held mandate key
 - sign any card, list, grant or checkpoint;
 - add a foreign person to `persons`;
 - inflate checkpoints and grow forks (F1 limit);
+- publish a restore signed by an owner device that was removed from (not revoked in) the workspace (P3-D24);
+- choose the position `at` of a restore within `[C.o.at, T.o.at]`. Certificate expiry at checkpoint-only devices is
+  evaluated at that host-chosen position (F1 §5.3, §5.11). At the relay, present authority (unexpired by the relay
+  clock) also applies. Together with a colluding relay, it can therefore get a device to accept a restore signed by an
+  **expired but unrevoked** device key, if the device's held checkpoint is older than the expiry, or if the holder
+  froze checkpoint `at` from before the expiry onwards. Expiry bounds honest use; **revocation is the only boundary
+  against a stolen key**, and is what the owner must use for a lost or retired device (P3-D25);
 - take over the holder;
 - deny service.
 
 **It cannot:**
 
 - lower a chain at the relay or a device without a fresh owner-signed transition naming the current H (R2, R3);
-- (with an honest host) let a withholding relay splice histories: accumulators pin every head list (P3-D19);
+- (with an honest host) let a withholding relay conceal the abandonment of a device's committed prefix (P3-D19);
 - replay an old restore (R2, R5);
 - drop or weaken a revocation through a restore (R4);
 - forge the genesis pin;
@@ -825,7 +900,10 @@ sealed before the rotation.
 
 - get sessions;
 - learn whether an id exists through login;
-- exhaust login for others (refusal budgets, not evictions).
+- evict other clients' challenges (refusals, not evictions).
+
+A global challenge saturation by a distributed attacker remains possible (P3-D17); it denies logins, it does not
+break any.
 
 ### Owner device compromise
 
@@ -838,8 +916,9 @@ The bridge client lives in orch-core (`orch serve`, stream A). Agents never see 
 
 **P3-D21 (host outbox; C20).** The host never holds the store lock across networking:
 
-- Under the lock, together with an append, it durably writes an outbox entry: the exact checkpoint (and, for a restore,
-  the line and certificate).
+- Under the lock, together with an append, it durably writes an outbox entry: the exact checkpoint, and for a restore
+  the full evidence set of stream A (C, T, the full signed restore, the certificate, the delegation) plus the proof
+  material (C's abandoned suffix from durable branch history, verified against C).
 - After releasing the lock, a publisher sends outbox entries in order, retries with backoff, and deletes an entry only
   after a 200.
 - A restore's outbox entry is the next one after the source it names. Normal checkpoints queued behind it wait.
@@ -855,7 +934,7 @@ The bridge client lives in orch-core (`orch serve`, stream A). Agents never see 
 | Serve devices | `GET host/poll?after=` loop; `POST bridge/{rid}` per chunk | advance `after` only to `n`s recorded in its rid store; seq window and rid store committed atomically; nothing sealed under an old epoch after the gate is up |
 | Pair | poll items `route: "pair"`; `POST pair/…`; cert requests and their state; `PUT devices` | proto §8.3–8.4; no grant before a valid certificate; the `approved` answer carries the baseline `{n, hash}` (§6.2) |
 | Checkpoints | outbox → `PUT checkpoint` with `appended` heads; `GET checkpoint` at startup | compare H with the logs (§6.2); show devices only relay-accepted checkpoints; refuse `ticket.created` near capacity (P3-D20) |
-| Restore | take the held H as `source` under the append lock (relay H accepted at startup or later); the owner's client cross-checks with the relay itself and shows the result (§6.4 (1)); append and persist the transition bundle with its evidence; publish through the outbox | do not require an outbox flush; on a diverged refusal of its own queued checkpoints, show the conflict and take the relay's H; fetch revocations first, so R4 cannot refuse a signed restore; on `restore_source_mismatch` the owner signs again |
+| Restore | take the held H as `source` under the append lock (relay H accepted at startup or later); the owner's client cross-checks with the relay itself and shows the result (§6.4 (1)); append and persist the transition with stream A's evidence set (C, T, the full signed restore, the certificate, the delegation) and the proof material; publish through the outbox: staged pages, then the final commit | do not require an outbox flush; on a diverged refusal of its own queued checkpoints, show the conflict and take the relay's H; fetch revocations first, so R4 cannot refuse a signed restore; on `restore_source_mismatch` the owner signs again |
 
 ## 10. Implementation groups
 
@@ -868,7 +947,7 @@ first.
 | **G1 directory** | `proto/`; accounts, invites, devices, revocations, sessions, auth, cards; durability settings | `uv run pytest tests/test_auth.py -x -q` | auth + directory + proto tests | `e2e/run.sh directory-basic`; name grep | G0 |
 | **G2 members** | atomic membership, card-key wraps, revocation footprint, `rotation_due` | `uv run pytest tests/test_members.py -x -q` | members + directory | `e2e/run.sh rotate-epoch` (host stub) | G1 |
 | **G3 bridge + vertical slice** | mailboxes, hold/poll/fencing, coalescing, P3-D22, pairing, cert queues, budgets | `uv run pytest tests/test_bridge_v2.py -x -q` (`-k replay`, `-k fence`, `-k pair`) | bridge + members | **vertical slice**: Python device client ↔ dev relay ↔ host stub (`bridge-device`, `pair-device`, `revoke-device`); lost-response and restart cases | G2 |
-| **G4 checkpoints** | genesis pin, accumulators and `appended`, checkpoints, transitions R0–R5 with evidence, heads and transitions routes bound to an endpoint, capacity | `uv run pytest tests/test_checkpoints.py -x -q` | checkpoints + F1 vectors | `e2e/run.sh checkpoint-rollback`, `restore-walk` | G2 (parallel with G3) |
+| **G4 checkpoints** | genesis pin, accumulators and `log_nodes`, staging and the atomic commit, checkpoints with P3-D25, transitions R0–R5 with the P3-D24 policy, hash-addressed proof and transition routes, retention and `checkpoint_gone`, measured capacity | `uv run pytest tests/test_checkpoints.py -x -q` | checkpoints + F1 vectors | `e2e/run.sh checkpoint-rollback`, `restore-walk` | G2 (parallel with G3) |
 | **G5 integration** | orch-core bridge client against the dev relay; one native orch-mobile adapter smoke run | per scenario | | P3 exit run, rotation race, restart during the outbox, a real-phone adapter | G3, G4, stream A |
 
 Order: G0 → G1 → G2 → (G3 ∥ G4) → G5. In every task the first commit is its failing vector or targeted test.
@@ -883,8 +962,8 @@ Order: G0 → G1 → G2 → (G3 ∥ G4) → G5. In every task the first commit i
 | Q4 | Exit criterion "desktop browser" | A Python harness plus one native smoke run. Amend spec §13 formally; close #8 as superseded. |
 | Q5 | Ticket checkpoints at the relay | No (P3-D12). |
 | Q6 | Option B (checkpoints commit to the last restore) | Not needed: the owner-signed source, the accumulators and the endpoint-bound walk cover it. B alone is WSK-forgeable. |
-| Q11 | Accumulators (P3-D19) are an F1 checkpoint-shape change | Ask stream A to take them (proposal part 2, §6.4). The fallback is heights only, with the limit stated in §8. |
-| Q7 | Checkpoint growth | P3-D20 limits; deltas only with a commitment scheme. |
+| Q11 | Accumulators (P3-D19) are an F1 checkpoint-shape change | **Decided by stream A**: taken, with 32-byte inputs and the guarantee wording of §6.1. There is no heights-only fallback. |
+| Q7 | Checkpoint growth | **Decided (P3-D20)**: object vs request limits, staged pages, atomic commit; about 5 000 tickets until G0 measures. Deltas only with a commitment scheme. |
 | Q8 | Genesis | P3-D18 owner-device pin; devices verify it under the pinned `PK`. |
 | Q9 | The `stale_epoch` hint in orch-mobile | Keep, bounded (P3-D8). The FakeRelay is amended, and drops rotation-abandon (P3-D7). |
 | Q10 | Relay epoch checks on responses | Yes, as defence in depth (P3-D22). |
@@ -916,34 +995,76 @@ Order: G0 → G1 → G2 → (G3 ∥ G4) → G5. In every task the first commit i
 | C19 | Relay plus old `WK` stated; rotation gate; P3-D22; uids to members noted for P8 |
 | C20 | Host outbox, tombstones at admission (P3-D21); adversarial vectors; G5 crash and race coverage |
 
-**Source challenge** (restore-rev/source-challenge.md; points 1, 2, 5, 9 and the core half of 6, 7 and 10 were
-decided by stream A and are fixed input in §6.4). The relay- and receiver-side points:
+**Source challenge** (restore-rev/source-challenge.md; its core points were decided by stream A, fixed input in
+§6.4). The relay- and receiver-side points:
 
 | Point | Change |
 |---|---|
-| 3. The owner client cannot establish H's freshness | Agreed. The owner client fetches the relay's H over its own session and **discloses** matches, conflicts and unknown freshness; it claims nothing about latestness. The relay's atomic R2 is the arbiter (§6.4 (1)). |
-| 4. Flushing must not be a prerequisite | Agreed. Queued checkpoints go first in order; a diverged refusal is shown as a conflict, and the relay's H becomes the source (§6.4 (1)). |
-| 6. `null` needs an explicit bootstrap state | Agreed. An uninitialized state at the relay; at devices, a pairing baseline from the host's `approved` answer, cross-checked with the relay. `null` bundles only ever come first (§6.2, §6.4 (3)). |
-| 7. Growth must be verified ancestry, not heights | Agreed. A per-log accumulator in checkpoints (P3-D19). The relay enforces it on publication and serves head lists; devices verify ancestry. Limit: it holds against a withholding relay with an honest host, not against a WSK holder (stated). This needs the F1 shape change (Q11). |
-| 8. Bind pagination to an endpoint | Agreed. `to_n=E` on transitions and heads; gaps in `n` are allowed because the accumulators prove continuity. Missing evidence is `sync.incomplete`, not re-pairing (§6.2). |
-| 10. Authorization evidence; recheck historical validity | Agreed. Bundles carry `authz` (the delegation and the member list in force). Devices recompute validity from the bundle at `line.at` and the bundle's own revocation set; device-local knowledge raises alarms without changing validity (§6.3, §6.4 (3)). |
+| S3. The owner client cannot establish H's freshness | Agreed. It discloses matches, conflicts and unknown freshness; the relay's atomic R2 is the arbiter (§6.4 (1)). |
+| S4. Flushing must not be a prerequisite | Agreed (§6.4 (1)). |
+| S6. `null` needs an explicit bootstrap state | Agreed. Separate bootstrap validation (§6.3), plus the exact pairing baseline (§6.2). |
+| S7. Growth must be verified ancestry | Agreed. Accumulators, **decided by stream A as P3-D19**. |
+| S8. Bind pagination to an endpoint | Agreed. Hash-addressed endpoints with retention (§6.2). |
+| S10. Authorization evidence; historical validity | **Decided by tie-break: P3-D24** (a named, narrower P3 owner-device policy, not a resolution of S10), and historical validity recomputed from the bundle with the **P3-D25** anchors. |
 
-**Disagreements and deviations** (for the Opus tie-break):
+**Challenge 2** (codex-p3-challenge2-out.md, on commit `049cf9a`; rulings from the Opus tie-break, p3-tiebreak.md):
 
-1. **C18, how the genesis is co-signed.** The relay gets a separate owner-device-signed `genesis_pin` object, not the
-   `workspace.created` event, because that event carries the owner's name and the prefix, which are sealed (spec §4).
-   The binding is equivalent.
-2. **Source challenge 10, owner evidence at checkpoint-only receivers.** Full F1 authorization at `from_seq` cannot be
-   replayed without the logs. The relay and devices accept as owner evidence: the delegation's owner person, a
-   `PK`-signed certificate with `operate`, and the device's membership in a WSK-signed member list. This is weaker
-   than the host's replay (a WSK holder could list a removed device that still holds a valid owner key). I argue it is
-   the most that can be verified without logs. A signed roster with roles is the P8 answer.
-3. **C16, receivers' revocation sets.** Devices keep their durable revocation knowledge and refuse revoked devices
-   whatever a bundle says. They do not demand retroactive R4 completeness from historical bundles, because a revocation
-   learned later would otherwise invalidate every older bundle. Completeness is judged by the relay at acceptance.
-4. **Historical position time.** Validity at `line.at` uses F1's host-chosen position. A WSK holder could choose an
-   `at` inside a certificate's validity window. It would still need that owner device's signature on a restore naming
-   the current source, so I accept this rather than invent a signer clock (stream A's ULID rule forbids that).
-5. **C12, delivery mechanism.** I chose the durable cursor of Codex's two options. This is not a disagreement.
-6. **C5, fresh `PK` possession at account creation.** Not required. Fresh device possession is required, and an
-   account holding someone's `pk_pub` grants nothing without their device keys.
+| Finding | Status in revision 3 |
+|---|---|
+| 1. Accumulator boundary | Fixed: the retained prefix proven to `payload.head`, exact counts, equal-seq identity, unchanged logs byte-equal, the forward proof when `from_seq ≥ C.seq`; the WSK limit kept (R3, §6.1). |
+| 2. Historical proof serving | **Decided (tie-break):** immutable `log_nodes` keyed by `acc`, never cut back; pages keyed by checkpoint hash; advance only after the final fold (§2, §6.1). |
+| 3. Disappearing endpoint | **Decided (tie-break):** hash-addressed endpoints, 24 h retention (permanent if referenced), 410 `checkpoint_gone`, restart with the held H; baseline refresh over the bridge (§3.4, §6.2). |
+| 4. Incomplete transition cases | Fixed: separate bootstrap validation, the `abandoned` rule, the walker's own checks listed, the outbox carries the full evidence (§6.3, §6.4, §9). |
+| 5. Stale authorization evidence | **Decided (tie-break): P3-D24.** The member list is dropped from bundles; there is a relay-only current-list check; non-guarantees are stated. |
+| 6. Historical validity and `line.at` | **Decided (tie-break): P3-D25.** A documented host-chosen position with the anchors `C.at ≤ line.at ≤ T.at`, non-decreasing checkpoint `at`, at most 300 s into the future. The claim that a rewritten `at` has no effect is withdrawn. |
+| 7. Incompatible limits | **Decided (tie-break): P3-D20.** Object vs request limits, paged staging bound to `(source hash, T hash)`, an atomic preflighted final PUT, about 5 000 tickets until G0 measures. |
+| 8. Cursor and fence races | Fixed: one poll per generation, a contiguous completed prefix, compare-and-set on `(gen, lease)`, renewal every 15 s, at-least-once within 60 s (P3-D10). |
+| 9. Retry lifecycle | Fixed: 409 `retry_exhausted`, metadata outliving dependent messages, per-device bounds (P3-D9, P3-D17). |
+| 10. Recovery quota denial | Fixed: charge after verification, free exact retries, full-duration windows, reserved revocation share. The "cannot exhaust login" claim is replaced by the stated saturation limit (§3.1, §4, §8). |
+| 11. Durable rotation | Fixed: a durable `rotation_due` with cursor and epoch, cleared only by an excluding higher-epoch list under serialization; exact-body retry precedence; no reseal (§2, §3.2, §5.3). |
+| 12. B1 evidence | **Decided (tie-break):** the relay compares by `(device_id, reason strength)`, with lost = retired; byte identity stays a host rule; `ever_devices` grows only from verified evidence; devices keep tombstones and commit atomically (R4, §6.4). |
+| 13. Refusal exception | Fixed: bound to a known rid with the `LAST \| REFUSAL` shape, validated by the client, described as an honest-host defence; no TTL extension (P3-D22). |
+| Genesis-pin verdict | Fixed: eligibility checked at first acceptance, historical verification later, an established pin never replaced, alarm on revocation (P3-D18). |
+
+**Disagreements: status after the tie-break**
+
+1. **Genesis pin vs the genesis event.** Codex accepted the separate privacy-preserving attestation. Closed.
+2. **Owner evidence without logs.** **Decided by tie-break: P3-D24, an agreed narrower policy.**
+3. **Revocation completeness on old bundles.** Codex agreed: no retroactive completeness, and local denials are kept.
+   Closed.
+4. **Historical position time.** **Decided by tie-break: P3-D25.** A documented host-chosen position with the
+   source/target anchors. The claim that rewriting has no effect is withdrawn.
+5. **Delivery mechanism.** The durable cursor; Codex's fixes for it adopted (finding 8). Closed.
+6. **Fresh `PK` possession at account creation.** Not required (P3-D3); not contested again. Closed.
+
+No open disagreements remain.
+
+## 13. Decision index
+
+| Id | Decision | Section |
+|---|---|---|
+| P3-D1 | `/v2` routes, FakeRelay shapes without `host_api`, shared HTTP fixtures | §3 |
+| P3-D2 | Sessions: 15 min bearer tokens, concurrent, checked per route; scoped per relay or workspace | §4 |
+| P3-D3 | Accounts by single-use invite plus a fresh device signature | §3.1 |
+| P3-D4 | The first card without a session, first writer wins, per-owner quotas | §3.1 |
+| P3-D5 | PK-only recovery: session-less revocations and certificates, quota-protected | §3.1 |
+| P3-D6 | Member list with `person_id` and `persons` (D39); narrower guarantee | §3.2 |
+| P3-D7 | Atomic membership publication; no rotation-abandon; no reseal on retry | §3.2 |
+| P3-D8 | Unsigned 409 `stale_epoch` hint for new rids; bounded refetch | §3.3 |
+| P3-D9 | Replay store, coalescing, `retry_exhausted` | §3.3 |
+| P3-D10 | Durable host cursor (contiguous prefix), one poll per generation, CAS fencing | §3.3 |
+| P3-D11 | Cert-request state machine; signed `cert_rejection` | §3.3 |
+| P3-D12 | The relay stores workspace checkpoints only | §3.4 |
+| P3-D13 | Restore rules R0–R5 with R3a, atomic; bootstrap validation | §6.3 |
+| P3-D14 | Restricted-ticket inner seal deferred to P8 | §7 |
+| P3-D15 | One worker, `synchronous=FULL`, SQLite off the event loop | §2 |
+| P3-D16 | Relay enforces membership, not bridge scopes | §3.3 |
+| P3-D17 | Budgets as refusals; full-duration windows; per-device record bounds | §4 |
+| P3-D18 | Owner-device genesis pin; eligibility at first acceptance; never replaced | §6.1 |
+| P3-D19 | Log accumulators (stream A) and immutable `log_nodes` | §6.1 |
+| P3-D20 | Object vs request limits, staged pages, atomic commit, measured capacity | §6.1 |
+| P3-D21 | Host outbox with the full evidence; no lock across networking | §9 |
+| P3-D22 | Old-epoch response chunks: refusals for known rids or stored replays only | §3.3 |
+| P3-D23 | Restores from owner devices only (a restriction of D62) | §11 Q3 |
+| P3-D24 | P3 owner-device policy for checkpoint-only receivers (tie-break) | §6.3 |
+| P3-D25 | Position time: documented limit, anchors, non-decreasing checkpoint `at` (tie-break) | §6.1, §6.3 |
