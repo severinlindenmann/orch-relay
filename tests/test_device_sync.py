@@ -37,30 +37,80 @@ def test_extract_matches_the_f1_snapshot_once_resynced():
     assert all(full[k] == F1[k] for k in src["keys"])
 
 
+F52 = json.loads((HERE / "vectors/f1_receiver_56f2b8a6.json").read_text())
+
+
+def judge(f1, held, offered, now, **kw):
+    return C.judge_offer(
+        S,
+        held["o"] if held else None,
+        offered["o"],
+        genesis=f1["genesis"],
+        workspace_id=f1["workspace_id"],
+        now=C.timestamp(now),
+        wsk_pub=f1["wsk_pub"],
+        **kw,
+    )
+
+
 @by_name(F1["transition_cases"])
 def test_f1_transition_cases_against_reference_judge(c):
-    got = C.judge_offer(
-        S,
-        c["held"]["o"] if c["held"] else None,
-        c["offered"]["o"],
-        genesis=c["offered"]["o"]["genesis"],
-        wsk_pub=F1["wsk_pub"],
-        restore=c["restore"],
+    # f1094b3 predates the pinned card and the clock: pin the bundle's own delegation, judge at T.at.
+    restore = c["restore"]
+    got = judge(
+        F1,
+        c["held"],
+        c["offered"],
+        c["offered"]["o"]["at"],
+        restore=restore,
         applied=c["applied"],
         proofs=c["proofs"],
         known=c.get("known_revocations", []),
+        card=restore.get("delegation"),
     )
     assert got == (c["expect"], c["recorded"])
 
 
 @by_name(F1["workspace_n_offers"])
 def test_f1_workspace_n_offers_against_reference_judge(c):
-    got = C.judge_offer(
-        S,
-        F1["workspace_n_held"]["o"],
-        c["checkpoint"]["o"],
-        genesis=F1["genesis"],
-        wsk_pub=F1["wsk_pub"],
+    got = judge(
+        F1,
+        F1["workspace_n_held"],
+        c["checkpoint"],
+        c["checkpoint"]["o"]["at"],
+        restore=c.get("restore"),
+        applied=c.get("applied", []),
+        proofs=c.get("proofs"),
+    )
+    assert got == (c["expect"], c.get("recorded"))
+
+
+@by_name(F52["transition_cases"])
+def test_orch52_transition_cases_against_reference_judge(c):
+    """orch-52's receiver cases (fix/restore-receiver-vectors 56f2b8a6, not yet merged): one defect each."""
+    kw = {
+        "restore": c["restore"],
+        "applied": c["applied"],
+        "proofs": c["proofs"],
+        "card": c["pinned_delegation"],
+    }
+    got = judge(F52, c["held"], c["offered"], c["now"], known=c.get("known_revocations", []), **kw)
+    assert got == (c["expect"], c["recorded"])
+    if "learned_later_in_walk" in c:
+        again = judge(
+            F52, c["held"], c["offered"], c["now"], known=c["learned_later_in_walk"], **kw
+        )
+        assert again == ("chain.diverged", None)
+
+
+@by_name(F52["workspace_n_offers"])
+def test_orch52_workspace_n_offers_against_reference_judge(c):
+    held = c["held"] if "held" in c else F52["workspace_n_held"]
+    got = judge(
+        F52,
+        held,
+        c["checkpoint"],
+        c["now"],
         restore=c.get("restore"),
         applied=c.get("applied", []),
         proofs=c.get("proofs"),
@@ -70,13 +120,28 @@ def test_f1_workspace_n_offers_against_reference_judge(c):
 
 def test_f1_known_revocation_of_signer_refuses_on_ticket_logs_too():
     # Review 1 in F1 terms: known revocations refuse the signer whatever the log.
-    c = copy.deepcopy(next(x for x in F1["transition_cases"] if x["name"] == "restore_accumulator_fold"))
+    c = copy.deepcopy(
+        next(x for x in F1["transition_cases"] if x["name"] == "restore_accumulator_fold")
+    )
     signer = c["restore"]["device_cert"]["o"]["device_id"]
     for reason in ("lost", "retired", "compromised"):
-        rev = {"o": {"device_id": signer, "reason": reason}}
-        got = C.judge_offer(
-            S, c["held"]["o"], c["offered"]["o"], genesis=F1["genesis"], wsk_pub=F1["wsk_pub"],
-            restore=c["restore"], applied=[], proofs=c["proofs"], known=[{"revocation": rev}],
+        rev = {
+            "o": {
+                "device_id": signer,
+                "reason": reason,
+                "person_id": c["restore"]["device_cert"]["o"]["person_id"],
+            }
+        }
+        got = judge(
+            F1,
+            c["held"],
+            c["offered"],
+            c["offered"]["o"]["at"],
+            restore=c["restore"],
+            applied=[],
+            proofs=c["proofs"],
+            known=[{"revocation": rev}],
+            card=c["restore"]["delegation"],
         )
         assert got == ("chain.diverged", None), reason
 
@@ -118,7 +183,12 @@ def test_device_sync_never_mutates_the_device_on_refusal():
     state = copy.deepcopy(case["state"])
     device = copy.deepcopy(case["steps"][0]["input"]["body"])
     before = copy.deepcopy(device)
-    assert C.dispatch(S, state, "device_sync", device, now_ms=case["steps"][0]["input"]["now_ms"])["status"] == 409
+    assert (
+        C.dispatch(S, state, "device_sync", device, now_ms=case["steps"][0]["input"]["now_ms"])[
+            "status"
+        ]
+        == 409
+    )
     assert device == before
 
 
@@ -136,13 +206,113 @@ def _hostile_reader(monkeypatch, op, page):
     monkeypatch.setattr(C, "read", read)
 
 
-@pytest.mark.parametrize("op,page", [
-    ("transitions", lambda a: {"transitions": [], "next": str(a["after_n"])}),
-    ("proof", lambda a: {"heads": ["sha256:" + "11" * 32], "next": a["from"]}),
-])
+@pytest.mark.parametrize(
+    "op,page",
+    [
+        ("transitions", lambda a: {"transitions": [], "next": str(a["after_n"])}),
+        ("proof", lambda a: {"heads": ["sha256:" + "11" * 32], "next": a["from"]}),
+        ("proof", lambda a: {"heads": [], "next": a["from"]}),
+    ],
+)
 def test_walk_paging_is_bounded_against_a_hostile_relay(monkeypatch, op, page):
     case = CASES["walk_two_restores_then_growth"]
     state = copy.deepcopy(case["state"])
     step = case["steps"][0]["input"]
     _hostile_reader(monkeypatch, op, page)
     assert C.dispatch(S, state, **step) == {"status": 409, "error": "sync_incomplete"}
+
+
+def test_ignored_never_commits_a_state_walked_above_the_endpoint(monkeypatch):
+    # Review N2/N08: a relay that serves transitions beyond E and then E itself (lower n).
+    case = CASES["walk_two_restores_then_growth"]
+    state = copy.deepcopy(case["state"])
+    device = case["steps"][0]["input"]["body"]
+    lower = state["transitions"][0]["target_hash"]  # E = the first restore's target
+    real = C.read
+
+    def read(st, op, args, now):
+        if op == "transitions":
+            return real(st, op, {**args, "to": C.checkpoint_hash(st["held"])}, now)
+        return real(st, op, args, now)
+
+    monkeypatch.setattr(C, "read", read)
+    before = copy.deepcopy(device)
+    result = C.dispatch(
+        S, state, "device_sync", device, now_ms=case["steps"][0]["input"]["now_ms"], endpoint=lower
+    )
+    assert result == {"status": 409, "error": "chain_diverged"}
+    assert device == before
+
+
+def test_device_head_budget_bounds_wsk_signed_heights(monkeypatch):
+    # Review L3: a WSK holder can sign any height; the device's own ceiling bounds the walk.
+    case = CASES["walk_plain_growth"]
+    state = copy.deepcopy(case["state"])
+    step = case["steps"][0]["input"]
+    monkeypatch.setattr(C, "DEVICE_MAX_HEADS", 1)
+    assert C.dispatch(S, state, **step) == {"status": 409, "error": "sync_incomplete"}
+    monkeypatch.setattr(C, "DEVICE_MAX_HEADS", 2)
+    assert C.dispatch(S, state, **step)["status"] == 200
+
+
+def test_budget_not_charged_to_a_fenced_holder_and_reset_per_generation():
+    case = CASES["publish_budget_per_holder_generation"]
+    state = copy.deepcopy(case["state"])
+    results = [C.dispatch(S, state, **s["input"]) for s in case["steps"]]
+    assert [r.get("error") for r in results[-3:]] == ["quota_exceeded", "fenced", None]
+    assert state["generation"] == 1 and state["failures"] == []
+
+
+def test_device_refuses_a_restore_line_over_the_line_cap(monkeypatch):
+    case = CASES["walk_two_restores_then_growth"]
+    state = copy.deepcopy(case["state"])
+    step = case["steps"][0]["input"]
+    size = len(R.cj(state["transitions"][0]["line"])) + 1
+    monkeypatch.setattr(C, "LINE_CAP", size - 1)
+    assert C.dispatch(S, state, **step) == {"status": 409, "error": "chain_diverged"}
+    monkeypatch.setattr(C, "LINE_CAP", size)
+    assert C.dispatch(S, copy.deepcopy(case["state"]), **step)["status"] == 200
+
+
+def test_known_evidence_must_match_the_receivers_stored_key():
+    # PR #41 completeness rule: person ids agree, but the receiver stored another key for the device.
+    c = next(x for x in F52["transition_cases"] if x["name"] == "receiver_retired_to_lost")
+    kw = {
+        "restore": c["restore"],
+        "applied": c["applied"],
+        "proofs": c["proofs"],
+        "card": c["pinned_delegation"],
+    }
+    known = copy.deepcopy(c["known_revocations"])
+    carried = {e["revocation"]["o"]["device_id"]: e for e in c["restore"]["event"]["revocations"]}
+    known[0]["pk_pub"] = carried[known[0]["revocation"]["o"]["device_id"]]["pk_pub"]
+    assert judge(F52, c["held"], c["offered"], c["now"], known=known, **kw)[0] == "ok"
+    known[0]["pk_pub"] = c["restore"]["pk_pub"]  # the owner's key, not the device person's
+    assert judge(F52, c["held"], c["offered"], c["now"], known=known, **kw) == (
+        "chain.diverged",
+        None,
+    )
+
+
+def test_initial_binds_member_devices_to_their_person():
+    state = CASES["first_checkpoint_full_proof"]["state"]
+    owner = state["delegation"]["o"]["owner_person_id"]
+    fresh = C.initial(state["ws"], state["wsk_pub"], state["owner_pk"], state["delegation"], {"d1": [], "d2": []})
+    assert fresh["device_persons"] == {"d1": owner, "d2": owner}
+    named = C.initial(state["ws"], state["wsk_pub"], state["owner_pk"], state["delegation"], {"d1": []}, {"d1": "p"})
+    assert named["device_persons"] == {"d1": "p"}
+
+
+def test_resumed_endpoint_must_be_the_requested_hash(monkeypatch):
+    case = CASES["walk_endpoint_gone_keeps_held"]
+    state = copy.deepcopy(case["state"])
+    step = {**case["steps"][0]["input"], "now_ms": case["steps"][0]["input"]["now_ms"] - C.DAY}
+    real = C.read
+
+    def read(st, op, args, now):
+        if op == "get" and args.get("hash") == step["endpoint"]:
+            return real(st, op, {}, now)  # serves the current H for an older requested E
+        return real(st, op, args, now)
+
+    monkeypatch.setattr(C, "read", read)
+    assert C.dispatch(S, state, **step) == {"status": 409, "error": "chain_diverged"}

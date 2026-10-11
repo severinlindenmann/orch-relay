@@ -11,7 +11,7 @@ ROUTES = [
     ('staging_manifest', 'PUT', PREFIX+'/staging/{source_hash}/{target_hash}/manifest', 'host', 'W(g)', '409:staging_conflict 429:quota_exceeded'),
     ('baseline_post', 'POST', PREFIX+'/baselines', 'host', 'W(g)', '404:not_found 410:checkpoint_gone 429:quota_exceeded'),
     ('baseline_delete', 'DELETE', PREFIX+'/baselines/{hash}', 'client', 'W(g)|D(m)', ''),
-    ('checkpoint_put', 'PUT', PREFIX+'/checkpoint', 'host', 'W(g)', '400:wrong_suite,too_large 401:bad_signature 409:no_genesis,genesis_mismatch,chain_diverged,checkpoint_time,staging_incomplete,restore_invalid,restore_not_owner,restore_source_mismatch,restore_reused,restore_missing_revocation 429:quota_exceeded'),
+    ('checkpoint_put', 'PUT', PREFIX+'/checkpoint', 'host', 'W(g)', '400:wrong_suite,too_large 401:bad_signature 409:no_genesis,genesis_mismatch,chain_diverged,checkpoint_time,staging_incomplete,restore_invalid,restore_not_owner,restore_source_mismatch,restore_reused,restore_missing_revocation,fenced 429:quota_exceeded'),
     ('checkpoint_get', 'GET', PREFIX+'/checkpoint', 'client', 'D(m)|W', '404:not_found 410:checkpoint_gone'),
     ('transitions', 'GET', PREFIX+'/transitions', 'client', 'D(m)|W', '404:not_found 410:checkpoint_gone'),
     ('proof', 'GET', PREFIX+'/proof', 'client', 'D(m)|W', '404:not_found 410:checkpoint_gone'),
@@ -100,9 +100,10 @@ def enrich(output, v):
             for i, step in enumerate(vector['steps']):
                 if step['input']['op'] != op:
                     continue
-                if name == 'baseline_delete' and vector['name'] == 'baseline_member_release_needs_offer_id' and i == 3:
+                if name == 'baseline_delete' and vector['name'] == 'baseline_member_release_needs_offer_id' and i in (0, 3):
                     c = copy.deepcopy(fixture['cases'][0])
-                    c['name'] = 'member_release_by_offer_id'
+                    # i == 0: a member naming another offer_id is a no-op and the pin stays (review L5).
+                    c['name'] = 'member_release_by_offer_id' if i == 3 else 'member_wrong_offer_id_is_a_noop'
                     c['request']['query'] = {'offer_id': step['input']['body']['offer_id']}
                     c['request']['headers']['Authorization'] = 'Bearer FAKE-device'
                     c['given'].update(vector={'section': 'checkpoints', 'name': vector['name'], 'step': i},

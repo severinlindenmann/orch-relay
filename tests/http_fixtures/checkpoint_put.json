@@ -735,8 +735,13 @@
       "name": "refusal_409_fenced",
       "given": {
         "scenario": "fenced",
-        "now_ms": 1790000000000,
-        "condition": "checkpoint_put: Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
+        "now_ms": 1790000000021,
+        "condition": "checkpoint_put: Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen).",
+        "vector": {
+          "section": "checkpoints",
+          "name": "publish_budget_per_holder_generation",
+          "step": 19
+        }
       },
       "request": {
         "method": "PUT",
