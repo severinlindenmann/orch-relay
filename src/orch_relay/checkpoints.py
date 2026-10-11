@@ -9,6 +9,7 @@ final publication records its failure row (protocol-v2 §19.8 failure budget).
 
 import asyncio
 import hashlib
+import os
 import re
 import sqlite3
 from datetime import datetime
@@ -486,6 +487,11 @@ class Relay:
 
     def charge_stage(self, key, size, global_cap):
         need(self.staged_bytes() + size <= STAGE_CAP, "quota_exceeded", 429)
+        # The deployment ceiling across workspaces: a refusal, never an eviction (§19.8, P3-D17).
+        total = self.con.execute(
+            "SELECT coalesce(sum(bytes),0) FROM checkpoint_staging WHERE expires_ms>?", (self.now,)
+        ).fetchone()[0]
+        need(total + size <= global_cap, "overloaded", 503)
         self.con.execute(
             "UPDATE checkpoint_staging SET bytes=bytes+? WHERE workspace_id=? AND source=? AND target=?",
             (size, self.ws, *key),
@@ -1166,7 +1172,9 @@ QUERY = {
 class Checkpoints:
     def __init__(self, directory, bridge):
         self.d, self.bridge = directory, bridge
-        self.global_stage_cap = GLOBAL_STAGE_CAP
+        self.global_stage_cap = int(
+            os.environ.get("ORCH_RELAY_GLOBAL_STAGE_BYTES", GLOBAL_STAGE_CAP)
+        )
 
     def authorize(self, con, route, ws, headers, now):
         """The route's principal: authenticated, authorized for this workspace, fenced."""
