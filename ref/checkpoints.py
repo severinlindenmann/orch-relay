@@ -18,6 +18,8 @@ LINE_CAP = 524288
 REQUEST_CAP = CP_CAP + LINE_CAP + 65536
 PAGE_CAP = 4 * 1024 * 1024
 STAGE_CAP = 64 * 1024 * 1024
+REQUEST_CAPS = {'genesis': 65536, 'page': PAGE_CAP, 'manifest': PAGE_CAP,
+                'baseline': 16384, 'publish': REQUEST_CAP}
 STRENGTH = {'lost': 1, 'retired': 1, 'compromised': 2}
 
 
@@ -531,7 +533,7 @@ def dispatch(S, state, op, body=None, now_ms=0, **args):
         wire = None
         if isinstance(body, (str, bytes)):
             raw = body.encode() if isinstance(body, str) else body
-            cap = REQUEST_CAP if op == 'publish' else PAGE_CAP if op in ('page', 'manifest') else 65536
+            cap = REQUEST_CAPS.get(op, 65536)
             need(len(raw) <= cap, 'too_large', 400 if op == 'publish' else 413)
             body = R.parse_json(raw)
             wire = raw

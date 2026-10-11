@@ -61,7 +61,8 @@ def test_strict_parse_precedes_any_mutation(raw):
 
 
 @pytest.mark.parametrize(
-    "op,cap,status", [("publish", C.REQUEST_CAP, 400), ("page", C.PAGE_CAP, 413)]
+    "op,cap,status",
+    [("publish", C.REQUEST_CAP, 400), ("page", C.PAGE_CAP, 413), ("baseline", 16384, 413)],
 )
 def test_actual_transport_byte_caps_before_parsing(op, cap, status):
     state = copy.deepcopy(CASES["first_checkpoint_full_proof"]["state"])
@@ -198,3 +199,35 @@ def test_historical_owner_ignores_later_local_revocation_and_completeness(reason
     state["ever_devices"] = sorted(set(state["ever_devices"]) | set(other["ever_devices"]))
     assert C.dispatch(S, state, **request) == {"status": 200}
     assert state.get("alarms", []) == ([signer] if reason == "compromised" else [])
+
+
+@pytest.mark.parametrize("as_text", [False, True])
+@pytest.mark.parametrize("extra_bytes", [0, 1])
+def test_baseline_raw_request_cap_boundary(as_text, extra_bytes):
+    case = CASES["baseline_retention_release_and_expiry"]
+    state = copy.deepcopy(case["state"])
+    request = copy.deepcopy(case["steps"][0]["input"])
+    raw = R.cj(request["body"])
+    raw += b" " * (16384 + extra_bytes - len(raw))
+    request["body"] = raw.decode() if as_text else raw
+    before = copy.deepcopy(state)
+    result = C.dispatch(S, state, **request)
+    if extra_bytes:
+        assert result == {"status": 413, "error": "too_large"}
+        assert state == before
+    else:
+        assert result == case["steps"][0]["expect"]
+        assert len(state["baselines"]) == 1
+
+
+def test_checkpoint_request_caps_match_http_registry():
+    from ref._checkpoint_http import CAPS
+
+    routes = {
+        "genesis": "genesis",
+        "page": "staging_page",
+        "manifest": "staging_manifest",
+        "baseline": "baseline_post",
+        "publish": "checkpoint_put",
+    }
+    assert C.REQUEST_CAPS == {op: CAPS[route] for op, route in routes.items()}
