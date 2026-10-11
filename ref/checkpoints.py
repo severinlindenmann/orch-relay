@@ -310,11 +310,15 @@ def revocation_evidence(S, state, line, log):
         need(d not in listed, 'restore_invalid', 409)
         order.append(d); listed[d] = item['revocation']
     need(order == sorted(order), 'restore_invalid', 409)
+    return listed
+
+
+def revocation_coverage(state, listed, signer, log):
     if log == 'workspace':
-        missing = sorted(d for d in state['ever_devices'] if d in state['revocations'] and
+        devices = set(state['ever_devices']) | set(listed) | {signer}
+        missing = sorted(d for d in devices if d in state['revocations'] and
                          (d not in listed or STRENGTH[listed[d]['o']['reason']] < STRENGTH[state['revocations'][d]['o']['reason']]))
         need(not missing, 'restore_missing_revocation', 409, devices=missing)
-    return listed
 
 
 def owner_policy(S, state, bundle, now, extra=(), historical=False):
@@ -358,6 +362,7 @@ def restore_check(S, state, body, target, held, stage, used, now):
     log = logs[0]
     listed = revocation_evidence(S, state, line, log)
     cert = owner_policy(S, state, bundle, now, listed)
+    revocation_coverage(state, listed, cert['device_id'], log)
     need((not held or timestamp(held['o']['at']) <= timestamp(line['at'])) and
          timestamp(line['at']) <= timestamp(target['o']['at']), 'restore_invalid', 409)
     if 'ws_seq' in line:

@@ -41,28 +41,32 @@ def test_f1_event_signing_context_matches_portable_f1_vectors():
         # F1's own explicit signing bytes provide an independent oracle.
         assert isinstance(example, dict)
     chain = json.loads((Path(__file__).parent / "vectors/f1/chain.json").read_text())
-    assert C.event_bytes(S, chain["ws_event"], chain["workspace_id"], "workspace").hex() == chain["ws_event_signing_hex"]
+    assert (
+        C.event_bytes(S, chain["ws_event"], chain["workspace_id"], "workspace").hex()
+        == chain["ws_event_signing_hex"]
+    )
     for line, expected in zip(chain["events"], chain["host_signing_hex"]):
         assert C.event_bytes(S, line, chain["workspace_id"], chain["log"], True).hex() == expected
 
 
-@pytest.mark.parametrize("raw", ['{"checkpoint":{},"checkpoint":{}}', '{"n":1.0}', '{} trailing'])
+@pytest.mark.parametrize("raw", ['{"checkpoint":{},"checkpoint":{}}', '{"n":1.0}', "{} trailing"])
 def test_strict_parse_precedes_any_mutation(raw):
     state = copy.deepcopy(CASES["first_checkpoint_full_proof"]["state"])
     before = copy.deepcopy(state)
     assert C.dispatch(S, state, "publish", raw, now_ms=1790000000000) == {
-        "status": 400, "error": "malformed"
+        "status": 400,
+        "error": "malformed",
     }
     assert state == before
 
 
-@pytest.mark.parametrize("op,cap,status", [("publish", C.REQUEST_CAP, 400), ("page", C.PAGE_CAP, 413)])
+@pytest.mark.parametrize(
+    "op,cap,status", [("publish", C.REQUEST_CAP, 400), ("page", C.PAGE_CAP, 413)]
+)
 def test_actual_transport_byte_caps_before_parsing(op, cap, status):
     state = copy.deepcopy(CASES["first_checkpoint_full_proof"]["state"])
     before = copy.deepcopy(state)
-    assert C.dispatch(S, state, op, b" " * (cap + 1)) == {
-        "status": status, "error": "too_large"
-    }
+    assert C.dispatch(S, state, op, b" " * (cap + 1)) == {"status": status, "error": "too_large"}
     assert state == before
 
 
@@ -141,4 +145,23 @@ def test_staging_retries_compare_http_bytes_not_only_parsed_objects():
     first["body"] = json.dumps(first["body"], indent=2)
     before = copy.deepcopy(state)
     assert C.dispatch(S, state, **first) == {"status": 409, "error": "staging_conflict"}
+    assert state == before
+
+
+def test_restore_covers_revoked_device_first_introduced_by_payload():
+    case = CASES["B1_weaker"]
+    state = copy.deepcopy(case["state"])
+    publication = case["steps"][-1]["input"]
+    device = publication["body"]["restore"]["line"]["revocations"][0]["device_cert"]["o"][
+        "device_id"
+    ]
+    state["ever_devices"].remove(device)
+    for step in case["steps"][:-1]:
+        assert C.dispatch(S, state, **step["input"])["status"] == 200
+    before = copy.deepcopy(state)
+    assert C.dispatch(S, state, **publication) == {
+        "status": 409,
+        "error": "restore_missing_revocation",
+        "devices": [device],
+    }
     assert state == before
