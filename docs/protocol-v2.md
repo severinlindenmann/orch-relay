@@ -672,9 +672,11 @@ order two lists of one epoch.
 1. the signature with the card's `wsk_pub`;
 2. the shape: field set, sorted unique hex ids, `epoch ≥ 1`;
 3. `workspace_id` is the card's, **including on the first list** (`other_workspace`);
-4. the first list has `epoch = 1` and `list_seq = 1`;
+4. the first list has `epoch = 1` (`stale_epoch`, unsigned hint `epoch: 0`) and
+   `list_seq = 1` (`bad_epoch`); it must include a certificate-bound member device of the
+   delegation owner (`other_person`), keeping the owner in `ever_persons`;
 5. `list_seq` strictly increases (`stale_list`);
-6. `epoch` is the previous one or the previous one + 1 (`bad_epoch`; epochs never skip);
+6. `epoch` is the previous one or the previous one + 1 (`stale_epoch` with unsigned `epoch` hint; epochs never skip);
 7. if any previous member is missing, `epoch` MUST be the previous one + 1 (`rotation_required`);
 8. for every member:
    - not revoked (`revoked`);
@@ -1956,7 +1958,7 @@ on.
 
 | Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
 |---|---|---|---|---|---|
-| `PUT /v2/workspaces/{ws}/membership` | W(g) | `{member_list, grants: [wk_grant], card_key_wraps?: {card_seq, wraps}}` → `{list_seq, epoch}` | one transaction; the exact same body → 200; ≤ 1024 members, ≤ 2 MiB; JSON cap 2 MiB (G0a review 2) | 401 `bad_signature`; 403 `revoked`, `other_person`, `scope_exceeded`, `cert_expired`; 409 `other_workspace`, `stale_list`, `bad_epoch`, `rotation_required`, `missing_grant`, `grant_conflict`, `stale_card`, `wrap_conflict` (G0a review 10), `fenced` | §7.2, §7.3 (P3-D7) |
+| `PUT /v2/workspaces/{ws}/membership` | W(g) | `{member_list, grants: [wk_grant], card_key_wraps?: {card_seq, wraps}}` → `{list_seq, epoch}` | one transaction; the exact same body → 200; ≤ 1024 members, ≤ 2 MiB; JSON cap 2 MiB (G0a review 2) | 401 `bad_signature`; 403 `revoked`, `other_person`, `scope_exceeded`, `cert_expired`; 409 `other_workspace`, `stale_list`, `bad_epoch`, `stale_epoch` (`epoch`), `rotation_required`, `missing_grant`, `grant_conflict`, `stale_card`, `wrap_conflict` (G0a review 10), `fenced` | §7.2, §7.3 (P3-D7) |
 | `PUT /v2/workspaces/{ws}/card-keys` | W(g) | `{card_seq, wraps: [{device_id, sealed}]}` → `{stored}` | only devices of the current list; same → no-op; JSON cap 64 KiB (G0a review 2) | 403; 409 `stale_card`, `wrap_conflict` (G0a review 10), `fenced` | §5.3 |
 | `GET /v2/workspaces/{ws}/grants[?epoch=e]` | D(m) | → `{grants}` (own device, ascending, from `first_epoch` on) | | 403; 404 | §7.3 |
 | `GET /v2/workspaces/{ws}/members` | D(m) or W | → `{member_list}` | | 403; 404 | §7.2 |
