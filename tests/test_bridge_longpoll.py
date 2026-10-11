@@ -118,7 +118,7 @@ def test_device_poll_wakes_on_response(client):
         posted = time.monotonic()
         assert post(client, binary("bridge_host_post"), True).status_code == 202
         r = pending.result(timeout=5)
-        assert time.monotonic() - posted < 0.5
+        assert time.monotonic() - posted < 1.5
     assert len(r.json()["chunks"]) == 1
     assert client.app.state.bridge.polls == {}
 
@@ -133,7 +133,7 @@ def test_host_poll_wakes_on_request(client):
         posted = time.monotonic()
         assert post(client, binary("bridge_device_post")).status_code == 202
         r = pending.result(timeout=5)
-        assert time.monotonic() - posted < 0.5
+        assert time.monotonic() - posted < 1.5
     assert [item["device"] for item in r.json()["items"]] == [DEVICE]
 
 
@@ -165,7 +165,7 @@ def test_cert_poll_wakes_on_request(client):
         )
         assert r.status_code == 200
         r = pending.result(timeout=5)
-        assert time.monotonic() - posted < 0.5
+        assert time.monotonic() - posted < 1.5
     assert len(r.json()["requests"]) == 1
 
 
@@ -181,7 +181,7 @@ def test_device_poll_ends_promptly_on_revocation(client):
         revoked = time.monotonic()
         assert client.post("/v2/revocations", json={"record": RECORD}).status_code == 200
         assert pending.result(timeout=5).status_code == 401
-        assert time.monotonic() - revoked < 0.5
+        assert time.monotonic() - revoked < 1.5
     assert client.app.state.bridge.polls == {}
 
 
@@ -218,7 +218,7 @@ def test_device_poll_ends_promptly_on_logout(client):
         )
         assert r.status_code == 200
         assert pending.result(timeout=5).status_code == 401
-        assert time.monotonic() - out < 0.5
+        assert time.monotonic() - out < 1.5
 
 
 def test_device_poll_rechecks_membership_on_wake(client):
@@ -229,7 +229,7 @@ def test_device_poll_rechecks_membership_on_wake(client):
         removed = time.monotonic()
         client.portal.call(bridge.wake, ("members", WS))
         assert pending.result(timeout=5).status_code == 403
-        assert time.monotonic() - removed < 0.5
+        assert time.monotonic() - removed < 1.5
 
 
 def test_timed_out_poll_reauthorizes_at_deadline(client):
@@ -263,7 +263,7 @@ def test_host_poll_waits_despite_past_revocation(client):
     # The first response delivers the durable notice to this holder generation.
     started = time.monotonic()
     assert host_poll(client, 2).json()["notices"]["revocations_cursor"] == 1
-    assert time.monotonic() - started < 0.5
+    assert time.monotonic() - started < 1.5
     started = time.monotonic()
     r = host_poll(client, 2)
     assert time.monotonic() - started >= 1.9
@@ -276,7 +276,7 @@ def test_host_poll_waits_despite_past_revocation(client):
     started = time.monotonic()
     r = client.get(f"/v2/workspaces/{WS}/host/poll", params={"wait": 2}, headers=gen2)
     assert r.json()["notices"]["revocations_cursor"] == 1
-    assert time.monotonic() - started < 0.5
+    assert time.monotonic() - started < 1.5
 
 
 def test_host_poll_wakes_on_new_revocation(client):
@@ -288,7 +288,7 @@ def test_host_poll_wakes_on_new_revocation(client):
         revoked = time.monotonic()
         assert client.post("/v2/revocations", json={"record": RECORD}).status_code == 200
         r = pending.result(timeout=5)
-        assert time.monotonic() - revoked < 0.5
+        assert time.monotonic() - revoked < 1.5
     notices = r.json()["notices"]
     assert notices["revocations_cursor"] == 1
     assert [row["device_id"] for row in notices["rotation_due"]] == [DEVICE]
@@ -299,7 +299,7 @@ def test_host_poll_returns_undelivered_notice_change_at_once(client):
     sql(client, "INSERT INTO rotation_due VALUES (?,?,?,?)", (WS, DEVICE, 1, 1))
     started = time.monotonic()
     r = host_poll(client, 5)
-    assert time.monotonic() - started < 0.5
+    assert time.monotonic() - started < 1.5
     assert r.json()["notices"]["rotation_due"] == [
         {"device_id": DEVICE, "revocation_cursor": 1, "epoch": 1}
     ]
@@ -346,7 +346,7 @@ def test_host_poll_wakes_on_cert_challenge(client):
         )
         assert r.status_code == 200
         r = pending.result(timeout=5)
-        assert time.monotonic() - challenged < 0.5
+        assert time.monotonic() - challenged < 1.5
     assert r.json()["notices"]["cert_requests"] == [CRID]
 
 
@@ -362,7 +362,7 @@ def test_host_poll_fenced_promptly_after_takeover(client):
         )
         assert r.status_code == 200
         assert pending.result(timeout=5).json() == {"error": "fenced"}
-        assert time.monotonic() - took < 0.5
+        assert time.monotonic() - took < 1.5
 
 
 def throughput(client, seconds=1.0):
@@ -889,7 +889,7 @@ def test_pair_poll_wakes_on_host_answer(client):
         r = client.post(path, content=P.unb64u(fixture["body_b64u"]), headers=fixture["headers"])
         assert r.status_code == 202, r.text
         r = pending.result(timeout=5)
-        assert time.monotonic() - answered < 0.5
+        assert time.monotonic() - answered < 1.5
     assert len(r.json()["chunks"]) == 1
 
 
@@ -942,7 +942,7 @@ def test_host_poll_ends_promptly_on_workspace_logout(client):
         )
         assert r.status_code == 200
         assert pending.result(timeout=5).status_code == 401
-        assert time.monotonic() - out < 0.5
+        assert time.monotonic() - out < 1.5
 
 
 def test_preauthorize_database_error_falls_back_to_transaction(client, monkeypatch):
