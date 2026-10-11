@@ -38,10 +38,13 @@ sets grow only through accepted membership publication, as §19.1 requires.
 
 Contract clarifications in this group:
 
-- Per the G2 task, invalid relay epoch adjacency returns `stale_epoch` with the
-  unsigned current epoch (zero before a first list). The original §7.2 said
-  `bad_epoch`; §7.2 and §19.2 now agree with the task. `bad_epoch` remains for an
-  invalid first-list sequence. Existing abstract vectors are unchanged.
+- (G2b, P3-D26; supersedes the G2 adjacency note) Epoch violations return 409
+  `bad_epoch`: a first list outside epochs `1..2^16`, a later epoch that falls or
+  skips by more than `2^16`. Any first `list_seq >= 1` is accepted, so a refused
+  first publication can retry at `(2, 2)`. A removal needs a higher epoch
+  (`rotation_required`); the same epoch with another `wk_commit` is 409
+  `wk_commit_changed`. The `member_lists` vectors `first_list_not_epoch_1` and
+  `epoch_skips` were replaced; the `bad_epoch` fixture now uses a falling epoch.
 - `other_person` covers an ownerless first list; no new refusal code is needed.
 - Membership refusal fixtures now use appropriate signed vector artifacts:
   other-workspace, grant-device/epoch mismatch, invalid first-list sequence, and
