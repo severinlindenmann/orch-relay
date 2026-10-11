@@ -33,6 +33,7 @@ def _suite(S, v):  # noqa: C901 (a builder: long by nature)
     old_seed_sig, old_seed_kx = fake(f"suite{S.id}/g3b phone earlier attempt/sig"), fake(f"suite{S.id}/g3b phone earlier attempt/kx")
     old_sig_pub, old_kx_pub = S.sig_pub(S.sig_key(old_seed_sig)), S.kx_pub(S.kx_key(old_seed_kx))
     old_dev = R.device_id(S, old_sig_pub)
+    old_hash = R.b64u(R.dk_hash(S, old_sig_pub, old_kx_pub))
 
     def inner_for(sig_pub, kx_pub, attempt, offer_=offer):
         return {"device_id": R.device_id(S, sig_pub).hex(), "dk_sig_pub": R.b64u(sig_pub), "dk_kx_pub": R.b64u(kx_pub),
@@ -204,7 +205,8 @@ def _suite(S, v):  # noqa: C901 (a builder: long by nature)
     ctx0 = {"suite": S.id, "workspace": ws.hex(), "device": dev["phone"].hex(), "offer": offer.hex(),
             "secret": secret.hex(), "wsk_pin": R.wsk_pin(S, pub["wsk_a.sig"]).hex(),
             "pk_pin": R.pk_pin(S, pub["person_alice.sig"]).hex(), "dk_sig_pub": R.b64u(pub["phone.sig"]),
-            "dk_kx_pub": R.b64u(pub["phone.kx"]), "attempt": attempt_a, "earlier_devices": [old_dev.hex()],
+            "dk_kx_pub": R.b64u(pub["phone.kx"]), "attempt": attempt_a,
+            "earlier_attempts": [{"device_id": old_dev.hex(), "dk_hash": old_hash}],
             "offset_ms": 0, "pending": {}}
 
     def chain(group, name, steps, ctx=None):
@@ -262,7 +264,25 @@ def _suite(S, v):  # noqa: C901 (a builder: long by nature)
     # a phone that forgot its earlier keys fails closed: the earlier attempt's challenge raises the alarm
     assert one(challenges, "challenge_of_an_earlier_attempt_without_its_memory_raises_the_alarm", {
         **cp, "challenge": R.make_cert_challenge(S, pk, req_old["o"], inner_old, nonce)},
-        ctx={**ctx0, "earlier_devices": []})["alarm"] is True
+        ctx={**ctx0, "earlier_attempts": []})["alarm"] is True
+    # round 2 (F1, probe case A): the phone's OLD signing key with the host's kx key is not a stale attempt
+    inner_old_sig_foreign_kx = inner_for(old_sig_pub, pub["intruder.kx"], attempt_a)
+    req_old_sig_foreign_kx = creq(inner_old_sig_foreign_kx, "old sig foreign kx")
+    assert one(challenges, "challenge_earlier_device_foreign_kx_raises_the_alarm", {
+        **cp, "challenge": R.make_cert_challenge(S, pk, req_old_sig_foreign_kx["o"], inner_old_sig_foreign_kx, nonce)}) \
+        == {"result": "drop", "why": "not_my_key", "alarm": True}
+    # round 2 (F3): expiry before the alarm: an expired foreign challenge is dropped silently
+    assert one(challenges, "expired_foreign_challenge_dropped_without_alarm", {
+        **cp, "challenge": R.make_cert_challenge(S, pk, req_intruder["o"], inner_intruder, nonce)},
+        now=req_intruder["o"]["expires_ms"]) == {"result": "drop", "why": "challenge_expired"}
+    assert one(challenges, "expired_challenge_of_an_earlier_attempt_dropped_as_expired", {
+        **cp, "challenge": R.make_cert_challenge(S, pk, req_old["o"], inner_old, nonce)},
+        now=req_old["o"]["expires_ms"]) == {"result": "drop", "why": "challenge_expired"}
+    # ... but for this attempt's own keys the attempt and the offer still come before the expiry
+    assert one(challenges, "expired_challenge_with_these_keys_other_offer_not_for_this_pairing", {
+        **cp, "challenge": R.make_cert_challenge(S, pk, req_other_offer["o"], {**inner, "offer_id": other_offer.hex()},
+                                                 nonce)}, now=req_other_offer["o"]["expires_ms"]) == \
+        {"result": "drop", "why": "not_for_this_pairing"}
 
     # ------------------------------------------------------------------ rejected: two exact forms
     forms = []
@@ -280,6 +300,16 @@ def _suite(S, v):  # noqa: C901 (a builder: long by nature)
         assert got == want, (name, got, want)
 
     rj("short_form_unattributed_without_alarm", {"state": "rejected", "wsk_pub": wpub})
+    rj("short_form_with_an_extra_field_not_a_pairing_answer",
+       {"state": "rejected", "wsk_pub": wpub, "primary_label": "MacBook Pro"}, "not_a_pairing_answer")
+    rj("rejection_earlier_device_other_dk_hash_raises_the_alarm",
+       {**long_, "rejection": R.make_cert_rejection(S, pk, req_old_sig_foreign_kx["o"])}, "not_my_key", alarm=True)
+    rj("expired_foreign_rejection_unattributed_without_alarm",
+       {**long_, "rejection": R.make_cert_rejection(S, pk, req_intruder["o"])}, "rejection_expired",
+       now=req_intruder["o"]["expires_ms"])
+    rj("expired_rejection_this_device_other_attempt_not_for_this_pairing",
+       {**long_, "rejection": R.make_cert_rejection(S, pk, req_other_attempt["o"])}, "not_for_this_pairing",
+       now=req_other_attempt["o"]["expires_ms"])
     rj("long_form_before_any_challenge_denied_by_the_owner", long_, "ok")
     rj("long_form_stripped_of_the_rejection_unattributed", {"state": "rejected", "wsk_pub": wpub, "pk_pub": ppub},
        "not_a_pairing_answer")
@@ -358,6 +388,17 @@ def _suite(S, v):  # noqa: C901 (a builder: long by nature)
         assert one(answers, name, meta) == {"result": "drop", "why": "not_a_pairing_answer"}, name
     assert one(answers, "approved_without_the_baseline_field", {k_: x for k_, x in base.items() if k_ != "baseline"}) \
         == {"result": "drop", "why": "not_a_pairing_answer"}
+    # round 2 (F5): equal baseline n never takes the new hash; F6: scopes move only with a higher list_seq
+    other_base = {"n": 7, "hash": "sha256:" + R.H(b"g3b other baseline").hex()}
+    steps = chain(answers, "approved_again_same_baseline_n_other_hash_keeps_the_baseline", [
+        (base, NOW, False), ({**base, "baseline": other_base}, NOW + 1000, False)])
+    assert steps[1]["expect"]["anchor"]["baseline"] == base["baseline"]
+    steps = chain(answers, "approved_again_same_list_seq_other_scopes_keeps_the_floor", [
+        (base, NOW, False), ({**base, "scopes": ["look"]}, NOW + 1000, False)])
+    assert steps[1]["expect"]["anchor"]["scopes"] == steps[1]["expect"]["scopes"] == base["scopes"]
+    steps = chain(answers, "approved_again_higher_list_seq_takes_its_scopes", [
+        (base, NOW, False), ({**base, "scopes": ["look"], "list_seq": 4}, NOW + 1000, False)])
+    assert steps[1]["expect"]["anchor"]["scopes"] == ["look"]
     steps = chain(answers, "approved_again_with_lower_values_keeps_the_floor", [
         (base, NOW, False), ({**base, "list_seq": 2, "card_seq": 1, "epoch": 1, "baseline": None}, NOW + 1000, True)])
     assert steps[1]["expect"]["anchor"] == steps[0]["expect"]["anchor"]
@@ -395,8 +436,11 @@ def _suite(S, v):  # noqa: C901 (a builder: long by nature)
     assert jcase("list_above_the_anchor_joins", [("list", mlist(3, 5))])[0]["expect"] == {"ok": "advanced"}
     assert jcase("list_below_the_anchor_list_seq_refused", [("list", mlist(2, 2))])[0]["expect"] == {"refuse": "below_anchor"}
     assert jcase("list_below_the_anchor_epoch_refused", [("list", mlist(1, 4))])[0]["expect"] == {"refuse": "below_anchor"}
-    assert jcase("list_without_this_device_refused", [("list", mlist(2, 3, with_phone=False))])[0]["expect"] == \
-        {"refuse": "scopes_mismatch"}
+    assert jcase("list_without_this_device_not_a_member", [("list", mlist(2, 3, with_phone=False))])[0]["expect"] == \
+        {"refuse": "not_a_member"}
+    # round 2 (F2): above the anchor the list's scopes rule (an owner change after approval)
+    assert jcase("list_above_the_anchor_with_changed_scopes_joins",
+                 [("list", mlist(2, 4, phone_scopes=["look"]))])[0]["expect"] == {"ok": "advanced"}
     assert jcase("list_with_other_scopes_refused", [("list", mlist(2, 3, phone_scopes=["look"]))])[0]["expect"] == \
         {"refuse": "scopes_mismatch"}
     got = jcase("refused_join_keeps_the_floor_for_the_retry", [("list", mlist(2, 2)), ("list", mlist(2, 3))])
@@ -408,7 +452,7 @@ def _suite(S, v):  # noqa: C901 (a builder: long by nature)
 
     v["cert_binding"] = {"relay": relay, "primary": primary, "host": host, "challenges": challenges,
                          "earlier_attempt_keys": {"sig_seed": old_seed_sig.hex(), "kx_seed": old_seed_kx.hex(),
-                                                  "device_id": old_dev.hex()},
+                                                  "device_id": old_dev.hex(), "dk_hash": old_hash},
                          "attempts": {"current": attempt_a, "other": attempt_b}}
     v["rejected_forms"] = {"answers": forms, "objects": {"rejection": rej, "request": req}}
     v["approved_anchor"] = {"answers": answers, "join": join}

@@ -928,7 +928,8 @@ def device_accept_member_list(suite: Suite, wsk_pub: bytes, card_ws: str, dstate
     epoch until a verified list at a higher epoch arrives.
     G3b (Q6): a device that joined through pairing holds dstate["anchor"] (the approved answer's floor, persisted
     across join retries) and dstate["device"] (its own id). Its first contact then needs epoch and list_seq at or
-    above the anchor (below_anchor) and its own entry with exactly the approved scopes (scopes_mismatch)."""
+    above the anchor (below_anchor) and its own entry (not_a_member: removed, stop retrying), with exactly the
+    approved scopes when list_seq equals the anchor's (scopes_mismatch); above it the list's scopes rule."""
     o = verify_object(suite, wsk_pub, signed, "member_list")
     if o is None:
         return {"refuse": "bad_signature"}
@@ -947,8 +948,10 @@ def device_accept_member_list(suite: Suite, wsk_pub: bytes, card_ws: str, dstate
         if o["epoch"] < anchor["epoch"] or o["list_seq"] < anchor["list_seq"]:
             return {"refuse": "below_anchor"}
         own = [m for m in o["members"] if m["device_id"] == dstate["device"]]
-        if not own or own[0]["scopes"] != anchor["scopes"]:
-            return {"refuse": "scopes_mismatch"}
+        if not own:
+            return {"refuse": "not_a_member"}                      # removed after approval: stop retrying
+        if o["list_seq"] == anchor["list_seq"] and own[0]["scopes"] != anchor["scopes"]:
+            return {"refuse": "scopes_mismatch"}                   # above the anchor the list's scopes rule
     if head is not None:
         if o["list_seq"] == head["list_seq"]:
             return {"ok": "noop"} if digest_ == head["list_hash"] else {"alarm": "conflicting_snapshot"}
@@ -1571,22 +1574,24 @@ def open_pair_answer(env: bytes, c: dict, now_ms: int) -> dict:
             if not scopes_ok(meta.get("scopes")) or anchor is None:
                 return _drop("not_a_pairing_answer")
             c["anchor"] = _raise_floor(c.get("anchor"), anchor)
-            res.update(state="approved", scopes=meta["scopes"], epoch=meta["epoch"], device_id=v["ok"]["device_id"],
-                       anchor=c["anchor"])
+            res.update(state="approved", scopes=c["anchor"]["scopes"], epoch=meta["epoch"],
+                       device_id=v["ok"]["device_id"], anchor=c["anchor"])      # F6: show the floor's scopes
     elif st == "rejected":
         # G3b (Q8): attributed to the pinned owner only when the long form verifies completely; anything else is
         # an unattributed refusal (the host could have sent the short form anyway). A rejection naming another
         # device of this workspace means the owner rejected someone else's attempt: the alarm (A7.3).
         res["state"] = "rejected"
-        if "pk_pub" in meta or "rejection" in meta:
+        if set(meta) == {"state", "wsk_pub"}:
+            res["attributed"] = False
+        elif "pk_pub" in meta or "rejection" in meta:
             v = check_cert_rejection(suite, meta, c, now_ms + c.get("offset_ms", 0))
             res["attributed"] = "ok" in v
             if "why" in v:
                 res["why"] = v["why"]
                 if v["why"] == "not_my_key":
                     res["alarm"] = True
-        else:
-            res["attributed"] = False
+        else:                                   # round 2 (F8): the short form is exact too
+            res.update(attributed=False, why="not_a_pairing_answer")
     elif st == "expired":
         res["state"] = st
     else:
@@ -1616,11 +1621,11 @@ def _raise_floor(old: dict | None, new: dict) -> dict:
     """The anchor is a floor persisted across join retries: it only ever rises; the baseline never downgrades."""
     if old is None:
         return new
-    newer = new["list_seq"] >= old["list_seq"]
+    newer = new["list_seq"] > old["list_seq"]             # round 2 (F6): scopes move only with a higher list
     ob, nb = old["baseline"], new["baseline"]
     return {"epoch": max(old["epoch"], new["epoch"]), "list_seq": max(old["list_seq"], new["list_seq"]),
             "card_seq": max(old["card_seq"], new["card_seq"]), "scopes": new["scopes"] if newer else old["scopes"],
-            "baseline": nb if ob is None or nb is not None and nb["n"] >= ob["n"] else ob}
+            "baseline": nb if ob is None or nb is not None and nb["n"] > ob["n"] else ob}   # F5: equal n keeps
 
 
 _FRAGMENT = re.compile(r"#?v2\.([0-9a-f]{32})\.([0-9a-f]{32})\.([A-Za-z0-9_-]{43})\.([A-Za-z0-9_-]{43})\.([A-Za-z0-9_-]{43})")
@@ -1741,12 +1746,16 @@ def primary_issue_challenge(suite: Suite, pk, prim: dict, request_o: dict, inner
     return ch
 
 
-def _own_device(o: dict, c: dict, current: bool) -> str | None:
-    """G3b step 4, before the attempt and the offer: current keys go on; a device of one of this phone's own
-    earlier attempts is a stale attempt (drop, no alarm); anything else is someone else's key (the alarm)."""
+def _own_device(o: dict, c: dict, current: bool, keys_hash: str | None, now_ms: int, expired: str) -> str | None:
+    """G3b step 4, before the attempt and the offer: current keys go on. Otherwise (round 2, F3) an expired object
+    is dropped silently; a (device_id, dk_hash) pair of one of this phone's own earlier attempts is a stale attempt
+    (drop, no alarm; F1: both must match, so an old signing key with another kx key is NOT stale); anything else
+    is someone else's key (the alarm)."""
     if current:
         return None
-    if o["device_id"] in c.get("earlier_devices", []):
+    if type(o["expires_ms"]) is not int or now_ms >= o["expires_ms"]:
+        return expired
+    if {"device_id": o["device_id"], "dk_hash": keys_hash} in c.get("earlier_attempts", []):
         return "stale_attempt"
     return "not_my_key"
 
@@ -1763,16 +1772,20 @@ def _attempt_checks(o: dict, c: dict) -> str | None:
 
 def check_cert_challenge(suite: Suite, signed, pk_pub: bytes, c: dict, now_ms: int) -> dict:
     """§8.4 step 5, on the phone (G3b order): PK's signature and exact fields; this workspace and person; this
-    device's own current keys (else a stale attempt or the alarm), checked BEFORE the attempt and the offer, so a
-    host-chosen offer_id cannot turn the alarm into a silent drop; then the attempt nonce, the link's offer, the
-    request seen earlier in this attempt; then the expiry."""
+    device's own current keys (else: expired → silent; an own earlier attempt → stale; otherwise the alarm),
+    checked BEFORE the attempt and the offer, so a host-chosen offer_id cannot turn the alarm into a silent drop;
+    then the attempt nonce, the link's offer, the request seen earlier in this attempt; then the expiry."""
     o = verify_object(suite, pk_pub, signed, "cert_challenge")
     if o is None or set(o) != CHALLENGE_FIELDS:
         return {"drop": "challenge_signature"}
     if o["workspace_id"] != c["workspace"] or o["person_id"] != person_id(suite, pk_pub).hex():
         return {"drop": "not_for_this_workspace"}
+    try:
+        keys_hash = b64u(dk_hash(suite, unb64u(o["dk_sig_pub"]), unb64u(o["dk_kx_pub"])))
+    except (ValueError, TypeError, AssertionError):
+        keys_hash = None
     bad = _own_device(o, c, o["dk_sig_pub"] == c["dk_sig_pub"] and o["dk_kx_pub"] == c["dk_kx_pub"]
-                      and o["device_id"] == c["device"])
+                      and o["device_id"] == c["device"], keys_hash, now_ms, "challenge_expired")
     if bad:
         return {"drop": bad}
     bad = _attempt_checks(o, c)
@@ -1802,7 +1815,8 @@ def check_cert_rejection(suite: Suite, meta: dict, c: dict, now_ms: int) -> dict
     if o["workspace_id"] != c["workspace"] or o["person_id"] != person_id(suite, pk_pub).hex():
         return {"why": "not_for_this_workspace"}
     mine = b64u(dk_hash(suite, unb64u(c["dk_sig_pub"]), unb64u(c["dk_kx_pub"])))
-    bad = _own_device(o, c, o["device_id"] == c["device"] and o["dk_hash"] == mine) or _attempt_checks(o, c)
+    bad = _own_device(o, c, o["device_id"] == c["device"] and o["dk_hash"] == mine, o["dk_hash"], now_ms,
+                      "rejection_expired") or _attempt_checks(o, c)
     if bad:
         return {"why": bad}
     if type(o["expires_ms"]) is not int or now_ms >= o["expires_ms"]:

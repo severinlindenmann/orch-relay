@@ -657,7 +657,8 @@ def test_round_trip_rejection_on_the_primary_is_attributed(sid):
     ans = ask({"op": "pair_status"}, 2, now + 10)
     assert (ans["state"], ans["attributed"]) == ("rejected", True)
     # the next attempt on a reused offer: fresh keys and a new nonce; the old rejection is not this attempt's
-    ctx.update(earlier_devices=[ctx["device"]], attempt=R.fake("rt rejection attempt 2")[:16].hex())
+    ctx.update(earlier_attempts=[{"device_id": ctx["device"], "dk_hash": R.b64u(R.dk_hash(
+        S, R.unb64u(ctx["dk_sig_pub"]), R.unb64u(ctx["dk_kx_pub"])))}], attempt=R.fake("rt rejection attempt 2")[:16].hex())
     for k in ("device", "dk_sig_pub", "dk_kx_pub"):
         ctx[k] = {"device": w.id["device_laptop"].hex(), "dk_sig_pub": R.b64u(w.pub["laptop.sig"]),
                   "dk_kx_pub": R.b64u(w.pub["laptop.kx"])}[k]

@@ -987,10 +987,14 @@ Vectors: `bridge.seal`, `hkdf` (`k_bridge_epoch_1`, `k_bridge_epoch_2`, `k_pair`
    - **The pairing attempt (G3b, P3-D28).** `attempt` is a nonce the device draws when it starts a pairing
      attempt. A resend or `pair_status` poll of the same attempt keeps it (also across an app restart); a new
      attempt, including a new scan of the same link, draws a new one. A phone **without** a certificate MUST
-     draw **fresh device keys** (`dk_sig`, `dk_kx`) for every new attempt, and MUST persist, for at least
-     10 minutes after an attempt ends (the challenge lifetime), that attempt's `device_id`, so it can recognise
-     its own earlier attempt's challenge or rejection. The host cannot know the attempt nonce or the fresh
-     keys before the attempt starts, so it cannot prepare a PK-signed challenge or rejection for it.
+     draw **fresh device keys** (`dk_sig`, `dk_kx`) for every new attempt. It MUST persist the new
+     attempt's `device_id`, `dk_hash` (§8.4) and `attempt` **before it sends the pair request**, moving the
+     previous attempt's `(device_id, dk_hash)` to its list of earlier attempts in the same write; and it MUST
+     keep each earlier attempt's `(device_id, dk_hash)` for at least 10 minutes after that attempt ends (the
+     challenge lifetime), so it can recognise its own earlier attempt's challenge or rejection (round 2, F1/F4).
+     A phone that lost this memory treats such an object as foreign (the alarm): fail closed. The host cannot
+     know the attempt nonce or the fresh keys before the attempt starts, so it cannot prepare a PK-signed
+     challenge or rejection for it.
    - A phone that is already one of the owner's devices sends its certificate. If the certificate's
      person differs from `pk_pin`, the phone shows "this workspace belongs to someone else" and sends
      nothing.
@@ -1060,7 +1064,8 @@ exactly one of:
 {"state":"expired", "wsk_pub"}            cert_pending ran 10 minutes without a certificate
 ```
 
-The two `rejected` forms are exact (G3b, P3-D28). In the second the host relays the primary's PK-signed
+The two `rejected` forms are exact (G3b, P3-D28): a `rejected` answer matching neither field set is an
+unattributed refusal with reason `not_a_pairing_answer`. In the second the host relays the primary's PK-signed
 `cert_rejection` (§8.4) unchanged, as it relays the challenge.
 
 `pending` repeats the full five-field answer, with the key echo, so a device whose first answer was lost can
@@ -1079,17 +1084,26 @@ On `approved`, the device checks:
   "sha256:" + 64 lower-case hex}` (§19.8). Otherwise the answer is dropped (`not_a_pairing_answer`).
 
 `list_seq` is the sequence of the list the host published in step 6.3 (the one that adds this device),
-`card_seq` the host's current card. The device **persists** `{epoch, list_seq, card_seq, scopes,
-baseline}` as its join floor before it fetches anything, and keeps it across join retries and restarts. A
-later `approved` (a re-poll) only raises it: each number is the maximum, and the baseline never downgrades
-(§19.8). At join (vectors `approved_anchor.join`):
+`card_seq` the host's current card. **Host requirement (orch-core; round 2, F7):** `epoch`, `list_seq` and
+`card_seq` are those of the head list and card **the relay accepted**, never of a publication the relay refused
+or that is still unconfirmed: under G2b (P3-D26) a refused publication burns its numbers, and an anchor above
+every accepted object would make the phone refuse every list or card until something higher is published.
+
+The device **persists** `{epoch, list_seq, card_seq, scopes, baseline}` as its join floor before it fetches
+anything, and keeps it across join retries and restarts. A later `approved` (a re-poll) only raises it: each
+number is the maximum; the baseline is replaced only by one with a strictly higher `n` (an equal `n` with
+another hash keeps the stored one); the scopes are replaced only by an answer with a strictly higher
+`list_seq`. The device shows the floor's scopes (round 2, F5/F6). At join (vectors `approved_anchor.join`):
 
 - the first member list it accepts MUST have `epoch ≥` the floor's epoch and `list_seq ≥` the floor's
-  `list_seq` (else `below_anchor`), and MUST contain this device with **exactly** the approved `scopes`
-  (else `scopes_mismatch`);
+  `list_seq` (else `below_anchor`) and MUST contain this device (else `not_a_member`: it was removed after
+  approval; the device stops retrying and shows the pairing as ended). At exactly the floor's `list_seq` its
+  entry MUST carry **exactly** the approved `scopes` (else `scopes_mismatch`); above it the list's scopes
+  are authoritative (a newer WSK-signed list, e.g. an owner's scope change after approval; round 2, F2);
 - the first card it accepts MUST have `card_seq ≥` the floor's (else `below_anchor`).
 
-A refused object leaves the floor and the device's state unchanged; the device retries the fetch. This
+A refused object leaves the floor and the device's state unchanged; the device retries the fetch, except after
+`not_a_member`. This
 closes a relay rollback **below** the approval point; withholding newer objects stays possible (design
 §5.2). After first contact the normal monotonic rules apply (§7.2, §7.3, §18 R6). It then logs in to the
 relay (§12.2) and fetches its WK grant (§7.3).
@@ -1103,9 +1117,11 @@ no alarm, because the host could have sent the short form anyway. The only excep
 2. the signature verifies under `pk_pub` with `orch/v2/sig/cert-rejection|`, and the field set is exact
    (`rejection_signature`);
 3. `workspace_id` is the link's and `person_id == person_id(pk_pub)` (`not_for_this_workspace`);
-4. the device: `device_id` and `dk_hash` are this attempt's own. A `device_id` of one of the phone's own
-   earlier attempts is unattributed (`stale_attempt`, no alarm). **Any other device raises the alarm**
-   (`not_my_key`): the owner rejected someone else's request for this workspace;
+4. the device: `device_id` and `dk_hash` are this attempt's own. Otherwise: an expired rejection
+   (`now ≥ expires_ms`) is unattributed without alarm (`rejection_expired`); a `(device_id, dk_hash)` pair
+   equal to one of the phone's own earlier attempts is unattributed (`stale_attempt`, no alarm; **both** must
+   match, so the phone's old signing key with another key is not stale); **any other device raises the
+   alarm** (`not_my_key`): the owner rejected someone else's request for this workspace;
 5. `attempt` is this attempt's nonce and `offer_id` the link's offer (`not_for_this_pairing`);
 6. if the phone saw a challenge in this attempt, `request_id` equals that challenge's
    (`not_for_this_pairing`);
@@ -1187,16 +1203,22 @@ host must not be able to get one for a key of its choosing. The flow is:
    1. `pk_pin(pk_pub)` against the link;
    2. the signature with that `pk_pub`, and the exact field set → `challenge_signature`;
    3. `workspace_id` is the link's, and `person_id` is `person_id(pk_pub)` → `not_for_this_workspace`;
-   4. `device_id`, `dk_sig_pub` and `dk_kx_pub` are **its own current** keys. A `device_id` of one of its
-      own earlier attempts → drop without alarm (`stale_attempt`). Anything else → drop and **raise the
-      alarm** (`not_my_key`): someone asked the primary to certify another key for this pairing;
+   4. `device_id`, `dk_sig_pub` and `dk_kx_pub` are **its own current** keys. Otherwise: an expired
+      challenge (`now ≥ expires_ms`) → drop without alarm (`challenge_expired`); a `(device_id,
+      dk_hash(dk_sig_pub, dk_kx_pub))` pair equal to one of its own earlier attempts → drop without alarm
+      (`stale_attempt`; **both** must match: the phone's old signing key with a host-chosen `dk_kx_pub` is
+      foreign); anything else → drop and **raise the alarm** (`not_my_key`): someone asked the primary to
+      certify another key for this pairing;
    5. `attempt` is this attempt's nonce, and `offer_id` the link's offer → `not_for_this_pairing`;
    6. if it already accepted a challenge in this attempt, `request_id` equals that one's →
       `not_for_this_pairing`;
    7. `now < expires_ms` → `challenge_expired`.
 
    The keys are checked **before** the attempt and the offer: the host chooses `inner.offer_id`, so with
-   the offer first an R1 host could write a wrong `offer_id` and turn the alarm into a silent drop. The phone
+   the offer first an R1 host could write a wrong `offer_id` and turn the alarm into a silent drop. Only an
+   **expired** foreign object is silent (round 2, F3): it can never make the phone show a code, and a host can
+   always silence the alarm by not relaying; the rule stops a host from replaying old PK-signed objects as
+   alarm noise. For this attempt's own keys, the attempt and offer checks (5, 6) still precede the expiry. The phone
    persists the accepted challenge's `request_id` with the attempt (also across a restart). Then it shows
    `cert_code`.
 
@@ -1901,8 +1923,9 @@ Every answer to an epoch-0 request, refusals included, also carries `wsk_pub`.
 `stale_attempt` and `not_for_this_pairing` (challenges), and, as the reason of an unattributed `rejected`,
 `rejection_signature`, `rejection_expired`, `not_a_pairing_answer` and the codes above.
 
-**Phone, at join (G3b, P3-D28):** `below_anchor` (a list or card below the `approved` floor),
-`scopes_mismatch` (the first list lacks this device with exactly the approved scopes).
+**Phone, at join (G3b, P3-D28):** `below_anchor` (a list or card below the `approved` floor, retry),
+`scopes_mismatch` (a list at the anchor's `list_seq` with other scopes for this device, retry),
+`not_a_member` (the first list lacks this device: removed after approval, stop retrying).
 
 **Service worker (drops):** `signature`, `replay`, `stale`, `no_key`, `tag`, `payload`.
 

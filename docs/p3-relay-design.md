@@ -382,13 +382,17 @@ bound to the pairing attempt, and two security challenges (Opus, Codex) agreed o
   binding (403 `not_for_this_device`) and a rejection to carry the request's expiry. Defence in depth only.
 - **Phone order.** Keys and device are checked before the attempt and the offer, also when no challenge was seen,
   so a host-chosen `offer_id` cannot turn the `not_my_key` alarm into a silent drop. An own earlier attempt's
-  object is dropped without alarm (`stale_attempt`).
+  object is dropped without alarm (`stale_attempt`) only when both its `device_id` and `dk_hash` match an earlier
+  attempt the phone persisted before sending that attempt's pair request; an expired foreign object is dropped
+  without alarm; any other foreign object raises the alarm (round 2).
 - **`rejected`.** Two exact forms (short, or with `pk_pub` and the PK-signed rejection). "Denied by the owner" is
   shown only when everything verifies; it names the pinned owner, never the host's `primary_label`. Anything else
   is an unattributed refusal; a rejection for a foreign device raises the alarm.
 - **Join anchor (Q6).** `approved` carries `list_seq` and `card_seq` beside `epoch` and G0b's `baseline`; the phone
   persists them as a floor across join retries and requires its first list and card at or above it, with its own
-  entry at exactly the approved scopes.
+  entry present (`not_a_member` otherwise, no retry) and at exactly the approved scopes when the list is at the
+  anchor's `list_seq`. The host fills the anchor from relay-accepted objects only (burned G2b numbers would stall
+  the join).
 - **Q9.** A host pair answer without a held generation is 409 `fenced`, as intended (P3-D10).
 - **Residual.** A hostile host can still refuse (short form, timeout); a hostile relay can drop answers; a
   compromised primary can sign anything. Withholding newer lists after the floor stays possible (§5.2).
