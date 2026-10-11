@@ -217,3 +217,57 @@ def test_feed_pagination_and_request_time_gate(tmp_path):
             c.get(path, params={"after": "1", "next": first["next"]}, headers=headers).status_code
             == 400
         )
+
+
+def test_revocation_must_fit_feed_page(tmp_path):
+    from orch_relay.directory import MAX_BODY
+
+    with TestClient(create_app(tmp_path)) as c:
+        seed(c.app.state.directory)
+        raw = P.cj({"record": RECORD})
+        # Even a heavily padded, valid HTTP body must fit a feed entry after acceptance.
+        response = c.post(
+            "/v2/revocations",
+            content=raw + b" " * (MAX_BODY - len(raw)),
+            headers={"Content-Type": "application/json"},
+        )
+        assert response.status_code == 200  # The canonical record is tiny.
+        malformed_large = {**RECORD, "sig": "A" * MAX_BODY}
+        assert c.post("/v2/revocations", json={"record": malformed_large}).json() == {
+            "error": "too_large"
+        }
+
+
+def test_database_work_is_off_event_loop(tmp_path, monkeypatch):
+    import asyncio
+
+    real_connect = db.connect
+
+    def connect(path):
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return real_connect(path)
+        pytest.fail("SQLite connection opened on the event loop")
+
+    monkeypatch.setattr(db, "connect", connect)
+    with TestClient(create_app(tmp_path)) as c:
+        assert c.post("/v2/session/challenge", json={}).status_code == 200
+
+
+def test_card_owner_quota_spans_addresses_and_workspace_ids(tmp_path):
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d, card=False)
+        d.trusted_proxy = "127.0.0.1"
+        for i in range(11):
+            ws = f"{i:032x}"
+            card = copy.deepcopy(CARD)
+            card["o"]["workspace_id"] = ws
+            card["delegation"] = signed({**card["delegation"]["o"], "workspace_id": ws})
+            card["sig"] = sign("wsk_a.sig", P.L["sig_card_wsk"] + P.cj(card["o"]))
+            # Reset only address state; owner accounting must still limit fresh ids.
+            d.windows.pop(("card-address", "testclient", HOUR), None)
+            r = c.put("/v2/workspaces/" + ws + "/card", json={"card": card})
+            assert r.status_code == (200 if i < 10 else 429)
+        assert d.windows[("card-owner", PERSON, HOUR)][1] == 10
