@@ -324,6 +324,10 @@ def revocation_coverage(state, listed, signer, log):
 def owner_policy(S, state, bundle, now, extra=(), historical=False):
     """P3-D24: historical receivers omit the relay-only current-list/current-clock checks."""
     line = bundle['line']
+    if historical:
+        # Internal evidence is mandatory even when relay-local completeness is irrelevant.
+        listed = revocation_evidence(S, state, line, 'ticket' if 'ws_seq' in line else 'workspace')
+        extra = set(extra) | set(listed)
     cert = owner(S, state, bundle['cert'], timestamp(line['at']), extra, historical)
     if historical and state['revocations'].get(cert['device_id'], {}).get('o', {}).get('reason') == 'compromised':
         alarms = state.setdefault('alarms', [])

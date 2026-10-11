@@ -165,3 +165,36 @@ def test_restore_covers_revoked_device_first_introduced_by_payload():
         "devices": [device],
     }
     assert state == before
+
+
+@pytest.mark.parametrize("invalid_evidence", [False, True])
+def test_historical_owner_rejects_bundle_revocation(invalid_evidence):
+    case = CASES["B1_signer_self_revoked_in_payload"]
+    state = copy.deepcopy(case["state"])
+    bundle = copy.deepcopy(case["steps"][-1]["input"]["body"]["restore"])
+    if invalid_evidence:
+        bundle["line"]["revocations"][0]["revocation"]["sig"] = R.b64u(bytes(64))
+    before = copy.deepcopy(state)
+    assert C.dispatch(S, state, "owner_policy", bundle, historical=True) == {
+        "status": 409,
+        "error": "restore_invalid" if invalid_evidence else "restore_not_owner",
+    }
+    assert state == before
+
+
+@pytest.mark.parametrize("reason", ["lost", "retired", "compromised"])
+def test_historical_owner_ignores_later_local_revocation_and_completeness(reason):
+    case = CASES["historical_signer_later_lost"]
+    state = copy.deepcopy(case["state"])
+    request = case["steps"][0]["input"]
+    signer = request["body"]["cert"]["o"]["device_id"]
+    key = S.sig_key(bytes.fromhex(V["keys"]["person_alice.sig"]["seed"]))
+    state["revocations"][signer] = R.sign_object(
+        S, key, {**state["revocations"][signer]["o"], "reason": reason}
+    )
+    # An unrelated relay-known device is also absent from this historical bundle.
+    other = CASES["B1_weaker"]["state"]
+    state["revocations"].update(other["revocations"])
+    state["ever_devices"] = sorted(set(state["ever_devices"]) | set(other["ever_devices"]))
+    assert C.dispatch(S, state, **request) == {"status": 200}
+    assert state.get("alarms", []) == ([signer] if reason == "compromised" else [])
