@@ -648,7 +648,7 @@ def test_vector_files_match_the_recorded_sha256():
         for line in (F1 / "SOURCE").read_text().splitlines()
         if line.startswith("sha256:")
     )
-    assert "Commit: f1094b3fc2a4c3e5ae16dc8fd23162b8360bba09" in (F1 / "SOURCE").read_text()
+    assert "Commit: 4f00d9ce32e8e512366c908c36b43f35142747c9" in (F1 / "SOURCE").read_text()
     assert {p.name for p in F1.iterdir()} == {n + ".json" for n in FILE_KEYS} | {"SOURCE"}
     files = sorted(p.name for p in F1.glob("*.json"))
     assert files == sorted(rec) and set(files) == {name + ".json" for name in FILE_KEYS}
@@ -771,6 +771,7 @@ FILE_KEYS = {
     "generation": ["pins", "scenarios"],
     "devices": ["pins", "scenarios"],
     "repo_identity": ["mapping", "mapping_note", "ok", "pins", "refused", "same"],
+    "repo_paths": ["cases", "pins"],
     "approvals": ["pins", "scenarios"],
     "index": ["files", "note"],
     "revocation": ["pins", "scenarios"],
@@ -928,6 +929,15 @@ def test_repo_path_comparison(a, b, same):
     assert repo_paths_unique({"one": {"path": a}, "two": {"path": b}}) != same
 
 
+@by_name(load("repo_paths")["cases"])
+def test_repo_path_vectors(c):
+    """F1 §1 / §11.3 (orch-core #377 repo_paths.json): NFC first, then the ASCII-only collision comparison;
+    an owner-signed path may leave the workspace."""
+    assert [unicodedata.normalize("NFC", p) for p in c["input"]] == c["normalized"]
+    repos = {f"r{i}": {"path": p} for i, p in enumerate(c["input"])}
+    assert repo_paths_unique(repos) != c["collision"]
+
+
 def branch_ok(branch):
     """F1 §3: git branch names, with the additional reserved names and Unicode exclusions."""
     return (
@@ -948,7 +958,11 @@ def branch_ok(branch):
             for c in branch
         )
         and all(
-            part and not part.startswith(".") and not part.endswith(".lock")
+            part
+            and not part.startswith(".")
+            and not part.endswith(".lock")
+            # orch-core #377: no path component may start with a combining mark, not only the first.
+            and not unicodedata.category(part[0]).startswith("M")
             for part in branch.split("/")
         )
     )
@@ -1219,7 +1233,8 @@ def test_signed_chain_heads_and_lines():
 CP = load("checkpoint")
 
 
-def checkpoint_schema_and_signature_ok(signed):
+def checkpoint_schema_and_signature_ok(signed, bind=True):
+    """`bind=False` leaves the pinned workspace and genesis to the receiver, which reports them in its own order."""
     o = signed["o"]
     common = {"v", "suite", "kind", "workspace_id", "at"}
     fields = (
@@ -1248,8 +1263,9 @@ def checkpoint_schema_and_signature_ok(signed):
             )
         )
         and (o["kind"] != "workspace_checkpoint" or type(o["n"]) is int and o["n"] >= 1)
-        and o["workspace_id"] == CP["workspace_id"]
-        and (o["kind"] != "workspace_checkpoint" or o["genesis"] == CP["genesis"])
+        and HASH_RE.fullmatch(o["genesis"] if o["kind"] == "workspace_checkpoint" else o["head"])
+        and (not bind or o["workspace_id"] == CP["workspace_id"])
+        and (not bind or o["kind"] != "workspace_checkpoint" or o["genesis"] == CP["genesis"])
         and signature_ok(CP["wsk_pub"], signed["sig"], L["sig_checkpoint"].encode() + cjt(o))
     )
 
@@ -1263,9 +1279,9 @@ def entry_ok(entry):
     )
 
 
-def checkpoint_ok(signed):
+def checkpoint_ok(signed, bind=True):
     try:
-        return bool(checkpoint_schema_and_signature_ok(signed))
+        return bool(checkpoint_schema_and_signature_ok(signed, bind))
     except (KeyError, TypeError, ValueError, AttributeError):
         return False
 
@@ -1275,12 +1291,19 @@ def workspace_checkpoint_ok(signed):
     return checkpoint_ok(signed) and signed["o"]["kind"] == "workspace_checkpoint"
 
 
-# Receiver state the shared vectors do not carry as such.
+def workspace_offer_shape_ok(signed):
+    """A WSK-signed workspace checkpoint of the §5.10 shape; its genesis and workspace are judged after it."""
+    return checkpoint_ok(signed, bind=False) and signed["o"]["kind"] == "workspace_checkpoint"
+
+
+# Receiver state. Since orch-core #377 every shared transition case carries its own receiver view (`now`,
+# `pinned_delegation`, `known_devices`, `known_revocations`, `learned_later_in_walk`) and every offer its `now`.
 # The workspace card's PK-signed delegation (P3-D24: "the card's delegation"). Relays hold it with the card and
 # devices pin it with the genesis; it is the delegation of the genesis event whose head is the pinned genesis.
+# Only a fallback for local regressions: shared cases use their own `pinned_delegation`.
 GENESIS_EVENT = load("genesis")["valid"]["event"]
 CARD_DELEGATION = GENESIS_EVENT["delegation"]
-# The relay clock for the shared vectors: after every vector checkpoint, so the ceiling never binds there.
+# A fixed receiver clock for the local plain-offer regressions only (shared cases give `now` per case).
 VECTOR_CLOCK = "2026-10-10T10:05:00Z"
 # P3-D25 / relay design R3a: every published checkpoint, T included, has o.at <= relay clock + 300 s.
 FUTURE_CEILING_MS = 300_000
@@ -1292,6 +1315,24 @@ def test_card_delegation_is_the_pinned_genesis_owner():
     assert "ok" in R.verify_delegation(S, CARD_DELEGATION, pk)
     assert CARD_DELEGATION["o"]["workspace_id"] == CP["workspace_id"]
     assert CARD_DELEGATION["o"]["wsk_pub"] == CP["wsk_pub"]
+    # Per-case pins: the owner_policy_delegation_* defects pin a card for another workspace or WSK (or with an
+    # extra field) so that only the delegation check refuses; every accepted case pins the genesis card.
+    other = {
+        c["name"]
+        for c in CP["transition_cases"]
+        if c["pinned_delegation"]["o"] != CARD_DELEGATION["o"]
+    }
+    assert other == {
+        "owner_policy_delegation_for_another_workspace",
+        "owner_policy_delegation_for_another_wsk",
+        "owner_policy_delegation_extra_field",
+    }
+
+
+def test_receiver_view_has_no_defaults_for_known_devices():
+    """orch-core #377 B1: forgetting the receiver's known devices fails loudly instead of trusting nothing."""
+    with pytest.raises(TypeError):
+        receiver_verdict(None, CP["workspace_checkpoint"]["signed"], now=VECTOR_CLOCK)
 
 
 @pytest.mark.parametrize("kind", ["ticket_checkpoint", "workspace_checkpoint"])
@@ -1464,6 +1505,9 @@ def restore_schema_ok(e, log):
             )
             and type(e["from_seq"]) is int
             and e["from_seq"] >= 1
+            # orch-core #377: the line counter is part of the restore schema, so a restore is never seq 1.
+            and e["seq"] == e["from_seq"] + 1
+            and len(set(e["abandoned_decisions"])) == len(e["abandoned_decisions"])
             and HASH_RE.fullmatch(e["head"]) is not None
         )
     except (KeyError, TypeError, ValueError):
@@ -1505,11 +1549,15 @@ def entries(signed):
     return {"workspace": signed["o"]["workspace_log"], **signed["o"]["tickets"]}
 
 
-def transition_ok(held, offered, restore, applied, known, card=CARD_DELEGATION):
+def transition_ok(held, offered, restore, applied, known, card, known_devices):
     """P3-D24 receiver policy intentionally does not infer the owner's current roster role.
 
-    It is bound to the workspace card's owner: the bundle's delegation must be byte-identical (cj) to the card's.
+    It is bound to the workspace card's owner: the bundle's delegation must carry the pinned card's content (`o`).
+    `known_devices` (device id -> person_id and optional pk_pub, active or revoked) and `known` (revocations held
+    when judging) are the receiver's own knowledge; evidence a bundle carries for such a device must be of that person
+    and key (orch-core #377). Returns (code, retained, signer).
     """
+    diverged = "chain.diverged", None, None
     try:
         e, log, C = restore["event"], restore["log"], restore["C"]
         cert, pk, delegation = (
@@ -1519,7 +1567,8 @@ def transition_ok(held, offered, restore, applied, known, card=CARD_DELEGATION):
         )
         if (
             restore["T"] != offered
-            or C != held
+            or (held is None) != (C is None)
+            or (C is not None and C["o"] != held["o"])
             # Redundant while it holds: held only ever comes from an accepted (verified) offer, and C == held.
             or (C is not None and not workspace_checkpoint_ok(C))
             or e["source"] != (checkpoint_ref(C) if C else None)
@@ -1538,6 +1587,7 @@ def transition_ok(held, offered, restore, applied, known, card=CARD_DELEGATION):
             or delegation["o"]["wsk_pub"] != CP["wsk_pub"]
             or "ok" not in R.verify_cert(S, cert, pk, milliseconds(e["at"]))
             or e["actor"]["id"] != "p_" + delegation["o"]["owner_person_id"]
+            or e["actor"]["id"] != "p_" + cert["o"]["person_id"]
             or e["actor"]["device"] != "d_" + cert["o"]["device_id"]
             or "operate" not in cert["o"]["scopes_max"]
             or any(s.startswith("drop:") for s in cert["o"]["scopes_max"])
@@ -1546,123 +1596,211 @@ def transition_ok(held, offered, restore, applied, known, card=CARD_DELEGATION):
             # Relay design R3: a ticket restore names a workspace seq T already commits.
             or (log != "workspace" and e["ws_seq"] > offered["o"]["workspace_log"]["seq"])
         ):
-            return "chain.diverged", None
+            return diverged
+        if not all(revocation_evidence_ok(x) for x in e["revocations"]):
+            return diverged
         carried = {x["revocation"]["o"]["device_id"]: x for x in e["revocations"]}
+        signer = cert["o"]["device_id"]
+        # The bundle revokes its own signer: a log-free receiver cannot place the revocation.
+        if signer in carried:
+            return diverged
+        # F1 §5.10 / R4 (orch-core #377): evidence for a device the receiver knows, active or revoked, is from its
+        # known person (and stored key, where the receiver has one).
+        knowledge = [
+            (d, mine["person_id"], mine.get("pk_pub")) for d, mine in known_devices.items()
+        ]
+        knowledge += [
+            (x["revocation"]["o"]["device_id"], x["revocation"]["o"]["person_id"], x.get("pk_pub"))
+            for x in known
+        ]
+        for device, person, pk_pub in knowledge:
+            got = carried.get(device)
+            if got is not None and (
+                got["revocation"]["o"]["person_id"] != person
+                or (pk_pub is not None and got["pk_pub"] != pk_pub)
+            ):
+                return diverged
         for x in known:
             r = x["revocation"]
             device = r["o"]["device_id"]
-            # §19.8 R1: the signer is unrevoked by every revocation the receiver holds, for every log.
-            if device == cert["o"]["device_id"]:
-                return "chain.diverged", None
+            # §19.8 R1 / C3: held when judged, any reason, any host-chosen position, every log.
+            if device == signer:
+                return diverged
             # Completeness (R4) applies to workspace restores only; a ticket restore carries [].
-            if log != "workspace":
-                continue
-            if (
-                device not in carried
-                or strength(carried[device]["revocation"]) < strength(r)
-                # F1 §5.10 / R4: evidence for a known device is from its known person (and stored key).
-                or carried[device]["revocation"]["o"]["person_id"] != r["o"]["person_id"]
-                or ("pk_pub" in x and carried[device]["pk_pub"] != x["pk_pub"])
+            if log == "workspace" and (
+                device not in carried or strength(carried[device]["revocation"]) < strength(r)
             ):
-                return "chain.diverged", None
-        if not all(revocation_evidence_ok(x) for x in e["revocations"]):
-            return "chain.diverged", None
-        if cert["o"]["device_id"] in carried:
-            return "chain.diverged", None
-    except (KeyError, TypeError, ValueError, IndexError):
-        return "chain.diverged", None
+                return diverged
+    except (KeyError, TypeError, ValueError, IndexError, AttributeError):
+        return diverged
     try:
         old = entries(C).get(log) if C else None
         old = old or {"seq": 0, "head": None, "acc": ZERO_ACC}
         retained = {"seq": e["from_seq"], "head": e["head"], "acc": restore["acc_from"]}
+        if log == "workspace" and old["seq"] == 0:
+            forward = restore.get("forward_heads")
+            if not isinstance(forward, list) or not forward or forward[0] != CP["genesis"]:
+                return "sync.incomplete", None, None
         if old["seq"] > retained["seq"]:
+            if log_acc(restore["acc_before"], e["head"]) != retained["acc"]:
+                return "sync.incomplete", None, None
+            if not growth_ok(retained, old, restore.get("abandoned_heads")):
+                return "sync.incomplete", None, None
             abandoned = e["abandoned"]
             if (
                 not abandoned
                 or abandoned["seq"] < old["seq"]
                 or (abandoned["seq"] == old["seq"] and abandoned["head"] != old["head"])
             ):
-                return "chain.diverged", None
-            if not growth_ok(retained, old, restore.get("abandoned_heads")):
-                return "sync.incomplete", None
-            if log_acc(restore["acc_before"], e["head"]) != retained["acc"]:
-                return "sync.incomplete", None
-        else:
-            if not growth_ok(old, retained, restore.get("forward_heads")):
-                return "sync.incomplete", None
-            if C is None and log == "workspace" and restore["forward_heads"][0] != CP["genesis"]:
-                return "sync.incomplete", None
-        return "ok", retained
+                return diverged
+        elif not growth_ok(old, retained, restore.get("forward_heads", [])):
+            return "sync.incomplete", None, None
+        # A workspace restore to seq 1 retains the pinned genesis itself.
+        if (
+            log == "workspace"
+            and e["from_seq"] == 1
+            and (e["head"] != CP["genesis"] or retained["acc"] != log_acc(ZERO_ACC, CP["genesis"]))
+        ):
+            return "sync.incomplete", None, None
+        return "ok", retained, signer
     except (KeyError, TypeError, ValueError, IndexError):
         # Incomplete accumulator evidence is not evidence of equivocation.
-        return "sync.incomplete", None
+        return "sync.incomplete", None, None
 
 
-def checkpoint_offer(
-    held, offered, restore=None, applied=(), proofs=None, known=(), *, now, card=CARD_DELEGATION
+def receiver_verdict(
+    held,
+    offered,
+    restore=None,
+    applied=(),
+    proofs=None,
+    known=(),
+    *,
+    now,
+    known_devices,
+    card=CARD_DELEGATION,
+    learned_later=(),
 ):
-    """A receiver with held H (or None), relay clock `now`, and the workspace card's delegation.
+    """A receiver with held H (or None), its one sampled clock `now`, the workspace card's delegation and its own
+    knowledge (`known_devices`, `known` revocations, `learned_later` in the walk). Returns (code, restore_id, alarms).
 
-    `checkpoint_time` is the relay's refusal of an `o.at` beyond its clock + 300 s (P3-D25, relay §19.8 R3a):
-    409 `checkpoint_time` for every publication, restores included; `o.at == clock + 300 s` is accepted.
+    Order follows orch-core #377 `judge_offer`: shape and signature, the pinned genesis (`trust.genesis_mismatch`),
+    the workspace, equal or lower n, then the clock ceiling: `o.at > now + 300 s` is the retryable
+    `checkpoint.future` (`o.at == now + 300 s` is accepted), then the forward rules, the restore and the growth.
     """
-    if not workspace_checkpoint_ok(offered):
-        return "chain.diverged", None
-    if held == offered:
-        return "ok", None
+    diverged = ("chain.diverged", None, ())
+    if not workspace_offer_shape_ok(offered):
+        return diverged
+    if offered["o"]["genesis"] != CP["genesis"]:
+        return "trust.genesis_mismatch", None, ()
+    if offered["o"]["workspace_id"] != CP["workspace_id"] or (
+        held and held["o"]["workspace_id"] != CP["workspace_id"]
+    ):
+        return diverged
     old, new = entries(held) if held else {}, entries(offered)
     if held:
         h, o = held["o"], offered["o"]
         if o["n"] == h["n"]:
-            return ("ok", None) if o == h else ("chain.diverged", None)
+            return ("ok", None, ()) if o == h else diverged
         if o["n"] < h["n"]:
             stale = new.keys() <= old.keys() and all(
                 new[k]["seq"] < old[k]["seq"] or new[k] == old[k] for k in new
             )
-            return ("ignored", None) if stale else ("chain.diverged", None)
-        if o["at"] < h["at"] or not old.keys() <= new.keys():
-            return "chain.diverged", None
+            return ("ignored", None, ()) if stale else diverged
     if milliseconds(offered["o"]["at"]) > milliseconds(now) + FUTURE_CEILING_MS:
-        return "checkpoint_time", None
-    recorded = None
+        return "checkpoint.future", None, ()
+    if held and (offered["o"]["at"] < held["o"]["at"] or not old.keys() <= new.keys()):
+        return diverged
+    proofs = {} if proofs is None else proofs
+    if not isinstance(proofs, dict):
+        return "sync.incomplete", None, ()
+    restored = None
     if restore:
-        result, retained = transition_ok(held, offered, restore, applied, known, card)
+        result, retained, signer = transition_ok(
+            held, offered, restore, applied, known, card, known_devices
+        )
         if result != "ok":
-            return result, None
-        log, e = restore["log"], restore["event"]
-        old[log] = retained
-        recorded = e["id"]
-        if (
-            not proofs
-            or not isinstance(proofs.get(log), list)
-            or not proofs[log]
-            or proofs[log][0] != head(e)
-        ):
-            return "sync.incomplete", None
+            return result, None, ()
+        restored = restore["log"], retained, signer
     elif held is None:
-        return "ok", None
+        return "ok", None, ()
     for log, target in new.items():
         prior = old.get(log, {"seq": 0, "head": None, "acc": ZERO_ACC})
-        if height_conflict(prior, target):
-            return "chain.diverged", None
-        if prior == target:
+        if restored and log == restored[0]:
             continue
-        if not growth_ok(prior, target, (proofs or {}).get(log)):
-            return "sync.incomplete", None
-    return "ok", recorded
+        if height_conflict(prior, target):
+            return diverged
+        if prior != target and not growth_ok(prior, target, proofs.get(log, [])):
+            return "sync.incomplete", None, ()
+    if not restored:
+        return "ok", None, ()
+    log, retained, signer = restored
+    e = restore["event"]
+    tail = proofs.get(log)
+    if (
+        not isinstance(tail, list)
+        or not tail
+        or log not in new
+        or not growth_ok(retained, new[log], tail)
+    ):
+        return "sync.incomplete", None, ()
+    if tail[0] != head(e):
+        # A WSK-signed T whose entry at from_seq + 1 is another event than this restore (orch-core #377).
+        return diverged
+    # C3: a `compromised` revocation of the signer learned only later in the walk never refuses; it raises an alarm.
+    alarms = tuple(
+        sorted(
+            {
+                "d_" + signer
+                for x in learned_later
+                if x["revocation"]["o"]["device_id"] == signer
+                and x["revocation"]["o"]["reason"] == "compromised"
+            }
+        )
+    )
+    return "ok", e["id"], alarms
+
+
+def checkpoint_offer(*args, **kw):
+    """(code, restore_id) of :func:`receiver_verdict`, for the local regressions that never learn later."""
+    return receiver_verdict(*args, **kw)[:2]
+
+
+def plain_offer(held, offered, proofs=None, *, now):
+    """A plain (restore-free) offer to a receiver that knows no devices or revocations."""
+    return checkpoint_offer(held, offered, proofs=proofs, now=now, known_devices={})
 
 
 @by_name(CP["transition_cases"])
 def test_checkpoint_transition(c):
-    assert checkpoint_offer(
+    got = receiver_verdict(
         c["held"],
         c["offered"],
-        c.get("restore"),
+        c["restore"],
         c["applied"],
-        c.get("proofs"),
-        c.get("known_revocations", ()),
-        now=VECTOR_CLOCK,
-    ) == (c["expect"], c["recorded"])
+        c["proofs"],
+        c["known_revocations"],
+        now=c["now"],
+        known_devices=c["known_devices"],
+        card=c["pinned_delegation"],
+        learned_later=c["learned_later_in_walk"],
+    )
+    alarms = (c["restore"]["event"]["actor"]["device"],) if c.get("alarm") else ()
+    assert got == (c["expect"], c["recorded"], alarms)
+    if c["learned_later_in_walk"]:
+        # Only the receiver's order separates this case from a refusal: held when judged, it refuses.
+        earlier = receiver_verdict(
+            c["held"],
+            c["offered"],
+            c["restore"],
+            c["applied"],
+            c["proofs"],
+            c["learned_later_in_walk"],
+            now=c["now"],
+            known_devices=c["known_devices"],
+            card=c["pinned_delegation"],
+        )
+        assert earlier == ("chain.diverged", None, ())
 
 
 @by_name(load("restore")["schema_cases"])
@@ -1678,16 +1816,12 @@ def test_restore_schema(c):
 
 @by_name(CP["workspace_n_offers"])
 def test_workspace_checkpoint_receiver(c):
-    result, recorded = checkpoint_offer(
-        CP["workspace_n_held"],
-        c["checkpoint"],
-        c.get("restore"),
-        c.get("applied", ()),
-        c.get("proofs"),
-        now=VECTOR_CLOCK,
+    # A `held` key (null: an uninitialized receiver) replaces workspace_n_held; plain offers know nothing.
+    held = c["held"] if "held" in c else CP["workspace_n_held"]
+    got = receiver_verdict(
+        held, c["checkpoint"], proofs=c.get("proofs"), now=c["now"], known_devices={}
     )
-    assert result == c["expect"]
-    assert recorded == c.get("recorded")
+    assert got == (c["expect"], None, ())
 
 
 # --- Stateful append verification for the shared protocol scenarios ---
@@ -1734,6 +1868,9 @@ class F1State:
     def judge(self, e, log, replay=False):
         t, a = e["type"], e["actor"]
         lines = self.logs.get(log, [])
+        # A restore's actor is person-only in its schema (orch-core #377 `actor_shape_host_kind`): validation.event.
+        if t == "restore" and not restore_schema_ok(e, log):
+            return "chain.broken" if replay else "validation.event"
         # §5.11 step 0 at append: field set (`validation.*`). sig, auth and roster_v are person-only (§5.2).
         if a["kind"] != "person" and any(k in e for k in ("sig", "auth", "roster_v")):
             return "chain.broken" if replay else "validation.field_set"
@@ -1746,8 +1883,6 @@ class F1State:
             and "ticket.links" in e.get("set", {})
             and not links_branches_ok(e["set"]["ticket.links"])
         ):
-            return "chain.broken" if replay else "validation.event"
-        if t == "restore" and not restore_schema_ok(e, log):
             return "chain.broken" if replay else "validation.event"
         # §5.11 steps 1–4, in order. At append, person signature is step 5.
         if e["seq"] != len(lines) + 1 or e["prev"] != (head(lines[-1]) if lines else None):
@@ -2225,13 +2360,13 @@ def test_first_checkpoint_requires_signature_and_pinned_genesis():
     from copy import deepcopy
 
     first = CP["workspace_checkpoint"]["signed"]
-    assert checkpoint_offer(None, first, now=VECTOR_CLOCK) == ("ok", None)
+    assert plain_offer(None, first, now=VECTOR_CLOCK) == ("ok", None)
     changed = deepcopy(first)
     changed["o"]["genesis"] = "sha256:" + "0" * 64
-    assert checkpoint_offer(None, changed, now=VECTOR_CLOCK) == ("chain.diverged", None)
+    assert plain_offer(None, changed, now=VECTOR_CLOCK) == ("chain.diverged", None)
     changed = deepcopy(first)
     changed["sig"] = R.b64u(bytes(64))
-    assert checkpoint_offer(None, changed, now=VECTOR_CLOCK) == ("chain.diverged", None)
+    assert plain_offer(None, changed, now=VECTOR_CLOCK) == ("chain.diverged", None)
 
 
 def test_checkpoint_lower_n_extra_uid_diverges(monkeypatch):
@@ -2239,17 +2374,22 @@ def test_checkpoint_lower_n_extra_uid_diverges(monkeypatch):
 
     No shared vector yet (asked the core for `lower_n_extra_uid`); signatures are out of scope here.
     """
-    monkeypatch.setattr(sys.modules[__name__], "workspace_checkpoint_ok", lambda signed: True)
+    monkeypatch.setattr(sys.modules[__name__], "workspace_offer_shape_ok", lambda signed: True)
     log = {"seq": 3, "head": "sha256:" + "a" * 64}
-    held = {"o": {"n": 5, "workspace_log": log, "tickets": {}}}
+    pins = {"genesis": CP["genesis"], "workspace_id": CP["workspace_id"]}
+    held = {"o": {**pins, "n": 5, "workspace_log": log, "tickets": {}}}
     offered = {
         "o": {
+            **pins,
             "n": 4,
             "workspace_log": log,
             "tickets": {"01EXTRA": {"seq": 1, "head": "sha256:" + "b" * 64}},
         }
     }
-    assert checkpoint_offer(held, offered, now=VECTOR_CLOCK) == ("chain.diverged", None)
+    assert plain_offer(held, offered, now=VECTOR_CLOCK) == ("chain.diverged", None)
+    # Control: the same lower-n offer without the extra ticket is merely stale.
+    offered["o"]["tickets"] = {}
+    assert plain_offer(held, offered, now=VECTOR_CLOCK) == ("ignored", None)
 
 
 def test_agent_event_with_person_fields_refused_at_append():
@@ -2323,6 +2463,9 @@ class RestoreCommit:
         if event["source"] != expected_source:
             return "chain.diverged"
         carried = {x["revocation"]["o"]["device_id"]: x for x in event["revocations"]}
+        # orch-core #377: the host refuses a restore that lists its own signer before the append.
+        if event["actor"]["device"][2:] in carried:
+            return "validation.restore"
         for device, entry in old["evidence"].items():
             if device not in carried or strength(carried[device]["revocation"]) < strength(
                 entry["revocation"]
@@ -2354,6 +2497,19 @@ def test_restore_atomic_publication(c):
     target = CP["workspace_n_held"]
     if "missing" in c:
         event["revocations"] = []
+    if c.get("self_revocation"):
+        signer = event["actor"]["device"]
+        cert = next(
+            x["event"]["device_cert"]
+            for x in scenario["steps"]
+            if "d_" + x["event"].get("device_cert", {"o": {"device_id": ""}})["o"]["device_id"]
+            == signer
+        )
+        own = local_revocation_evidence(cert, reason="retired")
+        assert revocation_evidence_ok(own)
+        event["revocations"] = sorted(
+            [*event["revocations"], own], key=lambda x: x["revocation"]["o"]["device_id"]
+        )
     if c["name"] == "stale_source":
         store.durable["held"] = target
         before = deepcopy(store.durable)
@@ -2439,9 +2595,18 @@ def resign_transition(c, person="dk_sev1", host="wsk"):
     assert fold(r["acc_from"], c["proofs"][log]) == entry["acc"]
 
 
-def offer_local_transition(c, now=VECTOR_CLOCK, known=(), card=CARD_DELEGATION):
+def offer_local_transition(c, now=None, known=None, card=None, known_devices=None):
+    """The case's own receiver view (now, pinned delegation, known devices and revocations) unless overridden."""
     return checkpoint_offer(
-        c["held"], c["offered"], c["restore"], proofs=c["proofs"], known=known, now=now, card=card
+        c["held"],
+        c["offered"],
+        c["restore"],
+        c["applied"],
+        c["proofs"],
+        c["known_revocations"] if known is None else known,
+        now=c["now"] if now is None else now,
+        known_devices=c["known_devices"] if known_devices is None else known_devices,
+        card=c["pinned_delegation"] if card is None else card,
     )
 
 
@@ -2876,7 +3041,10 @@ def test_restore_abandoned_names_at_least_the_held_entry(abandoned, ok):
 
 
 def test_target_must_commit_to_the_restore_head():
-    """Review finding 6: a WSK-signed T whose restored entry folds a different head X with a consistent proof."""
+    """Review finding 6: a WSK-signed T whose restored entry folds a different head X with a consistent proof.
+
+    orch-core #377 (`target_over_another_head`): the proof folds, so T commits another event than this restore at
+    from_seq + 1; that is divergence, not a missing proof (this regression expected sync.incomplete before)."""
     c = local_transition()
     resign_transition(c)
     r = c["restore"]
@@ -2888,7 +3056,7 @@ def test_target_must_commit_to_the_restore_head():
     c["proofs"]["workspace"] = [x]
     assert workspace_checkpoint_ok(c["offered"])
     assert growth_ok({"seq": r["event"]["from_seq"], "acc": r["acc_from"]}, entry, [x])
-    assert offer_local_transition(c) == ("sync.incomplete", None)
+    assert offer_local_transition(c) == ("chain.diverged", None)
 
 
 @pytest.mark.parametrize(
@@ -2927,21 +3095,23 @@ def test_wsk_signed_checkpoint_trust_root(field, value):
     signed = sign_checkpoint(o)
     assert signature_ok(CP["wsk_pub"], signed["sig"], L["sig_checkpoint"].encode() + cjt(o))
     assert not checkpoint_ok(signed)
-    assert checkpoint_offer(None, signed, now=VECTOR_CLOCK) == ("chain.diverged", None)
+    # orch-core #377: another genesis under a valid WSK signature is `trust.genesis_mismatch`, judged after the shape.
+    expected = "trust.genesis_mismatch" if field == "genesis" else "chain.diverged"
+    assert plain_offer(None, signed, now=VECTOR_CLOCK) == (expected, None)
 
 
 def test_checkpoint_signed_object_has_exactly_o_and_sig():
     signed = dict(CP["workspace_checkpoint"]["signed"], note="x")
     assert not checkpoint_ok(signed)
-    assert checkpoint_offer(None, signed, now=VECTOR_CLOCK) == ("chain.diverged", None)
+    assert plain_offer(None, signed, now=VECTOR_CLOCK) == ("chain.diverged", None)
 
 
 def test_valid_ticket_checkpoint_is_not_a_workspace_offer():
     """Review finding 11: refused, not a KeyError."""
     ticket = CP["ticket_checkpoint"]["signed"]
     assert checkpoint_ok(ticket)
-    assert checkpoint_offer(None, ticket, now=VECTOR_CLOCK) == ("chain.diverged", None)
-    assert checkpoint_offer(CP["workspace_n_held"], ticket, now=VECTOR_CLOCK) == (
+    assert plain_offer(None, ticket, now=VECTOR_CLOCK) == ("chain.diverged", None)
+    assert plain_offer(CP["workspace_n_held"], ticket, now=VECTOR_CLOCK) == (
         "chain.diverged",
         None,
     )
@@ -2953,14 +3123,14 @@ def test_valid_ticket_checkpoint_is_not_a_workspace_offer():
 @pytest.mark.parametrize("ahead,ok", [(299, True), (300, True), (301, False)])
 def test_receiver_future_ceiling(ahead, ok):
     """P3-D25 / R3a: o.at <= relay clock + 300 s for every published checkpoint, T included (finding 8)."""
-    refused = ("checkpoint_time", None)
+    refused = ("checkpoint.future", None)
     first = CP["workspace_checkpoint"]["signed"]
     now = utc(first["o"]["at"], -ahead)
-    assert checkpoint_offer(None, first, now=now) == (("ok", None) if ok else refused)
+    assert plain_offer(None, first, now=now) == (("ok", None) if ok else refused)
     growth = next(c for c in CP["workspace_n_offers"] if c["name"] == "verified_accumulator_growth")
     held, offered = CP["workspace_n_held"], growth["checkpoint"]
     now = utc(offered["o"]["at"], -ahead)
-    result = checkpoint_offer(held, offered, proofs=growth["proofs"], now=now)
+    result = plain_offer(held, offered, proofs=growth["proofs"], now=now)
     assert result == (("ok", None) if ok else refused)
     c = local_transition()
     now = utc(c["offered"]["o"]["at"], -ahead)
@@ -2972,14 +3142,14 @@ def test_far_future_checkpoint_cannot_freeze_the_receiver():
 
     o = deepcopy(CP["workspace_checkpoint"]["signed"]["o"])
     o["at"] = "2100-01-01T00:00:00Z"
-    assert checkpoint_offer(None, sign_checkpoint(o), now=VECTOR_CLOCK) == ("checkpoint_time", None)
+    assert plain_offer(None, sign_checkpoint(o), now=VECTOR_CLOCK) == ("checkpoint.future", None)
     c = local_transition()
     c["offered"]["o"]["at"] = "2100-01-01T00:00:00Z"
     resign_transition(c)
-    assert offer_local_transition(c) == ("checkpoint_time", None)
+    assert offer_local_transition(c) == ("checkpoint.future", None)
     # An identical retry of the held checkpoint is not a new publication.
     held = CP["workspace_n_held"]
-    assert checkpoint_offer(held, held, now=utc(held["o"]["at"], -3600)) == ("ok", None)
+    assert plain_offer(held, held, now=utc(held["o"]["at"], -3600)) == ("ok", None)
 
 
 def completeness_case(pk_name, reason="lost"):
@@ -3127,7 +3297,7 @@ def test_wsk_signed_growth_entry_must_match_its_proof(defect):
         entry["head"] = "sha256:" + "77" * 32
     offered = sign_checkpoint(o)
     assert workspace_checkpoint_ok(offered)
-    assert checkpoint_offer(held, offered, proofs=proofs, now=VECTOR_CLOCK) == (
+    assert plain_offer(held, offered, proofs=proofs, now=VECTOR_CLOCK) == (
         "sync.incomplete",
         None,
     )
@@ -3147,12 +3317,17 @@ def test_forward_proof_must_derive_acc_from(case):
 
 
 def test_restore_seq_true_is_not_seq_one():
-    """`seq: true` equals 1 in Python; with the seq-1 nulls it must still fail the integer rule."""
+    """`seq: true` equals 1 in Python and must still fail the integer rule. Since orch-core #377 the restore schema
+    pins seq = from_seq + 1 (from_seq >= 1), so a restore is never seq 1: the seq-1 nulls are refused too."""
     e = local_transition()["restore"]["event"]
+    assert restore_schema_ok(e, "workspace")
     e.update(seq=True, based_on=None, prev=None)
     assert not restore_schema_ok(e, "workspace")
     e["seq"] = 1
-    assert restore_schema_ok(e, "workspace")
+    assert not restore_schema_ok(e, "workspace")
+    # The integer rule on its own: True equals from_seq + 1 when from_seq is 0, which the schema also refuses.
+    e.update(seq=True, from_seq=0)
+    assert not restore_schema_ok(e, "workspace")
 
 
 @pytest.mark.parametrize("note", [[], {}, 5])
