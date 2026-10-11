@@ -197,10 +197,10 @@ def dispatch(d, con, route, params, method, raw, headers, now):
         ):
             fail("malformed")
         P.unb64u(o["primary_nonce"], 32)
-    if row[field] and P.cj(P.parse_json(row[field])["o"]) == P.cj(o):
-        return {}
     if row["state"] == "expired":
         refuse("expired", 410)
+    if row[field] and P.cj(P.parse_json(row[field])["o"]) == P.cj(o):
+        return {}
     if row["state"] == "signed":
         refuse("already_signed", 409)
     if row["state"] == "rejected" or field == "challenge" and row["state"] != "open":

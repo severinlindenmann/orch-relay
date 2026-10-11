@@ -653,3 +653,52 @@ def test_pair_accounting_migrates_retained_bodies(tmp_path):
         ("", len(binary("pair_device_post")), 1),
         (DEVICE, len(binary("bridge_device_post")), 1),
     ]
+
+
+@pytest.mark.parametrize("resign", [False, True])
+@pytest.mark.parametrize("state", ["challenged", "signed", "rejected"])
+@pytest.mark.parametrize("offset", [599999, 600000, 600001])
+def test_challenge_retry_expiry_and_retained_terminals(client, resign, state, offset):
+    setup_pair_queue(client)
+    if state == "signed":
+        assert client.put(f"/v2/devices/{DEVICE}", json={"cert": CERT}).status_code == 200
+    elif state == "rejected":
+        assert (
+            client.post(
+                f"/v2/cert-requests/{CRID}/rejection",
+                json={"rejection": OBJECTS["cert_rejection"]},
+                headers={"Authorization": "Bearer FAKE-primary"},
+            ).status_code
+            == 200
+        )
+    before = sql(client, "SELECT * FROM cert_requests")[0]
+    advance(client, offset)
+    challenge = signed(OBJECTS["challenge"]["o"]) if resign else OBJECTS["challenge"]
+    if resign:
+        assert challenge["sig"] != OBJECTS["challenge"]["sig"]
+    response = client.post(
+        f"/v2/cert-requests/{CRID}/challenge",
+        json={"challenge": challenge},
+        headers={"Authorization": "Bearer FAKE-primary"},
+    )
+    expired = state == "challenged" and offset >= 600000
+    assert response.status_code == (410 if expired else 200)
+    assert response.json() == ({"error": "expired"} if expired else {})
+    # A refused POST rolls back its sweep; GET commits only the expiry transition.
+    assert sql(client, "SELECT * FROM cert_requests")[0] == before
+    fetched = client.get(f"/v2/cert-requests/{CRID}", headers=HOST)
+    assert fetched.status_code == 200
+    assert fetched.json()["state"] == ("expired" if expired else state)
+    after = sql(client, "SELECT * FROM cert_requests")[0]
+    expected = list(before)
+    if expired:
+        expected[6] = "expired"
+    assert after == tuple(expected)
+    # Also reject retries after expiry has been persisted by GET/maintenance.
+    again = client.post(
+        f"/v2/cert-requests/{CRID}/challenge",
+        json={"challenge": challenge},
+        headers={"Authorization": "Bearer FAKE-primary"},
+    )
+    assert again.status_code == response.status_code
+    assert sql(client, "SELECT * FROM cert_requests")[0] == after
