@@ -1,4 +1,5 @@
 """Portable HTTP transcripts: route/refusal coverage, exact shapes, signatures and ORB2 framing."""
+
 import json
 import re
 from pathlib import Path
@@ -19,8 +20,10 @@ S = R.SUITES[2]
 def test_all_contract_routes_have_fixtures():
     table = DOC.split("## 19. Relay HTTP API", 1)[1]
     routes = set(re.findall(r"`(GET|POST|PUT|DELETE) (/v2/[^`?\[]+)", table))
-    actual = {(f["route"]["method"], f["route"]["path"])
-              for f in (json.loads(p.read_text()) for p in FILES)}
+    actual = {
+        (f["route"]["method"], f["route"]["path"])
+        for f in (json.loads(p.read_text()) for p in FILES)
+    }
     assert actual == routes
     # Both authenticated directions of these POST routes need independent examples.
     for suffix in ("bridge/{rid}", "pair/{offer}/{rid}"):
@@ -42,7 +45,9 @@ def test_explicit_route_refusals_are_covered():
         match = re.match(r"\| `(GET|POST|PUT) (/v2/[^`?\[]+)", line)
         if not match:
             continue
-        matching = [f for f in fixtures if (f["route"]["method"], f["route"]["path"]) == match.groups()]
+        matching = [
+            f for f in fixtures if (f["route"]["method"], f["route"]["path"]) == match.groups()
+        ]
         # Escaped pipes occur in the hold request shape, so isolate the refusal cell from the right.
         cell = line.rsplit("|", 3)[1]
         explicit = set(re.findall(r"`([a-z_]+)`", cell)) - {"epoch"}
@@ -61,21 +66,42 @@ def signed_objects(value):
             yield from signed_objects(child)
 
 
-def check_signatures(value):
+def check_signatures(value, *, card_refusal=None, cert_refusal=None):
     for signed in signed_objects(value):
         o = signed["o"]
         corpus = CORPUS[str(o["suite"])]
         suite = R.SUITES[o["suite"]]
         if o["kind"] == "card":
-            assert "ok" in R.verify_card(suite, signed, bytes.fromhex(corpus["keys"]["person_alice.sig"]["pub"]))
+            result = R.verify_card(
+                suite, signed, bytes.fromhex(corpus["keys"]["person_alice.sig"]["pub"])
+            )
+            if card_refusal:
+                assert result == {"refuse": card_refusal}
+            else:
+                assert "ok" in result
+            continue
+        if o["kind"] == "device_cert" and cert_refusal:
+            assert R.verify_cert(
+                suite,
+                signed,
+                bytes.fromhex(corpus["keys"]["person_alice.sig"]["pub"]),
+                1790000000000,
+            ) == {"refuse": cert_refusal}
             continue
         if o["kind"] in {"device_cert", "revocation", "cert_challenge", "cert_rejection"}:
-            owner = "person_bob" if o["person_id"] == corpus["ids"]["person_bob"] else "person_alice"
+            owner = (
+                "person_bob" if o["person_id"] == corpus["ids"]["person_bob"] else "person_alice"
+            )
         elif o["kind"] == "ws_delegation":
             owner = "person_alice"
         else:
             owner = "wsk_a"
-        assert R.verify_object(suite, bytes.fromhex(corpus["keys"][owner + ".sig"]["pub"]), signed, o["kind"]) == o
+        assert (
+            R.verify_object(
+                suite, bytes.fromhex(corpus["keys"][owner + ".sig"]["pub"]), signed, o["kind"]
+            )
+            == o
+        )
 
 
 def check_envelope(text):
@@ -109,12 +135,17 @@ def test_http_fixture(path):
     assert f["contract"] == "orch-relay-http-v2" and f["suite"] == 2
     assert len({c["name"] for c in f["cases"]}) == len(f["cases"])
     row = next(r for r in ROUTES if r[0] == path.stem)
-    actual = {(c["response"]["status"], c["response"]["json"]["error"])
-              for c in f["cases"] if "error" in c["response"]["json"]}
+    actual = {
+        (c["response"]["status"], c["response"]["json"]["error"])
+        for c in f["cases"]
+        if "error" in c["response"]["json"]
+    }
     assert actual == set(refusals(row))
     registry = DOC.split("**Relay and orch-publish HTTP**", 1)[1].split("**Primary device", 1)[0]
-    allowed = {int(status): set(re.findall(r"`([a-z_]+)`", cell))
-               for status, cell in re.findall(r"\| (\d+) \| ([^\n]+)", registry)}
+    allowed = {
+        int(status): set(re.findall(r"`([a-z_]+)`", cell))
+        for status, cell in re.findall(r"\| (\d+) \| ([^\n]+)", registry)
+    }
     for c in f["cases"]:
         request, response = c["request"], c["response"]
         assert request["method"] == f["route"]["method"]
@@ -129,25 +160,52 @@ def test_http_fixture(path):
         if response["status"] >= 400:
             code = response["json"]["error"]
             assert code in allowed[response["status"]], (response["status"], code)
-            assert set(response["json"]) == ({"error", "epoch"} if code == "stale_epoch" else {"error"})
+            assert set(response["json"]) == (
+                {"error", "epoch"} if code == "stale_epoch" else {"error"}
+            )
         if response["status"] in (429, 503):
             assert re.fullmatch(r"[0-9]+", response["headers"]["Retry-After"])
-        check_signatures(request)
+        scenario = c["given"].get("scenario", c["name"])
+        check_signatures(
+            request,
+            card_refusal=scenario
+            if path.stem == "card_put" and scenario in {"bad_signature", "delegation_mismatch"}
+            else None,
+            cert_refusal="cert_invalid"
+            if path.stem == "accounts" and scenario == "cert_invalid"
+            else None,
+        )
         check_signatures(response)
         list(envelopes(c))
         if "body_recipe" in request:
             recipe = request["body_recipe"]
-            raw = R.unb64u(recipe["prefix_b64u"]) + bytes([recipe["byte"]]) * recipe["count"] + R.unb64u(recipe["suffix_b64u"])
+            raw = (
+                R.unb64u(recipe["prefix_b64u"])
+                + bytes([recipe["byte"]]) * recipe["count"]
+                + R.unb64u(recipe["suffix_b64u"])
+            )
             assert len(raw) == BODY_CAPS[path.stem] + 1
             assert response["json"] == {"error": "too_large"}
         if path.stem in {"session_login", "accounts"} and "json" in request:
             body = request["json"]
-            kind, ident = (body["kind"], body["id"]) if path.stem == "session_login" else ("device", body["device_cert"]["o"]["device_id"])
+            kind, ident = (
+                (body["kind"], body["id"])
+                if path.stem == "session_login"
+                else ("device", body["device_cert"]["o"]["device_id"])
+            )
             suite_id = body["device_cert"]["o"]["suite"] if path.stem == "accounts" else 2
             suite = R.SUITES[suite_id]
             corpus = CORPUS[str(suite_id)]
-            msg = R.relay_auth_signed_bytes(suite, "https://relay.dev.severin.io", R.unb64u(body["challenge"], 32), kind, bytes.fromhex(ident))
-            assert suite.verify(bytes.fromhex(corpus["keys"]["phone.sig"]["pub"]), R.unb64u(body["sig"], 64), msg)
+            msg = R.relay_auth_signed_bytes(
+                suite,
+                "https://relay.dev.severin.io",
+                R.unb64u(body["challenge"], 32),
+                kind,
+                bytes.fromhex(ident),
+            )
+            assert suite.verify(
+                bytes.fromhex(corpus["keys"]["phone.sig"]["pub"]), R.unb64u(body["sig"], 64), msg
+            )
 
 
 def test_fixture_success_shapes():
@@ -162,10 +220,18 @@ def test_fixture_success_shapes():
                     assert set(chunk) == {"id", "idx", "last", "stream", "envelope"}
                     h = check_envelope(chunk["envelope"])
                     assert (chunk["id"], chunk["idx"], chunk["last"], chunk["stream"]) == (
-                        h.rid.hex(), h.seq, bool(h.flags & R.F_LAST), bool(h.flags & R.F_STREAM))
+                        h.rid.hex(),
+                        h.seq,
+                        bool(h.flags & R.F_LAST),
+                        bool(h.flags & R.F_STREAM),
+                    )
             if "items" in body:
                 assert set(body) == {"items", "notices", "next"}
-                assert set(body["notices"]) == {"revocations_cursor", "cert_requests", "rotation_due"}
+                assert set(body["notices"]) == {
+                    "revocations_cursor",
+                    "cert_requests",
+                    "rotation_due",
+                }
                 for item in body["items"]:
                     assert set(item) == {"n", "route", "device", "rid", "offer", "envelope"}
                     h = check_envelope(item["envelope"])
@@ -180,14 +246,18 @@ def test_json_caps_match_route_tables_and_success_bodies_fit():
         if "json" not in success["request"]:
             continue
         path = fixture["route"]["path"]
-        row = next(line for line in DOC.splitlines()
-                   if line.startswith(f'| `{fixture["route"]["method"]} {path}`'))
+        row = next(
+            line
+            for line in DOC.splitlines()
+            if line.startswith(f"| `{fixture['route']['method']} {path}`")
+        )
         amount, unit = re.search(r"JSON cap (\d+) (KiB|MiB)", row).groups()
         cap = int(amount) * (1024 if unit == "KiB" else 1024 * 1024)
         assert BODY_CAPS[name] == cap
         assert len(R.cj(success["request"]["json"])) <= cap
-        oversized = next(c for c in fixture["cases"]
-                         if c["response"]["json"].get("error") == "too_large")
+        oversized = next(
+            c for c in fixture["cases"] if c["response"]["json"].get("error") == "too_large"
+        )
         assert oversized["response"]["status"] == 413
         assert oversized["request"]["body_recipe"]["count"] == cap + 1
 
@@ -197,8 +267,9 @@ def test_workspace_fixtures_do_not_invent_device_session_failures():
         auth = fixture["route"]["auth"]
         if "W" not in auth or "D(" in auth:
             continue
-        errors = {(c["response"]["status"], c["response"]["json"].get("error"))
-                  for c in fixture["cases"]}
+        errors = {
+            (c["response"]["status"], c["response"]["json"].get("error")) for c in fixture["cases"]
+        }
         assert (400, "cert_expired") not in errors
         if name == "membership":
             assert (403, "cert_expired") in errors  # proposed member's certificate

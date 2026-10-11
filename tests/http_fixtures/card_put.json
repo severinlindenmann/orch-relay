@@ -92,12 +92,12 @@
                 "suite": 2,
                 "kind": "ws_delegation",
                 "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
-                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "wsk_pub": "BM4v-fnQ3spQQ0mJyJVLXg2Ph_eHk6XQuPC7AaiX7qeygwPq7ItHHbYSc_Gtg0zhunk2ZVkb7nU_Lwbe-urVGmU",
                 "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
                 "client_hosted": false,
-                "issued_ms": 1789913600000
+                "issued_ms": 1790000000000
               },
-              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+              "sig": "OjHN5D28OLaBnvhhg5T4527jYC_PnUFS9wN2QnCyDqB4t0wrH5bxkxjDSG0PRlYhZCgz5pXP09shGYUhYUA6cA"
             },
             "o": {
               "v": 2,
@@ -299,7 +299,7 @@
               "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
               "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
             },
-            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sig": "WLo2NnXEb_9QgKpwvqKhZVIEkaCexmLgg64VyaYhAJFzyKARgFqP7uZ9d_JpYQgytpIzTbPWrcchbzvb7QNNLQ",
             "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
           }
         }

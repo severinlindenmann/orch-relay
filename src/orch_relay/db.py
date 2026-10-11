@@ -14,7 +14,7 @@ def connect(path: Path) -> sqlite3.Connection:
     con = sqlite3.connect(path, timeout=5)
     con.execute("PRAGMA busy_timeout=5000")
     _set_wal(con)
-    con.execute("PRAGMA synchronous=NORMAL")
+    con.execute("PRAGMA synchronous=FULL")
     con.execute("PRAGMA foreign_keys=ON")
     return con
 
