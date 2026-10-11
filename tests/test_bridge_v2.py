@@ -541,12 +541,16 @@ def other_pair_workspace(client):
 
 def test_pair_forged_device_rate_isolation(client):
     other = other_pair_workspace(client)
-    for _ in range(20):
-        assert forged_pair(client, other).status_code == 202
+    windows = client.app.state.directory.windows
+    # Distinct rids: identical resends are free, so each post must be new work.
+    for i in range(20):
+        assert forged_pair(client, other, rid=f"{i:032x}").status_code == 202
+    assert ("bridge-post", DEVICE, 1000) not in windows
     assert post_raw(client, binary("bridge_device_post")).status_code == 202
-    # Anonymous retries still exhaust the workspace/address pairing limit.
-    for _ in range(40):
-        assert forged_pair(client, other).status_code == 202
+    assert windows[("bridge-post", DEVICE, 1000)][1] == 1
+    # Anonymous posts still exhaust the workspace/address pairing limit.
+    for i in range(20, 60):
+        assert forged_pair(client, other, rid=f"{i:032x}").status_code == 202
     response = forged_pair(client, other)
     assert response.status_code == 429
     assert response.json() == {"error": "rate_limited"}
