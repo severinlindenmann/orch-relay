@@ -387,6 +387,7 @@
      "note": "a person event needs decide"
     },
     {
+     "append_code": "validation.event",
      "event": {
       "actor": {
        "device": "d_c65032f21d43401cc223b05723c1e5b4",
@@ -431,6 +432,7 @@
      "schema_refused": true
     },
     {
+     "append_code": "validation.event",
      "event": {
       "actor": {
        "device": "d_c65032f21d43401cc223b05723c1e5b4",
@@ -521,6 +523,7 @@
      "note": "a certificate that expired before the event"
     },
     {
+     "append_code": "validation.event",
      "event": {
       "actor": {
        "device": "d_c65032f21d43401cc223b05723c1e5b4",
@@ -614,6 +617,7 @@
      "note": "certificate not signed by the person's key"
     },
     {
+     "append_code": "validation.event",
      "event": {
       "actor": {
        "device": "d_7efc1ba896b95f9151978a1dad982e3a",
@@ -1095,6 +1099,7 @@
      "note": "recovery needs a certificate signed by the person key"
     },
     {
+     "append_code": "validation.event",
      "event": {
       "actor": {
        "device": "d_dab52d8a46400ebc725bc16e30794db6",

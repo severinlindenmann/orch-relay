@@ -586,6 +586,7 @@
    "note": "the device belongs to another person"
   },
   {
+   "append_code": "validation.event",
    "event": {
     "actor": {
      "device": "d_c65032f21d43401cc223b05723c1e5b4",

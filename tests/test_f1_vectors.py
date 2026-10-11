@@ -11,6 +11,7 @@ Verification follows the pinned F1 text; no orch-core code is imported.
 import hashlib
 import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -640,7 +641,7 @@ def test_vector_files_match_the_recorded_sha256():
         for line in (F1 / "SOURCE").read_text().splitlines()
         if line.startswith("sha256:")
     )
-    assert "Commit: 908f2511125b46c09a40383fa4f8f61f72ca6a98" in (F1 / "SOURCE").read_text()
+    assert "Commit: 8ae6354e13f5e53b338798f25282cb4453161177" in (F1 / "SOURCE").read_text()
     assert {p.name for p in F1.iterdir()} == {n + ".json" for n in FILE_KEYS} | {"SOURCE"}
     files = sorted(p.name for p in F1.glob("*.json"))
     assert files == sorted(rec) and set(files) == {name + ".json" for name in FILE_KEYS}
@@ -750,6 +751,7 @@ FILE_KEYS = {
         "cases",
         "genesis",
         "heads",
+        "note",
         "now",
         "pins",
         "ticket_events",
@@ -878,6 +880,46 @@ def map_remote(raw, name, additional=()):
     return mapped if canonical_identity(mapped) else local
 
 
+def ascii_fold(s):
+    """F1 §2 / §8.1: only ASCII A–Z fold; NFC non-ASCII stays exact."""
+    return unicodedata.normalize("NFC", s).translate(
+        str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+    )
+
+
+def repo_paths_unique(repos):
+    """§2: compare resulting settings, including unchanged entries and leading //."""
+    names = [ascii_fold(name) for name in repos]
+    paths = [ascii_fold(posixpath.normpath(re.sub(r"/+", "/", r["path"]))) for r in repos.values()]
+    return len(names) == len(set(names)) and len(paths) == len(set(paths))
+
+
+def addon_heading_key(heading):
+    """§8.1: ASCII heading grammar, then ASCII alphanumerics only in its key."""
+    if len(heading) > 40 or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9,&/'-]| (?! ))*", heading):
+        raise ValueError("invalid addon heading")
+    return re.sub(r"[^a-z0-9]", "", ascii_fold(heading))
+
+
+@pytest.mark.parametrize("heading", ["Plan", "PLAN", "P-l a,n", "P/l&an"])
+def test_addon_heading_ascii_key(heading):
+    assert addon_heading_key(heading) == "plan"
+
+
+@pytest.mark.parametrize("heading", ["Key", "İdea", "ſummary", "Café", "a  b", "a" * 41])
+def test_addon_heading_refuses_non_ascii_and_bad_grammar(heading):
+    with pytest.raises(ValueError):
+        addon_heading_key(heading)
+
+
+@pytest.mark.parametrize(
+    "a, b, same",
+    [("/A", "/a", True), ("/É", "/é", False), ("/é", "/e\u0301", True), ("//a", "/a", True)],
+)
+def test_repo_path_comparison(a, b, same):
+    assert repo_paths_unique({"one": {"path": a}, "two": {"path": b}}) != same
+
+
 def branch_ok(branch):
     """F1 §3: git branch names, with the additional reserved names and Unicode exclusions."""
     return (
@@ -887,7 +929,16 @@ def branch_ok(branch):
         and branch not in {"HEAD", "@"}
         and not branch.endswith(".")
         and not any(x in branch for x in ("..", "@{"))
-        and not any(c in " ~^:?*[\\" or unicodedata.category(c) in {"Cc", "Cf"} for c in branch)
+        and not unicodedata.category(branch[0]).startswith("M")
+        and not any(
+            c in " ~^:?*[\\"
+            or unicodedata.category(c) in {"Cc", "Cf", "Co", "Zs", "Zl", "Zp", "Cn", "Cs"}
+            or 0xFE00 <= ord(c) <= 0xFE0F
+            or 0xE0100 <= ord(c) <= 0xE01EF
+            or 0x180B <= ord(c) <= 0x180F
+            or ord(c) in {0x034F, 0x115F, 0x1160, 0x3164, 0xFFA0, 0x17B4, 0x17B5, 0x2800}
+            for c in branch
+        )
         and all(
             part and not part.startswith(".") and not part.endswith(".lock")
             for part in branch.split("/")
@@ -1043,22 +1094,32 @@ def test_genesis_checks(c):
 
 
 # §5.5: never sort lines; report the physical position, not the supplied seq.
-def chain_break(events, log, ws, wsk, certs, ws_height):
+def chain_failure(events, log, ws, wsk, certs, ws_height):
     certs = dict(certs)
+    repos = {}
     prev, order = None, (0, "")
     for pos, e in enumerate(events, 1):
         if e["type"] == "settings.changed" and not settings_schema_ok(e.get("set")):
-            return pos
+            return pos, "chain.broken"
+        if e["type"] == "settings.changed":
+            for name, repo in e["set"].get("repos", {}).items():
+                if repo is None:
+                    repos.pop(name, None)
+                else:
+                    repos[name] = repo
+            if not repo_paths_unique(repos):
+                return pos, "chain.broken"
+        if (
+            e["type"] == "ticket.updated"
+            and "ticket.links" in e.get("set", {})
+            and not links_branches_ok(e["set"]["ticket.links"])
+        ):
+            return pos, "chain.broken"
         if e["seq"] != pos or e["prev"] != prev or not host_ok_event(e, wsk, ws, log):
-            return pos
+            return pos, "chain.broken"
         # §5.2: sig, auth and roster_v belong to person events only; a host event carrying one breaks the chain.
         if e["actor"]["kind"] != "person" and any(k in e for k in ("sig", "auth", "roster_v")):
-            return pos
-        if log != "workspace":
-            current = (e["ws_seq"], e["at"])
-            if current < order or e["ws_seq"] > ws_height:
-                return pos
-            order = current
+            return pos, "chain.broken"
         if e["actor"]["kind"] == "person":
             cert = certs.get(e["actor"]["device"])
             if e["type"] == "workspace.created":
@@ -1066,13 +1127,23 @@ def chain_break(events, log, ws, wsk, certs, ws_height):
             if e["type"] == "device.added" and e["actor"]["device"] == e["device"]:
                 cert = e["cert"]
             if not person_ok(e, cert, ws, log):
-                return pos
+                return pos, "chain.broken"
+        if log != "workspace":
+            current = (e["ws_seq"], e["at"])
+            if current < order or e["ws_seq"] > ws_height:
+                return pos, "chain.bad_ws_seq"
+            order = current
         if "device_cert" in e:
             certs["d_" + e["device_cert"]["o"]["device_id"]] = e["device_cert"]
         if e["type"] == "device.added":
             certs[e["device"]] = e["cert"]
         prev = head(e)
     return None
+
+
+def chain_break(events, log, ws, wsk, certs, ws_height):
+    failure = chain_failure(events, log, ws, wsk, certs, ws_height)
+    return failure[0] if failure else None
 
 
 TAMPER = load("tamper")
@@ -1095,6 +1166,24 @@ def test_signed_chain_tampering(c):
         len(workspace),
     )
     assert broken == c["chain_broken_at"]
+    if "replay_expect" in c:
+        failure = chain_failure(
+            c["events"],
+            c["log"],
+            TAMPER["workspace_id"],
+            workspace[0]["wsk_pub"],
+            certs,
+            len(workspace),
+        )
+        assert (failure[1] if failure else "ok") == c["replay_expect"]
+        # Exercise the stateful reader's step-1 precedence with the same signed prefix.
+        state = F1State(TAMPER["workspace_id"])
+        state.wsk, state.certs = workspace[0]["wsk_pub"], certs
+        state.logs = {"workspace": workspace, c["log"]: c["events"][: broken - 1]}
+        if broken > 1:
+            previous = c["events"][broken - 2]
+            state.log_order[c["log"]] = (previous["ws_seq"], previous["at"])
+        assert state.judge(c["events"][broken - 1], c["log"], replay=True) == c["replay_expect"]
     if c["log"] == "workspace":
         stopped = {
             uid: next((i for i, e in enumerate(events, 1) if e["ws_seq"] >= broken), None)
@@ -1279,7 +1368,9 @@ class F1State:
         # §5.11 step 0 at append: field set (`validation.*`). sig, auth and roster_v are person-only (§5.2).
         if a["kind"] != "person" and any(k in e for k in ("sig", "auth", "roster_v")):
             return "chain.broken" if replay else "validation.field_set"
-        if t == "settings.changed" and not settings_schema_ok(e.get("set")):
+        if t == "settings.changed" and (
+            not settings_schema_ok(e.get("set")) or not repo_paths_unique(self.updated_repos(e))
+        ):
             return "chain.broken" if replay else "validation.event"
         if (
             t == "ticket.updated"
@@ -1293,6 +1384,15 @@ class F1State:
         wsk = self.wsk if self.wsk is not None else e.get("wsk_pub")
         if not host_ok_event(e, wsk, self.ws, log):
             return "chain.broken"
+        # §5.11 step 1: replay verifies person signatures before ws_seq range/order.
+        if replay and a["kind"] == "person":
+            cert = self.certs.get(a["device"])
+            if t == "workspace.created":
+                cert = e["device_cert"]
+            if t == "device.added" and a["device"] == e["device"]:
+                cert = e["cert"]
+            if not person_ok(e, cert, self.ws, log):
+                return "chain.broken"
         if log != "workspace":
             current = (e["ws_seq"], e["at"], log, e["seq"])
             if (
@@ -1414,9 +1514,9 @@ class F1State:
                     continue
                 if remote.startswith("local:") and remote != "local:" + name:
                     return "settings.invalid"
-                if remote.lower() in identities:
+                if ascii_fold(remote) in identities:
                     return "settings.invalid"
-                identities.add(remote.lower())
+                identities.add(ascii_fold(remote))
         if t == "member.added":
             if role != "owner" and not (role == "maintainer" and e["role"] in {"member", "viewer"}):
                 return "role.denied"

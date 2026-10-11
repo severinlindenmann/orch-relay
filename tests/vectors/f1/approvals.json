@@ -4555,6 +4555,7 @@
      "note": "the ticket is filled in one edit"
     },
     {
+     "append_code": "validation.event",
      "event": {
       "actor": {
        "kind": "host"
@@ -4580,6 +4581,7 @@
      "schema_refused": true
     },
     {
+     "append_code": "validation.event",
      "event": {
       "actor": {
        "kind": "host"
@@ -4602,6 +4604,7 @@
      "schema_refused": true
     },
     {
+     "append_code": "validation.event",
      "event": {
       "actor": {
        "kind": "host"
@@ -4685,6 +4688,7 @@
      "note": "the agent asks Q1"
     },
     {
+     "append_code": "validation.event",
      "event": {
       "actor": {
        "kind": "host"

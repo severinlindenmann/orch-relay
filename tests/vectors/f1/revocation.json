@@ -212,6 +212,7 @@
      "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D"
     },
     {
+     "append_code": "validation.event",
      "event": {
       "actor": {
        "device": "d_c65032f21d43401cc223b05723c1e5b4",
@@ -289,6 +290,7 @@
      "note": "revocation signed by the sender's person key, not the device's person's"
     },
     {
+     "append_code": "validation.event",
      "event": {
       "actor": {
        "device": "d_c65032f21d43401cc223b05723c1e5b4",
@@ -509,6 +511,7 @@
      "note": "the host appends a PK-signed revocation (actor H)"
     },
     {
+     "append_code": "validation.event",
      "event": {
       "actor": {
        "kind": "host"
