@@ -229,6 +229,7 @@
      "note": "owners only"
     },
     {
+     "append_code": "validation.event",
      "event": {
       "abandoned": {
        "head": "sha256:93a1f8e06a1e58d517ac1220214f911a9cdec466b4b5660fcd8cbea671520640",
@@ -262,6 +263,7 @@
      "schema_refused": true
     },
     {
+     "append_code": "validation.event",
      "event": {
       "abandoned": {
        "head": "sha256:93a1f8e06a1e58d517ac1220214f911a9cdec466b4b5660fcd8cbea671520640",
@@ -618,6 +620,7 @@
      "note": "owners only"
     },
     {
+     "append_code": "validation.event",
      "event": {
       "abandoned": {
        "head": "sha256:93a1f8e06a1e58d517ac1220214f911a9cdec466b4b5660fcd8cbea671520640",
@@ -651,6 +654,7 @@
      "schema_refused": true
     },
     {
+     "append_code": "validation.event",
      "event": {
       "abandoned": {
        "head": "sha256:93a1f8e06a1e58d517ac1220214f911a9cdec466b4b5660fcd8cbea671520640",

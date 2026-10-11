@@ -1724,6 +1724,7 @@
      "note": "applies is a union: plan applies again"
     },
     {
+     "append_code": "validation.event",
      "event": {
       "actor": {
        "device": "d_c65032f21d43401cc223b05723c1e5b4",
@@ -1761,6 +1762,7 @@
      "schema_refused": true
     },
     {
+     "append_code": "validation.event",
      "event": {
       "actor": {
        "device": "d_c65032f21d43401cc223b05723c1e5b4",

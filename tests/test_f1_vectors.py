@@ -640,7 +640,7 @@ def test_vector_files_match_the_recorded_sha256():
         for line in (F1 / "SOURCE").read_text().splitlines()
         if line.startswith("sha256:")
     )
-    assert "Commit: 908f2511125b46c09a40383fa4f8f61f72ca6a98" in (F1 / "SOURCE").read_text()
+    assert "Commit: 8ae6354e13f5e53b338798f25282cb4453161177" in (F1 / "SOURCE").read_text()
     assert {p.name for p in F1.iterdir()} == {n + ".json" for n in FILE_KEYS} | {"SOURCE"}
     files = sorted(p.name for p in F1.glob("*.json"))
     assert files == sorted(rec) and set(files) == {name + ".json" for name in FILE_KEYS}
@@ -750,6 +750,7 @@ FILE_KEYS = {
         "cases",
         "genesis",
         "heads",
+        "note",
         "now",
         "pins",
         "ticket_events",
