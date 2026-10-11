@@ -475,3 +475,40 @@ def test_host_poll_whole_json_budget(client):
     response = host_poll(client)
     assert len(response.content) <= 4 * 1024 * 1024
     assert response.json()["next"]
+
+
+@pytest.mark.parametrize(
+    "path,headers",
+    [
+        (f"/v2/workspaces/{WS}/host/poll", HOST),
+        (f"/v2/workspaces/{WS}/bridge/{RID}", {"Authorization": "Bearer FAKE-device"}),
+        (f"/v2/workspaces/{WS}/pair/{CRID}/{RID}", {}),
+        (f"/v2/persons/{PERSON}/cert-requests", {"Authorization": "Bearer FAKE-device"}),
+    ],
+)
+def test_long_poll_wait_releases_lock_and_transaction(client, monkeypatch, path, headers):
+    directory = client.app.state.directory
+    original = directory.assert_can_wait
+    calls = []
+
+    def check_lock_from_another_thread():
+        acquired = directory.lock.acquire(timeout=0.5)
+        assert acquired, "long poll retained the directory lock"
+        directory.lock.release()
+
+    def check_wait():
+        original()
+        # Also detect a lock retained by the transaction's worker thread.
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(check_lock_from_another_thread).result(timeout=1)
+        with closing(db.connect(directory.path)) as con:
+            con.execute("PRAGMA busy_timeout=0")
+            con.execute("BEGIN IMMEDIATE")
+            con.rollback()
+        calls.append(True)
+
+    monkeypatch.setattr(directory, "assert_can_wait", check_wait)
+    response = client.get(path, headers=headers, params={"wait": 1})
+    assert response.status_code == 200
+    assert calls, "long poll must check wait safety before sleeping"
+    assert client.app.state.bridge.polls == {}

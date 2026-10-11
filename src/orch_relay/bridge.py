@@ -504,6 +504,7 @@ class Bridge:
                 if ready or not wait or time.monotonic() >= deadline:
                     return JSONResponse(result, status_code=202 if binary else 200)
                 first = False
+                self.d.assert_can_wait()
                 await asyncio.sleep(min(0.05, max(0, deadline - time.monotonic())))
         except Refusal as error:
             return JSONResponse(
