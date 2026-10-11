@@ -3,6 +3,8 @@
   "event": "orch/v2/event|",
   "gate": "orch/v2/gate|",
   "grant_secret": "orch/v2/grant-secret|",
+  "h_checkpoint": "orch/v2/checkpoint-hash|",
+  "h_log_acc": "orch/v2/log-acc|",
   "people": "orch/v2/people|",
   "policy": "orch/v2/policy|",
   "question": "orch/v2/question|",

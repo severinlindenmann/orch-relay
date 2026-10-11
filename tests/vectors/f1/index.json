@@ -17,7 +17,7 @@
   "refusal_order.json": "model scenarios: an event breaking two rules gets the code of the earlier step of the refusal order (5.11)",
   "replay.json": "model scenario: replayed or re-contexted signed events are refused with the real verifier (5.3, 5.11)",
   "repo_identity.json": "[shared, extended] canonical identities, refused forms, and `mapping`: raw remote -> canonical (5.7)",
-  "restore.json": "workspace restore re-appends every PK-signed revocation (5.10)",
+  "restore.json": "workspace restore carries effective revocations atomically (5.10)",
   "revocation.json": "device.revoked: embedded revocation as authority, reason mismatch, recovery (5.3)",
   "section_text.json": "body.md heading and fence rules, LF trimming, what is hashed (4, 5.6)",
   "signatures.json": "real P-256 signatures of events and host_sig, what they cover, replay refusals (5.3, 5.5)",
