@@ -2193,6 +2193,10 @@ un-revoke.
 ### 19.6 Exact HTTP shapes and common refusals (P3-D1/D2/D10/D17)
 
 `tests/http_fixtures/*.json` is the executable example corpus (one file per route role).
+`tests/http_fixtures/MANIFEST.json` lists the sha256 of every other file in that directory plus an
+aggregate hash (`uv run python tests/http_fixtures/manifest.py --write|--check`; a pytest fails on a stale
+manifest). Bump `revision` whenever any fixture changes. Consumers (orch-mobile, orch-core) vendor the
+corpus at a named commit and verify the manifest in their CI.
 There are no public invite-management routes: invite creation is the admin CLI (P3-D3).
 Checkpoint, restore, genesis, staging, baseline and proof routes wait for the next contract group.
 

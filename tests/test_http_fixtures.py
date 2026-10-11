@@ -11,7 +11,9 @@ from ref._http_fixtures import BODY_CAPS, ROUTES, build, refusals
 
 ROOT = Path(__file__).resolve().parents[1]
 DOC = (ROOT / "docs/protocol-v2.md").read_text()
-FILES = sorted((ROOT / "tests/http_fixtures").glob("*.json"))
+FILES = sorted(
+    p for p in (ROOT / "tests/http_fixtures").glob("*.json") if p.name != "MANIFEST.json"
+)
 CORPUS = json.loads(R.VECTORS.read_text())["suites"]
 V = CORPUS["2"]
 S = R.SUITES[2]

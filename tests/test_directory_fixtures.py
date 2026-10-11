@@ -28,6 +28,7 @@ G2 = {"membership", "members", "grants", "card_keys", "card_key"}
 CASES = [
     (p.stem, c)
     for p in sorted(Path("tests/http_fixtures").glob("*.json"))
+    if p.name != "MANIFEST.json"
     for c in json.loads(p.read_text())["cases"]
 ]
 
