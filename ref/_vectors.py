@@ -77,6 +77,8 @@ def build() -> dict:
     }
     from ref._p3_vectors import add_p3
     add_p3(out)
+    from ref._checkpoint_vectors import add_checkpoints
+    add_checkpoints(out)
     return out
 
 

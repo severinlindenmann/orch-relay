@@ -44,7 +44,7 @@ def test_explicit_route_refusals_are_covered():
     """Independent doc extraction prevents a forgotten route-table error in the generator."""
     fixtures = [json.loads(p.read_text()) for p in FILES]
     for line in DOC.split("## 19. Relay HTTP API", 1)[1].splitlines():
-        match = re.match(r"\| `(GET|POST|PUT) (/v2/[^`?\[]+)", line)
+        match = re.match(r"\| `(GET|POST|PUT|DELETE) (/v2/[^`?\[]+)", line)
         if not match:
             continue
         matching = [
@@ -68,11 +68,17 @@ def signed_objects(value):
             yield from signed_objects(child)
 
 
-def check_signatures(value, *, card_refusal=None, cert_refusal=None):
+def check_signatures(value, *, card_refusal=None, cert_refusal=None, genesis_refusal=False, checkpoint_refusal=False):
     for signed in signed_objects(value):
         o = signed["o"]
         corpus = CORPUS[str(o["suite"])]
         suite = R.SUITES[o["suite"]]
+        if o["kind"] == "workspace_checkpoint" and checkpoint_refusal:
+            assert R.verify_object(
+                suite, bytes.fromhex(corpus["keys"]["wsk_a.sig"]["pub"]), signed,
+                "workspace_checkpoint",
+            ) is None
+            continue
         if o["kind"] == "card":
             result = R.verify_card(
                 suite, signed, bytes.fromhex(corpus["keys"]["person_alice.sig"]["pub"])
@@ -94,6 +100,14 @@ def check_signatures(value, *, card_refusal=None, cert_refusal=None):
             owner = (
                 "person_bob" if o["person_id"] == corpus["ids"]["person_bob"] else "person_alice"
             )
+        elif o["kind"] == "genesis_pin":
+            if genesis_refusal:
+                assert R.verify_object(
+                    suite, bytes.fromhex(corpus["keys"]["phone.sig"]["pub"]), signed,
+                    "genesis_pin",
+                ) is None
+                continue
+            owner = "phone"
         elif o["kind"] == "ws_delegation":
             owner = "person_alice"
         else:
@@ -151,7 +165,7 @@ def test_http_fixture(path):
     for c in f["cases"]:
         request, response = c["request"], c["response"]
         assert request["method"] == f["route"]["method"]
-        pattern = re.sub(r"\{[a-z]+\}", "[0-9a-f]{32}", f["route"]["path"])
+        pattern = re.sub(r"\{[a-z_]+\}", lambda m: ("(?:null|sha256:[0-9a-f]{64})" if m[0] == "{source_hash}" else "sha256:[0-9a-f]{64}" if m[0] in {"{hash}", "{target_hash}"} else "[0-9]+" if m[0] == "{i}" else "[0-9a-f]{32}"), f["route"]["path"])
         assert re.fullmatch(pattern, request["path"])
         assert "Orch-Host-API" not in request["headers"]
         assert "host_api" not in json.dumps(c)
@@ -163,13 +177,15 @@ def test_http_fixture(path):
             code = response["json"]["error"]
             assert code in allowed[response["status"]], (response["status"], code)
             assert set(response["json"]) == (
-                {"error", "epoch"} if code == "stale_epoch" else {"error"}
+                {"error", "epoch"} if code == "stale_epoch" else {"error", "devices"} if code == "restore_missing_revocation" else {"error"}
             )
         if response["status"] in (429, 503):
             assert re.fullmatch(r"[0-9]+", response["headers"]["Retry-After"])
         scenario = c["given"].get("scenario", c["name"])
         check_signatures(
             request,
+            checkpoint_refusal=path.stem == "checkpoint_put" and scenario == "bad_signature",
+            genesis_refusal=path.stem == "genesis" and scenario == "bad_signature",
             card_refusal=scenario
             if path.stem == "card_put" and scenario in {"bad_signature", "delegation_mismatch"}
             else None,
@@ -260,7 +276,7 @@ def test_json_caps_match_route_tables_and_success_bodies_fit():
         oversized = next(
             c for c in fixture["cases"] if c["response"]["json"].get("error") == "too_large"
         )
-        assert oversized["response"]["status"] == 413
+        assert oversized["response"]["status"] == (400 if name == "checkpoint_put" else 413)
         assert oversized["request"]["body_recipe"]["count"] == cap + 1
 
 
@@ -277,3 +293,25 @@ def test_workspace_fixtures_do_not_invent_device_session_failures():
             assert (403, "cert_expired") in errors  # proposed member's certificate
         if name not in {"membership", "bridge_host_post"}:
             assert (403, "revoked") not in errors
+
+
+def test_checkpoint_fixture_state_machine_bindings():
+    from ref import checkpoints as C
+    from ref._checkpoint_http import ROUTES as CHECKPOINT_ROUTES
+
+    names = {row[0] for row in CHECKPOINT_ROUTES}
+    fixtures = build()
+    for name in names:
+        fixture = fixtures[name]
+        assert "vector" in fixture["cases"][0]["given"]
+        for case in fixture["cases"]:
+            binding = case["given"].get("vector")
+            if binding is None:
+                continue
+            vector = next(c for c in V["checkpoints"]["cases"] if c["name"] == binding["name"])
+            import copy
+            state = copy.deepcopy(vector["state"])
+            for step in vector["steps"][:binding["step"] + 1]:
+                result = C.dispatch(S, state, **step["input"])
+            assert result["status"] == case["response"]["status"]
+            assert {k: v for k, v in result.items() if k != "status"} == case["response"]["json"]

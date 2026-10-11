@@ -235,6 +235,9 @@ LABELS = {
     "h_people": "orch/v2/people|",
     "h_question_id": "orch/v2/question-id|",
     "h_event": "orch/v2/event|",
+    "h_checkpoint": "orch/v2/checkpoint-hash|",
+    "h_log_acc": "orch/v2/log-acc|",
+    "sig_genesis_pin": "orch/v2/sig/genesis-pin|",
     "h_grant_secret": "orch/v2/grant-secret|",
     "h_assert": "orch/v2/assert|",
     "h_webauthn_reg": "orch/v2/webauthn-reg|",
@@ -547,7 +550,7 @@ def open_sealed(suite: Suite, rcpt_kx_priv, rcpt_id: bytes, purpose: str, object
 # §6 Signed objects
 # =====================================================================================================
 
-KIND_LABEL = {"device_cert": "sig_device_cert", "revocation": "sig_revocation", "member_list": "sig_member_list",
+KIND_LABEL = {"workspace_checkpoint": "sig_checkpoint", "genesis_pin": "sig_genesis_pin", "device_cert": "sig_device_cert", "revocation": "sig_revocation", "member_list": "sig_member_list",
               "wk_grant": "sig_wk_grant", "sk_grant": "sig_sk_grant", "cert_request": "sig_cert_request",
               "cert_rejection": "sig_cert_rejection", "ws_delegation": "sig_ws_delegation", "cert_challenge": "sig_cert_challenge",
               "enroll_request": "sig_enroll_request", "drop_object": "sig_drop_object",

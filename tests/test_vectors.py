@@ -768,3 +768,9 @@ def test_p3_membership_whole_body_size_before_parsing(sid):
     assert replay(R.SUITES[int(sid)], c) == {"result": {"refuse": "too_large"}, "state": c["state"]}
     c["args"]["body_raw"] = " " * 2097153
     assert replay(R.SUITES[int(sid)], c) == {"result": {"refuse": "too_large"}, "state": c["state"]}
+
+
+@each_suite("checkpoints", "cases")
+def test_checkpoint_contract_cases(S, c):
+    from ref._checkpoint_vectors import replay
+    assert replay(S, c) == c["expect"]

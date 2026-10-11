@@ -1,0 +1,549 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "PUT",
+    "path": "/v2/workspaces/{ws}/genesis",
+    "role": "host",
+    "auth": "W(g)"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000,
+        "vector": {
+          "section": "checkpoints",
+          "name": "genesis_valid_and_historical_retry",
+          "step": 0
+        }
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/genesis",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pin": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "genesis_pin",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "genesis": "sha256:0b8218975f6951f4eeec4fb4913c0818dbd79faa78e0cfef0712b3422031cc4c"
+            },
+            "sig": "m1b-uVHeP3iUTp9wFbG29CMgQaKkjP0BceaMjPkvKt_zU86bc_vV1IHFPrQh782qQ76F1cAjQpfoU8Jc_UwzBg"
+          },
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {}
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "genesis: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/genesis",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pin": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "genesis_pin",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "genesis": "sha256:0b8218975f6951f4eeec4fb4913c0818dbd79faa78e0cfef0712b3422031cc4c"
+            },
+            "sig": "m1b-uVHeP3iUTp9wFbG29CMgQaKkjP0BceaMjPkvKt_zU86bc_vV1IHFPrQh782qQ76F1cAjQpfoU8Jc_UwzBg"
+          },
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_bad_signature",
+      "given": {
+        "scenario": "bad_signature",
+        "now_ms": 1790000000000,
+        "condition": "genesis: Trusted directory verification key differs from the artifact's signing key; artifact remains valid under its fixture key.",
+        "vector": {
+          "section": "checkpoints",
+          "name": "genesis_non_owner",
+          "step": 0
+        }
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/genesis",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pin": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "genesis_pin",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "genesis": "sha256:0b8218975f6951f4eeec4fb4913c0818dbd79faa78e0cfef0712b3422031cc4c"
+            },
+            "sig": "bsjCMFs8tadLNONtjhHeYMj3JbhnuANn6LKkwTxZ4LS7xcVTMNGvleGP4R0oMQupNQMx9bBXBp7tJN3bDLNkKg"
+          },
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "bad_signature"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "genesis: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/genesis",
+        "query": {},
+        "headers": {
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pin": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "genesis_pin",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "genesis": "sha256:0b8218975f6951f4eeec4fb4913c0818dbd79faa78e0cfef0712b3422031cc4c"
+            },
+            "sig": "m1b-uVHeP3iUTp9wFbG29CMgQaKkjP0BceaMjPkvKt_zU86bc_vV1IHFPrQh782qQ76F1cAjQpfoU8Jc_UwzBg"
+          },
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by genesis."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/genesis",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pin": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "genesis_pin",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "genesis": "sha256:0b8218975f6951f4eeec4fb4913c0818dbd79faa78e0cfef0712b3422031cc4c"
+            },
+            "sig": "m1b-uVHeP3iUTp9wFbG29CMgQaKkjP0BceaMjPkvKt_zU86bc_vV1IHFPrQh782qQ76F1cAjQpfoU8Jc_UwzBg"
+          },
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_fenced",
+      "given": {
+        "scenario": "fenced",
+        "now_ms": 1790000000000,
+        "condition": "genesis: Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/genesis",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "0",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pin": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "genesis_pin",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "genesis": "sha256:0b8218975f6951f4eeec4fb4913c0818dbd79faa78e0cfef0712b3422031cc4c"
+            },
+            "sig": "m1b-uVHeP3iUTp9wFbG29CMgQaKkjP0BceaMjPkvKt_zU86bc_vV1IHFPrQh782qQ76F1cAjQpfoU8Jc_UwzBg"
+          },
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "fenced"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_genesis_mismatch",
+      "given": {
+        "scenario": "genesis_mismatch",
+        "now_ms": 1790000000000,
+        "condition": "genesis: Pinned genesis or card WSK/workspace disagrees; established pins never change.",
+        "vector": {
+          "section": "checkpoints",
+          "name": "genesis_other_wsk",
+          "step": 0
+        }
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/genesis",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pin": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "genesis_pin",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BOgRnzpX0AUPYGfNWl4v7d-Nv0LQDpoz5PP_5XD8vgu0W3Z6l6Y2lTj9Ty_C2LiyvnyxnkdWSHRRU16AssDhfLY",
+              "genesis": "sha256:0b8218975f6951f4eeec4fb4913c0818dbd79faa78e0cfef0712b3422031cc4c"
+            },
+            "sig": "XDQxg163DkbAHQU9Zp4FvAj9cYPPLStfUNYb-77DM5rw99RKSkJe74CRWlWoRamc0MJhxw-w96-6ghJTyNruLQ"
+          },
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "genesis_mismatch"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_restore_not_owner",
+      "given": {
+        "scenario": "restore_not_owner",
+        "now_ms": 1790000000000,
+        "condition": "genesis: The signer lacks the card owner device authority required by P3-D24.",
+        "vector": {
+          "section": "checkpoints",
+          "name": "genesis_decide_only",
+          "step": 0
+        }
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/genesis",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pin": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "genesis_pin",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "genesis": "sha256:0b8218975f6951f4eeec4fb4913c0818dbd79faa78e0cfef0712b3422031cc4c"
+            },
+            "sig": "m1b-uVHeP3iUTp9wFbG29CMgQaKkjP0BceaMjPkvKt_zU86bc_vV1IHFPrQh782qQ76F1cAjQpfoU8Jc_UwzBg"
+          },
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide"
+              ]
+            },
+            "sig": "w9ramW33bT7T6ORGAW4M4aY2PBRf-DGpevGF_MDMRnfXt4Hro4V2VQE4i3by6oaj0nqIWcutjHQFXwVfA9akTg"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "restore_not_owner"
+        }
+      }
+    },
+    {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "genesis: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/genesis",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 65537,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    }
+  ]
+}

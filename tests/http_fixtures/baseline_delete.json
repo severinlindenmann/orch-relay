@@ -1,0 +1,260 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "DELETE",
+    "path": "/v2/workspaces/{ws}/baselines/{hash}",
+    "role": "client",
+    "auth": "W(g)|D(m)"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790172800000,
+        "vector": {
+          "section": "checkpoints",
+          "name": "baseline_retention_release_and_expiry",
+          "step": 5
+        }
+      },
+      "request": {
+        "method": "DELETE",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/baselines/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {}
+      }
+    },
+    {
+      "name": "refusal_400_cert_expired",
+      "given": {
+        "scenario": "cert_expired",
+        "now_ms": 1790000000000,
+        "condition": "Device certificate used by baseline_delete has expired (400)."
+      },
+      "request": {
+        "method": "DELETE",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/baselines/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "cert_expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790172800000,
+        "condition": "baseline_delete: Unknown query parameter; strict route parsing refuses before dispatch.",
+        "vector": {
+          "section": "checkpoints",
+          "name": "baseline_delete_requires_role",
+          "step": 0
+        }
+      },
+      "request": {
+        "method": "DELETE",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/baselines/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "baseline_delete: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "DELETE",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/baselines/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+        "query": {},
+        "headers": {
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by baseline_delete."
+      },
+      "request": {
+        "method": "DELETE",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/baselines/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_revoked",
+      "given": {
+        "scenario": "revoked",
+        "now_ms": 1790000000000,
+        "condition": "The device authenticating baseline_delete is revoked."
+      },
+      "request": {
+        "method": "DELETE",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/baselines/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "revoked"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_fenced",
+      "given": {
+        "scenario": "fenced",
+        "now_ms": 1790000000000,
+        "condition": "baseline_delete: Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
+      },
+      "request": {
+        "method": "DELETE",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/baselines/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Orch-Holder": "0"
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "fenced"
+        }
+      }
+    },
+    {
+      "name": "member_wrong_offer_id_is_a_noop",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790172800000,
+        "vector": {
+          "section": "checkpoints",
+          "name": "baseline_member_release_needs_offer_id",
+          "step": 0
+        }
+      },
+      "request": {
+        "method": "DELETE",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/baselines/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+        "query": {
+          "offer_id": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {}
+      }
+    },
+    {
+      "name": "member_release_by_offer_id",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790172800000,
+        "vector": {
+          "section": "checkpoints",
+          "name": "baseline_member_release_needs_offer_id",
+          "step": 3
+        }
+      },
+      "request": {
+        "method": "DELETE",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/baselines/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+        "query": {
+          "offer_id": "abababababababababababababababab"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {}
+      }
+    }
+  ]
+}

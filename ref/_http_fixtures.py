@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from ref import orch_protocol_ref as R
+from ref import _checkpoint_http as CP
 
 # Separate role rows share a path but have distinct auth, body and response semantics.
 # id, method, path, role, auth, route-specific status/code pairs
@@ -43,6 +44,7 @@ ROUTES = [
     ("cert_request_get", "GET", "/v2/cert-requests/{id}", "host", "W", "404:not_found"),
 ]
 
+ROUTES += CP.ROUTES
 
 CONDITIONS = {
     "malformed": "Unknown query parameter; strict route parsing refuses before dispatch.",
@@ -91,11 +93,14 @@ CONDITIONS = {
 }
 
 
+CONDITIONS.update(CP.CONDITIONS)
+
 # (G0a review 2) Whole JSON body caps, enforced before parsing.
 JSON_CAPS = {r[0]: (2097152 if r[0] == "membership" else 65536 if r[0] in
              {"accounts", "card_put", "card_keys", "cert_requests_post"} else 16384)
              for r in ROUTES if r[1] in {"POST", "PUT"} and r[0] not in
              {"bridge_device_post", "bridge_host_post", "pair_device_post", "pair_host_post"}}
+JSON_CAPS.update(CP.CAPS)
 BODY_CAPS = {**JSON_CAPS, "bridge_device_post": 1048576, "bridge_host_post": 262144,
              "pair_device_post": 65536, "pair_host_post": 65536}
 
@@ -104,7 +109,7 @@ def refusals(row):
     name, method, _, _, auth, spec = row
     result = {(400, "malformed")}
     if name in BODY_CAPS:
-        result.add((413 if name in JSON_CAPS else 400, "too_large"))
+        result.add((413 if name in JSON_CAPS and name != "checkpoint_put" else 400, "too_large"))
     if auth not in ("none", "logout"):
         result |= {(401, "unauthenticated"), (403, "not_eligible")}
         if "D(" in auth:
@@ -196,11 +201,14 @@ def build(vectors=None):
     }
     query = {"revocation_feed": {"after": "0", "limit": "256"}, "grants": {"epoch": "1"}, "card_key": {"card_seq": "1"},
              "bridge_device_poll": {"wait": "25"}, "pair_poll": {"wait": "25"}, "host_poll": {"after": "0", "wait": "25"}, "cert_requests_poll": {"wait": "25"}}
+    cp_shapes, cp_query, cp_paths = CP.shapes(v)
+    shapes.update(cp_shapes)
+    query.update(cp_query)
     output = {}
     for row in ROUTES:
         name, method, path, role, auth, _ = row
         actual = path
-        for k, val in {"ws": ws, "person": person, "device": device, "rid": rid, "offer": offer, "id": crid}.items():
+        for k, val in {"ws": ws, "person": person, "device": device, "rid": rid, "offer": offer, "id": crid, **cp_paths}.items():
             actual = actual.replace("{" + k + "}", val)
         req, resp = shapes[name]
         headers = {}
@@ -221,6 +229,8 @@ def build(vectors=None):
         cases = [success]
         for code_status, code in refusals(row):
             err = {"error": code}
+            if code == "restore_missing_revocation":
+                err["devices"] = [device]
             if code == "stale_epoch":
                 err["epoch"] = 2
             response = {"status": code_status, "headers": {"Content-Type": "application/json"}, "json": err}
@@ -237,6 +247,8 @@ def build(vectors=None):
                 if "body_b64u" in refused_request:
                     key = "bridge_response" if role == "host" else "bridge_request"
                     refused_request["body_b64u"] = R.b64u(bytes.fromhex(alternate["p3"]["objects"][key]))
+                elif name == "checkpoint_put":
+                    refused_request["json"]["checkpoint"] = alternate["checkpoints"]["objects"]["checkpoint"]
                 else:
                     alt = alternate["p3"]["objects"]
                     replacements = {"card": alternate["card"]["card"], "cert": alternate["certs"]["signed"]["phone"],
@@ -340,7 +352,7 @@ def build(vectors=None):
             extra("expired_token_retry", given="token_expired_or_already_logged_out")
         output[name] = {"contract": "orch-relay-http-v2", "suite": 2, "route": {"method": method, "path": path, "role": role, "auth": auth},
                         "cases": cases}
-    return output
+    return CP.enrich(output, v)
 
 
 if __name__ == "__main__":
