@@ -300,6 +300,7 @@ Every derivation, signature, AEAD associated data, hash and MAC has its own labe
 | `h_pin_workspace` | `orch/v2/pin/workspace\|` | hash | | `wsk_pin` |
 | `h_sas` | `orch/v2/sas\|` | hash | | the 6-character pairing code |
 | `h_sas_cert` | `orch/v2/sas-cert\|` | hash | | the 6-character code of the primary's challenge |
+| `h_dk_hash` | `orch/v2/dk-hash\|` | hash | | `dk_hash`: both keys of one pairing attempt (§8.4, G3b P3-D28) |
 | `h_dek_commit` | `orch/v2/dek-commit\|` | hash | | key commitment for a DEK |
 | `h_card_key_commit` | `orch/v2/card-key-commit\|` | hash | | key commitment for a card key `CK` |
 | `h_wk_commit` | `orch/v2/wk-commit\|` | hash | | key commitment for `WK_e`, the member list's `wk_commit` (§7.2, G2b) |
@@ -978,10 +979,18 @@ Vectors: `bridge.seal`, `hkdf` (`k_bridge_epoch_1`, `k_bridge_epoch_2`, `k_pair`
    `dk_sig`; the header `device` is `device_id(dk_sig_pub)`):
 
    ```
-   meta = {"op":"pair", "dk_sig_pub", "dk_kx_pub", "label": text, "cert": null | <signed device_cert>}
+   meta = {"op":"pair", "dk_sig_pub", "dk_kx_pub", "label": text, "cert": null | <signed device_cert>,
+           "attempt": hex(16 CSPRNG bytes)}
    ```
 
    - The field set is exact.
+   - **The pairing attempt (G3b, P3-D28).** `attempt` is a nonce the device draws when it starts a pairing
+     attempt. A resend or `pair_status` poll of the same attempt keeps it (also across an app restart); a new
+     attempt, including a new scan of the same link, draws a new one. A phone **without** a certificate MUST
+     draw **fresh device keys** (`dk_sig`, `dk_kx`) for every new attempt, and MUST persist, for at least
+     10 minutes after an attempt ends (the challenge lifetime), that attempt's `device_id`, so it can recognise
+     its own earlier attempt's challenge or rejection. The host cannot know the attempt nonce or the fresh
+     keys before the attempt starts, so it cannot prepare a PK-signed challenge or rejection for it.
    - A phone that is already one of the owner's devices sends its certificate. If the certificate's
      person differs from `pk_pin`, the phone shows "this workspace belongs to someone else" and sends
      nothing.
@@ -990,9 +999,9 @@ Vectors: `bridge.seal`, `hkdf` (`k_bridge_epoch_1`, `k_bridge_epoch_2`, `k_pair`
 
 3. **Host checks**, in this order, after §8.6 steps 1–3, which give silence for an unknown offer or a bad
    tag:
-   1. the meta shape → `malformed`;
+   1. the meta shape, including `attempt` as 32 lower-case hex characters → `malformed`;
    2. the offer is open and unused. A resend by the device that holds the pending pairing, with the same
-      two keys, is answered `pending` again. Otherwise → `pairing_closed`;
+      two keys and the same `attempt`, is answered `pending` again. Otherwise → `pairing_closed`;
    3. `device_id(dk_sig_pub)` equals the header's, and the signature verifies → `bad_signature`;
    4. the time window → `stale_timestamp` (`host_ms`);
    5. if `cert` is present:
@@ -1044,10 +1053,15 @@ exactly one of:
 {"state":"pending", "wsk_pub", "sas_nonce", "dk_sig_pub", "dk_kx_pub"}     the same five fields as step 3
 {"state":"cert_pending", "primary_label": text, "pk_pub": b64u, "challenge": <signed cert_challenge> | null,
  "wsk_pub"}
-{"state":"approved", "scopes": [...], "cert": <signed device_cert>, "pk_pub": b64u, "epoch": e, "wsk_pub"}
-{"state":"rejected", "wsk_pub"}
+{"state":"approved", "scopes": [...], "cert": <signed device_cert>, "pk_pub": b64u, "epoch": e,
+ "list_seq": n, "card_seq": n, "baseline": {"n", "hash"} | null, "wsk_pub"}
+{"state":"rejected", "wsk_pub"}                                  rejected on the host (step 5), or unknown
+{"state":"rejected", "wsk_pub", "pk_pub": b64u, "rejection": <signed cert_rejection>}   rejected on the primary
 {"state":"expired", "wsk_pub"}            cert_pending ran 10 minutes without a certificate
 ```
+
+The two `rejected` forms are exact (G3b, P3-D28). In the second the host relays the primary's PK-signed
+`cert_rejection` (§8.4) unchanged, as it relays the challenge.
 
 `pending` repeats the full five-field answer, with the key echo, so a device whose first answer was lost can
 still check the echo and show the code. A device ignores fields it does not know.
@@ -1059,12 +1073,55 @@ On `approved`, the device checks:
 
 - `pk_pin(pk_pub)` against the link;
 - the certificate's signature, its two keys (they must be its own) and its validity;
-- `scopes`.
+- `scopes`;
+- the **join anchor** (G3b, P3-D28; F1 Q6): `epoch` an integer `1 … 2^32 − 1`; `list_seq` and `card_seq`
+  safe integers `≥ 1`; `baseline` present, either `null` or exactly `{"n": safe integer ≥ 0, "hash":
+  "sha256:" + 64 lower-case hex}` (§19.8). Otherwise the answer is dropped (`not_a_pairing_answer`).
 
-It then logs in to the relay (§12.2) and fetches its WK grant (§7.3). **DECIDED HERE:** the answer shapes,
+`list_seq` is the sequence of the list the host published in step 6.3 (the one that adds this device),
+`card_seq` the host's current card. The device **persists** `{epoch, list_seq, card_seq, scopes,
+baseline}` as its join floor before it fetches anything, and keeps it across join retries and restarts. A
+later `approved` (a re-poll) only raises it: each number is the maximum, and the baseline never downgrades
+(§19.8). At join (vectors `approved_anchor.join`):
+
+- the first member list it accepts MUST have `epoch ≥` the floor's epoch and `list_seq ≥` the floor's
+  `list_seq` (else `below_anchor`), and MUST contain this device with **exactly** the approved `scopes`
+  (else `scopes_mismatch`);
+- the first card it accepts MUST have `card_seq ≥` the floor's (else `below_anchor`).
+
+A refused object leaves the floor and the device's state unchanged; the device retries the fetch. This
+closes a relay rollback **below** the approval point; withholding newer objects stays possible (design
+§5.2). After first contact the normal monotonic rules apply (§7.2, §7.3, §18 R6). It then logs in to the
+relay (§12.2) and fetches its WK grant (§7.3).
+
+On `rejected`, the device shows a verified **"Denied by the owner"** only if every check below passes, in
+this order (G3b, P3-D28; F1 Q8). Otherwise it shows the unattributed "The pairing was refused" and raises
+no alarm, because the host could have sent the short form anyway. The only exception is step 4's alarm.
+
+1. the long form's field set is exact (`not_a_pairing_answer`) and `pk_pin(pk_pub)` matches the link
+   (`pk_pin`);
+2. the signature verifies under `pk_pub` with `orch/v2/sig/cert-rejection|`, and the field set is exact
+   (`rejection_signature`);
+3. `workspace_id` is the link's and `person_id == person_id(pk_pub)` (`not_for_this_workspace`);
+4. the device: `device_id` and `dk_hash` are this attempt's own. A `device_id` of one of the phone's own
+   earlier attempts is unattributed (`stale_attempt`, no alarm). **Any other device raises the alarm**
+   (`not_my_key`): the owner rejected someone else's request for this workspace;
+5. `attempt` is this attempt's nonce and `offer_id` the link's offer (`not_for_this_pairing`);
+6. if the phone saw a challenge in this attempt, `request_id` equals that challenge's
+   (`not_for_this_pairing`);
+7. `now < expires_ms` (`rejection_expired`).
+
+The device and attempt checks run **before** the offer, and also when no challenge was seen (`open →
+rejected`), so a host-chosen `offer_id` cannot turn the alarm into a silent refusal. The denial is attributed
+to the **pinned owner** (the person of `pk_pin`), never to the host-supplied `primary_label`: the signature
+authenticates `PK`, not a device name.
+
+**DECIDED HERE:** the answer shapes,
 the `expired` state, that every answer carries `wsk_pub`, and that `approved` carries `pk_pub` and the
 certificate. Vectors: `host_cases` `pair_*`, `pair_status_*`, `pair_answers`, and the round trip
-`test_round_trip_pairing_through_cert_pending`.
+`test_round_trip_pairing_through_cert_pending`. G3b (P3-D28): `cert_binding` (`relay`, `primary`, `host`,
+`challenges`), `rejected_forms` and `approved_anchor` (`answers`, `join`), and the round trip
+`test_round_trip_rejection_on_the_primary_is_attributed`.
 
 ### 8.4 `cert_pending`: the request to the primary device and its challenge
 
@@ -1076,13 +1133,21 @@ host must not be able to get one for a key of its choosing. The flow is:
 
    ```
    {"o": {"v":2, "suite", "kind":"cert_request", "request_id", "workspace_id", "person_id", "primary_device_id",
+          "offer_id", "attempt", "device_id", "dk_hash",
           "created_ms", "expires_ms" (= created + 10 min),
           "sealed": b64u(seal_to(primary dk_kx, "cert-request", object = request_id, epoch 0, cj(inner)))},
     "sig": b64u(Sign(WSK, "orch/v2/sig/cert-request|" || cj(o)))}
-   inner = {"device_id", "dk_sig_pub", "dk_kx_pub", "label", "scopes_max", "offer_id"}       exactly these
+   inner = {"device_id", "dk_sig_pub", "dk_kx_pub", "label", "scopes_max", "offer_id", "attempt"}   exactly these
+   dk_hash = b64u(H("orch/v2/dk-hash|" || suite || lp16(dk_sig_pub) || lp16(dk_kx_pub)))
    ```
 
    `inner` carries **no host nonce**. Anything the host chooses could be ground against a 30-bit code.
+   `attempt` is the device's nonce from the pair request (§8.3 step 2), copied unchanged.
+
+   **G3b (P3-D28).** `offer_id`, `attempt`, `device_id` and `dk_hash` also travel **in clear** in `o`, so the
+   relay can bind the primary's challenge and rejection to the attempt (P3-D11). `offer_id` is not secret from
+   the relay (it is in the pair path); `attempt`, `device_id` and `dk_hash` reveal no key. The primary
+   checks that they equal the sealed inner (step 2.7).
 
 2. **The primary checks, in order:**
    1. the card is its own person's → `other_person`;
@@ -1093,8 +1158,9 @@ host must not be able to get one for a key of its choosing. The flow is:
    6. no other request of this workspace is open → `request_open` (at most one open request per
       workspace). **A request is open while it is unexpired and neither signed nor rejected**, so an
       expired or rejected request never blocks the workspace;
-   7. the inner field set is exact, the keys are valid, `device_id` derives from `dk_sig_pub`, and the
-      scopes are valid → `malformed`;
+   7. the field sets of `o` and `inner` are exact, the keys are valid, `device_id` derives from `dk_sig_pub`,
+      the scopes are valid, and `o`'s clear `offer_id`, `attempt`, `device_id` equal `inner`'s and `o.dk_hash`
+      is `dk_hash` of `inner`'s keys (G3b) → `malformed`;
    8. `scopes_max` is not a `drop:` scope → `scope_exceeded` (scoped agents enrol only through §6.4).
 
    If the card's delegation says `client_hosted`, the primary goes on, but shows a **warning**: "this
@@ -1105,26 +1171,34 @@ host must not be able to get one for a key of its choosing. The flow is:
    to the relay's queue for `(workspace_id, request_id)`:
 
    ```
-   {"o": {"v":2, "suite", "kind":"cert_challenge", "request_id", "workspace_id", "person_id", "device_id",
-          "dk_sig_pub", "dk_kx_pub", "primary_nonce", "expires_ms" (= the request's)},
+   {"o": {"v":2, "suite", "kind":"cert_challenge", "request_id", "workspace_id", "person_id", "offer_id",
+          "attempt", "device_id", "dk_sig_pub", "dk_kx_pub", "primary_nonce", "expires_ms" (= the request's)},
     "sig": b64u(Sign(PK, "orch/v2/sig/cert-challenge|" || cj(o)))}
    cert_code = base32(H("orch/v2/sas-cert|" || suite || cj(challenge.o)))[0:6]
    ```
 
-   The primary shows `cert_code` with the label and asks for a confirmation.
+   `offer_id` and `attempt` are copied from the inner (G3b). The primary shows `cert_code` with the label and
+   asks for a confirmation.
 
 4. **The host relays the challenge** unchanged, in its `cert_pending` answer (§8.3). Until it arrives,
    `challenge` is `null`, and both screens say "Open orch on <primary>".
 
-5. **The phone checks the challenge** before it shows anything:
+5. **The phone checks the challenge** before it shows anything (G3b order, P3-D28):
    1. `pk_pin(pk_pub)` against the link;
    2. the signature with that `pk_pub`, and the exact field set → `challenge_signature`;
    3. `workspace_id` is the link's, and `person_id` is `person_id(pk_pub)` → `not_for_this_workspace`;
-   4. `device_id`, `dk_sig_pub` and `dk_kx_pub` are **its own** → otherwise drop and **raise the alarm**
-      (`not_my_key`): someone asked the primary to certify another key for this pairing;
-   5. `now < expires_ms` → `challenge_expired`.
+   4. `device_id`, `dk_sig_pub` and `dk_kx_pub` are **its own current** keys. A `device_id` of one of its
+      own earlier attempts → drop without alarm (`stale_attempt`). Anything else → drop and **raise the
+      alarm** (`not_my_key`): someone asked the primary to certify another key for this pairing;
+   5. `attempt` is this attempt's nonce, and `offer_id` the link's offer → `not_for_this_pairing`;
+   6. if it already accepted a challenge in this attempt, `request_id` equals that one's →
+      `not_for_this_pairing`;
+   7. `now < expires_ms` → `challenge_expired`.
 
-   Then it shows `cert_code`.
+   The keys are checked **before** the attempt and the offer: the host chooses `inner.offer_id`, so with
+   the offer first an R1 host could write a wrong `offer_id` and turn the alarm into a silent drop. The phone
+   persists the accepted challenge's `request_id` with the attempt (also across a restart). Then it shows
+   `cert_code`.
 
 6. **The human compares the code on the primary and the phone, and confirms on the primary.**
    - The primary signs a certificate (§6.1) **for exactly the two keys of its own stored challenge**, once
@@ -1165,16 +1239,25 @@ or was rejected, signing after a rejection or after expiry), `cert_request.chall
 trips: `test_round_trip_pairing_through_cert_pending`, `test_round_trip_r1_attack_fails`.
 
 **P3-D11.** Queue routes are in §19. The primary uses a device session of the addressee,
-including for a challenge or rejection. A rejection is exactly:
+including for a challenge or rejection. A rejection is exactly (G3b, P3-D28):
 
 ```
-{"o": {"v":2, "suite", "kind":"cert_rejection", "request_id", "workspace_id", "person_id"},
+{"o": {"v":2, "suite", "kind":"cert_rejection", "request_id", "workspace_id", "person_id", "offer_id",
+       "attempt", "device_id", "dk_hash", "expires_ms" (= the request's)},
  "sig": b64u(Sign(PK, "orch/v2/sig/cert-rejection|" || cj(o)))}
 ```
 
+The primary copies every field from the request it opened (step 2). The rejection names the attempt
+(`offer_id`, `attempt`), the device and both its keys (`device_id`, `dk_hash`), and carries a signed expiry,
+so a captured rejection cannot be re-enveloped into a later attempt or after the request's lifetime.
+
 The relay verifies requests under the card's WSK and challenges/rejections under the account PK.
 Identifiers must match the stored request; a challenge has the request's expiry, valid device keys
-and the derived device id. The state machine is `open → challenged → signed`, with `rejected`
+and the derived device id; a rejection has the request's expiry. **G3b:** before storing, the relay also
+requires a challenge's `offer_id`, `attempt`, `device_id` and `dk_hash(dk_sig_pub, dk_kx_pub)`, and a
+rejection's `offer_id`, `attempt`, `device_id` and `dk_hash`, to equal the stored request's clear fields
+(403 `not_for_this_device`). The relay cannot open the inner; the primary's step 2.7 ties the clear fields
+to it. The state machine is `open → challenged → signed`, with `rejected`
 from open or challenged, and `expired` from either at `expires_ms`. Challenges cannot be replaced:
 (G0a review 3) a valid signature over identical `cj(o)` is idempotent (200, no state change),
 including re-signed challenges and rejections; different canonical challenge content is `replayed`. Rejection after signing is `already_signed`;
@@ -1814,7 +1897,12 @@ Every answer to an epoch-0 request, refusals included, also carries `wsk_pub`.
 - for enrolment (§6.4): `bad_signature`, `malformed`, `unknown_code`, `used`, `expired`, `bad_mac`.
 
 **Phone, on a pairing answer (drops, never sent):** `not_my_key` (raises the alarm),
-`challenge_signature`, `not_for_this_workspace`, `challenge_expired`, `pk_pin`, `wsk_pin`.
+`challenge_signature`, `not_for_this_workspace`, `challenge_expired`, `pk_pin`, `wsk_pin`; G3b (P3-D28):
+`stale_attempt` and `not_for_this_pairing` (challenges), and, as the reason of an unattributed `rejected`,
+`rejection_signature`, `rejection_expired`, `not_a_pairing_answer` and the codes above.
+
+**Phone, at join (G3b, P3-D28):** `below_anchor` (a list or card below the `approved` floor),
+`scopes_mismatch` (the first list lacks this device with exactly the approved scopes).
 
 **Service worker (drops):** `signature`, `replay`, `stale`, `no_key`, `tag`, `payload`.
 
@@ -1966,6 +2054,13 @@ Each is marked **DECIDED HERE** where it is used; the reviewer may reverse any o
 38. Relay login layout and lifetimes, and its check order (§12.2).
 39. *(review)* The question hash input, the `decision` op with a detached `dk_sig` signature over
     `workspace_id` and the decision, and `question_changed` (§13).
+40. **G3b (P3-D28; F1 Q6, Q7, Q8).** The pairing attempt binding: a device nonce `attempt` and, for an
+    uncertified phone, fresh device keys per attempt (MUST); `offer_id` and `attempt` in the challenge;
+    `offer_id`, `attempt`, `device_id`, `dk_hash` and `expires_ms` in the rejection; the clear binding in
+    the cert request, checked by the primary against the inner and by the relay against posted objects;
+    the phone checks keys and device before the attempt and the offer; the two exact `rejected` forms and
+    the verified "Denied by the owner"; the `approved` join anchor `list_seq`, `card_seq` and `baseline`
+    beside `epoch` (§8.3, §8.4, §19.3).
 
 Taken out after review: the first draft's item "the primary refuses cert requests from client-hosted
 workspaces" (now a warning), and "ids derived from keys" (the owner accepted it, and spec §4 is being
@@ -2166,12 +2261,12 @@ In P3, lists have one person in practice.
 | `POST /v2/workspaces/{ws}/host/hold` | W | `{gen: int \| null, take_over: bool}` → `{gen, lease_s: 40, cursor}` | `gen` = the current generation: renews the lease, same `gen`; `gen: null`: a new generation when the lease is expired or `take_over` is set, otherwise 409; a stale `gen` → 409 `fenced`; JSON cap 16 KiB (G0a review 2) | 409 `holder_conflict`, `fenced` | P3-D10 |
 | `GET /v2/workspaces/{ws}/host/poll?after=n&wait=s` | W(g) | → `{items: [{n, route, device, rid, offer, envelope}], notices: {revocations_cursor, cert_requests, rotation_due}, next}` | non-consuming; `after` acknowledges everything up to it (stored as `holders.cursor`); renews the lease; ≤ 16 items or 4 MiB | 409 `fenced`; 401 | P3-D10 |
 | `POST /v2/workspaces/{ws}/bridge/{rid}` (host) | W(g) | raw ORB2, direction 2 → 202 `{}` | ≤ 256 KiB whole chunk; same `(device, rid, idx)` and bytes → no-op while a copy is live, stored again after it expired within P3-D27's bounds; other bytes → 409; epoch rule P3-D22 | 400; 403 `not_eligible`, `revoked`; 409 `chunk_conflict`, `stale_epoch`, `fenced`, `retry_exhausted` (P3-D27); 410 `expired` (G0a review 8, P3-D27); 429 | §8.1, §8.5, §8.9 |
-| `POST /v2/workspaces/{ws}/pair/{offer}/{rid}` | none (device), W(g) (host answer) | raw epoch-0 ORB2 → 202 | ≤ 64 KiB; per workspace and per address (/64 IPv6) 60/min; /56 480/min (G0a review 9); global 6 000/min | 400; 401 `unknown_workspace`; 429 | §8.3, §8.9 |
+| `POST /v2/workspaces/{ws}/pair/{offer}/{rid}` | none (device), W(g) (host answer) | raw epoch-0 ORB2 → 202 | ≤ 64 KiB; per workspace and per address (/64 IPv6) 60/min; /56 480/min (G0a review 9); global 6 000/min | 400; 401 `unknown_workspace`; 409 `fenced` (host answer without a held generation, P3-D10); 429 | §8.3, §8.9 |
 | `GET /v2/workspaces/{ws}/pair/{offer}/{rid}?after=i&wait=s` | none | → `{chunks}` | per address (/64 IPv6) 120/min; /56 960/min (G0a review 9); global 12 000/min | 429 | §8.3 |
-| `POST /v2/persons/{person}/cert-requests` | W(g), card owner = person | `{request}` → `{request_id}` | ≤ 1 open per workspace, ≤ 64 open per person; same → 200; JSON cap 64 KiB (G0a review 2) | 401 `bad_signature`; 403 `other_person`, `not_for_this_device`; 409 `request_open`, `replayed` | §8.4 step 1 |
+| `POST /v2/persons/{person}/cert-requests` | W(g), card owner = person | `{request}` → `{request_id}` | ≤ 1 open per workspace, ≤ 64 open per person; same → 200; JSON cap 64 KiB (G0a review 2); exact field set with the clear attempt binding (P3-D28) | 400 `malformed`; 401 `bad_signature`; 403 `other_person`, `not_for_this_device`; 409 `request_open`, `replayed` | §8.4 step 1 |
 | `GET /v2/persons/{person}/cert-requests?wait=s` | D(p), addressee only | → `{requests}` | open only | 403 | §8.4 step 2 |
-| `POST /v2/cert-requests/{id}/challenge` | D(p), addressee | `{challenge}` → `{}` | `open` → `challenged` only; same verified `cj(o)` → 200 (G0a review 3); another challenge → 409; JSON cap 16 KiB (G0a review 2) | 401; 409 `replayed`; 410 `expired` | §8.4 step 3 |
-| `POST /v2/cert-requests/{id}/rejection` | D(p), addressee | `{rejection}` → `{}` | `open` or `challenged` → `rejected`; same verified `cj(o)` → 200 (G0a review 3); JSON cap 16 KiB (G0a review 2) | 401; 409 `already_signed`; 410 | new (P3-D11) |
+| `POST /v2/cert-requests/{id}/challenge` | D(p), addressee | `{challenge}` → `{}` | `open` → `challenged` only; same verified `cj(o)` → 200 (G0a review 3); another challenge → 409; JSON cap 16 KiB (G0a review 2); bound to the request's attempt and keys (P3-D28) | 400 `malformed`; 401; 403 `not_for_this_device`; 409 `replayed`; 410 `expired` | §8.4 step 3 |
+| `POST /v2/cert-requests/{id}/rejection` | D(p), addressee | `{rejection}` → `{}` | `open` or `challenged` → `rejected`; same verified `cj(o)` → 200 (G0a review 3); JSON cap 16 KiB (G0a review 2); bound to the request's attempt, device, keys and expiry (P3-D28) | 400 `malformed`; 401; 403 `not_for_this_device`; 409 `already_signed`; 410 | new (P3-D11) |
 | `GET /v2/cert-requests/{id}` | W, the requester | → `{state, challenge, cert, rejection}` | kept until expiry + 60 s | 404 | §8.4 |
 
 **P3-D8 (epoch at the relay; C10).** A device request for a **new** rid, whose header epoch is not the current list
@@ -2232,10 +2327,21 @@ exactly-once authority.
 - **When the request becomes `signed`.** Only when a certificate is stored (`PUT devices`) whose `dk_sig_pub`,
   `dk_kx_pub`, `device_id` and person equal the challenge's. Scopes are inside the sealed inner request, so the host
   checks them, not the relay.
-- **Rejection** is a new signed kind, `cert_rejection {v, suite, kind, request_id, workspace_id, person_id}`, under
+- **Rejection** is a new signed kind, `cert_rejection {v, suite, kind, request_id, workspace_id, person_id, offer_id,
+  attempt, device_id, dk_hash, expires_ms}` (fields after `person_id`: G3b, P3-D28), under
   `orch/v2/sig/cert-rejection|`.
 - **FakeRelay change.** The primary must now use a device session; its session-less submission in the FakeRelay
   changes.
+
+**P3-D28 (pairing attempt binding; G3b; F1 Q6, Q7, Q8).** The cert request carries in clear the attempt binding
+`offer_id`, `attempt`, `device_id`, `dk_hash` (§8.4 step 1); the relay checks its shape (400 `malformed`). A posted
+challenge or rejection must name exactly that binding (a challenge through `dk_hash` of its two keys), else 403
+`not_for_this_device`, checked after the signature, the exact field set, the identifiers and the shape, and before
+any state transition. A rejection's `expires_ms` must equal the request's (400 `malformed`). This is defence in
+depth: the phone's own checks (§8.3, §8.4 step 5) are what make a replayed challenge or rejection harmless; the
+relay only stops an honest primary's object for one attempt from being stored under another attempt's request. No
+schema change: the request is stored as signed JSON. Pre-G3b requests, challenges and rejections are refused as
+`malformed` (pre-deployment; wipe dev databases with queued requests).
 
 **P3-D16 (scopes).** On the bridge the relay enforces membership only. Ops and scopes are sealed. The typing lease has
 no relay part.
@@ -2389,6 +2495,10 @@ JSON field sets shown above are exact. GET requests have no body. Empty success 
 including 202. Bearer authorization is `Authorization: Bearer <token>`; `Orch-Holder` is a decimal
 generation. The first card is the only unfenced workspace write. Logout returns 200 for an
 unknown/expired token as well as an already-logged-out token.
+
+**A host pair answer without a held generation** is 409 `fenced`: this is intended (F1 Q9). The host pair answer
+is a W(g) write (§19.3), and W(g) routes refuse missing, stale or expired holder authority; `holder_conflict` is only
+an answer of `host/hold` itself. A host MUST `POST host/hold` before any write, pair answers included (P3-D10).
 
 All routes can refuse 400 `malformed` for invalid fields, paths, query or strict JSON; bounded
 JSON requests refuse 413 `too_large` before parsing (G0a review 2), except the P3-D20 final checkpoint request (400); bounded ORB2 requests
