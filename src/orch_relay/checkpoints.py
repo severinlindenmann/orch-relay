@@ -87,10 +87,17 @@ def no(code, status=409, **details):
 
 
 def record_failure(con, ws, gen, now):
+    """Charge one refusal, unless the window is already full (review L1): rows never grow with
+    the request rate, and a full window refuses with 429 before any work either way."""
     con.execute(
         "DELETE FROM checkpoint_failures WHERE workspace_id=? AND at_ms<=?", (ws, now - HOUR)
     )
-    con.execute("INSERT INTO checkpoint_failures VALUES (?,?,?)", (ws, gen, now))
+    total, mine = con.execute(
+        "SELECT count(*), coalesce(sum(gen=?),0) FROM checkpoint_failures WHERE workspace_id=?",
+        (gen, ws),
+    ).fetchone()
+    if mine < FAILURE_BUDGET and total < WORKSPACE_FAILURE_CEILING:
+        con.execute("INSERT INTO checkpoint_failures VALUES (?,?,?)", (ws, gen, now))
 
 
 def refusal(code, status=409):
@@ -459,11 +466,15 @@ class Relay:
 
     def owner(self, w, cert, at_ms, extra=()):
         # Every revocation the relay holds, and evidence in this payload, refuses the signer.
+        # A malformed certificate fails verify_cert below; a database error propagates (fail
+        # closed, review L2): the relay's revocation lookup is never skipped.
         try:
             device = cert["o"]["device_id"]
-            revoked = {device} if device in extra or self.revoked(device) else set()
-        except (TypeError, KeyError, sqlite3.Error):
-            revoked = set()
+        except (TypeError, KeyError):
+            device = None
+        revoked = set()
+        if isinstance(device, str) and (device in extra or self.revoked(device)):
+            revoked = {device}
         checked = P.verify_cert(cert, P.unb64u(w["owner_pk"]), at_ms, revoked)
         need("ok" in checked, "restore_not_owner", 409)
         c = checked["ok"]
@@ -875,18 +886,15 @@ class Relay:
         """(person, key or None) the relay binds to a device; None for a wholly unknown device.
 
         The first accepted binding wins: a held revocation's person comes before the live
-        registry, then a restore signer this relay verified (§19.8 R4, review A/B)."""
+        registry (§19.8 R4, review A/B). The reference's verified-signer binding needs no table
+        here: a restore signer is a current list member, list members are registered devices,
+        and devices are never deleted (review L3)."""
         row = self.con.execute(
             "SELECT person_id FROM revocations WHERE device_id=?", (device,)
         ).fetchone()
         if row is None:
             row = self.con.execute(
                 "SELECT person_id FROM devices WHERE device_id=?", (device,)
-            ).fetchone()
-        if row is None:
-            row = self.con.execute(
-                "SELECT person_id FROM checkpoint_bound WHERE workspace_id=? AND device_id=?",
-                (self.ws, device),
             ).fetchone()
         if row is None:
             return None
@@ -1035,10 +1043,6 @@ class Relay:
         need(entries(target).get(log) == result, "restore_invalid", 409)
         self.apply_evidence(listed)
         con, ws = self.con, self.ws
-        con.execute(
-            "INSERT OR REPLACE INTO checkpoint_bound VALUES (?,?,?)",
-            (ws, cert["device_id"], cert["person_id"]),
-        )
         for device in {*listed, cert["device_id"]}:
             con.execute("INSERT OR IGNORE INTO checkpoint_ever_devices VALUES (?,?)", (ws, device))
         transition = {

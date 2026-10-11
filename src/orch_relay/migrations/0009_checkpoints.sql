@@ -68,13 +68,9 @@ CREATE TABLE checkpoint_failures (
 );
 CREATE INDEX checkpoint_failure_window ON checkpoint_failures(workspace_id, at_ms);
 -- R4 coverage: devices first seen as restore evidence or signers (G2 ever_devices holds the
--- list members); restore signers the relay verified under the owner PK.
+-- list members). No signer-binding table: signers are registered devices (review L3).
 CREATE TABLE checkpoint_ever_devices (
     workspace_id TEXT NOT NULL, device_id TEXT NOT NULL, PRIMARY KEY(workspace_id, device_id)
-);
-CREATE TABLE checkpoint_bound (
-    workspace_id TEXT NOT NULL, device_id TEXT NOT NULL, person_id TEXT NOT NULL,
-    PRIMARY KEY(workspace_id, device_id)
 );
 -- P3-D29: a person first known from self-certified restore evidence. The account row exists
 -- only so the revoked device and its revocation can be stored; it grants nothing until the

@@ -100,7 +100,7 @@ def test_proof_page_wall_clock_near_end_matches_near_start(history):
             for _ in range(20):
                 Nodes(con, WS, "workspace").page(accs[start], end["acc"], 16)
             timings.append(time.perf_counter() - began)
-    assert timings[1] < 0.5 and timings[0] < 0.5, timings
+    assert timings[1] < 2 and timings[0] < 2, timings  # coarse; VM-step tests are exact
 
 
 def test_proof_source_must_be_on_the_endpoint_branch(history, tmp_path):
@@ -589,7 +589,8 @@ def test_many_ticket_publication_work_is_linear_in_staged_pages(tmp_path, refuse
     # tickets x pages (2000 tickets: ~4M visits, seconds under the global lock).
     assert small.visits <= small_pages and large.visits <= large_pages, (small.visits, large.visits)
     # 8x the tickets: linear is ~8x the time, the quadratic scan ~64x.
-    assert large_s <= 24 * small_s + 0.05, (small_s, large_s)
+    # Coarse (timing on a shared machine); the visit count above is the exact bound.
+    assert large_s <= 24 * max(small_s, 0.05), (small_s, large_s)
 
 
 # --- transport refusals of PUT checkpoint: charged after W(g), capped by the window (review L1) ---

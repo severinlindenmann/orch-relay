@@ -185,8 +185,6 @@ def seed(path, state, case, now=None, ws=WS):
                 "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
                 (d, rev["o"]["person_id"], P.cj(rev), rev["o"]["reason"], 0, cursor),
             )
-        for d, person in state.get("bound", {}).items():
-            con.execute("INSERT INTO checkpoint_bound VALUES (?,?,?)", (ws, d, person))
         if state["genesis"]:
             con.execute("INSERT INTO checkpoint_genesis VALUES (?,?)", (ws, P.cj(state["genesis"])))
         for h, c in state["checkpoints"].items():
@@ -415,7 +413,6 @@ def project_state(state, now):
         },
         "revocations": {d: (r["o"]["person_id"], r["o"]["reason"]) for d, r in revs.items()},
         "ever": set(state["ever_devices"]),
-        "bound": dict(state["bound"]),
         "staging": {
             tuple(k.split("/")): (
                 s["expires_ms"],
@@ -505,11 +502,6 @@ def project_db(path, now, ws=WS):
                     (ws,),
                 )
             },
-            "bound": dict(
-                con.execute(
-                    "SELECT device_id,person_id FROM checkpoint_bound WHERE workspace_id=?", (ws,)
-                )
-            ),
             "staging": staging,
             "receipts": {
                 r[0]

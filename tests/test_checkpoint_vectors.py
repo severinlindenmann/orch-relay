@@ -18,5 +18,7 @@ def test_production_replays_checkpoint_vector(tmp_path, case):
         now = case["steps"][-1]["input"]["now_ms"]
         assert project_db(path, now) == project_state(case["expect"]["state"], now)
         stored = registry(path)
-        for device, person in case["expect"]["state"]["registry"].items():
+        expected = case["expect"]["state"]
+        # The reference's verified-signer bindings are registered devices in production (L3).
+        for device, person in {**expected["bound"], **expected["registry"]}.items():
             assert stored[device] == person, device
