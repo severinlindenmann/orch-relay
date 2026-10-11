@@ -25,5 +25,5 @@
   "tamper.json": "tampered chain lines of the ticket and workspace log, the seq where the chain breaks (5.5)",
   "text.json": "[shared, unchanged] CRLF/CR -> LF, NFC (Unicode 16.0), refused controls, bidi and unassigned (11.3)"
  },
- "note": "files tagged [shared] are copied verbatim into orch-relay; the others are core-only"
+ "note": "files tagged [shared] are copied verbatim into orch-relay; the others are core-only. Step keys: replay_only accepts historical replay but admit refuses chain.bad_ws_seq; schema_refused means schema validation refuses before the model; replay_expect pins a distinct replay outcome."
 }

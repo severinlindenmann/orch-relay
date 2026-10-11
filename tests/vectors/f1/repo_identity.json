@@ -1,6 +1,18 @@
 {
  "mapping": [
   {
+   "canonical": "local:x",
+   "name": "unicode_kelvin_host",
+   "raw": "ssh://git@\u212aost/a",
+   "repo_name": "x"
+  },
+  {
+   "canonical": "local:x",
+   "name": "https_git_user",
+   "raw": "https://git@host/a/b",
+   "repo_name": "x"
+  },
+  {
    "canonical": "https://github.com/acme/x",
    "name": "https_plain",
    "raw": "https://github.com/acme/x",
@@ -25,13 +37,13 @@
    "repo_name": "x"
   },
   {
-   "canonical": "https://github.com/acme/x",
+   "canonical": "local:x",
    "name": "https_user_token",
    "raw": "https://user:s3cr3t-token@github.com/acme/x.git",
    "repo_name": "x"
   },
   {
-   "canonical": "https://github.com/acme/x",
+   "canonical": "local:x",
    "name": "https_token_only",
    "raw": "https://ghp_abc123@github.com/acme/x",
    "repo_name": "x"
@@ -61,6 +73,30 @@
    "repo_name": "x"
   },
   {
+   "canonical": "https://host/a/b",
+   "name": "ssh_git",
+   "raw": "ssh://git@host/a/b",
+   "repo_name": "x"
+  },
+  {
+   "canonical": "local:x",
+   "name": "ssh_alice",
+   "raw": "ssh://alice@host/a/b",
+   "repo_name": "x"
+  },
+  {
+   "canonical": "local:x",
+   "name": "ssh_git_password",
+   "raw": "ssh://git:pw@host/a/b",
+   "repo_name": "x"
+  },
+  {
+   "canonical": "local:x",
+   "name": "scp_alice",
+   "raw": "alice@host:a/b",
+   "repo_name": "x"
+  },
+  {
    "canonical": "https://github.com/acme/x",
    "name": "ssh_url",
    "raw": "ssh://git@github.com/acme/x.git",
@@ -73,7 +109,7 @@
    "repo_name": "x"
   },
   {
-   "canonical": "https://github.com/acme/x",
+   "canonical": "local:x",
    "name": "ssh_url_password",
    "raw": "ssh://git:pw@github.com/acme/x",
    "repo_name": "x"
@@ -97,7 +133,7 @@
    "repo_name": "x"
   },
   {
-   "canonical": "https://git.example.com/acme/x",
+   "canonical": "local:x",
    "name": "scp_like_other_user",
    "raw": "deploy@git.example.com:acme/x.git",
    "repo_name": "x"
@@ -259,7 +295,7 @@
    "repo_name": "x"
   }
  ],
- "mapping_note": "userinfo (user:token@) is removed before anything else and never appears in a result; one trailing / and then one trailing (lower-case) .git are removed from the end of the path; the https default port 443 and the ssh default port 22 are dropped, every other port is kept (so ssh on 443 keeps it); anything that is not https, ssh or scp-like is local:<repo name>. A mapped result that is not in the canonical form (x.GIT, x//, ssh port 443, %, .., IPv6, Unicode, a segment that is exactly .git) is local:<repo name> as well; so is a remote.origin.url with more than one value (`local_git_add` adds a second one). `canonical` is never null. A .git that ends a middle segment is not a .git suffix of the path and is kept.",
+ "mapping_note": "only absent userinfo or literal git is allowed; other users and passwords map to local:<repo name>; one trailing / and then one trailing (lower-case) .git are removed from the end of the path; the https default port 443 and the ssh default port 22 are dropped, every other port is kept (so ssh on 443 keeps it); anything that is not https, ssh or scp-like is local:<repo name>. A mapped result that is not in the canonical form (x.GIT, x//, ssh port 443, %, .., IPv6, Unicode, a segment that is exactly .git) is local:<repo name> as well; so is a remote.origin.url with more than one value (`local_git_add` adds a second one). `canonical` is never null. A .git that ends a middle segment is not a .git suffix of the path and is kept.",
  "ok": [
   "https://github.com/acme/x",
   "https://github.com/Acme/X.y_z~1",

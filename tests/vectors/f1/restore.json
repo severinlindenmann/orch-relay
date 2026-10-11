@@ -1,5 +1,5 @@
 {
- "pins": "workspace restore and revocations",
+ "pins": "workspace restore and revocations; replay_only steps replay successfully but admit refuses chain.bad_ws_seq; schema_refused marks steps refused by schema validation before the model",
  "scenarios": [
   {
    "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
@@ -1351,7 +1351,7 @@
   {
    "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
    "name": "restore_window_ends_before_a_later_host_revocation",
-   "now": "2026-10-10T11:02:50Z",
+   "now": "2026-10-10T11:03:00Z",
    "pins": "5.10: only the contiguous host device.revoked re-appends belong to the restore window; the first other workspace event closes it",
    "reappends": true,
    "steps": [
@@ -1745,6 +1745,33 @@
      "expect": "ok",
      "log": "workspace",
      "note": "a much later host revocation must not extend the old restore window"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T11:02:00Z",
+      "auth": "passphrase",
+      "based_on": "sha256:5aac29783cbc778dd1b2129531da8f28bbb0c944281efee6b1ea478538b0a4c1",
+      "hash_v": 1,
+      "host_sig": "ADQXHF2OzUiBnWfoyqDD74Zin-meSjhKEmZTlW3HNbxS372S-rH0906D6NMNVdBs16uhzG33QTphFnYEGrLg8Q",
+      "id": "01J9ZK0000000000000000000C",
+      "prev": "sha256:5aac29783cbc778dd1b2129531da8f28bbb0c944281efee6b1ea478538b0a4c1",
+      "roster_v": 3,
+      "seq": 4,
+      "sig": "rOGOJjvdpEQz15ONwGoH63fz9_6V-ID2FHhdu6WOWM4sjHHSuQ_7ce0S1ONm3FOoluH0P-BrwyKIjQKxdzEuQg",
+      "text": "still outside the restore window after the late revocation",
+      "type": "log.added",
+      "v": 2,
+      "ws_seq": 7
+     },
+     "expect": "ok",
+     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
+     "note": "read after workspace seq 8, but names seq 7 in the gap after the closed restore window",
+     "replay_only": true
     }
    ],
    "workspace_id": "0123456789abcdef0123456789abcdef"
