@@ -197,6 +197,7 @@ LABELS = {
     "sig_cert_challenge": "orch/v2/sig/cert-challenge|",
     "sig_push": "orch/v2/sig/push|",
     "sig_decision": "orch/v2/sig/decision|",
+    "sig_cert_rejection": "orch/v2/sig/cert-rejection|",
     "sig_member_list": "orch/v2/sig/member-list|",
     "sig_wk_grant": "orch/v2/sig/wk-grant|",
     "sig_sk_grant": "orch/v2/sig/sk-grant|",
@@ -548,7 +549,7 @@ def open_sealed(suite: Suite, rcpt_kx_priv, rcpt_id: bytes, purpose: str, object
 
 KIND_LABEL = {"device_cert": "sig_device_cert", "revocation": "sig_revocation", "member_list": "sig_member_list",
               "wk_grant": "sig_wk_grant", "sk_grant": "sig_sk_grant", "cert_request": "sig_cert_request",
-              "ws_delegation": "sig_ws_delegation", "cert_challenge": "sig_cert_challenge",
+              "cert_rejection": "sig_cert_rejection", "ws_delegation": "sig_ws_delegation", "cert_challenge": "sig_cert_challenge",
               "enroll_request": "sig_enroll_request", "drop_object": "sig_drop_object",
               "drop_claim": "sig_drop_claim"}
 
@@ -753,6 +754,8 @@ def relay_accept_card(suite: Suite, stored: dict | None, card, owner_pk_pub: byt
         return {"refuse": "wsk_changed"}
     if cj(card["delegation"]["o"]) != cj(stored["delegation"]):
         return {"refuse": "delegation_changed"}
+    if o == so:                         # P3-D4: the same verified card is an idempotent publication
+        return {"ok": o}
     if o["card_seq"] <= so["card_seq"]:
         return {"refuse": "stale_card"}
     if o["wxk_version"] == so["wxk_version"]:
@@ -771,13 +774,18 @@ def relay_accept_member_list(suite: Suite, wsk_pub: bytes, card_ws: str, prev: d
     if o is None:
         return {"refuse": "bad_signature"}
     try:
-        if set(o) != {"v", "suite", "kind", "workspace_id", "epoch", "list_seq", "issued_ms", "members"}:
+        if set(o) != {"v", "suite", "kind", "workspace_id", "epoch", "list_seq", "issued_ms", "members", "persons"}:
             return {"refuse": "malformed"}
         ids = [m["device_id"] for m in o["members"]]
         for m in o["members"]:
-            if set(m) != {"device_id", "scopes"}:
+            if set(m) != {"device_id", "person_id", "scopes"}:
                 return {"refuse": "malformed"}
             unhex(m["device_id"], 16)
+            unhex(m["person_id"], 16)
+        if o["persons"] != sorted(set(o["persons"])):
+            return {"refuse": "malformed"}
+        for person in o["persons"]:
+            unhex(person, 16)
         if ids != sorted(set(ids)):
             return {"refuse": "malformed"}
         if type(o["epoch"]) is not int or o["epoch"] < 1 or type(o["list_seq"]) is not int:
@@ -803,16 +811,23 @@ def relay_accept_member_list(suite: Suite, wsk_pub: bytes, card_ws: str, prev: d
         cert = dir_state["certs"].get(did)
         if cert is None:
             return {"refuse": "cert_invalid"}
-        c = verify_cert(suite, cert, dir_state["owner_pk_pub"], now_ms, dir_state["revoked"])
+        owner = person_id(suite, dir_state["owner_pk_pub"]).hex()
+        person = cert["o"].get("person_id")
+        if person != m["person_id"] or person not in [owner, *o["persons"]]:
+            return {"refuse": "other_person"}
+        pk = dir_state["owner_pk_pub"] if person == owner else dir_state.get("persons", {}).get(person)
+        if pk is None:
+            return {"refuse": "other_person"}
+        c = verify_cert(suite, cert, pk, now_ms, dir_state["revoked"])
         if "refuse" in c:
-            return {"refuse": "other_person" if c["refuse"] == "cert_invalid"
-                    and cert["o"].get("person_id") != person_id(suite, dir_state["owner_pk_pub"]).hex()
-                    else c["refuse"]}
+            return c
         cs = c["ok"]["scopes_max"]
         if cs[0].startswith("drop:") or not scopes_ok(m["scopes"]) or len(m["scopes"]) > len(cs):
             return {"refuse": "scope_exceeded"}
         if (did, o["epoch"]) not in dir_state["grants"]:
             return {"refuse": "missing_grant"}
+    if not set(o["persons"]) <= {m["person_id"] for m in o["members"]}:
+        return {"refuse": "other_person"}  # (G0a review 1)
     return {"ok": o}
 
 
@@ -2175,6 +2190,455 @@ def host_respond(suite: Suite, wsk, state: dict, req_env: bytes, result: dict, n
     stream = h.stream if h.epoch == 0 else (h.rid if h.flags & F_STREAM else ZERO_ID)
     rh = Header(TO_DEVICE, flags, suite.id, h.workspace, h.device, h.rid, stream, 0, now_ms, h.epoch, salt)
     return envelope(suite, bridge_key(state, rh), wsk, rh, frame(meta))
+
+
+# =====================================================================================================
+# P3 contract amendment: pure reference checks, never imported by the relay.
+# All state below is explicit so vectors can exercise atomicity and durable restart boundaries.
+# =====================================================================================================
+
+
+def _sealed_shape(suite, text, plaintext_len=None):
+    b = unb64u(text)
+    n = suite.kx_pub_len
+    return (len(b) >= n + 16 and suite.kx_pub_ok(b[:n])
+            and (plaintext_len is None or len(b) == n + 16 + plaintext_len))
+
+
+def relay_directory_read(state, person, records, device=None):
+    """(G0a review 1) W session already bound to this workspace; filter before pagination."""
+    if person not in state.get("ever_persons", []):
+        return {"refuse": "not_eligible"}
+    allowed = state.get("ever_devices", [])
+    if device is not None:
+        if device not in allowed:
+            return {"refuse": "not_eligible"}
+        return {"ok": [r for r in records if r["o"]["device_id"] == device and r["o"]["person_id"] == person]}
+    return {"ok": [r for r in records if r["o"]["device_id"] in allowed and r["o"]["person_id"] == person]}
+
+
+def relay_certificate(suite, state, signed, pk_pub, now_ms, revoked=()):
+    """(G0a review 3) Immutable canonical certificates, verified before retry identity."""
+    o = verify_object(suite, pk_pub, signed, "device_cert")
+    if o is None:
+        return {"refuse": "bad_signature"}
+    old = state.get(o.get("device_id"))
+    if old:
+        return {"ok": "retry"} if cj(old["o"]) == cj(o) else {"refuse": "cert_conflict"}
+    result = verify_cert(suite, signed, pk_pub, now_ms, revoked)
+    if "refuse" in result:
+        return result
+    state[o["device_id"]] = signed
+    return {"ok": "stored"}
+
+
+def relay_first_card(suite, state, card, owner_pk_pub, now_ms):
+    """(G0a review 5) Owner quota gate after both signatures; retries cost nothing."""
+    result = relay_accept_card(suite, state.get("card"), card, owner_pk_pub)
+    if "refuse" in result:
+        return result
+    if state.get("card"):
+        return {"ok": "retry"}
+    hour = now_ms // 3_600_000
+    count = state.get("count", 0) if state.get("hour") == hour else 0
+    if count >= 10:
+        return {"refuse": "rate_limited"}
+    state.update(hour=hour, count=count + 1, card={"o": result["ok"], "delegation": card["delegation"]["o"]})
+    return {"ok": "stored"}
+
+
+def relay_membership(suite, wsk_pub, ws, state, directory, body, now_ms):
+    """P3-D6/D7. Caller has checked session and holder; raw bytes retain exact retry identity.
+    state: {list, grants: {device/epoch: signed}, wraps, card_seq, publications, rotation_due}.
+    directory: relay_accept_member_list inputs plus persons: {person_id: pk_pub bytes}.
+    Mutates only after every check succeeds. The member_list remains the signed object.
+    """
+    try:
+        raw = body if isinstance(body, bytes) else cj(body)
+        if len(raw) > 2 * 1024 * 1024:
+            return {"refuse": "too_large"}
+        body = parse_json(raw)
+        digest_ = H(raw).hex()
+        if digest_ in state.get("publications", {}):
+            return state["publications"][digest_]
+        if set(body) not in ({"member_list", "grants"}, {"member_list", "grants", "card_key_wraps"}):
+            return {"refuse": "malformed"}
+        o = verify_object(suite, wsk_pub, body["member_list"], "member_list")
+        if o is None:
+            return {"refuse": "bad_signature"}
+        if len(o["members"]) > 1024 or not isinstance(body["grants"], list):
+            return {"refuse": "malformed"}
+        ids = {m["device_id"] for m in o["members"]}
+        grants = {}
+        for g in body["grants"]:
+            go = verify_object(suite, wsk_pub, g, "wk_grant")
+            if go is None:
+                return {"refuse": "bad_signature"}
+            if set(go) != {"v", "suite", "kind", "workspace_id", "device_id", "epoch", "sealed"}:
+                return {"refuse": "malformed"}
+            if go["workspace_id"] != ws:
+                return {"refuse": "other_workspace"}
+            if go["device_id"] not in ids or go["epoch"] != o["epoch"]:
+                return {"refuse": "not_for_this_device"}
+            key = go["device_id"] + "/" + str(go["epoch"])
+            if key in grants or not _sealed_shape(suite, go["sealed"], 32):
+                return {"refuse": "malformed"}
+            if key in state["grants"] and cj(state["grants"][key]) != cj(g):
+                return {"refuse": "grant_conflict"}
+            grants[key] = g
+        ds = {**directory, "grants": {(g["o"]["device_id"], g["o"]["epoch"]) for g in grants.values()}}
+        result = relay_accept_member_list(suite, wsk_pub, ws, state["list"], body["member_list"], ds, now_ms)
+        if "refuse" in result:
+            return result
+        wraps = body.get("card_key_wraps")
+        if wraps is not None:
+            if set(wraps) != {"card_seq", "wraps"} or not isinstance(wraps["wraps"], list):
+                return {"refuse": "malformed"}
+            if wraps["card_seq"] != state["card_seq"]:
+                return {"refuse": "stale_card"}
+            seen = set()
+            for w in wraps["wraps"]:
+                if set(w) != {"device_id", "sealed"} or w["device_id"] in seen:
+                    return {"refuse": "malformed"}
+                if w["device_id"] not in ids:
+                    return {"refuse": "not_for_this_device"}
+                if not _sealed_shape(suite, w["sealed"], 32):
+                    return {"refuse": "malformed"}
+                old = state.get("wraps", {}).get(w["device_id"])
+                if old and old["card_seq"] == wraps["card_seq"] and old["sealed"] != w["sealed"]:
+                    return {"refuse": "wrap_conflict"}  # (G0a review 10)
+                seen.add(w["device_id"])
+        # A rotation obligation survives same-epoch lists and restart; only a higher excluding list clears it.
+        due = {d: r for d, r in state.get("rotation_due", {}).items()
+               if d in ids or o["epoch"] <= r["epoch"]}
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return {"refuse": "malformed"}
+    state["ever_persons"] = sorted(set(state.get("ever_persons", [])) | {m["person_id"] for m in o["members"]})
+    state["ever_devices"] = sorted(set(state.get("ever_devices", [])) | ids)
+    state["list"] = o
+    state["grants"] = {k: g for k, g in {**state["grants"], **grants}.items() if g["o"]["device_id"] in ids}
+    state["wraps"] = {d: w for d, w in state.get("wraps", {}).items() if d in ids}
+    if wraps:
+        state["wraps"].update({w["device_id"]: {"card_seq": wraps["card_seq"], "sealed": w["sealed"]}
+                              for w in wraps["wraps"]})
+    state["rotation_due"] = due
+    answer = {"ok": {"list_seq": o["list_seq"], "epoch": o["epoch"]}}
+    state.setdefault("publications", {})[digest_] = answer
+    return answer
+
+
+def verify_cert_rejection(suite, signed, pk_pub, request):
+    """P3-D11: signature, exact shape, then request/person/workspace binding."""
+    o = verify_object(suite, pk_pub, signed, "cert_rejection")
+    if o is None:
+        return {"refuse": "bad_signature"}
+    try:
+        if set(o) != {"v", "suite", "kind", "request_id", "workspace_id", "person_id"}:
+            return {"refuse": "malformed"}
+        for field in ("request_id", "workspace_id", "person_id"):
+            unhex(o[field], 16)
+        if o["person_id"] != person_id(suite, pk_pub).hex() or o["person_id"] != request["person_id"]:
+            return {"refuse": "other_person"}
+        if o["workspace_id"] != request["workspace_id"]:
+            return {"refuse": "other_workspace"}
+        if o["request_id"] != request["request_id"]:
+            return {"refuse": "not_for_this_device"}
+    except (ValueError, TypeError, KeyError):
+        return {"refuse": "malformed"}
+    return {"ok": o}
+
+
+def relay_cert_request(suite, signed, wsk_pub, ws, owner, primary, queue, now_ms):
+    """P3-D11: admission (the caller already authenticated W(g))."""
+    o = verify_object(suite, wsk_pub, signed, "cert_request")
+    if o is None:
+        return {"refuse": "bad_signature"}
+    try:
+        if set(o) != {"v", "suite", "kind", "request_id", "workspace_id", "person_id", "primary_device_id",
+                      "created_ms", "expires_ms", "sealed"}:
+            return {"refuse": "malformed"}
+        for k in ("request_id", "workspace_id", "person_id", "primary_device_id"):
+            unhex(o[k], 16)
+        if o["workspace_id"] != ws:
+            return {"refuse": "other_workspace"}
+        if o["person_id"] != owner:
+            return {"refuse": "other_person"}
+        if o["primary_device_id"] != primary:
+            return {"refuse": "not_for_this_device"}
+        if not _sealed_shape(suite, o["sealed"]) or any(type(o[k]) is not int for k in ("created_ms", "expires_ms")):
+            return {"refuse": "malformed"}
+        old = queue.get(o["request_id"])
+        if old:
+            return {"ok": o["request_id"]} if old["request"] == signed else {"refuse": "replayed"}
+        if not o["created_ms"] - SKEW_MS <= now_ms < o["expires_ms"] or not 0 < o["expires_ms"] - o["created_ms"] <= 600_000:
+            return {"refuse": "expired"}
+        live = [q for q in queue.values() if q["state"] in ("open", "challenged")
+                and now_ms < q["request"]["o"]["expires_ms"]]
+        if any(q["request"]["o"]["workspace_id"] == ws for q in live):
+            return {"refuse": "request_open"}
+        if sum(q["request"]["o"]["person_id"] == owner for q in live) >= 64:
+            return {"refuse": "quota_exceeded"}
+    except (ValueError, KeyError, TypeError):
+        return {"refuse": "malformed"}
+    queue[o["request_id"]] = {"request": signed, "state": "open", "challenge": None, "cert": None, "rejection": None}
+    return {"ok": o["request_id"]}
+
+
+def relay_cert_queue(suite, entry, action, signed, pk_pub, now_ms):
+    """P3-D11 transition after device-session/addressee gate; unmatched certs do not complete."""
+    req = entry["request"]["o"]
+    if now_ms >= req["expires_ms"] + 60_000:
+        return {"refuse": "not_found"}
+    field = {"challenge": "challenge", "rejection": "rejection", "certificate": "cert"}[action]
+    old = entry.get(field)
+    if old and cj(old["o"]) == cj(signed["o"]):
+        # (G0a review 3) Verify even a canonical repeat; signatures may be randomized.
+        if verify_object(suite, pk_pub, signed, old["o"]["kind"]) is None:
+            return {"refuse": "bad_signature"}
+        return {"ok": entry["state"]}
+    if entry["state"] in ("open", "challenged") and now_ms >= req["expires_ms"]:
+        entry["state"] = "expired"
+    if entry["state"] == "expired":
+        return {"refuse": "expired"}
+    if action == "rejection":
+        result = verify_cert_rejection(suite, signed, pk_pub, req)
+    elif action == "certificate":
+        result = verify_cert(suite, signed, pk_pub, now_ms)
+    else:
+        o = verify_object(suite, pk_pub, signed, "cert_challenge")
+        result = {"ok": o} if o else {"refuse": "bad_signature"}
+        if o:
+            try:
+                if set(o) != {"v", "suite", "kind", "request_id", "workspace_id", "person_id", "device_id",
+                              "dk_sig_pub", "dk_kx_pub", "primary_nonce", "expires_ms"}:
+                    return {"refuse": "malformed"}
+                for key, code in (("person_id", "other_person"), ("workspace_id", "other_workspace"),
+                                  ("request_id", "not_for_this_device")):
+                    if o[key] != req[key]:
+                        return {"refuse": code}
+                pub = unb64u(o["dk_sig_pub"])
+                unb64u(o["primary_nonce"], 32)
+                if (not suite.sig_pub_ok(pub) or not suite.kx_pub_ok(unb64u(o["dk_kx_pub"]))
+                        or device_id(suite, pub).hex() != o["device_id"] or o["expires_ms"] != req["expires_ms"]
+                        or o["person_id"] != person_id(suite, pk_pub).hex()):
+                    return {"refuse": "malformed"}
+            except (ValueError, TypeError, KeyError):
+                return {"refuse": "malformed"}
+    if "refuse" in result:
+        return result
+    if entry["state"] == "signed":
+        return {"refuse": "already_signed"}
+    if entry["state"] == "rejected":
+        return {"refuse": "replayed"}
+    if action == "challenge" and entry["state"] != "open":
+        return {"refuse": "replayed"}
+    if action == "certificate":
+        if entry["state"] != "challenged" or any(
+                signed["o"][k] != entry["challenge"]["o"][k]
+                for k in ("person_id", "device_id", "dk_sig_pub", "dk_kx_pub")):
+            return {"ok": "unmatched"}
+    entry[field] = signed
+    entry["state"] = {"challenge": "challenged", "rejection": "rejected", "certificate": "signed"}[action]
+    return {"ok": entry["state"]}
+
+
+def relay_holder(state, now_ms, gen, take_over=False):
+    """P3-D10. state survives restart; cursor survives takeover."""
+    if gen is not None:
+        if type(gen) is not int or gen != state["gen"] or now_ms >= state["lease_until_ms"]:
+            return {"refuse": "fenced"}
+    elif now_ms < state["lease_until_ms"] and not take_over:
+        return {"refuse": "holder_conflict"}
+    else:
+        state["gen"] += 1
+        state["poll_token"] = None
+    state["lease_until_ms"] = now_ms + 40_000
+    return {"ok": {"gen": state["gen"], "lease_s": 40, "cursor": state["cursor"]}}
+
+
+def relay_poll(state, now_ms, gen, after, token, delivered):
+    """P3-D10 poll admission. Handoff repeats relay_fence and checks its poll token.
+    delivered is the highest position actually delivered to this holder; callers acknowledge only a
+    durably completed contiguous prefix. The relay cannot know the host's processing order.
+    """
+    if relay_fence(state, now_ms, gen):
+        return {"refuse": "fenced"}
+    if type(after) is not int or after < 0 or after > delivered:
+        return {"refuse": "malformed"}
+    state["cursor"] = max(state["cursor"], after)
+    state["poll_token"] = token
+    state["lease_until_ms"] = now_ms + 40_000
+    return {"ok": state["cursor"]}
+
+
+def relay_fence(state, now_ms, gen):
+    return type(gen) is not int or gen != state["gen"] or now_ms >= state["lease_until_ms"]
+
+
+def relay_bridge_request(state, raw, epoch, now_ms, cursor):
+    """P3-D8/D9. One authorized, shape-checked (ws,device,rid); full envelope bytes, not a signature id.
+    state initially {}; copies retain {n, expires_ms}, rid metadata outlives dependent copies.
+    """
+    d = H(raw).hex()
+    if state and now_ms >= state["keep_until_ms"]:
+        state.clear()
+    if not state:
+        if Header.decode(raw).epoch != epoch:
+            return {"refuse": "stale_epoch", "epoch": epoch}
+        state.update(digest=d, req_epoch=epoch, first_ms=now_ms, requeues=0, last_requeue_ms=now_ms,
+                     keep_until_ms=now_ms + 900_000, copies=[], chunks={})
+    else:
+        if d != state["digest"]:
+            return {"refuse": "rid_conflict"}
+        if any(c["n"] > cursor and now_ms < c["expires_ms"] for c in state["copies"]):
+            return {"ok": "coalesced"}
+        if state["requeues"] >= 8:
+            return {"refuse": "retry_exhausted"}
+        if now_ms < state["last_requeue_ms"] + 10_000:
+            return {"refuse": "rate_limited", "retry_after": (state["last_requeue_ms"] + 10_000 - now_ms + 999) // 1000}
+        state["requeues"] += 1
+        state["last_requeue_ms"] = now_ms
+    n = max([cursor, *[c["n"] for c in state["copies"]]]) + 1
+    state["copies"].append({"n": n, "expires_ms": now_ms + 60_000})
+    state["keep_until_ms"] = max(state["keep_until_ms"], now_ms + 60_000)
+    return {"ok": "queued", "n": n}
+
+
+def relay_bridge_chunk(state, raw, epoch, now_ms):
+    """P3-D22. Caller has checked shape, current membership and holder; one known rid."""
+    h = Header.decode(raw)
+    if not state or now_ms >= state["keep_until_ms"]:
+        return {"refuse": "expired"}  # (G0a review 8)
+    key, d = str(h.seq), H(raw).hex()
+    old = state["chunks"].get(key)
+    if old:
+        return {"ok": "replay"} if old["digest"] == d else {"refuse": "chunk_conflict"}
+    if h.epoch != state["req_epoch"] or (h.epoch != epoch and h.flags & (F_LAST | F_REFUSAL) != F_LAST | F_REFUSAL):
+        return {"refuse": "stale_epoch", "epoch": epoch}
+    if len(state["chunks"]) >= 64:
+        return {"refuse": "quota_exceeded"}
+    state["chunks"][key] = {"digest": d, "flags": h.flags, "expires_ms": now_ms + 60_000}
+    state["keep_until_ms"] = max(state["keep_until_ms"], now_ms + 60_000)
+    return {"ok": "stored"}
+
+
+def relay_recovery_quota(state, raw, now_ms, valid_signature, already_revoked, revocation=True, changes_state=True):
+    """P3-D5 person quota only (the independent address window is checked before this).
+    Exact retries and invalid signatures cannot spend it; eight of 32/day are reserved.
+    """
+    if not valid_signature:
+        return {"refuse": "bad_signature"}
+    if not changes_state:
+        return {"ok": "unchanged"}  # (G0a review 5)
+    d = H(raw).hex()
+    if d in state.get("accepted", []):
+        return {"ok": "retry"}
+    day = now_ms // 86_400_000
+    if state.get("day") != day:
+        state.update(day=day, total=0, repeat=0)
+    cap = 32 if revocation else 64
+    if state["total"] >= cap or (revocation and already_revoked and state["repeat"] >= 24):
+        return {"refuse": "rate_limited"}
+    state["total"] += 1
+    state["repeat"] += int(already_revoked)
+    state.setdefault("accepted", []).append(d)
+    return {"ok": "charged"}
+
+
+def relay_session_login(suite, state, origin, challenge, kind, ident, sig, subject, now_ms, token):
+    """P3-D2: validate before revealing revocation, concurrent tokens; subject comes from directory.
+    token is test-injected randomness; production uses a CSPRNG. Stored tokens are hashes only.
+    """
+    dummy = suite.sig_pub(suite.sig_key(fake("P3 dummy verification key")))
+    pub = dummy if subject is None else unb64u(subject["pub"])
+    result = relay_auth_check(suite, state, origin, challenge, kind, ident, sig, pub, now_ms)
+    if result["status"] != 200:
+        return result
+    if subject is None:
+        return {"status": 401, "error": "bad_signature"}
+    if subject.get("revoked"):
+        return {"status": 403, "error": "revoked"}
+    if subject.get("expires_ms") is not None and now_ms >= subject["expires_ms"]:
+        return {"status": 400, "error": "cert_expired"}
+    live = [t["expires_ms"] for t in state.get("tokens", {}).values()
+            if t["kind"] == kind and t["id"] == ident.hex() and now_ms < t["expires_ms"]]
+    if kind == "device" and len(live) >= 8:  # (G0a review 10)
+        return {"status": 429, "error": "quota_exceeded", "retry_after": (min(live) - now_ms + 999) // 1000}
+    state.setdefault("tokens", {})[H(token).hex()] = {"kind": kind, "id": ident.hex(), "expires_ms": now_ms + 900_000}
+    return {"status": 200, "token": b64u(token), "expires_ms": now_ms + 900_000}
+
+
+def relay_envelope_check(suite, raw, ws, rid, direction, device=None, member=True, revoked=False, offer=None):
+    """P3-D1/D8/D16/D17: whole-envelope bounds and routing only; ops/scopes remain sealed."""
+    if revoked:
+        return {"refuse": "revoked"}
+    if not member and offer is None:
+        return {"refuse": "not_eligible"}
+    limit = 65536 if offer is not None else (1024 * 1024 if direction == TO_HOST else 256 * 1024)
+    if len(raw) > limit:
+        return {"refuse": "too_large"}
+    if len(raw) < OVERHEAD:
+        return {"refuse": "malformed"}
+    h = Header.decode(raw)
+    if h.suite != suite.id:
+        return {"refuse": "wrong_suite"}
+    if (h.magic != MAGIC or h.version != VERSION or h.direction != direction or h.workspace.hex() != ws
+            or h.rid.hex() != rid or h.seq > (1 << 53) - 1
+            or h.flags & ~(F_STREAM if direction == TO_HOST else F_LAST | F_STREAM | F_REFUSAL)
+            or h.flags & F_REFUSAL and not h.flags & F_LAST):
+        return {"refuse": "malformed"}
+    if (offer is None and h.epoch == 0) or (offer is not None and (h.epoch != 0 or h.stream.hex() != offer)):
+        return {"refuse": "malformed"}
+    if direction == TO_HOST and device is not None and h.device.hex() != device:
+        return {"refuse": "not_for_this_device"}
+    return {"ok": True}
+
+
+def relay_session_gate(session, now_ms, subject, workspace=None, members=None):
+    """P3-D2/D10: repeat at request time and long-poll handoff; no cached membership decision."""
+    if session is None or now_ms >= session["expires_ms"]:
+        return {"refuse": "unauthenticated"}
+    if session["kind"] == "workspace":
+        return {"ok": True} if workspace in (None, session["id"]) else {"refuse": "not_eligible"}
+    if subject.get("revoked"):
+        return {"refuse": "revoked"}
+    if subject.get("expires_ms") is not None and now_ms >= subject["expires_ms"]:
+        return {"refuse": "cert_expired"}
+    if members is not None and session["id"] not in members:
+        return {"refuse": "not_eligible"}
+    return {"ok": True}
+
+
+def relay_poll_handoff(state, now_ms, gen, token):
+    """P3-D10 CAS after wakeup, before returning any data or moving a cursor."""
+    if relay_fence(state, now_ms, gen):
+        return {"refuse": "fenced"}
+    return {"ok": "deliver" if token == state["poll_token"] else "cancelled"}
+
+
+def relay_revoke(suite, state, record, pk_pub, cert):
+    """P3-D5/D7 verified intake and durable rotation obligations. No mutation on invalid evidence.
+    state: {revocations, cursor, sessions: {token_hash: device}, workspaces: {ws: {list, mailboxes,
+    responses, grants, wraps, rotation_due}}}. Per-device maps model cleanup, not storage layout.
+    """
+    result = verify_revocation(suite, record, pk_pub, cert)
+    if "refuse" in result:
+        return result
+    o = result["ok"]
+    d = o["device_id"]
+    old = state["revocations"].get(d)
+    strength = {"lost": 1, "retired": 1, "compromised": 2}
+    if old and strength[old["o"]["reason"]] >= strength[o["reason"]]:
+        return {"ok": d}
+    state["cursor"] += 1
+    state["revocations"][d] = record
+    state["sessions"] = {k: device for k, device in state["sessions"].items() if device != d}
+    for w in state["workspaces"].values():
+        for field in ("mailboxes", "responses", "grants", "wraps"):
+            w[field].pop(d, None)
+        if d in {m["device_id"] for m in w["list"]["members"]}:
+            w["rotation_due"][d] = {"epoch": w["list"]["epoch"], "revocation_cursor": state["cursor"]}
+    return {"ok": d}
 
 
 VECTORS = Path(__file__).resolve().parents[1] / "tests" / "vectors_v2.json"

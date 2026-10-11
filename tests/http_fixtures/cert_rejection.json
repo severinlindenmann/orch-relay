@@ -1,0 +1,699 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "POST",
+    "path": "/v2/cert-requests/{id}/rejection",
+    "role": "primary",
+    "auth": "D(p)"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "pgjMDa58U9Esjnp0N4PGKl1K7YMd-u91WZ3IT7ZvCSuY5nzXygud9luGYPo3-X1ygmtkucHDiwM7rYBmjj0Wrg"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {}
+      }
+    },
+    {
+      "name": "refusal_400_cert_expired",
+      "given": {
+        "scenario": "cert_expired",
+        "now_ms": 1790000000000,
+        "condition": "Device certificate used by cert_rejection has expired (400)."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "pgjMDa58U9Esjnp0N4PGKl1K7YMd-u91WZ3IT7ZvCSuY5nzXygud9luGYPo3-X1ygmtkucHDiwM7rYBmjj0Wrg"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "cert_expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "cert_rejection: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "pgjMDa58U9Esjnp0N4PGKl1K7YMd-u91WZ3IT7ZvCSuY5nzXygud9luGYPo3-X1ygmtkucHDiwM7rYBmjj0Wrg"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_wrong_suite",
+      "given": {
+        "scenario": "wrong_suite",
+        "now_ms": 1790000000000,
+        "condition": "cert_rejection: Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 1,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "c0ba4c0e49f25a37022cc22323a15986"
+            },
+            "sig": "k92RYEr3BDS2fEzJ2SOc5Y-hMB7H5MUOq4IhxVtfvxd9jVx02cCqrtr7dNhm0d5TzbwJxxNQ_CrLKmaC29GhAQ"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "wrong_suite"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_bad_signature",
+      "given": {
+        "scenario": "bad_signature",
+        "now_ms": 1790000000000,
+        "condition": "cert_rejection: Trusted directory verification key differs from the artifact's signing key; artifact remains valid under its fixture key."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "pgjMDa58U9Esjnp0N4PGKl1K7YMd-u91WZ3IT7ZvCSuY5nzXygud9luGYPo3-X1ygmtkucHDiwM7rYBmjj0Wrg"
+          }
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "bad_signature"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "cert_rejection: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "pgjMDa58U9Esjnp0N4PGKl1K7YMd-u91WZ3IT7ZvCSuY5nzXygud9luGYPo3-X1ygmtkucHDiwM7rYBmjj0Wrg"
+          }
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by cert_rejection."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "pgjMDa58U9Esjnp0N4PGKl1K7YMd-u91WZ3IT7ZvCSuY5nzXygud9luGYPo3-X1ygmtkucHDiwM7rYBmjj0Wrg"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_for_this_device",
+      "given": {
+        "scenario": "not_for_this_device",
+        "now_ms": 1790000000000,
+        "condition": "Target device/request binding required by cert_rejection fails."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "pgjMDa58U9Esjnp0N4PGKl1K7YMd-u91WZ3IT7ZvCSuY5nzXygud9luGYPo3-X1ygmtkucHDiwM7rYBmjj0Wrg"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_for_this_device"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_other_person",
+      "given": {
+        "scenario": "other_person",
+        "now_ms": 1790000000000,
+        "condition": "cert_rejection: No account for the signed person, or certificate/request person is neither owner nor authorized person."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "pgjMDa58U9Esjnp0N4PGKl1K7YMd-u91WZ3IT7ZvCSuY5nzXygud9luGYPo3-X1ygmtkucHDiwM7rYBmjj0Wrg"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "other_person"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_revoked",
+      "given": {
+        "scenario": "revoked",
+        "now_ms": 1790000000000,
+        "condition": "The device authenticating cert_rejection is revoked."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "pgjMDa58U9Esjnp0N4PGKl1K7YMd-u91WZ3IT7ZvCSuY5nzXygud9luGYPo3-X1ygmtkucHDiwM7rYBmjj0Wrg"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "revoked"
+        }
+      }
+    },
+    {
+      "name": "refusal_404_not_found",
+      "given": {
+        "scenario": "not_found",
+        "now_ms": 1790000000000,
+        "condition": "cert_rejection: Authorized resource is absent, or certificate request retention has ended."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "pgjMDa58U9Esjnp0N4PGKl1K7YMd-u91WZ3IT7ZvCSuY5nzXygud9luGYPo3-X1ygmtkucHDiwM7rYBmjj0Wrg"
+          }
+        }
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_found"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_already_signed",
+      "given": {
+        "scenario": "already_signed",
+        "now_ms": 1790000000000,
+        "condition": "cert_rejection: Certificate request is signed; this challenge/rejection is not an exact prior retry."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "pgjMDa58U9Esjnp0N4PGKl1K7YMd-u91WZ3IT7ZvCSuY5nzXygud9luGYPo3-X1ygmtkucHDiwM7rYBmjj0Wrg"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "already_signed"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_other_workspace",
+      "given": {
+        "scenario": "other_workspace",
+        "now_ms": 1790000000000,
+        "condition": "cert_rejection: Authenticated/route workspace differs from the signed object's workspace."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "pgjMDa58U9Esjnp0N4PGKl1K7YMd-u91WZ3IT7ZvCSuY5nzXygud9luGYPo3-X1ygmtkucHDiwM7rYBmjj0Wrg"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "other_workspace"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_replayed",
+      "given": {
+        "scenario": "replayed",
+        "now_ms": 1790000000000,
+        "condition": "cert_rejection: Request id is bound to other bytes, challenge replacement was attempted, or request was rejected."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "pgjMDa58U9Esjnp0N4PGKl1K7YMd-u91WZ3IT7ZvCSuY5nzXygud9luGYPo3-X1ygmtkucHDiwM7rYBmjj0Wrg"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "replayed"
+        }
+      }
+    },
+    {
+      "name": "refusal_410_expired",
+      "given": {
+        "scenario": "expired",
+        "now_ms": 1790000000000,
+        "condition": "The certificate request for cert_rejection has expired."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "pgjMDa58U9Esjnp0N4PGKl1K7YMd-u91WZ3IT7ZvCSuY5nzXygud9luGYPo3-X1ygmtkucHDiwM7rYBmjj0Wrg"
+          }
+        }
+      },
+      "response": {
+        "status": 410,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "cert_rejection: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 16385,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
+      "name": "resigned_identical",
+      "given": {
+        "scenario": "Same canonical signed object, different valid P-256 signature; no state change",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "e5XrqxaTEsxE_bTTvDLhd1p4ncd5S5WbOAmm256YxRk9rq_IzWJypV5FyRvvh2vroANsC-Gioqr9TwI7RcZbjQ"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {}
+      }
+    },
+    {
+      "name": "exact_retry",
+      "given": {
+        "scenario": "exact_bytes_already_committed",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9/rejection",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-primary",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d"
+            },
+            "sig": "pgjMDa58U9Esjnp0N4PGKl1K7YMd-u91WZ3IT7ZvCSuY5nzXygud9luGYPo3-X1ygmtkucHDiwM7rYBmjj0Wrg"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {}
+      }
+    }
+  ]
+}

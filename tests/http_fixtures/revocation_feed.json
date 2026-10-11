@@ -1,0 +1,265 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "GET",
+    "path": "/v2/persons/{person}/revocations",
+    "role": "client",
+    "auth": "D(p)|W"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/revocations",
+        "query": {
+          "after": "0",
+          "limit": "256"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "revocations": [
+            {
+              "cursor": 1,
+              "record": {
+                "o": {
+                  "v": 2,
+                  "suite": 2,
+                  "kind": "revocation",
+                  "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                  "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                  "revoked_ms": 1790000000000,
+                  "reason": "lost"
+                },
+                "sig": "5f5fIS1e8IWcHR3xFb8yPc3J6P5Kskox6EbXdnqZOMWP1Hd7rysykdtEsNaUGA0ZuWAmI_fLtEeLjN9nKwLZjQ"
+              }
+            }
+          ],
+          "next": null
+        }
+      }
+    },
+    {
+      "name": "refusal_400_cert_expired",
+      "given": {
+        "scenario": "cert_expired",
+        "now_ms": 1790000000000,
+        "condition": "Device certificate used by revocation_feed has expired (400)."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/revocations",
+        "query": {
+          "after": "0",
+          "limit": "256"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "cert_expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "revocation_feed: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/revocations",
+        "query": {
+          "after": "0",
+          "limit": "256",
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "revocation_feed: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/revocations",
+        "query": {
+          "after": "0",
+          "limit": "256"
+        },
+        "headers": {}
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Requested person is not in the W workspace's ever_persons."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/revocations",
+        "query": {
+          "after": "0",
+          "limit": "256"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_revoked",
+      "given": {
+        "scenario": "revoked",
+        "now_ms": 1790000000000,
+        "condition": "The device authenticating revocation_feed is revoked."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/revocations",
+        "query": {
+          "after": "0",
+          "limit": "256"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "revoked"
+        }
+      }
+    },
+    {
+      "name": "other_workspace_person_refused",
+      "given": {
+        "condition": "W belongs to a workspace whose ever_persons excludes the requested person."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/revocations",
+        "query": {
+          "after": "0",
+          "limit": "256"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace-token"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "filtered_workspace_feed",
+      "given": {
+        "scenario": "W ever_devices contains only the phone; records for the same person's other devices are excluded before pagination",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/revocations",
+        "query": {
+          "after": "0",
+          "limit": "256"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace-token"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "revocations": [
+            {
+              "cursor": 1,
+              "record": {
+                "o": {
+                  "v": 2,
+                  "suite": 2,
+                  "kind": "revocation",
+                  "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                  "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                  "revoked_ms": 1790000000000,
+                  "reason": "lost"
+                },
+                "sig": "5f5fIS1e8IWcHR3xFb8yPc3J6P5Kskox6EbXdnqZOMWP1Hd7rysykdtEsNaUGA0ZuWAmI_fLtEeLjN9nKwLZjQ"
+              }
+            }
+          ],
+          "next": null
+        }
+      }
+    }
+  ]
+}

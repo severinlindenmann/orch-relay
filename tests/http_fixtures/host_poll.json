@@ -1,0 +1,316 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "GET",
+    "path": "/v2/workspaces/{ws}/host/poll",
+    "role": "host",
+    "auth": "W(g)"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/poll",
+        "query": {
+          "after": "0",
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "items": [
+            {
+              "n": 1,
+              "route": "bridge",
+              "device": "4177b27d8e4ac182e8d388b247d2b136",
+              "rid": "fde154f24ef24b8eccff1cb87c930438",
+              "offer": null,
+              "envelope": "T1JCMgIBAAJwXUCru4wckDVKGsqpTJNcQXeyfY5KwYLo04iyR9KxNv3hVPJO8kuOzP8cuHyTBDgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGgxFBsAAAAAAFkwvC2Ae-BJ7La_ZRDQpQjCABgPY3Ue9UMfXvaJ6ycLTGDXGoswSIYRzyAZKomw1pVLYmYgvuWfHeXuVMpTjcuyjKByD_1JTphr0TPQB5yU3_q6kIPwcJE-PCyQOJi-aKJ9M-6aqzXV8r1V-8XjQ4NLA"
+            }
+          ],
+          "notices": {
+            "revocations_cursor": 0,
+            "cert_requests": [],
+            "rotation_due": []
+          },
+          "next": null
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "host_poll: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/poll",
+        "query": {
+          "after": "0",
+          "wait": "25",
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "host_poll: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/poll",
+        "query": {
+          "after": "0",
+          "wait": "25"
+        },
+        "headers": {
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by host_poll."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/poll",
+        "query": {
+          "after": "0",
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_fenced",
+      "given": {
+        "scenario": "fenced",
+        "now_ms": 1790000000000,
+        "condition": "host_poll: Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/poll",
+        "query": {
+          "after": "0",
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "0"
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "fenced"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_quota_exceeded",
+      "given": {
+        "scenario": "quota_exceeded",
+        "now_ms": 1790000000000,
+        "condition": "host_poll: Applicable device/workspace storage, concurrent poll, chunk or open-request cap is full."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/poll",
+        "query": {
+          "after": "0",
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "quota_exceeded"
+        }
+      }
+    },
+    {
+      "name": "refusal_503_overloaded",
+      "given": {
+        "scenario": "overloaded",
+        "now_ms": 1790000000000,
+        "condition": "host_poll: Global queued-body or concurrent-poll budget is full; existing state is not evicted."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/poll",
+        "query": {
+          "after": "0",
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 503,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "overloaded"
+        }
+      }
+    },
+    {
+      "name": "durable_notices",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/poll",
+        "query": {
+          "after": "0",
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "items": [],
+          "notices": {
+            "revocations_cursor": 1,
+            "cert_requests": [
+              "1995f17e92ddbfe28475cc5ad02be4c9"
+            ],
+            "rotation_due": [
+              {
+                "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                "revocation_cursor": 1,
+                "epoch": 1
+              }
+            ]
+          },
+          "next": null
+        }
+      }
+    },
+    {
+      "name": "pair_item",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/poll",
+        "query": {
+          "after": "0",
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "items": [
+            {
+              "n": 2,
+              "route": "pair",
+              "device": "4177b27d8e4ac182e8d388b247d2b136",
+              "rid": "fde154f24ef24b8eccff1cb87c930438",
+              "offer": "3588c9fcc1601503d3e17ae7a5a31607",
+              "envelope": "T1JCMgIBAAJwXUCru4wckDVKGsqpTJNcQXeyfY5KwYLo04iyR9KxNv3hVPJO8kuOzP8cuHyTBDg1iMn8wWAVA9PheueloxYHAAAAAAAAAAAAAAGgxFBsAAAAAAD-jZx5bF2kUDGXCxaJKGZDGKAvKjADrGAV29sVtqaWkF2X7Clorbwu7ghf5gqwVxG9tsFFimwlT6HB0vfKa_pDE6WyG75txKQ0eG58woGWntwQBwB-_GlXff-YZ--H9U4IP-ZpvGfzEDXy7PzNKi8Wv6uYwpIsQ3P-OghqzztsFS3YMwDmpgZ1lLzK0MU4VkC8gbzPR7HnYJ4yK72vupw0mSsMoVrnPdLAL-B-HXaEdu-7zFP8rwa7wbXCnwvTq97JfuJB9SR6NGaC9w40gX7vOlHeRsmkTGNscD5RPt2MPADxsdS-BujS_WQwK1-X_58-NrSVMeFxEkgOsslLqvHhreuALX1uZ-flLpCq-XXgBxy_8_vxii_TZ0H25qFwfVf6GjRUKAhb1HDfMZ6gs_PSwFeqIb6brmJQSYskoz68blB07CgxMq3G0Gq8iEZVILMSla6NGWnM2hA6l7Uu4Eg8TEI"
+            }
+          ],
+          "notices": {
+            "revocations_cursor": 0,
+            "cert_requests": [],
+            "rotation_due": []
+          },
+          "next": null
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,244 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "GET",
+    "path": "/v2/persons/{person}/cert-requests",
+    "role": "primary",
+    "auth": "D(p)"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-primary"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "requests": [
+            {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "cert_request",
+                "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+                "created_ms": 1790000000000,
+                "expires_ms": 1790000600000,
+                "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+              },
+              "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "refusal_400_cert_expired",
+      "given": {
+        "scenario": "cert_expired",
+        "now_ms": 1790000000000,
+        "condition": "Device certificate used by cert_requests_poll has expired (400)."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-primary"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "cert_expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_poll: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {
+          "wait": "25",
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-primary"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_poll: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {
+          "wait": "25"
+        },
+        "headers": {}
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by cert_requests_poll."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-primary"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_revoked",
+      "given": {
+        "scenario": "revoked",
+        "now_ms": 1790000000000,
+        "condition": "The device authenticating cert_requests_poll is revoked."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-primary"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "revoked"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_quota_exceeded",
+      "given": {
+        "scenario": "quota_exceeded",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_poll: Applicable device/workspace storage, concurrent poll, chunk or open-request cap is full."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-primary"
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "quota_exceeded"
+        }
+      }
+    },
+    {
+      "name": "refusal_503_overloaded",
+      "given": {
+        "scenario": "overloaded",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_poll: Global queued-body or concurrent-poll budget is full; existing state is not evicted."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-primary"
+        }
+      },
+      "response": {
+        "status": 503,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "overloaded"
+        }
+      }
+    }
+  ]
+}

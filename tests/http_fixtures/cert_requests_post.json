@@ -1,0 +1,662 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "POST",
+    "path": "/v2/persons/{person}/cert-requests",
+    "role": "host",
+    "auth": "W(g)"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+            },
+            "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request_id": "1995f17e92ddbfe28475cc5ad02be4c9"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+            },
+            "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_wrong_suite",
+      "given": {
+        "scenario": "wrong_suite",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 1,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "c0ba4c0e49f25a37022cc22323a15986",
+              "primary_device_id": "4693874c0d984a3cdec3bc508f56757f",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "I1WqQn6_K03pAFzdjsbHC5G1Bl0IiktxDtQ2ceVWlEtetTQXnI_3-Lj6_NXGlcuqBm4oSYCFHIlj10F3LwpoIW6EC9wxfU2rJqqqCUF0VjzqJU8J5zMuJA5FXMigmcQrC4VfbAHrtnI5hWdwIMiNLAAu3zjaW9yyPX5OWduZCO453xwKguqAJZOxJsxDezmu_gd5j99FQ7xsNzaKz-VwRMUucU36NzQqs7zjyOBo9dmDwi83PRXD5dNziC92zQMzH6NALuLZrvP6qy_n8GKUApqBdSZE4S9n3HltQTxUB0ahOwJKQ5T0icA_xQa3JRMuncMGf8aCx6NcpXgMfocMjPa9VIjNwCAtLPQfrRTO5DMZSruKBAJdONlrYIsKnhWu94pf4wuZLeQug9EN8Fm4cg9Cm2qw-Xkq82jBwn5BN4dRvJAWARTs8h-MnSJRMA"
+            },
+            "sig": "vHVDvryQ1emfszP7YMQoMEyJyzn7SniZHmdVOhZKlV2ApFPsoxGNyiWXUSjQTe6syB4sZJNShS4wbFasAo-4DA"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "wrong_suite"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_bad_signature",
+      "given": {
+        "scenario": "bad_signature",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Trusted directory verification key differs from the artifact's signing key; artifact remains valid under its fixture key."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+            },
+            "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+          }
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "bad_signature"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+            },
+            "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+          }
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by cert_requests_post."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+            },
+            "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_for_this_device",
+      "given": {
+        "scenario": "not_for_this_device",
+        "now_ms": 1790000000000,
+        "condition": "Target device/request binding required by cert_requests_post fails."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+            },
+            "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_for_this_device"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_other_person",
+      "given": {
+        "scenario": "other_person",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: No account for the signed person, or certificate/request person is neither owner nor authorized person."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+            },
+            "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "other_person"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_fenced",
+      "given": {
+        "scenario": "fenced",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "0",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+            },
+            "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "fenced"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_other_workspace",
+      "given": {
+        "scenario": "other_workspace",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Authenticated/route workspace differs from the signed object's workspace."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+            },
+            "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "other_workspace"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_replayed",
+      "given": {
+        "scenario": "replayed",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Request id is bound to other bytes, challenge replacement was attempted, or request was rejected."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+            },
+            "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "replayed"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_request_open",
+      "given": {
+        "scenario": "request_open",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Another unexpired open or challenged certificate request exists for the workspace."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+            },
+            "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "request_open"
+        }
+      }
+    },
+    {
+      "name": "refusal_410_expired",
+      "given": {
+        "scenario": "expired",
+        "now_ms": 1790000000000,
+        "condition": "The certificate request for cert_requests_post has expired."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+            },
+            "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+          }
+        }
+      },
+      "response": {
+        "status": 410,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 65537,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_quota_exceeded",
+      "given": {
+        "scenario": "quota_exceeded",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Applicable device/workspace storage, concurrent poll, chunk or open-request cap is full."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoKf9puCcHHQq2R7MGiM1zc6tE_r90Pht9wWqUxYgCknNhjXrkww0QrA__TC_kays9fJ3W7hUU6rQkh3S3V1CORebPQl6_p9zOQiF-q3wFm1fWCjA3y4h2ytcNaQydrZo5Ff1vuaTtk0x14X5DC5DvKvx-5IrbW8SbKp44ztt7Qxxai5bVfjbtkZbdK5AKQkDmTNsJKhc-O9BnTnwNwy-uJb7k_oEt83DYuvIuZ6WyEtZZarQU1VBKQFpxqxj1OTL_ZhrUJQ7UyRyQbuS5kgVmMqsYVAIgdvPylMrGNofqUf7msGMK_lDT54dIkFFNK5D4Uwv0v6IcyAQiJvnxhkrwd8qOXk4Ssf7YHf_dE2PFgD9S3cw9Zz9BSdcHDl9Kj8PUYjmmSmBNHsZqNNDgvMOgWI1OV0H6OKRlQmzhem_3J3irjh1VWqcgfkwgJxY9n7G3MLhPQPoTs1p1xsT3_DQ0z9TiGmYco5r9mC1k6BIEiqZuC76aiZK70b50js_CUs4qawgAw"
+            },
+            "sig": "-9d9hJUvqcC7WVye-JTtMy19mZWOWuG5tCOZJQ7nuARPD13IssoNibtKCUcixbmU-2jFrFtxVIuqXC1-kFR8bQ"
+          }
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "quota_exceeded"
+        }
+      }
+    }
+  ]
+}

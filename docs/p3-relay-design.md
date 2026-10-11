@@ -21,6 +21,10 @@ Naming:
   `orch-v2.md`.
 - **Cn** is a Codex challenge finding (§12).
 
+(G0a review 1) G0a review amendments in `protocol-v2.md` §19 are normative over
+the original route and budget summaries below. They include directory filtering, body caps,
+canonical retries, requeue status, quotas, and implementation limits.
+
 ## 1. Scope and non-goals
 
 P3 delivers, in orch-relay:
@@ -104,7 +108,8 @@ Tables (`*` marks the primary key; times are integer ms of the relay clock):
 | `members` | `(workspace_id, device_id)*`, `person_id`, `scopes` | the current list, exploded |
 | `ever_devices` | `(workspace_id, device_id)*`, `first_epoch` | grows only from verified evidence: listed devices, verified revocation entries, verified bundle certificates |
 | `rotation_due` | `(workspace_id, device_id)*`, `revocation_cursor`, `epoch` | durable obligation; cleared only by a committed higher-epoch list that excludes the device, serialized with revocation intake (§5.3) |
-| `ever_persons` | `(workspace_id, person_id)*` | the card owner and every person ever in `persons` |
+| `ever_devices` | `(workspace_id, device_id)*` | devices ever in an accepted member list (G0a review 1) |
+| `ever_persons` | `(workspace_id, person_id)*` | persons with a certificate-bound member device in an accepted list (G0a review 1; protocol §19.1) |
 | `wk_grants` | `(workspace_id, device_id, epoch)*`, `grant` | spec §6.1 calls this `memberships` |
 
 **bridge**

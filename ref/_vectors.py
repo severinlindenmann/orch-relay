@@ -75,6 +75,8 @@ def build() -> dict:
         "ed25519_small_order": R.ed25519_small_order_encodings(),
         "suites": {str(sid): _suite(R.SUITES[sid]) for sid in (1, 2)},
     }
+    from ref._p3_vectors import add_p3
+    add_p3(out)
     return out
 
 
@@ -352,6 +354,9 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
     crd("wxk_rotation_seq_2_signed_by_wsk_alone", card2, stored=st1)
     crd("replayed_older_card", card1, stored=st2)
     crd("same_seq", card1, stored=st1)
+    crd("same_seq_other_sealed", R.make_card(S, wsk_a, deleg, card_o, sp2, ck2), stored=st1)  # (G0a review 7)
+    crd("same_seq_only_sealed_hash_differs", R.make_card(S, wsk_a, deleg, card_o, sp2, ck), stored=st1)
+    crd("same_seq_only_ck_commit_differs", R.make_card(S, wsk_a, deleg, card_o, sp, ck2), stored=st1)
     deleg_x = R.make_delegation(S, pk, ws_a, pub["wsk_intruder.sig"], pid, False, NOW)
     crd("wsk_changed", R.make_card(S, wsk_x, deleg_x, {**card_o, "card_seq": 2,
                                                       "wsk_pub": b64u(pub["wsk_intruder.sig"])}, sp, ck), stored=st1)
@@ -400,7 +405,9 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
     def mlist(epoch, seq, members, signer=wsk_a, ws=ws_a):
         return R.sign_object(S, signer, {"v": 2, "suite": S.id, "kind": "member_list", "workspace_id": ws.hex(),
                                          "epoch": epoch, "list_seq": seq, "issued_ms": NOW,
-                                         "members": sorted(({"device_id": dev[n].hex(), "scopes": sc}
+                                         "persons": [],
+                                         "members": sorted(({"device_id": dev[n].hex(),
+                                                            "person_id": certs[n]["o"]["person_id"], "scopes": sc}
                                                             for n, sc in members), key=lambda m: m["device_id"])})
 
     full = ["look", "decide", "operate", "type"]

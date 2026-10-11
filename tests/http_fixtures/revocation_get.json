@@ -1,0 +1,117 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "GET",
+    "path": "/v2/devices/{device}/revocation",
+    "role": "client",
+    "auth": "none"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136/revocation",
+        "query": {},
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "record": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "revocation",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "revoked_ms": 1790000000000,
+              "reason": "lost"
+            },
+            "sig": "5f5fIS1e8IWcHR3xFb8yPc3J6P5Kskox6EbXdnqZOMWP1Hd7rysykdtEsNaUGA0ZuWAmI_fLtEeLjN9nKwLZjQ"
+          }
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "revocation_get: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136/revocation",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {}
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_404_not_found",
+      "given": {
+        "scenario": "not_found",
+        "now_ms": 1790000000000,
+        "condition": "revocation_get: Authorized resource is absent, or certificate request retention has ended."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136/revocation",
+        "query": {},
+        "headers": {}
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_found"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_rate_limited",
+      "given": {
+        "scenario": "rate_limited",
+        "now_ms": 1790000000000,
+        "condition": "revocation_get: Applicable full-duration address/person rate window or outstanding challenge cap is full."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136/revocation",
+        "query": {},
+        "headers": {}
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "rate_limited"
+        }
+      }
+    }
+  ]
+}

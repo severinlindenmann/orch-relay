@@ -1,0 +1,368 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "PUT",
+    "path": "/v2/workspaces/{ws}/card-keys",
+    "role": "host",
+    "auth": "W(g)"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card-keys",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card_seq": 1,
+          "wraps": [
+            {
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "stored": 1
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "card_keys: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card-keys",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card_seq": 1,
+          "wraps": [
+            {
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "card_keys: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card-keys",
+        "query": {},
+        "headers": {
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card_seq": 1,
+          "wraps": [
+            {
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by card_keys."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card-keys",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card_seq": 1,
+          "wraps": [
+            {
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_for_this_device",
+      "given": {
+        "scenario": "not_for_this_device",
+        "now_ms": 1790000000000,
+        "condition": "Target device/request binding required by card_keys fails."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card-keys",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card_seq": 1,
+          "wraps": [
+            {
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_for_this_device"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_fenced",
+      "given": {
+        "scenario": "fenced",
+        "now_ms": 1790000000000,
+        "condition": "card_keys: Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card-keys",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "0",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card_seq": 1,
+          "wraps": [
+            {
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "fenced"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_stale_card",
+      "given": {
+        "scenario": "stale_card",
+        "now_ms": 1790000000000,
+        "condition": "card_keys: Card sequence is behind held state (or an unequal card at the same sequence); wraps name an old card sequence."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card-keys",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card_seq": 1,
+          "wraps": [
+            {
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "stale_card"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_wrap_conflict",
+      "given": {
+        "scenario": "wrap_conflict",
+        "now_ms": 1790000000000,
+        "condition": "card_keys: A different wrap is committed for the same device and card sequence."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card-keys",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card_seq": 1,
+          "wraps": [
+            {
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "wrap_conflict"
+        }
+      }
+    },
+    {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "card_keys: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card-keys",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 65537,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
+      "name": "exact_retry",
+      "given": {
+        "scenario": "exact_bytes_already_committed",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card-keys",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card_seq": 1,
+          "wraps": [
+            {
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "stored": 1
+        }
+      }
+    }
+  ]
+}

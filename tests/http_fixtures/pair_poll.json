@@ -1,0 +1,173 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "GET",
+    "path": "/v2/workspaces/{ws}/pair/{offer}/{rid}",
+    "role": "device",
+    "auth": "none"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/pair/3588c9fcc1601503d3e17ae7a5a31607/fde154f24ef24b8eccff1cb87c930438",
+        "query": {
+          "wait": "25"
+        },
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "chunks": [
+            {
+              "id": "fde154f24ef24b8eccff1cb87c930438",
+              "idx": 0,
+              "last": true,
+              "stream": false,
+              "envelope": "T1JCMgICAQJwXUCru4wckDVKGsqpTJNcQXeyfY5KwYLo04iyR9KxNv3hVPJO8kuOzP8cuHyTBDg1iMn8wWAVA9PheueloxYHAAAAAAAAAAAAAAGgxFBsAAAAAAD-jZx5bF2kUDGXCxaJKGZDGKAuqjADq244xIFwqKaY3kuXygMBrI8eqUx4_EX3fT7Y7uNtii8vPZzh18vYPtY0QL2sZplE77UBSmc9n7uJysY7CTBi_X1sdP60ZfGk7Vs0Joxk5W-kHjXHiNKgIk02o4H69786B2mwXXQv3iNkPAL4HCLk5ght0pXRkeg4MGKDtNm0AqDXJ64MW5mJ3u8HjAoni0DUJ5flSrpcFymjTdW26yjPsg-FzP7xlSrakv7hZ_BX-ClcCH2j10sOl3LCElWHId2_TRZrAQxjPt3vSFiJ__-wQPzbwmUED1-B_6s-PIKzQaIBDQxAiYtp_-OoqvyHD2orF8P4dNzJv2S_AgmM_8NAYaWkLZxNb3Ltt3EBX6vMxnUb7OwaoAQKHTs1Iz074yjwJn3h5sBcLDxWUv5b1MVeEsib7P0YH1LfxgqaMshWJIM05e9zTgkhCSi9p3G-k20oxaVvlff5-mBdIAYj9ggaDDgiO8yer7MoCEEMVi47qePqohIs5pRlG8ELu9xXDb04cazNmySV8lEZdUiz5XNE8RVXNL_Xg2YNicYzynHgL25lhz9Kk9N1YuhxkLMmjUcW27Dw6eS5NDOow4XtxH04Aov9z1cwiyt2n-iw3A"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "pair_poll: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/pair/3588c9fcc1601503d3e17ae7a5a31607/fde154f24ef24b8eccff1cb87c930438",
+        "query": {
+          "wait": "25",
+          "unexpected": "1"
+        },
+        "headers": {}
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_quota_exceeded",
+      "given": {
+        "scenario": "quota_exceeded",
+        "now_ms": 1790000000000,
+        "condition": "pair_poll: Applicable device/workspace storage, concurrent poll, chunk or open-request cap is full."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/pair/3588c9fcc1601503d3e17ae7a5a31607/fde154f24ef24b8eccff1cb87c930438",
+        "query": {
+          "wait": "25"
+        },
+        "headers": {}
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "quota_exceeded"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_rate_limited",
+      "given": {
+        "scenario": "rate_limited",
+        "now_ms": 1790000000000,
+        "condition": "pair_poll: Applicable full-duration address/person rate window or outstanding challenge cap is full."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/pair/3588c9fcc1601503d3e17ae7a5a31607/fde154f24ef24b8eccff1cb87c930438",
+        "query": {
+          "wait": "25"
+        },
+        "headers": {}
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "rate_limited"
+        }
+      }
+    },
+    {
+      "name": "refusal_503_overloaded",
+      "given": {
+        "scenario": "overloaded",
+        "now_ms": 1790000000000,
+        "condition": "pair_poll: Global queued-body or concurrent-poll budget is full; existing state is not evicted."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/pair/3588c9fcc1601503d3e17ae7a5a31607/fde154f24ef24b8eccff1cb87c930438",
+        "query": {
+          "wait": "25"
+        },
+        "headers": {}
+      },
+      "response": {
+        "status": 503,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "overloaded"
+        }
+      }
+    },
+    {
+      "name": "after_first_chunk",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/pair/3588c9fcc1601503d3e17ae7a5a31607/fde154f24ef24b8eccff1cb87c930438",
+        "query": {
+          "after": "0",
+          "wait": "0"
+        },
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "chunks": []
+        }
+      }
+    }
+  ]
+}
