@@ -2643,16 +2643,19 @@ signed list and grants. Devices implement §7.3 D1–D4 and the `wk_commit_confl
 
 ### 19.8 Checkpoints, genesis and restore transport (P3-D12/D13/D18–D25)
 
-This section uses F1 §5.3/5.6/5.10 at orch-core `4f00d9ce32e8e512366c908c36b43f35142747c9` (develop, the merge
-of orch-core #377: receiver vectors with an explicit receiver view, `Verdict` with alarms, honest recovery for a host
-that lost its checkpoints). The relay's F1 vector snapshot `tests/vectors/f1` pins the same commit, and
-`tests/vectors/f1_receiver_4f00d9c.json` extracts its receiver cases (88 `transition_cases`, 30
+This section uses F1 §5.3/5.6/5.10 at orch-core `e9a26d95c247c4ff7794ae9abfc816a9032e576f` (orch-core #387, receiver
+revocations split into chain-learned and out-of-band, merged into develop as 39bd15bf with identical F1 text, code and
+vectors; it builds on #377: receiver vectors with an explicit receiver view, `Verdict` with alarms, honest recovery
+for a host that lost its checkpoints). The relay's F1 vector snapshot `tests/vectors/f1` pins the same commit, and
+`tests/vectors/f1_receiver_e9a26d9.json` extracts its receiver cases (115 `transition_cases`, 30
 `workspace_n_offers`, sha256 of the source file recorded), which run unchanged against the reference device judge.
-The earlier extracts (f1094b3, and orch-52's unmerged branch head) are retired: every case they carried is in the
-merged set. Each shared case gives the receiver's whole view: its clock `now`, the `pinned_delegation`,
+The earlier extracts (f1094b3, orch-52's unmerged branch head, 4f00d9c) are retired: every case they carried is in
+the current set. Each shared case gives the receiver's whole view: its clock `now`, the `pinned_delegation`,
 `known_devices` (every device it knows, active or revoked, with its person and optional key), `known_revocations`
-(held when judging) and `learned_later_in_walk`. `known_devices` is a required input of the judge (orch-core B1):
-an empty map says the receiver knows no device, and a missing one is an error, never "nothing known".
+(chain-learned, held when judging), `local_revocations` (out of band, held when judging) and
+`learned_later_in_walk`, plus the expected `unpublished`. Every view field is a required input of the judge
+(orch-core B1, #387): an empty map or list says the receiver knows nothing of that kind, and a missing one is an
+error, never "nothing known".
 F1 defines event/checkpoint bytes; the relay adds storage, transport and present-authority checks.
 **P3-D12:** only `workspace_checkpoint` objects are published, never `ticket_checkpoint` objects.
 
@@ -2787,8 +2790,13 @@ in that one context only, never by trying T's entries.
   one for new registrations would narrow pre-registration of not-yet-registered (v1) device ids.
   Otherwise `restore_invalid`. Entries are sorted and unique by device. For each held revocation of an ever-device,
   require the same or stronger reason: compromised > lost = retired. Missing/weaker coverage returns
-  `restore_missing_revocation` with sorted `devices`. Byte identity with the earliest chain evidence
-  is an F1 host rule, not a relay rule. Preserve strongest reasons; grow ever_devices atomically.
+  `restore_missing_revocation` with sorted `devices`. **Held** here means chain-learned for this workspace (F1 §5.10,
+  orch-core #387): the revocations the relay accepted in this workspace's own restores (the reference's per-workspace
+  `revocations`). A revocation the relay holds only out of band for this workspace (§19.5 intake, another
+  workspace's restore) refuses its device as a signer (R1) but is never demanded here; F1 calls its absence
+  `revocation.unpublished`, a non-blocking signal (G4 production: transport detail 6 (c) below). Byte identity with
+  the earliest chain evidence is an F1 host rule, not a relay rule. Preserve strongest reasons; grow ever_devices
+  atomically.
 - **R5 (P3-D13):** applied restore IDs are single-use. Exact publication retries return the stored
   prior result. Rejected IDs are not consumed. A source-bound transition pins both C and T permanently.
 
@@ -2814,27 +2822,79 @@ commit. Any revocation of the signer it already holds when it judges the transit
 a lower-n bundle in this walk, refuses that transition (`chain_diverged`), whatever the reason and whatever
 `revoked_ms` says. This matches F1's receiver (`judge_offer` refuses a known-revoked signer).
 
-**Where a device's revocations come from, and what each is used for (review N4).** A device holds two sets:
-*chain* revocations, learned from accepted restore bundles (with the bundle's `pk_pub`), and *local* revocations,
-learned out of band (the §19.5 revocation feed, the member list, the owner's own action). The **signer check**
-uses both sets: every revocation the device holds refuses its signer. The **person/key binding** of carried
-evidence uses everything the device knows of a device's person: chain revocations, local revocations and known
-active devices (the pairing member list, applied signers, accepted evidence; review F2, orch-core #377).
-A member added after pairing is bound on first sight: its first accepted evidence or applied signature on the
-chain. The device does not take bindings from later member lists, because those are WSK-signed and a WSK holder
-could pre-bind persons with them; P8's owner-signed roster closes this. Only the
-**completeness check** (a workspace restore must list every held revocation, a `compromised` one as
-`compromised`) uses chain revocations alone. Both sets are durable and both feed the resurrection rule. A local
-`compromised` revocation of a device that signed an applied transition raises the alarm when it is learned,
-independent of any sync (review F6).
-Consequences, stated in full: a device that learned an *unrelated* device's revocation out of band is not
-stranded behind an older genuine workspace restore that could not list it. A device that learned the *signer's*
-revocation out of band (any reason) while behind an older genuine restore by that signer stays refused at that
-restore until the owner re-pairs it from a fresh baseline; this is accepted, because refusing is the only rule a
-WSK holder holding a revoked device's key cannot exploit. F1's receiver (orch-core #377 `ReceiverView`) takes one
-`known_revocations` list for both the signer and the completeness check; the split is a relay-side refinement,
-still to be raised with stream A (orch-52) for F1 §5.10. A `compromised` revocation of an accepted restore's signer
-that F1 reports as learned later (`Verdict.alarms`) is the alarm the walk raises below, for this walk and later ones.
+**Revocations at receivers: chain-learned and out of band (F1 §5.10 at e9a26d95, orch-core #387; review N4).** F1
+now defines what the relay first did as a local refinement, and F1 wins; `ref/checkpoints.py` follows it. A device
+holds two collections, per workspace:
+
+- *Chain-learned* (`revocations`): a revocation whose occurrence the device authenticated against this workspace's
+  accepted history. A checkpoint-only device never sees `device.revoked` event bodies, so its only chain occurrences
+  are entries of restores it accepted. Each entry keeps the signed evidence (`revocation`, `device_cert`, `pk_pub`)
+  and its **provenance**: the accepted target checkpoint (`n` and `h_checkpoint`), the log, the restore's event id,
+  its seq (`from_seq + 1`), its event head and the accumulator node after it (the walk verified T's tail proof from
+  `acc_from` through that head, so the occurrence can be re-proved against T with a proof read from that node). A
+  checkpoint height alone is never provenance. Chain-learned provenance is **monotonic**: a later restore that
+  abandons the suffix holding the carrying restore, an earlier branch, recovery and failed walks never remove it,
+  and an equal-strength later occurrence keeps the first one; only a stronger reason replaces it.
+- *Out of band* (`local`): every other verified revocation the device holds (the §19.5 feed, the owner directly,
+  another workspace, a walk that failed), whether or not this workspace knows the device. **Verified** means
+  protocol §6.2 `verify_revocation` under the person key of the person the revocation names, against a device
+  certificate of that same person (`device_learn` checks it; the caller is never trusted). A device id's person
+  binding, once known (a known device, chain or local evidence, a verified signer), is never replaced: contradicting
+  evidence is not admitted (`revocation_conflict`) and is never an input to judgment. For an unbound device the
+  first verified evidence wins (F1 row 151; a forged first one makes the genuine later one contradicting, so honest
+  restores carrying it are refused: fails closed, the attacker must control the delivery order, recovery is a
+  re-pair). Evidence first learned out of band is promoted when an accepted restore later carries it.
+
+The two collections keep **separate reasons**: a chain-learned `lost` and a local `compromised` of one device are two
+entries, and the local upgrade never becomes chain-learned merely because the weaker one is. What each is used for:
+**signer refusal (C3)** and **evidence identity** use both (`local_revocations` is never filtered); a held revocation
+refuses a restore signer only when it names the signer's device **and person** (the restore certificate's person,
+the delegation owner), because any person can certify another person's device key. Evidence identity binds a listed
+entry for any device the device knows (known devices and both collections) to that person and stored key.
+**Completeness** (a workspace restore carries every chain-learned revocation at the same or stronger reason) uses
+chain-learned ones only. An otherwise accepted workspace restore that does not carry a local revocation, or carries
+it weaker, is accepted with **`revocation.unpublished`** for that device (judge output `unpublished`: sorted,
+de-duplicated `d_` ids); a ticket restore carries `[]` and gives no signal; the signal never overrides a refusal.
+Another person's evidence for the accepted restore's own signer device is dropped, neither refusal nor signal
+(the restore's certificate establishes that binding). The device then keeps the device id in `forward` when this
+workspace knows the device (the runtime forwards the evidence with its certificate and person key to the host and
+retries), or in `pending` when it does not (kept locally, never forwarded: forwarding would disclose the person's
+other devices to this host). An acknowledgement is not publication: an entry leaves `forward`/`pending` only when an
+accepted restore carries it at the local strength, which makes it chain-learned. The host side (validate, retain,
+append `device.revoked` only where F1 §5.3 permits, no re-append of duplicate or weaker evidence) is the host's
+(P3 bridge), not the relay's.
+**Failed walks (F1 rows 149/150).** A walk commits nothing unless it verifies completely; then it replaces the device
+state in one atomic step: H (the walk position), the applied ids and their signers (the judgments), chain evidence
+with provenance, local evidence, `forward`/`pending` and alarms, so a restart can neither reorder knowledge nor drop a
+completeness obligation. A refused walk keeps H, applied ids, signers and chain provenance as they were, but every
+revocation it verified (each bundle's entries, checked independently as the bundle is reached, admitted in walk
+order against the committed bindings and the signers the walk verified before failing) stays as local evidence, and
+the refusal returns the updated `device`. A C3 alarm concerns a committed transition: whenever compromised evidence
+for the signer (device and person) of an already committed restore is learned, from any walk, committed or not, or
+out of band, the alarm is raised and persisted; alarms about transitions of a walk that never committed are dropped.
+Retrying such a walk can turn a would-be alarm into a refusal (the kept evidence is now held when the transition is
+judged). A local `compromised` revocation of a committed signer alarms when it is learned, independent of any sync
+(review F6).
+**Withholding limit (accepted, F1 §5.10).** A relay can suppress event bodies while supplying the heads that
+checkpoint and rollback proofs need; proofs establish ancestry, not disclosure. A revocation becomes chain-learned
+only when the device verifies its occurrence in accepted history, so this policy preserves the revocations the device
+established there, not every revocation committed by an accepted checkpoint whose bodies it never inspected
+(checkpoint.json `hash_only_withheld_revocation_*`). Option (a) also gives up option (b)'s stronger carriage: an
+accepted workspace restore need not carry the device's out-of-band revocations.
+Consequences, stated in full: a device that learned an *unrelated* device's revocation out of band is not stranded
+behind an older genuine workspace restore that could not list it. A device that learned the *signer's* revocation
+(same device and person) out of band, any reason, while behind an older genuine restore by that signer stays refused
+at that restore until the owner re-pairs it from a fresh baseline; this is accepted, because refusing is the only rule
+a WSK holder holding a revoked device's key cannot exploit. A `compromised` revocation of an accepted restore's signer
+that F1 reports as learned later (`Verdict.alarms`) is the alarm the walk raises, for this walk and later ones.
+**Remaining relay-side differences from F1 (none changes a verdict on a shared case):** (1) the reference walk is
+all-or-nothing over E, so a bundle accepted inside a walk that later fails contributes no chain evidence (F1 lets a
+receiver persist each accepted bundle; both are atomic, the relay's is coarser). (2) A round-2 device state that
+stored a signer as a bare device id has no recorded person; such a signer alarms by device alone (more alarms, never
+fewer). (3) The relay server's R1 refuses a signer revoked in any revocation it holds by device id; this equals F1's
+device-and-person match there because evidence is bound to the registry's first person (R4), so a held revocation of
+a registered owner device is always of that person. (4) The relay server does not report `revocation.unpublished`
+in its publication result (G4 follow-up, transport detail 6 (c)).
 
 **Reads, retention and pairing (P3-D13/D19/D20).** A GET returns an immutable endpoint E. Page transitions
 with `after_n=k&to=E`, ordered by target_n, exclusively after k and no later than E.n; k does not need to
@@ -2849,7 +2909,8 @@ missing evidence means incomplete sync, never permission to re-pair or discard r
 baseline or last commit, or none), its applied restore IDs, its durable revocations and the pairing-pinned owner PK,
 WSK and genesis. It MUST run this walk; `ref/checkpoints.py` `sync_walk`/`judge_offer` is the reference, and the
 `walk_*` vectors include states a malicious relay would serve. Every step is a refusal on failure, and a refusal
-leaves the device exactly as it was.
+leaves H, the applied ids, the signers and the chain-learned revocations exactly as they were; it keeps only the
+revocations the walk verified, as local evidence, and the alarms they cause (failed walks, above).
 
 1. `GET checkpoint` (or `?hash=E` to resume, which MUST return exactly E) gives E. Fetch every checkpoint by hash
    and verify that its `h_checkpoint` equals the requested hash and its WSK signature; the judge then checks the
@@ -2869,9 +2930,11 @@ leaves the device exactly as it was.
      only when the device has no `work`, so an initialized device refuses every null-source bundle),
      `line.id` not already applied, `work.o.at <= line.at <= T.o.at`, a ticket `ws_seq` at most T's workspace
      height, the signer not revoked inside B, and the revocation rules above (every revocation the device holds,
-     chain or local, including those learned from earlier bundles of this walk, refuses its signer; carried
-     evidence for any device the device knows, active or revoked, MUST come from its known person and key; a
-     workspace restore MUST list every chain revocation, a `compromised` one as `compromised`).
+     chain-learned or local, including those learned from earlier bundles of this walk, refuses its signer when it
+     names the signer's device and person; carried evidence for any device the device knows, active or revoked,
+     MUST come from its known person and key; a workspace restore MUST list every chain-learned revocation at the
+     same or stronger reason). Before judging B, the device verifies each of B's revocation entries on its own; a
+     verified one stays local evidence even if B or the walk fails.
    - Then prove R3 from GET proof pages bound to C and T: from_seq below C's height takes the retained prefix
      from T's branch (from `acc_0`) and the abandoned suffix from `acc_from` to C (exactly `C.seq − from_seq`
      heads, folding to C's acc, `abandoned` covering C); otherwise the forward heads from C's entry. The restored
@@ -2880,7 +2943,9 @@ leaves the device exactly as it was.
      signed over another head and is `chain_diverged` (orch-core #377; `sync_incomplete` is only for missing
      or malformed proofs).
      Every other log of T MUST extend work exactly. A workspace log with from_seq 1 starts at the pinned genesis.
-   - Record `line.id`, add B's revocations (strongest reason wins), `work = T`.
+   - Record `line.id` and its signer (device and person), add B's revocations as chain-learned with B's
+     provenance (strongest reason wins, an equal one keeps its first occurrence), note B's `unpublished` ids,
+     `work = T`.
 4. Finally judge E against work: equal n requires the identical object; a lower n is `ignored` only if no
    transition was walked and no entry of E is higher or conflicting (a lagging relay: keep H, never downgrade);
    a higher n MUST have `o.at >= work.o.at`, keep every log, and extend work exactly.
@@ -2889,11 +2954,13 @@ leaves the device exactly as it was.
    WSK-signed heights alone bound nothing; an empty page with a non-null `next`, a fold that misses the signed acc,
    a signed entry whose head or seq disagrees with its proof, or a 404 is `sync_incomplete`. A device without H
    requires full proofs from `acc_0`, with the workspace log's first head equal to the pinned genesis.
-6. Commit atomically: `H = E` (or unchanged on `ignored`), the applied IDs with each transition's signer device,
-   and the revocations. Whenever the device holds a `compromised` revocation (chain or local) of a device that
+6. Commit atomically: `H = E` (or unchanged on `ignored`), the applied IDs with each transition's signer device and
+   person, the chain-learned revocations with provenance, and `forward`/`pending` (the previous ones plus this walk's
+   `unpublished`, minus what is now chain-learned at the local strength; split by whether this workspace knows the
+   device). Whenever the device holds a `compromised` revocation (chain or local) of the device and person that
    signed any applied transition, in this walk or an earlier one, it raises an alarm and history stays valid; the
    alarm does not depend on how the history was split into walks (review N3). On 410 `checkpoint_gone` keep H and
-   restart with a new E.
+   restart with a new E (a refusal like any other: verified evidence stays local).
 
 The authenticated pairing `approved` answer carries the host's exact `{n, hash}` baseline, or null only
 when none exists. POST baselines pins it for seven days (16 per workspace); retries do not extend expiry.
@@ -2934,3 +3001,9 @@ rules and must be confirmed before G4 ships:
    workspace's token and fixtures for B's sessions on A's routes (403 `not_eligible`), A's checkpoint, proof,
    staging and baseline hashes requested under B (404, or a no-op for DELETE), and bind the transitions 404,
    baseline 404/410, staging 429 and checkpoint `too_large`/`wrong_suite` refusals to vector steps.
+   (c) **Revocations at the relay server (F1 §5.10, orch-core #387).** Completeness (R4) MUST use the revocations
+   the relay accepted in this workspace's own restores (chain-learned for the workspace, with their restore id and
+   target checkpoint as provenance, never removed), not the global §19.5 revocation table; a global (out-of-band)
+   revocation of an ever-device that a restore omits or carries weaker is accepted and reported as
+   `revocation.unpublished` (a field of the accepted result, or a host-visible notice; to be fixed with the fixtures
+   in G4), while R1 keeps refusing a signer revoked in any revocation the relay holds.

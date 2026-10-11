@@ -872,6 +872,15 @@ commit atomically: H = E, record the restore ids, apply the bundles' revocations
   the same transaction, so the first accepted binding wins at the relay and on devices alike. The
   failed-publication budget is 16 per holder generation and 48 per workspace-hour: takeovers stay unlimited
   (P3-D10), so the workspace ceiling, not a takeover limit, bounds a WSK holder taking over from itself.
+  Round 5 (orch-core #387, F1 §5.10 at e9a26d95, decision rows 149–151): the chain-learned/out-of-band split is now
+  F1's, and the relay follows F1. A held revocation refuses a signer only when it names its device and person;
+  chain-learned ones carry provenance (target checkpoint, restore event id, seq, head, accumulator node) and are
+  monotonic; reasons are tracked per collection; an accepted workspace restore missing a local revocation (or
+  carrying it weaker) gives `revocation.unpublished`, forwarded for devices the workspace knows and kept pending
+  otherwise, until an accepted restore carries it; a failed walk keeps the evidence it verified as local and alarms
+  only for committed signers. A hash-only withheld suffix can hide a committed revocation (accepted limit). The relay
+  server's R4 must use per-workspace chain-learned revocations in G4, not the global table (protocol-v2 §19.8
+  transport detail 6 (c)).
 - **Devices keep their durable revocation knowledge and tombstones.** A restore can never resurrect a device they know
   to be revoked. Bundle absence does not prove historical non-revocation, and no retroactive completeness is demanded.
 
@@ -1127,6 +1136,9 @@ Order: G0 → G1 → G2 → (G3 ∥ G4) → G5. In every task the first commit i
   (403 `not_eligible`), A's checkpoint/proof/staging/baseline hashes under B (404, or a no-op DELETE), and vector
   bindings for transitions 404, baseline 404/410, staging 429 and checkpoint `too_large`/`wrong_suite`.
 - *Global staging ceiling (finding 11).* Enforce the deployment-wide staged-bytes cap (503 `overloaded`).
+- *Revocations at the relay server (orch-core #387; protocol-v2 §19.8 transport detail 6 (c)).* R4 completeness over
+  the revocations accepted in this workspace's own restores, kept with provenance and never removed; a global
+  (§19.5) revocation a restore omits or carries weaker is accepted with `revocation.unpublished`; R1 unchanged.
 
 ## 11. Open questions
 
