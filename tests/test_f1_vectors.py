@@ -1367,7 +1367,7 @@ def restore_envelope_ok(e, log):
         and all(re.fullmatch(ulid, ident) for ident in e["abandoned_decisions"])
     ):
         return False
-    datetime.strptime(e["at"], "%Y-%m-%dT%H:%M:%SZ")
+    datetime.strptime(e["at"], "%Y-%m-%dT%H:%M:%S%z")
     for key in ("sig", "host_sig"):
         R.unb64u(e[key], 64)
     return True
@@ -2505,3 +2505,49 @@ def test_restore_signature_encoding_schema(field, value):
     c = local_transition()
     c["restore"]["event"][field] = value
     assert not restore_schema_ok(c["restore"]["event"], "workspace")
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "revocation_signature",
+        "certificate_signature",
+        "revocation_person",
+        "revocation_device",
+        "certificate_person",
+        "certificate_device",
+        "account_key",
+    ],
+)
+def test_restore_transition_embedded_evidence(defect):
+    from copy import deepcopy
+
+    c = local_transition()
+    # A different, valid device of the owner: do not trip the self-revocation check.
+    cert_o = deepcopy(c["restore"]["device_cert"]["o"])
+    pub = S.sig_pub(published_f1_key("dk_sev2"))
+    cert_o.update(dk_sig_pub=R.b64u(pub), device_id=R.device_id(S, pub).hex())
+    cert = R.sign_object(S, published_f1_key("pk_sev"), cert_o)
+    evidence = local_revocation_evidence(cert)
+    assert revocation_evidence_ok(evidence)
+    c["restore"]["event"]["revocations"] = [evidence]
+    resign_transition(c)
+    assert offer_local_transition(c) == ("ok", c["restore"]["event"]["id"])
+    valid = deepcopy(c)
+
+    if defect.endswith("signature"):
+        key = "revocation" if defect.startswith("revocation") else "device_cert"
+        evidence[key]["sig"] = R.b64u(bytes(64))
+    elif defect == "account_key":
+        evidence["pk_pub"] = SIG["keys"]["pk_lena"]["pub_b64u"]
+    else:
+        key = "revocation" if defect.startswith("revocation") else "device_cert"
+        field = "person_id" if defect.endswith("person") else "device_id"
+        evidence[key]["o"][field] = "0" * 32
+        # Valid PK signature over an invalid identity binding.
+        evidence[key] = R.sign_object(S, published_f1_key("pk_sev"), evidence[key]["o"])
+    assert not revocation_evidence_ok(evidence)
+    resign_transition(c)
+    assert offer_local_transition(c) == ("chain.diverged", None)
+    # Refusal returns no ID to record; the valid offer with the same ID remains usable.
+    assert offer_local_transition(valid) == ("ok", valid["restore"]["event"]["id"])
