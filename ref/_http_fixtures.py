@@ -250,6 +250,18 @@ def build(vectors=None):
                             sig=alt["login"]["sig"], challenge=alt["login"]["challenge"])
                     else:
                         refused_request["json"] = {k: replacements[k] for k in refused_request["json"]}
+            elif name == "accounts" and code == "cert_invalid":
+                refused_request["json"]["device_cert"] = copy.deepcopy(next(
+                    c["signed"] for c in v["certs"]["cases"] if c["name"] == "tampered_after_signing"))
+            elif name == "device_put" and code == "cert_expired":
+                refused_request["json"]["cert"] = copy.deepcopy(next(
+                    c["signed"] for c in v["certs"]["cases"] if c["name"] == "expired"))
+            elif name == "card_put" and code == "bad_signature":
+                refused_request["json"]["card"] = copy.deepcopy(next(
+                    c["card"] for c in v["card"]["cases"] if c["name"] == "card_signed_by_another_wsk"))
+            elif name == "card_put" and code == "delegation_mismatch":
+                refused_request["json"]["card"] = copy.deepcopy(next(
+                    c["card"] for c in v["card"]["cases"] if c["name"] == "delegation_for_another_wsk"))
             elif code == "missing_grant":
                 refused_request["json"]["grants"] = refused_request["json"]["grants"][:-1]
             elif code == "unauthenticated":
