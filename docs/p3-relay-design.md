@@ -1162,17 +1162,46 @@ HTTP fixture.
   still works. Found by the G4 security review: without the mark, the row was a full account without an invite.
 - *Measured* (`uv run python tests/bench_checkpoint_capacity.py`, `docs/p3-checkpoint-capacity.md`).
 
-Open after G4 (for orch-52/orch-f1):
+- *Round 2 (Opus review of PR #51).* R1: staged descriptors are grouped by `(kind, log)` once per
+  publication; a refused 10,000-ticket x 2-page first publication held the lock 12.7 s (9.4 s in the
+  review), now 1.1 s. G2: parsing and every check that needs no database state run after the read-only
+  authorization and before the lock; the precomputed refusal is raised in the transaction at its reference
+  position, so codes and charging are unchanged (lock hold of a 4 MiB bad-digest page 77 ms → 0.2 ms, of an
+  exact retry of a 1.8 MB publication 66 ms → 0.2 ms). L1: failure rows stop at the budget. L2: the
+  signer's revocation lookup fails closed. L3: `checkpoint_bound` is dropped (restore signers are current
+  list members, members are registered devices, devices are never deleted).
 
-- *Lock hold is O(heads).* A publication verifies and inserts every staged head inside the global directory
-  write transaction: 200,000 heads hold it for about 4 s, so a full 64 MiB staging set (~900,000 heads) holds it
-  for about 20 s, and the failure budget (48 an hour) bounds refused publications by count, not by work. This
-  blocks other workspaces' writes. Options: verify on a read snapshot outside the lock and insert verified
-  nodes in short transactions (nodes are immutable and hash-addressed), or a smaller per-publication head cap.
-- *Unthrottled work.* Reads (up to 56,680 heads per proof page) and staging/genesis refusals are not rate
-  limited or charged; they are authenticated (D(m) or W(g)). Same pre-public-deploy gate as G3 review D4.
-- *O(history) storage.* `log_nodes`, `checkpoint_receipts` and `checkpoint_gone` grow with accepted history
-  (the design accepts O(history) for nodes); only a WSK holder can grow them.
+**Pre-public-deploy gates.** Acceptable on the invite-only dev relay; each must be closed before any
+public deployment.
+
+- **G1: publication work inside the global write lock.** A full 64 MiB / ~900,000-head publication holds
+  `directory.lock` (shared by every write: logins, bridge, membership, recovery) for 21.4 s with peak RSS
+  about 836 MB, and a refusal at the end of the fold costs the same; refused publications repeat 48 times
+  per workspace-hour without re-staging, and blocked writes pin the worker threads, so reads and `/healthz`
+  stall too. Recommended phased design:
+  - *Phase A, outside the lock:* parse and verify on a WAL read snapshot (H, genesis, the staged set, every
+    fold, skip pointers against the snapshot's nodes, R0–R5), under a per-workspace mutex and a global
+    semaphore of about 2. Output: the new node rows and a precondition fingerprint (H's hash, the staging
+    key, the evidence and policy inputs).
+  - *Phase B:* insert the nodes in chunks of 20–50k rows, each a short `BEGIN IMMEDIATE`, releasing the lock
+    between chunks. Safe because nodes are immutable, hash-addressed and branch-agnostic, and nothing
+    references them yet; orphans after a phase C refusal are verified WSK-signed heads (count them in G4).
+  - *Phase C, a short commit under the lock:* re-authorize and fence, re-check receipt and budget, require H
+    unchanged and the staging set present, re-run the O(evidence) owner, membership, revocation, binding and
+    coverage checks live, then write checkpoint, head, receipt, transition and evidence and delete the set.
+  - *Budget by work:* a per-workspace budget of refused heads per hour, or delete the staged set on every
+    charged refusal after it was loaded. A per-publication head cap alone does not work: a first publication
+    needs a full proof from acc_0.
+- **G3: one account can fill the global staging ceiling.** 4 GiB is 64 full workspaces; one account creates
+  10 per hour and keeps every other workspace at 503. Needs a per-account (owner-person) staging cap or a
+  limit on live workspaces per account.
+- **G4: storage amplification.** An accepted 64 MiB publication adds ~900k nodes (~264 MB at 293 B/node),
+  about 4x the staged bytes, repeatable every ~25 s per workspace; `checkpoint_receipts` and
+  `checkpoint_gone` are never purged and restore-referenced checkpoints are permanent. Needs a per-workspace
+  storage quota (429).
+- **Unthrottled authenticated work.** Reads (up to 56,680 heads per proof page) and staging, genesis and
+  baseline refusals are not rate-limited; with the G3 review's `Directory.handle` finding (directory routes
+  take the lock before authenticating, D4) these are the same gate.
 
 ## 11. Open questions
 

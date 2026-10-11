@@ -46,3 +46,10 @@ one process, no network. Single runs, not a server capacity claim.
 
 The advertised capacity stays about 5,000 tickets. Publication time is linear in staged heads and is spent
 inside the global write transaction; see "Open after G4" in docs/p3-relay-design.md §10.
+
+After review round 2 (R1, G2) a refused 10,000-ticket x 2-page first publication holds the lock 1.1 s
+instead of 12.7 s, and megabyte stateless refusals hold it under a millisecond. The single-log figures above
+are unchanged: a full 64 MiB / ~900,000-head publication still holds the global write lock about 21 s (peak
+RSS ~836 MB, review measurement), and refused publications cost the same. This and the per-account staging
+cap and per-workspace storage quota are pre-public-deploy gates (G1, G3, G4 in docs/p3-relay-design.md
+§10, "G4 as built"); they are acceptable on the invite-only dev relay.

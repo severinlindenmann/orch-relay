@@ -3057,6 +3057,9 @@ rules and must be confirmed before G4 ships:
    parameter, wrong content type) is charged like any other refusal once the request passes W(g) and the
    holder check, as in the reference; an unauthenticated or fenced one is never charged. Retention is evaluated
    at read time, so reads take no lock and never write; expired rows are purged by writes and a periodic sweep.
+   Parsing and the checks that need no database state run after authorization and before the directory lock;
+   their refusals are raised in the transaction at the position above, so codes and charging are unchanged.
+   Failure rows stop at the budget.
    **P3-D29:** self-certified evidence for a person the relay has no account for creates an evidence-only
    account row (needed to store the device and its revocation); it registers no device, owns no card and
    joins no list until the person redeems an invite, which turns it into the account.
