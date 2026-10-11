@@ -1,17 +1,18 @@
 """Replay G1 P3 state transitions through the production database and authorization code."""
 
 import copy
+import hashlib
 import sqlite3
 from contextlib import closing
 
 import pytest
-from directory_support import CARD, DEVICE, NOW, PERSON, RECORD, V, seed
+from directory_support import CARD, CERT, DEVICE, NOW, PERSON, RECORD, WS, V, seed, signed
 from fastapi.testclient import TestClient
 
 from orch_relay import db
 from orch_relay import proto as P
 from orch_relay.app import create_app
-from orch_relay.directory import DAY, Refusal, checked, digest, token_hash
+from orch_relay.directory import DAY, HOUR, Refusal, checked, digest, token_hash
 
 CASES = V["p3"]["cases"]
 
@@ -46,6 +47,32 @@ def test_p3_login(tmp_path, case):
         d.clock = lambda: a["now_ms"]
         d.origin = a["origin"]
         d.random = lambda n: bytes.fromhex(a["token"])
+        if case["name"] == "valid_dummy_signature_still_401":
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric import ec
+
+            d.dummy_pub = (
+                ec.derive_private_key(
+                    int.from_bytes(
+                        hashlib.sha256(
+                            b"FAKE orch v2 test vector: P3 dummy verification key"
+                        ).digest(),
+                        "big",
+                    )
+                    % (P.P256_N - 1)
+                    + 1,
+                    ec.SECP256R1(),
+                )
+                .public_key()
+                .public_bytes(
+                    serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint
+                )
+            )
+            assert P.SUITE.verify(
+                d.dummy_pub,
+                bytes.fromhex(a["sig"]),
+                P.auth_bytes(a["origin"], bytes.fromhex(a["challenge"]), a["kind"], a["ident"]),
+            )
         d.challenges = {
             P.b64u(bytes.fromhex(k)): (v, "testclient") for k, v in state["challenges"].items()
         }
@@ -66,7 +93,10 @@ def test_p3_login(tmp_path, case):
                 "sig": P.b64u(bytes.fromhex(a["sig"])),
             },
         )
-        assert {"status": response.status_code, **response.json()} == expected["result"]
+        result = {"status": response.status_code, **response.json()}
+        if response.status_code == 429:
+            result["retry_after"] = int(response.headers["retry-after"])
+        assert result == expected["result"]
         assert {P.unb64u(k).hex(): v[0] for k, v in d.challenges.items()} == expected["state"][
             "challenges"
         ]
@@ -119,57 +149,98 @@ def test_p3_session_gate(tmp_path, case):
 @cases("quota")
 def test_p3_recovery_quota(tmp_path, case):
     a, state = case["args"], case["state"]
+    certificate = not a.get("revocation", True) or case["name"] in {
+        "expired_certificate_no_quota_charge",
+        "revoked_device_no_quota_charge",
+    }
+    kind = "certificate" if certificate else "revocation"
     with TestClient(create_app(tmp_path)) as c:
         d = c.app.state.directory
         seed(d)
         if state:
-            for purpose, count in [
-                ("revocation-person", state["total"]),
-                ("revocation-repeat", state["repeat"]),
-            ]:
-                d.windows[(purpose, PERSON, DAY)] = ((state["day"] + 1) * DAY, count)
-        record = copy.deepcopy(RECORD)
+            d.windows[(kind + "-person", PERSON, DAY)] = ((state["day"] + 1) * DAY, state["total"])
+            d.windows[("revocation-repeat", PERSON, DAY)] = (
+                (state["day"] + 1) * DAY,
+                state["repeat"],
+            )
+        record = copy.deepcopy(CERT if certificate else RECORD)
+        prior = None
+        if a["already_revoked"]:
+            prior = RECORD
+            record = signed({**RECORD["o"], "reason": "compromised"})
+        if case["name"] == "superseded_revocation_no_quota_charge":
+            prior = signed({**RECORD["o"], "reason": "compromised"})
+        if case["name"] == "expired_certificate_no_quota_charge":
+            record = signed({**CERT["o"], "created_ms": NOW - 1000, "expires_ms": NOW})
+        if case["name"] == "revoked_device_no_quota_charge":
+            prior = RECORD
         if not a["valid_signature"]:
             record["sig"] = P.b64u(bytes(64))
         with closing(db.connect(d.path)) as con:
             con.row_factory = sqlite3.Row
             with con:
-                if a["already_revoked"]:
+                if certificate and prior is None:
+                    con.execute("DELETE FROM members")
+                    con.execute("DELETE FROM devices WHERE device_id=?", (DEVICE,))
+                if prior:
                     con.execute(
                         "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
-                        (DEVICE, PERSON, P.cj(RECORD), "lost", NOW, 1),
+                        (DEVICE, PERSON, P.cj(prior), prior["o"]["reason"], NOW, 1),
                     )
                 for h in state.get("accepted", []):
-                    con.execute(
-                        "INSERT INTO recovery_receipts VALUES (?,?,?)", ("revocation", h, DEVICE)
-                    )
+                    con.execute("INSERT INTO recovery_receipts VALUES (?,?,?)", (kind, h, DEVICE))
             try:
                 with con:
                     d.recovery(
-                        con, {"record": record}, bytes.fromhex(a["raw"]), "testclient", a["now_ms"]
+                        con,
+                        {"cert" if certificate else "record": record},
+                        bytes.fromhex(a["raw"]),
+                        "testclient",
+                        a["now_ms"],
+                        DEVICE if certificate else None,
                     )
                 result = {
                     "ok": "retry"
                     if digest(bytes.fromhex(a["raw"])) in state.get("accepted", [])
+                    else "unchanged"
+                    if not a.get("changes_state", True)
                     else "charged"
                 }
             except Refusal as error:
-                result = {"refuse": error.code}
+                # The abstract quota vectors model no-charge outcomes; HTTP retains its refusal.
+                if case["name"] in {
+                    "expired_certificate_no_quota_charge",
+                    "revoked_device_no_quota_charge",
+                }:
+                    assert error.code == (
+                        "cert_expired" if "expired" in case["name"] else "revoked"
+                    )
+                    result = {"ok": "unchanged"}
+                else:
+                    result = {"refuse": error.code}
             assert result == case["expect"]["result"]
             expected = case["expect"]["state"]
-            total = d.windows.get(("revocation-person", PERSON, DAY))
+            total = d.windows.get((kind + "-person", PERSON, DAY))
             if not expected:
                 assert total is None
             else:
                 assert total == ((expected["day"] + 1) * DAY, expected["total"])
-                repeat = d.windows.get(("revocation-repeat", PERSON, DAY), (0, 0))[1]
-                assert repeat == expected["repeat"]
+                assert (
+                    d.windows.get(("revocation-repeat", PERSON, DAY), (0, 0))[1]
+                    == expected["repeat"]
+                )
                 assert [
                     r[0]
                     for r in con.execute(
                         "SELECT request_digest FROM recovery_receipts ORDER BY rowid"
                     )
                 ] == expected["accepted"]
+            if result != {"ok": "charged"}:
+                assert (
+                    kind + "-address",
+                    "testclient",
+                    HOUR if certificate else 60_000,
+                ) not in d.windows
 
 
 @cases("revocation")
@@ -258,3 +329,118 @@ def test_p3_revocation(tmp_path, case):
                     ):
                         actual.setdefault(r["device_id"], []).append(r["envelope"])
                     assert actual == workspace[key]
+
+
+@cases("certificate")
+def test_p3_certificate(tmp_path, case):
+    a, state = case["args"], case["state"]
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d, devices=False, card=False)
+        d.clock = lambda: a["now_ms"]
+        with closing(db.connect(d.path)) as con, con:
+            for cert in state.values():
+                d.store_device(con, cert)
+        r = c.put("/v2/devices/" + a["signed"]["o"]["device_id"], json={"cert": a["signed"]})
+        result = (
+            {"ok": "retry" if state else "stored"}
+            if r.status_code == 200
+            else {"refuse": r.json()["error"]}
+        )
+        assert result == case["expect"]["result"]
+        with closing(db.connect(d.path)) as con:
+            assert {
+                did: P.parse_json(cert)
+                for did, cert in con.execute("SELECT device_id,cert FROM devices")
+            } == case["expect"]["state"]
+        assert d.windows.get(("certificate-person", PERSON, DAY), (0, 0))[1] == (
+            1 if result == {"ok": "stored"} else 0
+        )
+
+
+@cases("directory")
+def test_p3_directory(tmp_path, case):
+    a, state = case["args"], case["state"]
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        with closing(db.connect(d.path)) as con, con:
+            con.execute("DELETE FROM ever_persons")
+            con.execute("DELETE FROM ever_devices")
+            for person in state["ever_persons"]:
+                con.execute("INSERT INTO ever_persons VALUES (?,?)", (WS, person))
+            for did in state["ever_devices"]:
+                con.execute("INSERT INTO ever_devices VALUES (?,?,?)", (WS, did, 1))
+            for cursor, record in enumerate(a["records"], 1):
+                con.execute(
+                    "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
+                    (record["o"]["device_id"], a["person"], P.cj(record), "lost", NOW, cursor),
+                )
+            con.execute("DELETE FROM members")  # Historical authority survives departure.
+        path = (
+            "/v2/devices/" + a["device"]
+            if "device" in a
+            else "/v2/persons/" + a["person"] + "/revocations"
+        )
+        r = c.get(path, headers={"Authorization": "Bearer FAKE-workspace"})
+        result = (
+            {"ok": [item["record"] for item in r.json()["revocations"]]}
+            if r.status_code == 200
+            else {"refuse": r.json()["error"]}
+        )
+        assert result == case["expect"]["result"]
+        with closing(db.connect(d.path)) as con:
+            assert (
+                sorted(
+                    r[0]
+                    for r in con.execute(
+                        "SELECT person_id FROM ever_persons WHERE workspace_id=?", (WS,)
+                    )
+                )
+                == state["ever_persons"]
+            )
+            assert (
+                sorted(
+                    r[0]
+                    for r in con.execute(
+                        "SELECT device_id FROM ever_devices WHERE workspace_id=?", (WS,)
+                    )
+                )
+                == state["ever_devices"]
+            )
+
+
+@cases("first_card")
+def test_p3_first_card(tmp_path, case):
+    a, state = case["args"], case["state"]
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d, card=bool(state))
+        d.clock = lambda: a["now_ms"]
+        if state:
+            d.windows[("card-owner", PERSON, HOUR)] = ((state["hour"] + 1) * HOUR, state["count"])
+        r = c.put(
+            "/v2/workspaces/" + WS + "/card",
+            json={"card": a["card"]},
+            headers={"Authorization": "Bearer FAKE-workspace", "Orch-Holder": "1"},
+        )
+        result = (
+            {"ok": "retry" if state else "stored"}
+            if r.status_code == 200
+            else {"refuse": r.json()["error"]}
+        )
+        assert result == case["expect"]["result"]
+        assert d.windows.get(("card-owner", PERSON, HOUR), (0, 0))[1] == case["expect"][
+            "state"
+        ].get("count", 0)
+        with closing(db.connect(d.path)) as con:
+            row = con.execute("SELECT card FROM workspaces").fetchone()
+            if case["expect"]["state"]:
+                card = P.parse_json(row[0])
+                assert {"o": card["o"], "delegation": card["delegation"]["o"]} == case["expect"][
+                    "state"
+                ]["card"]
+            else:
+                assert row is None
+            if not state:
+                assert con.execute("SELECT COUNT(*) FROM ever_persons").fetchone()[0] == 0

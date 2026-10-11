@@ -136,12 +136,12 @@ def test_recovery_quota_reserve_and_exact_retries(tmp_path):
             assert c.post("/v2/revocations", json={"record": record}).status_code == 200
         d.clock = lambda: NOW + 25 * MINUTE
         record = signed({**RECORD["o"], "revoked_ms": NOW + 25})
-        assert c.post("/v2/revocations", json={"record": record}).status_code == 429
+        assert c.post("/v2/revocations", json={"record": record}).status_code == 200
         assert c.post("/v2/revocations", json={"record": RECORD}).status_code == 200
         fresh = signed({**RECORD["o"], "device_id": PRIMARY})
         assert c.post("/v2/revocations", json={"record": fresh}).status_code == 200
         total = d.windows[("revocation-person", PERSON, DAY)][1]
-        assert total == 26
+        assert total == 2
         invalid = copy.deepcopy(record)
         invalid["sig"] = P.b64u(bytes(64))
         assert c.post("/v2/revocations", json={"record": invalid}).status_code == 401
@@ -220,7 +220,9 @@ def test_feed_pagination_and_request_time_gate(tmp_path):
 
 
 def test_revocation_must_fit_feed_page(tmp_path):
-    from orch_relay.directory import MAX_BODY
+    from orch_relay.directory import body_cap
+
+    cap = body_cap("revocations")
 
     with TestClient(create_app(tmp_path)) as c:
         seed(c.app.state.directory)
@@ -228,11 +230,11 @@ def test_revocation_must_fit_feed_page(tmp_path):
         # Even a heavily padded, valid HTTP body must fit a feed entry after acceptance.
         response = c.post(
             "/v2/revocations",
-            content=raw + b" " * (MAX_BODY - len(raw)),
+            content=raw + b" " * (cap - len(raw)),
             headers={"Content-Type": "application/json"},
         )
         assert response.status_code == 200  # The canonical record is tiny.
-        malformed_large = {**RECORD, "sig": "A" * MAX_BODY}
+        malformed_large = {**RECORD, "sig": "A" * cap}
         assert c.post("/v2/revocations", json={"record": malformed_large}).json() == {
             "error": "too_large"
         }
@@ -271,3 +273,149 @@ def test_card_owner_quota_spans_addresses_and_workspace_ids(tmp_path):
             r = c.put("/v2/workspaces/" + ws + "/card", json={"card": card})
             assert r.status_code == (200 if i < 10 else 429)
         assert d.windows[("card-owner", PERSON, HOUR)][1] == 10
+
+
+def test_stream_caps_precede_parsing_and_auth(tmp_path):
+    from orch_relay.directory import body_cap
+
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        cap = body_cap("login")
+        r = c.post(
+            "/v2/session/login",
+            content=iter([b"!" * cap, b"!"]),
+            headers={"Content-Type": "application/json"},
+        )
+        assert r.status_code == 413 and r.json() == {"error": "too_large"}
+        r = c.post("/v2/session/login", content=b"!", headers={"Content-Length": str(cap + 1)})
+        assert r.status_code == 413
+        r = d.handle("login", None, "POST", b"!" * (cap + 1), {}, {}, "testclient")
+        assert r.status_code == 413
+        assert d.challenges == {} and d.windows == {}
+
+
+def test_canonical_retry_at_full_quota_and_invalid_signature(tmp_path):
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        d.windows[("certificate-person", PERSON, DAY)] = (NOW + DAY, 64)
+        d.windows[("certificate-address", "testclient", HOUR)] = (NOW + HOUR, 30)
+        before = dict(d.windows)
+        cert = signed(CERT["o"])
+        r = c.put("/v2/devices/" + DEVICE, json={"cert": cert})
+        assert r.status_code == 200
+        cert["sig"] = P.b64u(bytes(64))
+        r = c.put("/v2/devices/" + DEVICE, json={"cert": cert})
+        assert r.status_code == 400 and r.json() == {"error": "cert_invalid"}
+        assert d.windows == before
+        with closing(db.connect(d.path)) as con:
+            assert (
+                P.parse_json(
+                    con.execute("SELECT cert FROM devices WHERE device_id=?", (DEVICE,)).fetchone()[
+                        0
+                    ]
+                )
+                == CERT
+            )
+
+
+def test_device_token_capacity_expiry_and_random_dummy(tmp_path):
+    from orch_relay.directory import Directory
+
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        assert P.SUITE.pub_ok(d.dummy_pub)
+        assert d.dummy_pub != Directory(d.path, d.origin).dummy_pub
+        with closing(db.connect(d.path)) as con, con:
+            con.execute("DELETE FROM sessions")
+        for _ in range(8):
+            assert issue_login(c).status_code == 200
+        r = issue_login(c)
+        assert r.status_code == 429 and r.json() == {"error": "quota_exceeded"}
+        assert r.headers["retry-after"] == "900"
+        with closing(db.connect(d.path)) as con:
+            assert con.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 8
+        d.clock = lambda: NOW + 900_000
+        assert issue_login(c).status_code == 200
+
+
+def test_ipv6_parent_challenge_limits(tmp_path):
+    from orch_relay.directory import Directory, Refusal
+
+    d = Directory(tmp_path / "unused", "https://relay.example")
+    for subnet in range(16):
+        for _ in range(16):
+            d.issue(f"2001:db8:1234:{subnet:x}::/64", NOW)
+    with pytest.raises(Refusal) as error:
+        d.issue("2001:db8:1234:10::/64", NOW)
+    assert error.value.status == 429
+    assert len(d.challenges) == 256
+    assert d.issue("2001:db8:1234:100::/64", NOW)
+    d.challenges.clear()
+    d.windows[("challenge-parent", "2001:db8:1234::/56", MINUTE)] = (NOW + MINUTE, 960)
+    with pytest.raises(Refusal):
+        d.issue("2001:db8:1234:20::/64", NOW)
+    assert not d.challenges
+
+
+@pytest.mark.parametrize(
+    "device,workspace,incoming,allowed",
+    [(2097151, 16777215, 1, True), (2097152, 2097152, 1, False), (0, 16777216, 1, False)],
+)
+def test_g3_response_budget_hook(device, workspace, incoming, allowed):
+    from orch_relay.directory import Refusal, check_response_budget
+
+    if allowed:
+        check_response_budget(device, workspace, incoming)
+    else:
+        with pytest.raises(Refusal) as error:
+            check_response_budget(device, workspace, incoming)
+        assert error.value.code == "quota_exceeded" and error.value.status == 429
+
+
+def test_workspace_filter_before_pagination_and_card_history(tmp_path):
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        with closing(db.connect(d.path)) as con, con:
+            # Put an unseen device first, so post-pagination filtering would lose the visible row.
+            for cursor, did in enumerate((PRIMARY, DEVICE), 1):
+                record = signed({**RECORD["o"], "device_id": did})
+                con.execute(
+                    "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
+                    (did, PERSON, P.cj(record), "lost", NOW, cursor),
+                )
+            con.execute("DELETE FROM members")
+        headers = {"Authorization": "Bearer FAKE-workspace"}
+        r = c.get("/v2/persons/" + PERSON + "/revocations?limit=1", headers=headers)
+        assert [x["cursor"] for x in r.json()["revocations"]] == [2]
+        assert r.json()["next"] is None
+        assert c.get("/v2/devices/" + DEVICE, headers=headers).status_code == 200
+        assert c.get("/v2/devices/" + PRIMARY, headers=headers).status_code == 403
+        assert c.get("/v2/workspaces/" + WS + "/card", headers=headers).status_code == 200
+        # A live same-person device with historical authority is still not a current member.
+        token = issue_login(c, key="laptop.sig", ident=V["ids"]["device_laptop"]).json()["token"]
+        assert (
+            c.get(
+                "/v2/workspaces/" + WS + "/card", headers={"Authorization": "Bearer " + token}
+            ).status_code
+            == 403
+        )
+
+
+def test_legacy_card_only_history_does_not_authorize_feed(tmp_path):
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        with closing(db.connect(d.path)) as con, con:
+            # The earlier G1 card writer inserted this person without an accepted list.
+            con.execute("DELETE FROM ever_devices")
+            con.execute("DELETE FROM members")
+        r = c.get(
+            "/v2/persons/" + PERSON + "/revocations",
+            headers={"Authorization": "Bearer FAKE-workspace"},
+        )
+        assert r.status_code == 403 and r.json() == {"error": "not_eligible"}
+        with closing(db.connect(d.path)) as con:
+            assert con.execute("SELECT person_id FROM ever_persons").fetchone()[0] == PERSON

@@ -34,7 +34,12 @@ strings are hashed as UTF-8 for lookup and cannot match generated tokens.
 
 G2 must publish members, lists, grants and wraps atomically, grow ever_persons and
 ever_devices, and clear rotation_due only on a higher-epoch publication excluding
-the obligated device. An owner enters ever_persons on first card publication.
+the obligated device. Only accepted membership publications add historical authority;
+first-card publication adds neither set. Read authorization also checks for a historical
+device bound to the person, so legacy card-only history rows grant no access and
+remain untouched in storage. Each listed person must have a certificate-bound
+member device in that list (403 `other_person` otherwise). W device reads require both
+sets, and W feeds filter by ever_devices before pagination. Card reads remain D(m) or W.
 G1 does not treat ownership alone as device workspace membership.
 
 G3 must implement holder acquisition/renewal and bridge/cert-request routes.
@@ -42,7 +47,8 @@ G3 must implement holder acquisition/renewal and bridge/cert-request routes.
 consume that authority. Add highest-delivered position and other fields as needed.
 G3 must complete a pending certificate request within the device-upload transaction,
 after the certificate is verified, including the already-stored-certificate path.
-Add this at `Directory.recovery` beside `store_device`/receipt insertion, with the
+Add this at every successful `Directory.recovery` certificate exit, including canonical
+and exact retries, with the
 queue's key/person/expiry checks; queue behavior is deliberately not simulated here.
 
 `Directory.revoke(con, record, now)` expects previously verified PK evidence and
@@ -57,7 +63,21 @@ all restore evidence, inside the restore transaction.
 
 Bridge mailbox, queued-byte, posts-per-second and concurrent-poll limits are G3's
 responsibility (§19.4). G1 implements challenge, certificate, revocation and first
-card limits; it does not impose undocumented session-count caps.
+card limits and eight live tokens per device (429 `quota_exceeded`, Retry-After until
+the earliest expiry, consumed challenge, no eviction). Challenges also enforce /56 IPv6
+limits of 256 outstanding and 960/min alongside /64 limits.
+
+`check_response_budget(device_bytes, workspace_bytes, incoming_bytes)` is the G3
+capacity hook: 2 MiB per device across sessions within 16 MiB per workspace. Call it
+inside the queue transaction with persisted undelivered totals before insertion.
+Release capacity on delivery, expiry or revocation; never evict to admit an overflow.
+G3 owns queue accounting and retry timing. Card-key routes belong to G2, which must
+apply atomic `wrap_conflict` for differing sealed bytes at the same device/card sequence.
+
+G1 JSON body caps are 16 KiB except accounts and card writes (64 KiB). Both declared
+and streamed sizes are checked before parsing/authentication, returning 413 `too_large`.
+Production dummy verification keys are random per Directory instance; only the public
+half is retained, and verification success never authorizes a missing subject.
 
 Contract interpretations and fixture repairs:
 
@@ -67,9 +87,12 @@ Contract interpretations and fixture repairs:
 - The full canonical signed delegation is immutable (§7.1); the reference helper
   compares only its `o`. HTTP enforces the stricter normative rule. Existing card
   vectors agree with both. A changed delegation signature alone is refused.
-- Recovery exact retries compare HTTP-byte digests; whitespace changes spend
-  quota. Certificate conflict compares canonical certificate bytes (signature
-  included), so HTTP whitespace cannot replace a certificate.
+- Recovery quotas (address and person) charge only verified state changes. Expired,
+  revoked, conflicting and invalid certificate submissions, canonical retries, and
+  weaker/superseded revocations are free. Certificates compare `cj(o)` after verifying
+  the submitted signature; re-signing or whitespace changes preserve the original
+  stored certificate. Exact accepted HTTP receipts survive restart. First-card owner
+  quota is checked and charged only after both signatures verify.
 - Fixed UTC-aligned minute/hour/day windows match the P3 quota vectors. Live
   windows are never idle-pruned. Restart drops them as specified by P3-D15.
 - Revocation feeds serve the current strongest record per device. Upgrades get a

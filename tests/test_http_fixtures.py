@@ -165,7 +165,7 @@ def test_http_fixture(path):
             )
         if response["status"] in (429, 503):
             assert re.fullmatch(r"[0-9]+", response["headers"]["Retry-After"])
-        scenario = c["given"]["scenario"]
+        scenario = c["given"].get("scenario", c["name"])
         check_signatures(
             request,
             card_refusal=scenario
@@ -246,14 +246,18 @@ def test_json_caps_match_route_tables_and_success_bodies_fit():
         if "json" not in success["request"]:
             continue
         path = fixture["route"]["path"]
-        row = next(line for line in DOC.splitlines()
-                   if line.startswith(f'| `{fixture["route"]["method"]} {path}`'))
+        row = next(
+            line
+            for line in DOC.splitlines()
+            if line.startswith(f"| `{fixture['route']['method']} {path}`")
+        )
         amount, unit = re.search(r"JSON cap (\d+) (KiB|MiB)", row).groups()
         cap = int(amount) * (1024 if unit == "KiB" else 1024 * 1024)
         assert BODY_CAPS[name] == cap
         assert len(R.cj(success["request"]["json"])) <= cap
-        oversized = next(c for c in fixture["cases"]
-                         if c["response"]["json"].get("error") == "too_large")
+        oversized = next(
+            c for c in fixture["cases"] if c["response"]["json"].get("error") == "too_large"
+        )
         assert oversized["response"]["status"] == 413
         assert oversized["request"]["body_recipe"]["count"] == cap + 1
 
@@ -263,8 +267,9 @@ def test_workspace_fixtures_do_not_invent_device_session_failures():
         auth = fixture["route"]["auth"]
         if "W" not in auth or "D(" in auth:
             continue
-        errors = {(c["response"]["status"], c["response"]["json"].get("error"))
-                  for c in fixture["cases"]}
+        errors = {
+            (c["response"]["status"], c["response"]["json"].get("error")) for c in fixture["cases"]
+        }
         assert (400, "cert_expired") not in errors
         if name == "membership":
             assert (403, "cert_expired") in errors  # proposed member's certificate

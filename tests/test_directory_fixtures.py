@@ -41,7 +41,14 @@ def test_http_example(tmp_path, name, case):
         kwargs = {"headers": request["headers"], "params": request["query"]}
         if "json" in request:
             kwargs["content"] = P.cj(request["json"])
-        if case["given"]["scenario"] == "exact_bytes_already_committed":
+        if "body_recipe" in request:
+            recipe = request["body_recipe"]
+            kwargs["content"] = (
+                P.unb64u(recipe["prefix_b64u"])
+                + bytes([recipe["byte"]]) * recipe["count"]
+                + P.unb64u(recipe["suffix_b64u"])
+            )
+        if case["given"].get("scenario") == "exact_bytes_already_committed":
             first = client.request(request["method"], request["path"], **kwargs)
             assert first.status_code == 200, first.text
         response = client.request(request["method"], request["path"], **kwargs)

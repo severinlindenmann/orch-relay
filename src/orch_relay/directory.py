@@ -25,12 +25,14 @@ from . import db
 from . import proto as P
 
 MINUTE, HOUR, DAY = 60_000, 3_600_000, 86_400_000
-MAX_BODY = 4 * 1024 * 1024
-DUMMY_PUB = (
-    ec.derive_private_key(1, ec.SECP256R1())
-    .public_key()
-    .public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
-)
+MAX_RESPONSE = 4 * 1024 * 1024
+BODY_CAPS = {"accounts": 65536, "card": 65536}
+
+
+def body_cap(route):
+    return BODY_CAPS.get(route, 16384)
+
+
 STATUS = {
     "unknown_challenge": 401,
     "expired": 401,
@@ -50,6 +52,8 @@ STATUS = {
     "bad_wxk_version": 409,
     "not_found": 404,
     "rate_limited": 429,
+    "quota_exceeded": 429,
+    "too_large": 413,
 }
 
 
@@ -125,6 +129,29 @@ def canonical_address(peer, forwarded, trusted_proxy):
         return peer  # A malformed forwarded header never creates a fresh budget identity.
 
 
+def ipv6_parent(address):
+    try:
+        network = ipaddress.ip_network(address, strict=False)
+        return str(network.supernet(new_prefix=56)) if network.version == 6 else None
+    except ValueError:
+        return None
+
+
+def check_response_budget(device_bytes, workspace_bytes, incoming_bytes):
+    """G3 calls under its queue transaction using persisted undelivered byte totals.
+
+    Totals span all sessions; call before insertion, release on delivery/expiry/revocation.
+    This checks capacity without evicting or mutating queues.
+    """
+    if min(device_bytes, workspace_bytes, incoming_bytes) < 0:
+        raise ValueError("negative response byte count")
+    if (
+        device_bytes + incoming_bytes > 2 * 1024 * 1024
+        or workspace_bytes + incoming_bytes > 16 * 1024 * 1024
+    ):
+        fail("quota_exceeded")
+
+
 class Directory:
     def __init__(self, path, origin, trusted_proxy=None):
         self.path, self.origin, self.trusted_proxy = path, origin, trusted_proxy
@@ -134,6 +161,11 @@ class Directory:
         self.windows = {}  # (purpose, identity, duration) -> (window end, count)
         self.clock = lambda: time.time_ns() // 1_000_000
         self.random = secrets.token_bytes
+        self.dummy_pub = (
+            ec.generate_private_key(ec.SECP256R1())
+            .public_key()
+            .public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+        )
 
     def rate(self, purpose, identity, duration, cap, now, charge=True):
         key = (purpose, identity, duration)
@@ -161,6 +193,12 @@ class Directory:
             or sum(s[1] == address for s in self.challenges.values()) >= 16
         ):
             fail("rate_limited", 60)
+        parent = ipv6_parent(address)
+        if parent and sum(ipv6_parent(s[1]) == parent for s in self.challenges.values()) >= 256:
+            fail("rate_limited", 60)
+        self.rate("challenge", address, MINUTE, 60, now, False)
+        if parent:
+            self.rate("challenge-parent", parent, MINUTE, 960, now)
         self.rate("challenge", address, MINUTE, 60, now)
         challenge = P.b64u(self.random(32))
         while challenge in self.challenges:
@@ -208,7 +246,9 @@ class Directory:
             )
         else:
             allowed = con.execute(
-                "SELECT 1 FROM ever_persons WHERE workspace_id=? AND person_id=?",
+                "SELECT 1 FROM ever_persons p WHERE p.workspace_id=? AND p.person_id=? "
+                "AND EXISTS (SELECT 1 FROM ever_devices e JOIN devices d ON d.device_id=e.device_id "
+                "WHERE e.workspace_id=p.workspace_id AND d.person_id=p.person_id)",
                 (session["subject_id"], person),
             ).fetchone()
         if not allowed:
@@ -298,12 +338,12 @@ class Directory:
         P.unhex(ident)
         if kind == "device":
             subject = con.execute("SELECT * FROM devices WHERE device_id=?", (ident,)).fetchone()
-            pub = P.unb64u(subject["dk_sig_pub"]) if subject else DUMMY_PUB
+            pub = P.unb64u(subject["dk_sig_pub"]) if subject else self.dummy_pub
         else:
             subject = con.execute(
                 "SELECT * FROM workspaces WHERE workspace_id=?", (ident,)
             ).fetchone()
-            pub = P.unb64u(subject["wsk_pub"]) if subject else DUMMY_PUB
+            pub = P.unb64u(subject["wsk_pub"]) if subject else self.dummy_pub
         try:
             sig = P.unb64u(body["sig"])
         except ValueError:
@@ -317,6 +357,14 @@ class Directory:
                 "SELECT pk_pub FROM accounts WHERE person_id=?", (subject["person_id"],)
             ).fetchone()
             checked(P.verify_cert(P.parse_json(subject["cert"]), P.unb64u(account["pk_pub"]), now))
+        if kind == "device":
+            live = con.execute(
+                "SELECT COUNT(*), MIN(expires_ms) FROM sessions "
+                "WHERE kind='device' AND subject_id=? AND expires_ms>?",
+                (ident, now),
+            ).fetchone()
+            if live[0] >= 8:
+                fail("quota_exceeded", max(1, math.ceil((live[1] - now) / 1000)))
         token = P.b64u(self.random(32))
         con.execute("DELETE FROM sessions WHERE expires_ms<=?", (now,))
         con.execute(
@@ -348,13 +396,6 @@ class Directory:
                 stored = con.execute("SELECT * FROM devices WHERE device_id=?", (did,)).fetchone()
                 self.device_status(con, stored, now)
             return {"device_id": did}
-        self.rate(
-            kind + "-address",
-            address,
-            MINUTE if revocation else HOUR,
-            10 if revocation else 30,
-            now,
-        )
         account = con.execute("SELECT pk_pub FROM accounts WHERE person_id=?", (person,)).fetchone()
         if account is None:
             fail("other_person")
@@ -369,11 +410,20 @@ class Directory:
             )
         else:
             checked(P.verify_cert(signed, pub, now, {did} if prior else set()))
-            if stored and stored["cert"] != P.cj(signed):
+            if stored and P.cj(P.parse_json(stored["cert"])["o"]) != P.cj(signed["o"]):
                 fail("cert_conflict")
+        if (not revocation and stored) or (
+            revocation
+            and prior
+            and (prior["reason"] == "compromised" or o["reason"] != "compromised")
+        ):
+            return {"device_id": did}
+        duration, cap = (MINUTE, 10) if revocation else (HOUR, 30)
+        self.rate(kind + "-address", address, duration, cap, now, False)
         self.rate(kind + "-person", person, DAY, 32 if revocation else 64, now, False)
         if revocation and prior:
             self.rate("revocation-repeat", person, DAY, 24, now, False)
+        self.rate(kind + "-address", address, duration, cap, now)
         self.rate(kind + "-person", person, DAY, 32 if revocation else 64, now)
         if revocation and prior:
             self.rate("revocation-repeat", person, DAY, 24, now)
@@ -469,7 +519,6 @@ class Directory:
                 card["delegation"]["o"]["client_hosted"],
             ),
         )
-        con.execute("INSERT OR IGNORE INTO ever_persons VALUES (?,?)", (ws, owner))
         return {"card_seq": o["card_seq"]}
 
     def dispatch(self, con, route, ident, method, body, raw, query, headers, address, now):
@@ -511,6 +560,14 @@ class Directory:
             if row is None:
                 fail("not_found")
             self.person_access(con, session, row["person_id"])
+            if (
+                session["kind"] == "workspace"
+                and not con.execute(
+                    "SELECT 1 FROM ever_devices WHERE workspace_id=? AND device_id=?",
+                    (session["subject_id"], ident),
+                ).fetchone()
+            ):
+                fail("not_eligible")
             return {"cert": P.parse_json(row["cert"])}
         if route == "card":
             row = con.execute(
@@ -531,15 +588,18 @@ class Directory:
             if continuation["person"] != ident or continuation["after"] != after:
                 fail("malformed")
             after = integer(str(continuation["cursor"]))
+        workspace = session["subject_id"] if session["kind"] == "workspace" else None
         rows = con.execute(
-            "SELECT cursor,record FROM revocations WHERE person_id=? AND cursor>? ORDER BY cursor LIMIT ?",
-            (ident, after, limit + 1),
+            "SELECT cursor,record FROM revocations r WHERE person_id=? AND cursor>? "
+            "AND (? IS NULL OR EXISTS (SELECT 1 FROM ever_devices e "
+            "WHERE e.workspace_id=? AND e.device_id=r.device_id)) ORDER BY cursor LIMIT ?",
+            (ident, after, workspace, workspace, limit + 1),
         ).fetchall()
         entries, size = [], 0
         for row in rows[:limit]:
             item = {"cursor": row["cursor"], "record": P.parse_json(row["record"])}
             item_size = len(P.cj(item)) + 1
-            if size + item_size > MAX_BODY - 1024:
+            if size + item_size > MAX_RESPONSE - 1024:
                 break
             entries.append(item)
             size += item_size
@@ -561,7 +621,7 @@ class Directory:
 
     def handle(self, route, ident, method, raw, query, headers, peer):
         try:
-            if len(raw) > MAX_BODY:
+            if len(raw) > body_cap(route):
                 fail("too_large")
             if method == "GET":
                 if raw:
@@ -603,10 +663,14 @@ def install(app, data):
     def endpoint(route):
         async def handle(request: Request):
             raw = bytearray()
+            cap = body_cap(route)
+            declared = request.headers.get("content-length")
+            if declared and declared.isdecimal() and int(declared) > cap:
+                return JSONResponse({"error": "too_large"}, status_code=413)
             async for chunk in request.stream():
+                if len(raw) + len(chunk) > cap:
+                    return JSONResponse({"error": "too_large"}, status_code=413)
                 raw.extend(chunk)
-                if len(raw) > MAX_BODY:
-                    return JSONResponse({"error": "too_large"}, status_code=400)
             if len(request.query_params.multi_items()) != len(request.query_params):
                 return JSONResponse({"error": "malformed"}, status_code=400)
             return await run_in_threadpool(

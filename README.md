@@ -62,7 +62,8 @@ Run one worker per database. SQLite uses WAL and `synchronous=FULL`; all databas
 work runs in the thread pool. Directory records, token hashes, invite-use digests,
 and accepted recovery request digests survive restart. Challenges and rate windows
 are process-local, per P3-D15. Clients obtain fresh challenges after a restart.
-Directory JSON bodies are bounded to 4 MiB, with strict field sets and parsing.
+Directory JSON bodies are capped at 16 KiB (64 KiB for accounts and cards), checked
+before parsing; oversized input returns 413. Devices may hold eight live tokens.
 
 G1 implements §19.1. Membership publication, holder acquisition, bridge and pairing
 routes remain the G2/G3 groups. Shared tables and integration rules are documented

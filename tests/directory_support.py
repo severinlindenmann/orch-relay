@@ -53,6 +53,7 @@ def seed(directory, accounts=True, devices=True, card=True):
                 (WS, PERSON, CARD["o"]["wsk_pub"], P.cj(CARD["delegation"]), P.cj(CARD), 1, 1, 0),
             )
             con.execute("INSERT INTO ever_persons VALUES (?,?)", (WS, PERSON))
+            con.execute("INSERT INTO ever_devices VALUES (?,?,?)", (WS, DEVICE, 1))
             con.execute(
                 "INSERT INTO members VALUES (?,?,?,?)", (WS, DEVICE, PERSON, P.cj(["look"]))
             )
@@ -85,7 +86,7 @@ def issue_login(client, key="phone.sig", kind="device", ident=DEVICE):
 
 
 def prepare_case(directory, name, case):
-    scenario = case["given"]["scenario"]
+    scenario = case["given"].get("scenario", case["name"])
     account_route = name == "accounts"
     seed(
         directory,
@@ -93,7 +94,7 @@ def prepare_case(directory, name, case):
         devices=not account_route,
         card=not account_route and name != "device_put",
     )
-    directory.clock = lambda: case["given"]["now_ms"]
+    directory.clock = lambda: case["given"].get("now_ms", NOW)
     request = case["request"]
     challenge = request.get("json", {}).get("challenge", LOGIN["challenge"])
     directory.challenges[challenge] = (NOW + 60_000, "testclient")
@@ -102,6 +103,33 @@ def prepare_case(directory, name, case):
             "INSERT INTO invites(code_hash,expires_ms) VALUES (?,?)",
             (digest(b"FAKE-single-use-invite"), NOW + 100_000),
         )
+        if request["headers"].get("Authorization") == "Bearer FAKE-workspace-token":
+            con.execute(
+                "INSERT INTO sessions VALUES (?,?,?,?)",
+                (token_hash("FAKE-workspace-token"), "workspace", WS, NOW + 900_000),
+            )
+        if name == "device_put" and case["name"] == "resigned_identical":
+            original = next(
+                c for c in V["p3"]["cases"] if c["name"] == "certificate_directory_resigned_retry"
+            )["state"][DEVICE]
+            con.execute("UPDATE devices SET cert=? WHERE device_id=?", (P.cj(original), DEVICE))
+        if scenario == "other_workspace_person_refused":
+            con.execute("DELETE FROM ever_persons")
+        if name == "session_login" and scenario == "quota_exceeded":
+            con.execute("DELETE FROM sessions")
+            for i in range(8):
+                con.execute(
+                    "INSERT INTO sessions VALUES (?,?,?,?)",
+                    (str(i), "device", DEVICE, NOW + 20_000),
+                )
+        if name == "device_put" and scenario == "rate_limited":
+            con.execute("DELETE FROM devices WHERE device_id=?", (DEVICE,))
+        if name == "revocation_feed" and case["name"] == "filtered_workspace_feed":
+            record = signed({**RECORD["o"], "device_id": PRIMARY})
+            con.execute(
+                "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
+                (PRIMARY, PERSON, P.cj(record), "lost", NOW, 2),
+            )
         if name == "revocation_feed":
             # The feed's target is revoked; its caller is another live device of the person.
             con.execute(
