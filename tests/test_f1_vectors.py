@@ -1063,9 +1063,12 @@ def checkpoint_offer(held, offered, restore=None, applied=()):
         return "ok", None
     old = {"workspace": h["workspace_log"], **h["tickets"]}
     new = {"workspace": o["workspace_log"], **o["tickets"]}
-    if not old.keys() <= new.keys():
+    # §5.10: a missing held uid is divergence only in an offer with a higher n; an older checkpoint
+    # naturally lacks tickets created after it (stale delivery comes first).
+    if o["n"] > h["n"] and not old.keys() <= new.keys():
         return "chain.diverged", None
-    conflicts = {log for log in old if height_conflict(old[log], new[log])}
+    shared = old.keys() & new.keys()
+    conflicts = {log for log in shared if height_conflict(old[log], new[log])}
     if restore and o["n"] > h["n"] and restore["log"] in conflicts:
         log = restore["log"]
         abandoned, prior = restore["abandoned"], old[log]
@@ -1078,23 +1081,19 @@ def checkpoint_offer(held, offered, restore=None, applied=()):
         )
         return ("ok", restore["id"]) if valid else ("chain.diverged", None)
     same_height_fork = any(
-        new[k]["seq"] == old[k]["seq"] and new[k]["head"] != old[k]["head"] for k in old
+        new[k]["seq"] == old[k]["seq"] and new[k]["head"] != old[k]["head"] for k in shared
     )
     if same_height_fork:
         return "chain.diverged", None
     if o["n"] > h["n"] and not conflicts:
         return "ok", None
-    if o["n"] < h["n"] and all(new[k]["seq"] <= old[k]["seq"] for k in old):
+    if o["n"] < h["n"] and all(new[k]["seq"] <= old[k]["seq"] for k in shared):
         return "ignored", None
     return ("ok", None) if o == h else ("chain.diverged", None)
 
 
 @by_name(CP["workspace_n_offers"])
 def test_workspace_checkpoint_receiver(c):
-    if c["name"] == "lower_n_lower_height":
-        pytest.skip(
-            "F1 §5.10 does not define precedence of stale lower-n delivery versus a missing held UID; vector expects ignored despite the missing-UID divergence rule"
-        )
     result, recorded = checkpoint_offer(
         CP["workspace_n_held"], c["checkpoint"], c.get("restore"), c.get("applied", ())
     )
