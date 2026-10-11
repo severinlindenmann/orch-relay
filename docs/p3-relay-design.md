@@ -767,7 +767,9 @@ commit atomically: H = E, record the restore ids, apply the bundles' revocations
   device already holds when it judges a transition, from before the sync or from a lower-n bundle of the walk,
   refuses it whatever the reason or `revoked_ms`, as F1's receiver does. The host-chosen `line.at` never decides it:
   otherwise a WSK holder with a stolen, already revoked owner device and a malicious relay could roll every device
-  back with only an alarm.
+  back with only an alarm. Round 2 (re-review N3/N4): a device keeps chain-learned and out-of-band revocations
+  apart. Both refuse a signer; only chain-learned ones are demanded as restore evidence. It records the signer of
+  every applied transition, so the compromised-history alarm is the same however the syncs were split.
 - **Devices keep their durable revocation knowledge and tombstones.** A restore can never resurrect a device they know
   to be revoked. Bundle absence does not prove historical non-revocation, and no retroactive completeness is demanded.
 
