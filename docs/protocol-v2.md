@@ -1234,8 +1234,18 @@ verified.**
    - revoked → `revoked`;
    - **not in the current member list → `not_member`**;
    - signature (with the certificate's `dk_sig_pub`) → `bad_signature`.
-5. **Replay.** A known rid gets v1 §5.3's answer; a re-sent stored `stale_epoch` carries the current
-   epoch.
+5. **Replay.** A known rid gets v1 §5.3's answer, with these v2 changes (P3-D27):
+   - **An answer that was posted to the relay is replayed as the exact chunk bytes already posted**, never
+     re-sealed or re-stamped: the relay refuses other bytes at a known chunk index (`chunk_conflict`). The
+     host persists each response envelope's exact bytes with the rid record **before the first POST**,
+     including a POST whose outcome was uncertain (a timeout may still have been accepted). The relay
+     stores an identical chunk again after its copy expired, bounded (§19.3).
+   - v1's re-seal and re-stamp apply only to an answer none of whose chunks was ever posted; such a
+     re-sent stored `stale_epoch` carries the current epoch.
+   - **A resend of a known rid whose op is still running gets no answer.** No interim
+     `already_done {status: "unknown"}`: it would take idx 0, and the real answer would then be refused
+     with `chunk_conflict`. The answer is posted once, when the op finishes. `already_done {unknown}`
+     stays for a record without an outcome whose op is not running (after a crash).
 
    5b. **Quota.** v1 §5.3 unchanged (`busy`; drop past the allowance or `MAX_RECORDS`).
 6. **Framing.** Strict meta (§2.3), with `op` a string. Otherwise record, then refuse `malformed`; the seq
@@ -1297,13 +1307,22 @@ The pin-failure counting and "pair again" after 3 failures are v1's. A `stale_ep
 epoch makes the device fetch grants (`fetch_grants`); any other is dropped (§8.5). Vectors:
 `bridge.device_cases`.
 
+**Replayed answers (P3-D27).** A host replays exact posted bytes (§8.6 step 5), so a replayed chunk keeps
+its original `ts_ms`, `host_ms` and `high`:
+- The phone's last automatic resend of a rid should start no later than about 240 s after its **first**
+  send, so that a replayed answer still passes step 10's ±300 s window.
+- For a `stale_timestamp` answering a rid that was sent more than once, the device computes its clock
+  offset as `host_ms` minus its device time of the **first** send, not of the latest resend.
+- A replayed `stale_sequence` carries an old `high`; `max(counter, high + 1)` stays correct.
+
 ### 8.9 What the relay checks on the bridge
 
 **P3-D8/D9/D10/D16/D17/D22.** §19.3 and §19.6 add epoch hints, replay coalescing,
 non-consuming polls, durable host cursors and holder fencing. Limits cover the whole envelope.
 The relay checks membership; operations and scopes stay sealed. New old-epoch response bytes
-are accepted only for a known rid with `LAST | REFUSAL`; an identical stored replay does not
-extend TTL. Request and response epochs must match.
+are accepted only for a known rid with `LAST | REFUSAL`; a live identical replay does not
+extend TTL, and an expired identical chunk is stored again only within P3-D27's bounds.
+Request and response epochs must match.
 
 The relay holds no keys. It MUST still enforce, before it queues anything:
 
@@ -1777,7 +1796,7 @@ Every answer to an epoch-0 request, refusals included, also carries `wsk_pub`.
 | 401 | `bad_signature`, `stale_timestamp` (`server_ms`), `unknown_workspace`, `replay`, `unknown_challenge`, `expired`, `unauthenticated` (P3-D2) |
 | 403 | `revoked`, `other_person`, `scope_exceeded`, `not_eligible`, `not_for_this_device`, `cert_expired` (membership publication, P3-D7) |
 | 404 | `not_found` (P3-D1) |
-| 409 | `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version`, `stale_list`, `bad_epoch`, `rotation_required`, `wk_commit_changed` (G2b), `missing_grant`, `already_claimed` (`claimed_by`), `version_conflict` (`current`), `account_exists`, `cert_conflict`, `grant_conflict`, `wrap_conflict` (G0a review 10), `rid_conflict`, `retry_exhausted`, `chunk_conflict`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed` (P3-D3/D5/D7–D11/D22), `no_genesis`, `genesis_mismatch` (P3-D18), `chain_diverged`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation` (`devices`: sorted device IDs; P3-D13/D24), `staging_conflict`, `staging_incomplete` (P3-D20), `checkpoint_time` (P3-D25) |
+| 409 | `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version`, `stale_list`, `bad_epoch`, `rotation_required`, `wk_commit_changed` (G2b), `missing_grant`, `already_claimed` (`claimed_by`), `version_conflict` (`current`), `account_exists`, `cert_conflict`, `grant_conflict`, `wrap_conflict` (G0a review 10), `rid_conflict`, `retry_exhausted`, `chunk_conflict`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed` (P3-D3/D5/D7–D11/D22/D27), `no_genesis`, `genesis_mismatch` (P3-D18), `chain_diverged`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation` (`devices`: sorted device IDs; P3-D13/D24), `staging_conflict`, `staging_incomplete` (P3-D20), `checkpoint_time` (P3-D25) |
 | 413 | `too_large` for JSON routes (G0a review 2); before parsing |
 | 410 | `checkpoint_gone` (P3-D19/D20; a previously stored endpoint expired), `expired` (P3-D11; unknown/expired response rid, G0a review 8) |
 | 429 | `rate_limited`, `quota_exceeded` (P3-D5/D17; `Retry-After`) |
@@ -1876,7 +1895,7 @@ suite in its own test suite.
 
 ## 17. Decisions taken here
 
-**P3 amendment.** P3-D1–D11, P3-D14–D17 and P3-D22 below and in §19 supersede the earlier
+**P3 amendment.** P3-D1–D11, P3-D14–D17, P3-D22 and P3-D27 below and in §19 supersede the earlier
 HTTP, membership and bridge transport rules. D45/D46 select native clients and suite 2.
 Checkpoint/restore decisions P3-D12/D13/D18–D21/D23–D25 are specified in §19.8 (G0b).
 
@@ -2143,7 +2162,7 @@ In P3, lists have one person in practice.
 | `GET /v2/workspaces/{ws}/bridge/{rid}?after=i&wait=s` (device) | D(m), own mailbox | → `{chunks: [{id, idx, last, stream, envelope}]}` | non-consuming | 401; 403 | §8.8 |
 | `POST /v2/workspaces/{ws}/host/hold` | W | `{gen: int \| null, take_over: bool}` → `{gen, lease_s: 40, cursor}` | `gen` = the current generation: renews the lease, same `gen`; `gen: null`: a new generation when the lease is expired or `take_over` is set, otherwise 409; a stale `gen` → 409 `fenced`; JSON cap 16 KiB (G0a review 2) | 409 `holder_conflict`, `fenced` | P3-D10 |
 | `GET /v2/workspaces/{ws}/host/poll?after=n&wait=s` | W(g) | → `{items: [{n, route, device, rid, offer, envelope}], notices: {revocations_cursor, cert_requests, rotation_due}, next}` | non-consuming; `after` acknowledges everything up to it (stored as `holders.cursor`); renews the lease; ≤ 16 items or 4 MiB | 409 `fenced`; 401 | P3-D10 |
-| `POST /v2/workspaces/{ws}/bridge/{rid}` (host) | W(g) | raw ORB2, direction 2 → 202 `{}` | ≤ 256 KiB whole chunk; same `(device, rid, idx)` and bytes → no-op; other bytes → 409; epoch rule P3-D22 | 400; 403 `not_eligible`, `revoked`; 409 `chunk_conflict`, `stale_epoch`, `fenced`; 410 `expired` (G0a review 8); 429 | §8.1, §8.5, §8.9 |
+| `POST /v2/workspaces/{ws}/bridge/{rid}` (host) | W(g) | raw ORB2, direction 2 → 202 `{}` | ≤ 256 KiB whole chunk; same `(device, rid, idx)` and bytes → no-op while a copy is live, stored again after it expired within P3-D27's bounds; other bytes → 409; epoch rule P3-D22 | 400; 403 `not_eligible`, `revoked`; 409 `chunk_conflict`, `stale_epoch`, `fenced`, `retry_exhausted` (P3-D27); 410 `expired` (G0a review 8, P3-D27); 429 | §8.1, §8.5, §8.9 |
 | `POST /v2/workspaces/{ws}/pair/{offer}/{rid}` | none (device), W(g) (host answer) | raw epoch-0 ORB2 → 202 | ≤ 64 KiB; per workspace and per address (/64 IPv6) 60/min; /56 480/min (G0a review 9); global 6 000/min | 400; 401 `unknown_workspace`; 429 | §8.3, §8.9 |
 | `GET /v2/workspaces/{ws}/pair/{offer}/{rid}?after=i&wait=s` | none | → `{chunks}` | per address (/64 IPv6) 120/min; /56 960/min (G0a review 9); global 12 000/min | 429 | §8.3 |
 | `POST /v2/persons/{person}/cert-requests` | W(g), card owner = person | `{request}` → `{request_id}` | ≤ 1 open per workspace, ≤ 64 open per person; same → 200; JSON cap 64 KiB (G0a review 2) | 401 `bad_signature`; 403 `other_person`, `not_for_this_device`; 409 `request_open`, `replayed` | §8.4 step 1 |
@@ -2223,8 +2242,31 @@ confidentiality boundary against a malicious host (the relay sees a flag, not th
 epoch must equal its request's (`rid_seen.req_epoch`), and the chunk must answer a known request (rid). Once the list
 epoch has moved past that epoch, the relay accepts an old-epoch chunk only if it has the `LAST | REFUSAL` shape, or if it
 is byte-identical to a chunk already accepted for that rid (a stored replay, `rid_chunks`). An unknown or expired rid is 410 `expired` (G0a review 8). Other epoch violations are 409
-`stale_epoch`. The device validates the refusal itself (§8.8). Replaying stored bytes never extends a chunk's
-TTL. This cannot constrain a compromised relay.
+`stale_epoch`. The device validates the refusal itself (§8.8). Replaying stored bytes never extends a live chunk's
+TTL, and an expired old-epoch data chunk is never stored again (P3-D27). This cannot constrain a compromised relay.
+
+**P3-D27 (bounded exact-bytes re-store; Q11).** A host replays an answer as the exact chunk bytes it already
+posted (§8.6 step 5); v1's re-seal could never pass `chunk_conflict`. When a byte-identical chunk arrives for a
+known `(device, rid, idx)` and no unexpired copy of it is queued, the relay stores it again with a fresh 60 s TTL,
+subject to all of these:
+
+- **Gates first.** Holder fencing, the target device's eligibility (current member, not revoked, certificate
+  unexpired) and `chunk_conflict` run before this rule, as for a new chunk. A chunk posted by an old holder
+  generation, or to a device since removed or revoked, is no authorization to store it again.
+- **Epoch.** Only a chunk at the current list epoch, or one with the `LAST | REFUSAL` shape. An expired
+  old-epoch data chunk stays expired: 202, nothing stored (P3-D22). The device then ends `uncertain`.
+- **Deadline.** Only before `rid_seen.first_ms + 900 s`, an immutable deadline from the first receipt; never the
+  extended `keep_until_ms`. After it: 410 `expired`.
+- **No extension.** The copy expires at `min(now + 60 s, keep_until_ms)`. A re-store never changes
+  `keep_until_ms`, so chunks restored in turn cannot keep a rid alive.
+- **Cap.** At most 8 restorations per chunk, counted durably (`rid_chunks.restores`; survives a restart). The
+  ninth is 409 `retry_exhausted`, terminal. The 64-chunk ceiling per rid is unchanged.
+- **Budgets.** A re-store is charged to the host-post rate and the response storage budgets (P3-D17); 429 and
+  503 apply as for a new chunk. A live duplicate stays a free no-op that never changes its TTL.
+- **Pairing answers** (the `pair` route) are never stored again.
+
+The device side is in §8.8 (the 240 s resend bound, the `stale_timestamp` offset). This changes only what an
+honest relay stores: a hostile relay could always replay bytes it once held. Vectors: `p3.restore`.
 
 
 ### 19.4 Authentication and budgets
@@ -2381,7 +2423,9 @@ polling its mailbox for that rid and MUST NOT automatically reissue the operatio
 rid. Terminal exhaustion also MUST NOT trigger automatic reissue under a new rid; continue
 polling for a queued response while retained, then surface failure for explicit user resolution.
 (G0a review 8) (ambiguity 11) P3-D22 returns 410 `expired` for an unknown or expired response rid.
-A stored chunk replay returns 202 without refreshing its TTL or resurrecting expired bytes.
+A stored chunk replay with a live copy returns 202 without refreshing its TTL. An expired identical chunk is
+stored again only within P3-D27's bounds (current epoch or `LAST | REFUSAL`, before first receipt + 900 s,
+at most 8 times, never past `keep_until_ms`); expired old-epoch data is a 202 no-op.
 If a matching known chunk index has different bytes, `chunk_conflict` precedes the epoch rule.
 `LAST | REFUSAL` may also carry `STREAM`; a refusal always has LAST.
 

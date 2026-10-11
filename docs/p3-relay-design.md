@@ -118,7 +118,7 @@ Tables (`*` marks the primary key; times are integer ms of the relay clock):
 |---|---|---|
 | `bridge_msgs` | `n*`, `workspace_id`, `device_id`, `rid`, `kind` (`req`, `resp`, `pair_req`, `pair_resp`), `offer_id`, `idx`, `flags`, `epoch`, `envelope`, `digest`, `received_ms`, `expires_ms` | sealed bodies, 60 s from their own receipt (proto §8.9), never extended |
 | `rid_seen` | `(workspace_id, device_id, rid)*`, `req_digest`, `req_epoch`, `first_ms`, `requeues`, `last_requeue_ms`, `keep_until_ms` | replay store: 900 s from the first receipt, extended only to outlive every dependent queued message (P3-D9); ≤ 4 096 records per device |
-| `rid_chunks` | `(workspace_id, device_id, rid, idx)*`, `digest`, `flags` | chunk identity for conflicts and stored replays, same lifetime as its `rid_seen` row; ≤ 64 chunks per rid |
+| `rid_chunks` | `(workspace_id, device_id, rid, idx)*`, `digest`, `flags`, `restores` | chunk identity for conflicts and stored replays, same lifetime as its `rid_seen` row; ≤ 64 chunks per rid; `restores` counts re-stores of expired identical bytes (≤ 8, P3-D27) |
 | `holders` | `workspace_id*`, `gen`, `lease_until_ms`, `cursor`, `poll_token` | fencing, the contiguous acknowledged cursor and the one live poll (P3-D10) |
 | `cert_requests` | `request_id*`, `workspace_id`, `person_id`, `primary_device_id`, `request`, `expires_ms`, `state`, `challenge`, `cert_device_id`, `rejection` | the transactional state machine (P3-D11) |
 
@@ -294,7 +294,7 @@ In P3, lists have one person in practice.
 | `GET /v2/workspaces/{ws}/bridge/{rid}?after=i&wait=s` (device) | D(m), own mailbox | → `{chunks: [{id, idx, last, stream, envelope}]}` | non-consuming | 401; 403 | §8.8 |
 | `POST /v2/workspaces/{ws}/host/hold` | W | `{gen: int \| null, take_over: bool}` → `{gen, lease_s: 40, cursor}` | `gen` = the current generation: renews the lease, same `gen`; `gen: null`: a new generation when the lease is expired or `take_over` is set, otherwise 409; a stale `gen` → 409 `fenced` | 409 `holder_conflict`, `fenced` | P3-D10 |
 | `GET /v2/workspaces/{ws}/host/poll?after=n&wait=s` | W(g) | → `{items: [{n, route, device, rid, offer, envelope}], notices: {revocations_cursor, cert_requests, rotation_due}, next}` | non-consuming; `after` acknowledges everything up to it (stored as `holders.cursor`); renews the lease; ≤ 16 items or 4 MiB | 409 `fenced`; 401 | P3-D10 |
-| `POST /v2/workspaces/{ws}/bridge/{rid}` (host) | W(g) | raw ORB2, direction 2 → 202 `{}` | ≤ 256 KiB whole chunk; same `(device, rid, idx)` and bytes → no-op; other bytes → 409; epoch rule P3-D22 | 400; 403 `not_eligible`, `revoked`; 409 `chunk_conflict`, `stale_epoch`, `fenced`; 429 | §8.1, §8.5, §8.9 |
+| `POST /v2/workspaces/{ws}/bridge/{rid}` (host) | W(g) | raw ORB2, direction 2 → 202 `{}` | ≤ 256 KiB whole chunk; same `(device, rid, idx)` and bytes → no-op while a copy is live, stored again after it expired within P3-D27's bounds; other bytes → 409; epoch rule P3-D22 | 400; 403 `not_eligible`, `revoked`; 409 `chunk_conflict`, `stale_epoch`, `fenced`, `retry_exhausted`; 410 `expired`; 429 | §8.1, §8.5, §8.9 |
 | `POST /v2/workspaces/{ws}/pair/{offer}/{rid}` | none (device), W(g) (host answer) | raw epoch-0 ORB2 → 202 | ≤ 64 KiB; per workspace and per address 60/min; global 6 000/min | 400; 401 `unknown_workspace`; 429 | §8.3, §8.9 |
 | `GET /v2/workspaces/{ws}/pair/{offer}/{rid}?after=i&wait=s` | none | → `{chunks}` | per address 120/min; global 12 000/min | 429 | §8.3 |
 | `POST /v2/persons/{person}/cert-requests` | W(g), card owner = person | `{request}` → `{request_id}` | ≤ 1 open per workspace, ≤ 64 open per person; same → 200 | 401 `bad_signature`; 403 `other_person`, `not_for_this_device`; 409 `request_open`, `replayed` | §8.4 step 1 |
@@ -374,8 +374,35 @@ confidentiality boundary against a malicious host (the relay sees a flag, not th
 epoch must equal its request's (`rid_seen.req_epoch`), and the chunk must answer a known request (rid). Once the list
 epoch has moved past that epoch, the relay accepts an old-epoch chunk only if it has the `LAST | REFUSAL` shape, or if it
 is byte-identical to a chunk already accepted for that rid (a stored replay, `rid_chunks`). Everything else is 409
-`stale_epoch`. The device validates the refusal itself (proto §8.8). Replaying stored bytes never extends a chunk's
-TTL. This cannot constrain a compromised relay.
+`stale_epoch`. The device validates the refusal itself (proto §8.8). Replaying stored bytes never extends a live
+chunk's TTL, and an expired old-epoch data chunk is never stored again (P3-D27). This cannot constrain a compromised
+relay.
+
+**P3-D27 (bounded exact-bytes re-store; Q11, two challenge rounds).** v1 replays a finished answer re-sealed with a
+fresh salt, which can never pass `chunk_conflict`, so in v2 a lost answer older than 60 s could not be recovered.
+Shrinking the resend window to 60 s fails on routine iOS suspension. Instead:
+
+- **Host.** A replay re-posts the **exact** chunk bytes already posted. The host persists each response envelope's
+  bytes with the rid record before the first POST (uncertain POST outcomes included). While an op runs, a resend
+  gets no interim `already_done {unknown}` (it would take idx 0). Proto §8.6 step 5.
+- **Relay.** An identical chunk for a known `(device, rid, idx)` with no unexpired queued copy is stored again with
+  a fresh 60 s TTL, only if all hold:
+  - fencing, target eligibility (current member, not revoked) and `chunk_conflict` pass first, as for a new chunk;
+  - the chunk is at the current list epoch, or has the `LAST | REFUSAL` shape (old-epoch data stays expired: the
+    at-rest minimisation behind P3-D22's "no resurrection");
+  - now is before `rid_seen.first_ms + 900 s`, an immutable deadline (never the extended `keep_until_ms`);
+    otherwise 410 `expired`;
+  - the chunk has been restored fewer than 8 times (`rid_chunks.restores`, durable across restarts); otherwise 409
+    `retry_exhausted`;
+  - the host-post rate and response storage budgets admit it (it is charged; a live duplicate stays a free no-op).
+  The copy expires at `min(now + 60 s, keep_until_ms)` and `keep_until_ms` never moves, so chunks restored in turn
+  cannot keep a rid alive. Pairing answers are never restored.
+- **Device.** A replay keeps its original `ts_ms`: the phone's last automatic resend starts by about 240 s after the
+  first send. A replayed `stale_timestamp` carries the original `host_ms`, so the offset is computed against the
+  first send's device time (proto §8.8).
+- **Not a security boundary.** A hostile relay could always replay bytes it once held; this bounds an honest
+  relay's storage and lifetime only. Vectors: `p3.restore`; fixture `bridge_host_post` cases
+  `expired_identical_chunk_restored` and `refusal_409_retry_exhausted`.
 
 ### 3.4 Checkpoints and transitions
 
@@ -1201,3 +1228,4 @@ No new decisions.
 | P3-D24 | P3 owner-device policy for checkpoint-only receivers (tie-break) | §6.3 |
 | P3-D25 | Position time: documented limit, anchors, non-decreasing checkpoint `at` (tie-break) | §6.1, §6.3 |
 | P3-D26 | One `WK` per epoch, ever; refused publications burn their epoch and `list_seq`; `wk_commit` and `wk_commit_changed` (G2b) | §3.2 |
+| P3-D27 | Bounded exact-bytes re-store of expired response chunks (current epoch or refusal, immutable deadline, ≤ 8 per chunk, budgets) | §3.3 |
