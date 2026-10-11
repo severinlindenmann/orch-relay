@@ -10,6 +10,7 @@ from members_support import prepare_fixture
 
 from orch_relay import proto as P
 from orch_relay.app import create_app
+from ref._checkpoint_http import ROUTES as CHECKPOINT_ROUTES
 
 G1 = {
     "accounts",
@@ -24,11 +25,14 @@ G1 = {
     "card_put",
     "card_get",
 }
+# Checkpoint/restore routes are specified by reference fixtures only (G0b); the relay has no
+# implementation to replay yet. tests/test_http_fixtures.py validates them against the reference.
+CHECKPOINT_FIXTURES = {row[0] for row in CHECKPOINT_ROUTES}
 G2 = {"membership", "members", "grants", "card_keys", "card_key"}
 CASES = [
     (p.stem, c)
     for p in sorted(Path("tests/http_fixtures").glob("*.json"))
-    if p.name != "MANIFEST.json"
+    if p.name != "MANIFEST.json" and p.stem not in CHECKPOINT_FIXTURES
     for c in json.loads(p.read_text())["cases"]
 ]
 
