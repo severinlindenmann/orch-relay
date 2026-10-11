@@ -160,6 +160,11 @@ class Bridge:
             "INSERT INTO holders VALUES (?,?,?,?,?) ON CONFLICT(workspace_id) DO UPDATE SET gen=excluded.gen,lease_until_ms=excluded.lease_until_ms,poll_token=CASE WHEN holders.gen=excluded.gen THEN holders.poll_token ELSE NULL END",
             (ws, gen, now + 40000, cursor, None),
         )
+        if row is None or gen != row["gen"]:
+            con.execute(
+                "INSERT INTO holder_delivery VALUES (?,?) ON CONFLICT(workspace_id) DO UPDATE SET delivered=excluded.delivered",
+                (ws, cursor),
+            )
         return {"gen": gen, "lease_s": 40, "cursor": cursor}
 
     def post(self, con, ws, rid, offer, raw, session, now):
@@ -310,34 +315,34 @@ class Bridge:
             "SELECT * FROM bridge_msgs WHERE workspace_id=? AND direction=1 AND n>? ORDER BY n",
             (ws, position),
         ).fetchall()
-        items, size, more = [], 0, False
+        updates = notices(con, ws)
+        items, size, more = [], len(P.cj(updates)) + 512, False
         for row in rows:
             if row["offer"] is None:
                 try:
                     self.eligible(con, ws, row["device_id"], now)
                 except Refusal:
                     continue
-            if len(items) == 16 or size + len(row["body"]) > 4 * MIB:
+            item = {
+                "n": row["n"],
+                "route": "pair" if row["offer"] else "bridge",
+                "device": row["device_id"],
+                "rid": row["rid"],
+                "offer": row["offer"],
+                "envelope": P.b64u(row["body"]),
+            }
+            item_size = len(P.cj(item)) + 1
+            if len(items) == 16 or size + item_size > 4 * MIB:
                 more = True
                 break
-            items.append(
-                {
-                    "n": row["n"],
-                    "route": "pair" if row["offer"] else "bridge",
-                    "device": row["device_id"],
-                    "rid": row["rid"],
-                    "offer": row["offer"],
-                    "envelope": P.b64u(row["body"]),
-                }
-            )
-            size += len(row["body"])
+            items.append(item)
+            size += item_size
         if items:
             con.execute(
                 "INSERT INTO holder_delivery VALUES (?,?) ON CONFLICT(workspace_id) DO UPDATE SET delivered=max(delivered,excluded.delivered)",
                 (ws, items[-1]["n"]),
             )
         nxt = P.b64u(P.cj({"ws": ws, "after": after, "n": items[-1]["n"]})) if more else None
-        updates = notices(con, ws)
         return {"items": items, "notices": updates, "next": nxt}, bool(
             items or any(updates.values())
         )

@@ -33,18 +33,19 @@ CREATE TABLE queue_totals (
 );
 CREATE TRIGGER bridge_insert AFTER INSERT ON bridge_msgs BEGIN
  INSERT INTO queue_totals VALUES (NEW.workspace_id, NEW.device_id, NEW.direction,
- length(NEW.body), length(NEW.body)*(1-NEW.delivered), 1)
+ length(NEW.body), length(NEW.body)*(1-NEW.delivered), 1-NEW.delivered)
  ON CONFLICT(workspace_id, device_id, direction) DO UPDATE SET
- bodies=bodies+length(NEW.body), pending=pending+length(NEW.body)*(1-NEW.delivered), count=count+1;
+ bodies=bodies+length(NEW.body), pending=pending+length(NEW.body)*(1-NEW.delivered), count=count+1-NEW.delivered;
 END;
 CREATE TRIGGER bridge_delete AFTER DELETE ON bridge_msgs BEGIN
  UPDATE queue_totals SET bodies=bodies-length(OLD.body),
- pending=pending-length(OLD.body)*(1-OLD.delivered), count=count-1
+ pending=pending-length(OLD.body)*(1-OLD.delivered), count=count-1+OLD.delivered
  WHERE workspace_id=OLD.workspace_id AND device_id=OLD.device_id AND direction=OLD.direction;
- DELETE FROM queue_totals WHERE count=0;
+ DELETE FROM queue_totals WHERE bodies=0;
 END;
 CREATE TRIGGER bridge_delivery AFTER UPDATE OF delivered ON bridge_msgs BEGIN
- UPDATE queue_totals SET pending=pending+length(NEW.body)*(OLD.delivered-NEW.delivered)
+ UPDATE queue_totals SET pending=pending+length(NEW.body)*(OLD.delivered-NEW.delivered),
+ count=count+OLD.delivered-NEW.delivered
  WHERE workspace_id=NEW.workspace_id AND device_id=NEW.device_id AND direction=NEW.direction;
 END;
 CREATE TABLE holder_delivery (
