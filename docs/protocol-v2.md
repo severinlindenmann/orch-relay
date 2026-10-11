@@ -290,6 +290,9 @@ Every derivation, signature, AEAD associated data, hash and MAC has its own labe
 | `sig_ticket_event` | `orch/v2/sig/ticket-event\|` | signature | `dk_sig` | a person event in a ticket log (ticket format F1 §5.3) |
 | `sig_ws_event` | `orch/v2/sig/ws-event\|` | signature | `dk_sig` | a person event in the workspace log (F1 §5.3) |
 | `sig_host_event` | `orch/v2/sig/host-event\|` | signature | `WSK` | the host's signature over a log line (F1 §5.5) |
+| `sig_genesis_pin` | `orch/v2/sig/genesis-pin\|` | signature | owner device | immutable genesis pin (P3-D18) |
+| `h_checkpoint` | `orch/v2/checkpoint-hash\|` | hash | — | `cj(C.o)`, exactly F1 (P3-D13) |
+| `h_log_acc` | `orch/v2/log-acc\|` | hash | — | two decoded 32-byte hashes, exactly F1 (P3-D19) |
 | `sig_checkpoint` | `orch/v2/sig/checkpoint\|` | signature | `WSK` | a checkpoint (F1 §5.10) |
 | `h_device_id` | `orch/v2/id/device\|` | hash | | device id |
 | `h_person_id` | `orch/v2/id/person\|` | hash | | person id |
@@ -835,7 +838,7 @@ Vectors: `bridge.seal`, `hkdf` (`k_bridge_epoch_1`, `k_bridge_epoch_2`, `k_pair`
    **D45/D46 (P3 design §7).** The native link is also
    `orch://pair?relay=<percent-encoded relay origin>#v2.<the same five fields>`.
    `/app/pair` remains an HTTPS alias. Passkey registration is removed from native pairing;
-   the checkpoint baseline amendment waits for the separate checkpoint/restore contract group.
+   the exact checkpoint baseline is `{n, hash}`, or null only when none exists; see §19.8 (P3-D13/D20).
 
    The spec's link has four fields after `v2`. **DECIDED HERE:** a fifth, `pk_pin`, because spec §7 step 4
    says the QR carries a pin of the owner's `PK`. The phone parses the link strictly (vectors
@@ -1649,11 +1652,11 @@ Every answer to an epoch-0 request, refusals included, also carries `wsk_pub`.
 |---|---|
 | 400 | `malformed`, `wrong_suite`, `cert_invalid`, `cert_expired`, `delegation_mismatch`, `too_large` (P3-D1/D17) |
 | 401 | `bad_signature`, `stale_timestamp` (`server_ms`), `unknown_workspace`, `replay`, `unknown_challenge`, `expired`, `unauthenticated` (P3-D2) |
-| 403 | `revoked`, `other_person`, `scope_exceeded`, `not_eligible`, `not_for_this_device`, `cert_expired` (membership publication, P3-D7) |
+| 403 | `revoked`, `other_person`, `scope_exceeded`, `not_eligible`, `not_for_this_device`, `restore_not_owner` (genesis, P3-D18), `cert_expired` (membership publication, P3-D7) |
 | 404 | `not_found` (P3-D1) |
-| 409 | `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version`, `stale_list`, `bad_epoch`, `rotation_required`, `missing_grant`, `already_claimed` (`claimed_by`), `version_conflict` (`current`), `account_exists`, `cert_conflict`, `grant_conflict`, `wrap_conflict` (G0a review 10), `rid_conflict`, `retry_exhausted`, `chunk_conflict`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed` (P3-D3/D5/D7–D11/D22) |
+| 409 | `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version`, `stale_list`, `bad_epoch`, `rotation_required`, `missing_grant`, `already_claimed` (`claimed_by`), `version_conflict` (`current`), `account_exists`, `cert_conflict`, `grant_conflict`, `wrap_conflict` (G0a review 10), `rid_conflict`, `retry_exhausted`, `chunk_conflict`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed` (P3-D3/D5/D7–D11/D22), `no_genesis`, `genesis_mismatch` (P3-D18), `chain_diverged`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation` (`devices`: sorted device IDs; P3-D13/D24), `staging_conflict`, `staging_incomplete` (P3-D20), `checkpoint_time` (P3-D25) |
 | 413 | `too_large` for JSON routes (G0a review 2); before parsing |
-| 410 | `expired` (P3-D11; unknown/expired response rid, G0a review 8) |
+| 410 | `checkpoint_gone` (P3-D19/D20; a previously stored endpoint expired), `expired` (P3-D11; unknown/expired response rid, G0a review 8) |
 | 429 | `rate_limited`, `quota_exceeded` (P3-D5/D17; `Retry-After`) |
 | 503 | `overloaded` (P3-D17; `Retry-After`) |
 | 428 | `precondition_required` |
@@ -2299,3 +2302,149 @@ devices. Boundary limits remain 64 certificates/day, 64 open requests/person, 64
   202/429 and never automatically reissue under a new rid (G0a review 4).
 - Enforce JSON caps/413, state-change-only quotas, auth-class refusals, unknown-rid 410,
   wrap conflicts, token and response budgets, and hierarchical IPv6 caps as specified above.
+
+
+### 19.8 Checkpoints, genesis and restore transport (P3-D12/D13/D18–D25)
+
+This section uses F1 §5.3/5.6/5.10 at orch-core `f1094b3fc2a4c3e5ae16dc8fd23162b8360bba09`.
+F1 defines event/checkpoint bytes; the relay adds storage, transport and present-authority checks.
+**P3-D12:** only `workspace_checkpoint` objects are published, never `ticket_checkpoint` objects.
+
+| Method, path | Auth | Request → response | Idempotency, limits | Refusals | Decision |
+|---|---|---|---|---|---|
+| `PUT /v2/workspaces/{ws}/genesis` | W(g) | `{pin, cert}` → `{}` | JSON cap 64 KiB; once, identical pin is a retry | 401 `bad_signature`; 403 `restore_not_owner`; 409 `genesis_mismatch` | P3-D18 |
+| `PUT /v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/pages/{i}` | W(g) | `{kind, log, after_seq, from_acc, heads, digest}` → `{}` | JSON cap 4 MiB; immutable page; 1 h set expiry | 409 `staging_conflict`; 429 `quota_exceeded` | P3-D20 |
+| `PUT /v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/manifest` | W(g) | `{pages: [{i, kind, log, after_seq, count, digest}]}` → `{complete, missing}` | JSON cap 4 MiB; immutable terminal marker | 409 `staging_conflict`; 429 `quota_exceeded` | P3-D20 |
+| `POST /v2/workspaces/{ws}/baselines` | W(g) | `{hash, offer_id}` → `{until_ms}` | JSON cap 16 KiB; 7 days, at most 16 pins | 404 `not_found`; 410 `checkpoint_gone`; 429 `quota_exceeded` | P3-D13/D20 |
+| `DELETE /v2/workspaces/{ws}/baselines/{hash}` | W(g) or D(m) after initialization | no body → `{}` | idempotent release | — | P3-D13/D20 |
+| `PUT /v2/workspaces/{ws}/checkpoint` | W(g) | `{checkpoint, source_hash, restore?}` → `{result: "accepted" or "ignored", n, hash}` | JSON cap 2624 KiB; atomic; exact retry returns prior result | 400 `wrong_suite`, `too_large`; 401 `bad_signature`; 409 `no_genesis`, `genesis_mismatch`, `chain_diverged`, `checkpoint_time`, `staging_incomplete`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation` | P3-D13/D20/D24/D25 |
+| `GET /v2/workspaces/{ws}/checkpoint[?hash=h]` | D(m) or W | `{genesis: {pin, cert}, checkpoint, transitions_head}` | held H or immutable hash h | 404 `not_found`; 410 `checkpoint_gone` | P3-D18/D19 |
+| `GET /v2/workspaces/{ws}/transitions?after_n=k&to=E&limit=` | D(m) or W | `{transitions: [bundle], next}` | ascending target_n; default/max 16, at most 4 MiB | 404 `not_found`; 410 `checkpoint_gone` | P3-D13/D19 |
+| `GET /v2/workspaces/{ws}/proof?log=L&from=acc&to=E&limit=` | D(m) or W | `{heads: [head], next}` | default/max 65 536, at most 4 MiB | 404 `not_found`; 410 `checkpoint_gone` | P3-D19 |
+
+Common §19.6 refusals and holder fencing apply. The checkpoint's **object** cap is 2 MiB of `cj`
+bytes. The restore event is at most **524,288 bytes including its LF**, measured as the complete signed
+F1 line. The whole final request is at most **2 MiB + 524,288 + 64 KiB = 2,686,976 bytes**.
+An over-cap request is 400 `too_large` on this route (P3-D20, specific exception to §19.6's JSON 413);
+an over-cap checkpoint or line is also 400. Other new JSON routes use 413 before parsing.
+Revocation evidence is never truncated. Hosts refuse `ticket.created` at 1.8 MiB (`checkpoint.capacity`,
+a local host error), before storage approaches the hard limit. About 5 000 tickets remains the conservative
+advertised capacity pending deployment measurements. Fold work and `log_nodes` storage are O(history).
+
+**Genesis (P3-D18).** An owner device signs
+`{o: {v:2, suite, kind:"genesis_pin", workspace_id, wsk_pub, genesis}, sig}` with
+`sig_genesis_pin || cj(o)`. First acceptance checks the card's owner PK, certificate binding,
+`operate` scope, expiry at the relay clock, non-revocation, workspace and card WSK. The relay refuses
+checkpoints without this pin or with a different genesis. An established pin is never replaced, including
+after certificate expiry/revocation; revocation raises an alarm. Devices verify it historically under the
+pairing-pinned owner PK. The pin attests genesis; only hosts with the log validate `workspace.created`.
+
+**Ancestry (P3-D19).** Each log entry is exactly `{seq, head, acc}`. `acc_0` is 32 zero bytes;
+`acc_k = H(h_log_acc || raw32(acc_{k-1}) || raw32(head_k))`, encoded as `sha256:` plus 64 lowercase hex.
+Neither text encodings nor seq are in the preimage. Growth requires exactly `t-s` heads, ending at the signed
+head and folding to the signed acc. Equal seq requires identical head and acc. Every existing log remains.
+`h_checkpoint(C) = H(h_checkpoint-label || cj(C.o))`, in the same hash-string encoding; signatures are excluded.
+Checkpoints use `sig_checkpoint || cj(o)`, with F1's exact workspace object shape and whole-second UTC `at`.
+Equal n requires the same object. A lower n is ignored only when no offered entry is new, higher, or conflicting
+at equal height. It never advances H. Higher n must also satisfy the position-time rules below.
+
+The relay retains immutable branch-agnostic `log_nodes(workspace, log, acc) → (seq, head, prev_acc)`.
+Restores do not delete abandoned nodes. Reads walk backwards from **the requested checkpoint's** acc,
+then return heads in forward order. A proof's source acc must be on that branch. This catches abandonment
+of a receiver's committed prefix with an honest host and withholding relay; it does not establish event
+validity, latestness or disclosure of every restore. A WSK holder can fabricate accumulators.
+
+**Staging and atomicity (P3-D20).** The set is bound to `(source_hash, target_hash)`; null source is spelled
+`null` in the path. `kind` is `appended`, `abandoned` or `retained`; `log` is `workspace` or a ticket ULID.
+`appended` proves ordinary growth; `abandoned` proves the source suffix above `from_seq`; `retained` proves
+the retained endpoint from a held node. Omit retained pages when the relay already holds the path.
+The manifest lists every page, sorted by `(kind, log, after_seq)`, with unique nonnegative page indices and
+contiguous ranges within each kind/log. Its descriptors must match page metadata, counts and digests.
+Pages are nonempty and at most 4 MiB each. Identical retries are no-ops; different content at an existing
+index or a different terminal manifest is `staging_conflict`. A manifest may precede missing pages and
+returns their indices. An unlisted page is a conflict. At most two live sets and 64 MiB of page bytes are
+allowed per workspace. Expiry is one hour from set creation, never extended by retries.
+Final publication requires the manifest and every listed page (`staging_incomplete` otherwise), validates
+every fold, all sizes and R0–R5 before effects, and rejects unused evidence. The transaction persists nodes,
+revocations, the transition and checkpoint, then advances H together. Refusals record no restore IDs.
+
+**Restore rules (P3-D13/D23/D24/D25).** `restore` is `{line, cert, authz: {delegation}}`.
+`line` is the full F1 event object, with its payload fields at the top level, not an interim nested payload.
+
+- **R0 (P3-D13):** exact F1 restore fields, person actor, `v=2`, `hash_v=1`, `sig`, `auth`, `roster_v`,
+  `host_sig`; `ws_seq` exactly for ticket logs. Strict JSON, schema and line-size checks precede effects.
+- **R1 (P3-D24):** verify both host and person signatures using F1's `{workspace_id, log}` context.
+  Verify the card's PK-signed delegation and PK-certified device; actor person/device IDs must match,
+  scope levels include operate and no `drop:` scope. Certificate validity is checked at `line.at` and,
+  by the relay only, at its present clock; the signer is unrevoked including evidence in this payload,
+  and currently in the relay member list with operate. Missing authorization evidence is refused.
+- **R2 (P3-D13):** person-signed `source` equals `{n: H.o.n, hash: h_checkpoint(H)}`;
+  outer source_hash must agree. Null is allowed only when no H exists. A withheld old restore or the
+  losing member of two concurrent restores against one source needs a newly signed source.
+- **R3 (P3-D13/D19):** `line.seq = from_seq+1`, `line.prev = head`, `from_seq >= 1`.
+  Prove that the retained endpoint actually ends in the owner-signed head. Below C's seq, the staged
+  abandoned suffix must fold from acc_from to C, with exact count; a retained page starts at a stored
+  node on C's branch. At/above C's seq, prove the forward path. Zero-length proofs compare the endpoint
+  head and acc directly. T's restored entry is exactly `{from_seq+1, head(line), fold(acc_from, head(line))}`.
+  Other logs extend C with exact appended evidence; no log disappears; T.n>C.n; ticket ws_seq does not
+  exceed T's workspace height. Signed abandoned must cover C when C is above from_seq; an equal-height
+  conflicting abandoned head is refused.
+- **R3a (P3-D25):** `C.o.at <= line.at <= T.o.at`, `T.o.at >= H.o.at`, and
+  `T.o.at <= relay clock + 300 s`. Every new plain publication has the latter two constraints, with
+  409 `checkpoint_time` on violation. Restore-specific position violations are `restore_invalid`.
+  The host clamps checkpoint at to max(clock, previous at), and restore at to max(clock, source at,
+  last merged-order at). `at` is a host-chosen position, not a person-signed timestamp. Rewriting it
+  within the anchored window remains possible and is explicitly tested.
+- **R4 (P3-D13, F1 B1):** workspace restores carry all effective host-held revocations; ticket restores
+  carry `[]`. Validate every `{revocation, device_cert, pk_pub}` first, using the stored account key
+  of the person. Entries are sorted and unique by device. For each held revocation of an ever-device,
+  require the same or stronger reason: compromised > lost = retired. Missing/weaker coverage returns
+  `restore_missing_revocation` with sorted `devices`. Byte identity with the earliest chain evidence
+  is an F1 host rule, not a relay rule. Preserve strongest reasons; grow ever_devices atomically.
+- **R5 (P3-D13):** applied restore IDs are single-use. Exact publication retries return the stored
+  prior result. Rejected IDs are not consumed. A source-bound transition pins both C and T permanently.
+
+A bootstrap null-source restore still runs R0/R1/R4/R5 and proves its exact target from acc_0, including
+its restored entry; there is no source comparison or abandoned proof against C. `line.at <= T.o.at` and
+the future ceiling remain. Initialized receivers never apply null-source transitions.
+
+**The P3 owner-device policy (P3-D23/D24).** This is deliberately narrower than full F1 replay:
+a removed device or demoted delegation owner can pass checkpoint-only verification while still holding
+a PK-certified, unrevoked operate device. Full hosts replay owner role, membership, device introduction/
+removal and scopes at from_seq. The relay's current-list check catches honest-host mistakes; WSK signs
+those lists, so they are not authorization evidence in bundles. No host mandate may sign these restores.
+P8's owner-signed roster is required to close this stated gap. Historical devices check certificate expiry
+against line.at, not today's clock, as well as the source/target anchors and known revocations.
+
+**Reads, retention and pairing (P3-D13/D19/D20).** A GET returns an immutable endpoint E. Page transitions
+with `after_n=k&to=E`, ordered by target_n, exclusively after k and no later than E.n; k does not need to
+name a retained checkpoint. Every bundle includes restore_id, log, source_hash, target_hash, target_n,
+line, cert and authz. Fetch checkpoint objects by hash and proofs against those same hashes. Superseded
+checkpoints live 24 hours from supersession; transition-referenced checkpoints live permanently.
+An expired E returns 410 `checkpoint_gone` on every endpoint-bound read; unknown hashes return 404.
+Keep the receiver's H unchanged until the entire walk is verified. Restart with a new E after 410;
+missing evidence means incomplete sync, never permission to re-pair or discard rollback protection.
+
+The authenticated pairing `approved` answer carries the host's exact `{n, hash}` baseline, or null only
+when none exists. POST baselines pins it for seven days (16 per workspace); retries do not extend expiry.
+DELETE releases it early, idempotently, by the host or initialized member. A device must fetch and verify
+that baseline before initialization; it never downgrades it and relay emptiness cannot override a non-null
+baseline. After 24 hours without retrieval it asks the host for a current reference under the same rule.
+
+**Transport details requiring design sign-off (G0b, P3-D13/D19/D20).** The source design leaves the following
+encodings unspecified. The reference and fixtures use explicit candidate conventions; these are not F1
+rules and must be confirmed before G4 ships:
+
+1. Page digest: `sha256:` + SHA-256 of `cj(page without digest)`, without a new domain label.
+2. Null path source: literal `null`. A final restore does not name its log; the reference resolves the
+   unique log whose person and host signed contexts verify among T's entries (workspace when ws_seq
+   is absent). An explicit transport log field would avoid this search but needs a design amendment.
+3. `transitions_head` is the greatest target_n at/below the requested checkpoint, or zero. Transition
+   next is the last target_n (returned to after_n); proof next is the folded acc (returned to from),
+   retaining the same to hash. The design calls next opaque but does not specify its resubmission parameter.
+4. Baseline identity is hash, matching DELETE's path. The design does not define multiple offers pinning
+   the same hash; this reference returns the existing pin without extending it.
+5. The design's §6.2 example uses `after=<held hash>`; §3.4/§6.4 and this contract use `after_n`.
+   F1 permits heads after the restore in T; P3 R3 intentionally requires T's entry to end at the restore.
+   P3 requires full first-publication proof for durable nodes, whereas F1 judge_offer accepts a verified
+   initial checkpoint without ancestry. These are relay restrictions, not changes to F1's event shape.
