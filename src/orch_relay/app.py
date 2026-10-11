@@ -23,13 +23,17 @@ def create_app(data_dir: Path | str | None = None, instance: str | None = None) 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await run_in_threadpool(db.migrate, data / db.DB_NAME)
-        maintenance = asyncio.create_task(app.state.bridge.maintenance())
+        tasks = [
+            asyncio.create_task(app.state.bridge.maintenance()),
+            asyncio.create_task(app.state.checkpoints.maintenance()),
+        ]
         try:
             yield
         finally:
-            maintenance.cancel()
-            with suppress(asyncio.CancelledError):
-                await maintenance
+            for task in tasks:
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
             app.state.bridge.close()
 
     app = FastAPI(title="orch-relay", version=__version__, lifespan=lifespan)
@@ -39,6 +43,9 @@ def create_app(data_dir: Path | str | None = None, instance: str | None = None) 
     from .bridge import install as install_bridge
 
     install_bridge(app)
+    from .checkpoints import install as install_checkpoints
+
+    install_checkpoints(app)
 
     @app.get("/healthz")
     def healthz() -> dict:
