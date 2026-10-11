@@ -117,7 +117,11 @@ def cjt(v) -> bytes:
 
 # --- the hashes of F1 §5.6 ----------------------------------------------------------------------------
 
-L = R.LABELS
+# F1 additions are registered locally: this task only changes the independent test model.
+L = R.LABELS | {
+    "h_checkpoint": "orch/v2/checkpoint-hash|",
+    "h_log_acc": "orch/v2/log-acc|",
+}
 
 
 def section_hash(text: str) -> str:
@@ -198,6 +202,8 @@ def question_hash(qid, ticket, text, options) -> str:
 # --- labels (F1 §5.6, §5.3, §5.5, §5.10) -------------------------------------------------------------------
 
 F1_LABELS = {
+    "h_checkpoint": "orch/v2/checkpoint-hash|",
+    "h_log_acc": "orch/v2/log-acc|",
     "section": "orch/v2/section|",
     "value": "orch/v2/value|",
     "gate": "orch/v2/gate|",
@@ -219,8 +225,8 @@ def test_labels_are_the_ones_the_f1_text_names():
 
 
 def test_f1_labels_are_in_the_protocol_registry():
-    """Every F1 label is a protocol label (protocol §3); `question` is the protocol's `h_question`."""
-    registry = set(R.LABELS.values())
+    """The independent F1 registry extends the relay registry with the two pinned hash labels."""
+    registry = set(L.values())
     for name, label in F1_LABELS.items():
         assert label in registry, name
     assert R.LABELS["h_question"] == F1_LABELS["question"]
@@ -230,7 +236,7 @@ def test_f1_labels_are_prefix_free_with_every_protocol_label():
     """Signed and hashed inputs are label || bytes: no label may be a prefix of another (protocol §3). The
     protocol's own check covers sig_/aad_/h_/mac_; this one covers all of them against all of F1's."""
     f1 = list(F1_LABELS.values())
-    everything = [v for v in R.LABELS.values() if v.endswith("|")]
+    everything = [v for v in L.values() if v.endswith("|")]
     for a in f1:
         assert a.endswith("|") and a.startswith("orch/v2/") and a.isascii()
         for b in everything:
@@ -679,7 +685,7 @@ FILE_KEYS = {
     "genesis": ["genesis", "note", "pins", "refused", "valid", "workspace_id"],
     "canon": ["depth"],
     "labels": ["labels"],
-    "restore": ["pins", "scenarios"],
+    "restore": ["host_cases", "pins", "scenarios", "schema_cases"],
     "effective_policy": ["cases", "pins", "scenarios"],
     "section_text": ["cases", "note", "pins"],
     "checkpoint": [
@@ -691,6 +697,7 @@ FILE_KEYS = {
         "ticket_checkpoint",
         "ticket_log",
         "ticket_offers",
+        "transition_cases",
         "workspace_checkpoint",
         "workspace_id",
         "workspace_log",
@@ -1211,11 +1218,11 @@ def test_signed_chain_heads_and_lines():
 CP = load("checkpoint")
 
 
-def checkpoint_ok(signed):
+def checkpoint_schema_and_signature_ok(signed):
     o = signed["o"]
     common = {"v", "suite", "kind", "workspace_id", "at"}
     fields = (
-        {"uid", "seq", "head"}
+        {"uid", "seq", "head", "acc"}
         if o["kind"] == "ticket_checkpoint"
         else {"genesis", "n", "workspace_log", "tickets"}
     )
@@ -1224,10 +1231,39 @@ def checkpoint_ok(signed):
         and set(o) == common | fields
         and o["v"] == 2
         and o["suite"] == 2
+        and o["kind"] in {"ticket_checkpoint", "workspace_checkpoint"}
+        and isinstance(o["at"], str)
+        and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", o["at"])
+        is not None
+        and all(
+            entry_ok(x)
+            for x in (
+                [{k: o[k] for k in ("seq", "head", "acc")}]
+                if o["kind"] == "ticket_checkpoint"
+                else [o["workspace_log"], *o["tickets"].values()]
+            )
+        )
+        and (o["kind"] != "workspace_checkpoint" or type(o["n"]) is int and o["n"] >= 1)
         and o["workspace_id"] == CP["workspace_id"]
         and (o["kind"] != "workspace_checkpoint" or o["genesis"] == CP["genesis"])
         and signature_ok(CP["wsk_pub"], signed["sig"], L["sig_checkpoint"].encode() + cjt(o))
     )
+
+
+def entry_ok(entry):
+    return (
+        set(entry) == {"seq", "head", "acc"}
+        and type(entry["seq"]) is int
+        and entry["seq"] >= 1
+        and all(HASH_RE.fullmatch(entry[k]) for k in ("head", "acc"))
+    )
+
+
+def checkpoint_ok(signed):
+    try:
+        return bool(checkpoint_schema_and_signature_ok(signed))
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return False
 
 
 @pytest.mark.parametrize("kind", ["ticket_checkpoint", "workspace_checkpoint"])
@@ -1244,7 +1280,10 @@ def test_forged_checkpoint(c):
 
 def height_conflict(held, offered):
     return offered["seq"] < held["seq"] or (
-        offered["seq"] == held["seq"] and offered["head"] != held["head"]
+        offered["seq"] == held["seq"]
+        and (
+            offered["head"] != held["head"] or ("acc" in offered and offered["acc"] != held["acc"])
+        )
     )
 
 
@@ -1273,53 +1312,273 @@ def test_checkpoint_against_local_log(c):
     assert (["chain.diverged"] if diverged else []) == c["expect"]
 
 
-def checkpoint_offer(held, offered, restore=None, applied=()):
-    """Height-only receiver; restore metadata is supplied after owner verification (§5.10)."""
-    if held is None:
-        return ("ok", None) if checkpoint_ok(offered) else ("chain.diverged", None)
-    h, o = held["o"], offered["o"]
+def strength(rev):
+    return 2 if rev["o"]["reason"] == "compromised" else 1
+
+
+def revocation_evidence_ok(entry):
+    try:
+        cert, rev, pk = entry["device_cert"], entry["revocation"], R.unb64u(entry["pk_pub"])
+        # Evidence remains usable after expiry; verify at certificate creation time.
+        return "ok" in R.verify_cert(S, cert, pk, cert["o"]["created_ms"]) and "ok" in (
+            R.verify_revocation(S, rev, pk, cert["o"])
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def restore_schema_ok(e, log):
+    try:
+        entries, source = e["revocations"], e["source"]
+        ids = [x["revocation"]["o"]["device_id"] for x in entries]
+        note = e.get("note", "")
+        required = {
+            "v",
+            "id",
+            "seq",
+            "at",
+            "type",
+            "actor",
+            "based_on",
+            "prev",
+            "hash_v",
+            "roster_v",
+            "auth",
+            "sig",
+            "host_sig",
+            "from_seq",
+            "head",
+            "abandoned",
+            "abandoned_decisions",
+            "revocations",
+            "source",
+            "reason",
+        }
+        if log != "workspace":
+            required.add("ws_seq")
+        abandoned = e["abandoned"]
+        return (
+            required <= set(e) <= required | {"note"}
+            and (
+                abandoned is None
+                or (
+                    set(abandoned) == {"seq", "head"}
+                    and type(abandoned["seq"]) is int
+                    and abandoned["seq"] > e["from_seq"]
+                    and HASH_RE.fullmatch(abandoned["head"])
+                )
+            )
+            and len(cjt(e)) + 1 <= 524288
+            and e["reason"] in {"rollback", "diverged", "broken", "other"}
+            and isinstance(note, str)
+            and "\n" not in note
+            and "\r" not in note
+            and len(note.encode()) <= 280
+            and isinstance(entries, list)
+            and all(set(x) == {"revocation", "device_cert", "pk_pub"} for x in entries)
+            and ids == sorted(set(ids))
+            and (log == "workspace" or entries == [])
+            and (
+                source is None
+                or (
+                    set(source) == {"n", "hash"}
+                    and type(source["n"]) is int
+                    and source["n"] >= 1
+                    and HASH_RE.fullmatch(source["hash"])
+                )
+            )
+            and type(e["from_seq"]) is int
+            and e["from_seq"] >= 1
+            and HASH_RE.fullmatch(e["head"]) is not None
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+ZERO_ACC = "sha256:" + "00" * 32
+
+
+def log_acc(acc, event_head):
+    if not all(isinstance(v, str) and HASH_RE.fullmatch(v) for v in (acc, event_head)):
+        raise ValueError("accumulator inputs must be 32-byte hashes")
+    return hl(L["h_log_acc"], bytes.fromhex(acc[7:]) + bytes.fromhex(event_head[7:]))
+
+
+def fold(acc, heads):
+    for h in heads:
+        acc = log_acc(acc, h)
+    return acc
+
+
+def growth_ok(old, new, heads):
+    try:
+        return (
+            isinstance(heads, list)
+            and len(heads) == new["seq"] - old["seq"]
+            and (heads[-1] == new["head"] if heads else old["head"] == new["head"])
+            and fold(old["acc"], heads) == new["acc"]
+        )
+    except (TypeError, ValueError, KeyError):
+        return False
+
+
+def checkpoint_ref(signed):
+    return {"n": signed["o"]["n"], "hash": hl(L["h_checkpoint"], cjt(signed["o"]))}
+
+
+def entries(signed):
+    return {"workspace": signed["o"]["workspace_log"], **signed["o"]["tickets"]}
+
+
+def transition_ok(held, offered, restore, applied, known):
+    """P3-D24 receiver policy intentionally does not infer the owner's current roster role."""
+    try:
+        e, log, C = restore["event"], restore["log"], restore["C"]
+        cert, pk, delegation = (
+            restore["device_cert"],
+            R.unb64u(restore["pk_pub"]),
+            restore["delegation"],
+        )
+        if (
+            restore["T"] != offered
+            or C != held
+            or (C is not None and not checkpoint_ok(C))
+            or e["source"] != (checkpoint_ref(C) if C else None)
+            or e["id"] in applied
+            or e["type"] != "restore"
+            or not restore_schema_ok(e, log)
+            or e["seq"] != e["from_seq"] + 1
+            or e["prev"] != e["head"]
+            or not host_ok_event(e, CP["wsk_pub"], CP["workspace_id"], log)
+            or not person_ok(e, cert, CP["workspace_id"], log)
+            or "ok" not in R.verify_delegation(S, delegation, pk)
+            or delegation["o"]["workspace_id"] != CP["workspace_id"]
+            or delegation["o"]["wsk_pub"] != CP["wsk_pub"]
+            or "ok" not in R.verify_cert(S, cert, pk, milliseconds(e["at"]))
+            or e["actor"]["id"] != "p_" + delegation["o"]["owner_person_id"]
+            or e["actor"]["device"] != "d_" + cert["o"]["device_id"]
+            or "operate" not in cert["o"]["scopes_max"]
+            or any(s.startswith("drop:") for s in cert["o"]["scopes_max"])
+            or (C and e["at"] < C["o"]["at"])
+        ):
+            return "chain.diverged", None
+        carried = {x["revocation"]["o"]["device_id"]: x["revocation"] for x in e["revocations"]}
+        for x in known:
+            r = x["revocation"]
+            device = r["o"]["device_id"]
+            if (
+                device == cert["o"]["device_id"]
+                or device not in carried
+                or strength(carried[device]) < strength(r)
+            ):
+                return "chain.diverged", None
+        if not all(revocation_evidence_ok(x) for x in e["revocations"]):
+            return "chain.diverged", None
+    except (KeyError, TypeError, ValueError, IndexError):
+        return "chain.diverged", None
+    try:
+        old = entries(C).get(log) if C else None
+        old = old or {"seq": 0, "head": None, "acc": ZERO_ACC}
+        retained = {"seq": e["from_seq"], "head": e["head"], "acc": restore["acc_from"]}
+        if old["seq"] > retained["seq"]:
+            abandoned = e["abandoned"]
+            if (
+                not abandoned
+                or abandoned["seq"] < old["seq"]
+                or (abandoned["seq"] == old["seq"] and abandoned["head"] != old["head"])
+            ):
+                return "chain.diverged", None
+            if not growth_ok(retained, old, restore.get("abandoned_heads")):
+                return "sync.incomplete", None
+            if log_acc(restore["acc_before"], e["head"]) != retained["acc"]:
+                return "sync.incomplete", None
+        else:
+            if not growth_ok(old, retained, restore.get("forward_heads")):
+                return "sync.incomplete", None
+            if C is None and log == "workspace" and restore["forward_heads"][0] != CP["genesis"]:
+                return "sync.incomplete", None
+        return "ok", retained
+    except (KeyError, TypeError, ValueError, IndexError):
+        # Incomplete accumulator evidence is not evidence of equivocation.
+        return "sync.incomplete", None
+
+
+def checkpoint_offer(held, offered, restore=None, applied=(), proofs=None, known=()):
     if not checkpoint_ok(offered):
         return "chain.diverged", None
     if held == offered:
         return "ok", None
-    old = {"workspace": h["workspace_log"], **h["tickets"]}
-    new = {"workspace": o["workspace_log"], **o["tickets"]}
-    # §5.10: a missing held uid is divergence only in an offer with a higher n; an older checkpoint
-    # naturally lacks tickets created after it (stale delivery comes first).
-    if o["n"] > h["n"] and not old.keys() <= new.keys():
-        return "chain.diverged", None
-    # A uid H lacks counts as seq 0 there, so a lower-n offer naming one has a higher seq: divergence.
-    if o["n"] < h["n"] and new.keys() - old.keys():
-        return "chain.diverged", None
-    shared = old.keys() & new.keys()
-    conflicts = {log for log in shared if height_conflict(old[log], new[log])}
-    if restore and o["n"] > h["n"] and restore["log"] in conflicts:
-        log = restore["log"]
-        abandoned, prior = restore["abandoned"], old[log]
-        valid = (
-            restore["id"] not in applied
-            and conflicts == {log}
-            and restore["from_seq"] < prior["seq"] <= abandoned["seq"]
-            and (prior["seq"] != abandoned["seq"] or prior["head"] == abandoned["head"])
-            and new[log]["seq"] >= restore["from_seq"] + 1
-        )
-        return ("ok", restore["id"]) if valid else ("chain.diverged", None)
-    same_height_fork = any(
-        new[k]["seq"] == old[k]["seq"] and new[k]["head"] != old[k]["head"] for k in shared
-    )
-    if same_height_fork:
-        return "chain.diverged", None
-    if o["n"] > h["n"] and not conflicts:
+    old, new = entries(held) if held else {}, entries(offered)
+    if held:
+        h, o = held["o"], offered["o"]
+        if o["n"] == h["n"]:
+            return ("ok", None) if o == h else ("chain.diverged", None)
+        if o["n"] < h["n"]:
+            stale = new.keys() <= old.keys() and all(
+                new[k]["seq"] < old[k]["seq"] or new[k] == old[k] for k in new
+            )
+            return ("ignored", None) if stale else ("chain.diverged", None)
+        if o["at"] < h["at"] or not old.keys() <= new.keys():
+            return "chain.diverged", None
+    recorded = None
+    if restore:
+        result, retained = transition_ok(held, offered, restore, applied, known)
+        if result != "ok":
+            return result, None
+        log, e = restore["log"], restore["event"]
+        old[log] = retained
+        recorded = e["id"]
+        if (
+            not proofs
+            or not isinstance(proofs.get(log), list)
+            or not proofs[log]
+            or proofs[log][0] != head(e)
+        ):
+            return "sync.incomplete", None
+    elif held is None:
         return "ok", None
-    if o["n"] < h["n"] and all(new[k]["seq"] <= old[k]["seq"] for k in shared):
-        return "ignored", None
-    return ("ok", None) if o == h else ("chain.diverged", None)
+    for log, target in new.items():
+        prior = old.get(log, {"seq": 0, "head": None, "acc": ZERO_ACC})
+        if height_conflict(prior, target):
+            return "chain.diverged", None
+        if prior == target:
+            continue
+        if not growth_ok(prior, target, (proofs or {}).get(log)):
+            return "sync.incomplete", None
+    return "ok", recorded
+
+
+@by_name(CP["transition_cases"])
+def test_checkpoint_transition(c):
+    assert checkpoint_offer(
+        c["held"],
+        c["offered"],
+        c.get("restore"),
+        c["applied"],
+        c.get("proofs"),
+        c.get("known_revocations", ()),
+    ) == (c["expect"], c["recorded"])
+
+
+@by_name(load("restore")["schema_cases"])
+def test_restore_schema(c):
+    from copy import deepcopy
+
+    state = F1State(CP["workspace_id"])
+    before = deepcopy(state.__dict__)
+    assert state.append(c["event"], c["log"]) == c["expect"]
+    assert state.append(c["event"], c["log"], replay=True) == c["replay"]
+    assert state.__dict__ == before
 
 
 @by_name(CP["workspace_n_offers"])
 def test_workspace_checkpoint_receiver(c):
     result, recorded = checkpoint_offer(
-        CP["workspace_n_held"], c["checkpoint"], c.get("restore"), c.get("applied", ())
+        CP["workspace_n_held"],
+        c["checkpoint"],
+        c.get("restore"),
+        c.get("applied", ()),
+        c.get("proofs"),
     )
     assert result == c["expect"]
     assert recorded == c.get("recorded")
@@ -1346,9 +1605,13 @@ class F1State:
         self.answers = {}
         self.owners = {}
         self.grants = {}
-        self.restore_start = None
-        self.restore_end = None
-        self.restore_open = False
+        self.effective = {}
+        self.device_keys = {}
+        self.tombstones = set()
+        self.gens = {}
+        self.approvals = {}
+        self.retired = {}
+        self.ticket_types = {}
         self.log_order = {}
         self.last_order = None
         self.repos = {}
@@ -1378,6 +1641,8 @@ class F1State:
             and not links_branches_ok(e["set"]["ticket.links"])
         ):
             return "chain.broken" if replay else "validation.event"
+        if t == "restore" and not restore_schema_ok(e, log):
+            return "chain.broken" if replay else "validation.event"
         # §5.11 steps 1–4, in order. At append, person signature is step 5.
         if e["seq"] != len(lines) + 1 or e["prev"] != (head(lines[-1]) if lines else None):
             return "chain.broken"
@@ -1402,10 +1667,6 @@ class F1State:
                 # §5.5 holds on replay too, per log: ws_seq never decreases along a ticket log, and at never
                 # goes back within one ws_seq. Only the cross-log merged order above is append-only.
                 or (log in self.log_order and (e["ws_seq"], e["at"]) < self.log_order[log])
-                or (
-                    self.restore_start is not None
-                    and self.restore_start <= e["ws_seq"] < self.restore_end
-                )
             ):
                 return "chain.bad_ws_seq"
         if e["id"] in self.seen.get(log, set()):
@@ -1430,6 +1691,9 @@ class F1State:
             "restore",
         }
         ticket_types = {
+            "ticket.updated",
+            "gate.approved",
+            "gate.invalidated",
             "ticket.created",
             "log.added",
             "question.asked",
@@ -1439,7 +1703,7 @@ class F1State:
         if t not in (workspace_types if log == "workspace" else ticket_types):
             return "event.unknown_type"
         if a["kind"] != "person" and not (
-            t == "device.revoked"
+            t in {"device.revoked", "gate.invalidated"}
             and a["kind"] == "host"
             or t in {"question.asked", "log.added"}
             and a["kind"] == "agent"
@@ -1455,7 +1719,7 @@ class F1State:
             member = self.members.get(a["id"])
             if member is None:
                 return "member.unknown"
-            cert = self.certs.get(a["device"])
+            cert = None if a["device"] in self.tombstones else self.certs.get(a["device"])
             recovery = t == "device.added" and a["device"] == e["device"]
             if cert is None and recovery:
                 active = any(
@@ -1518,6 +1782,8 @@ class F1State:
                     return "settings.invalid"
                 identities.add(ascii_fold(remote))
         if t == "member.added":
+            if "d_" + e["device_cert"]["o"]["device_id"] in self.tombstones:
+                return "device.exists"
             if role != "owner" and not (role == "maintainer" and e["role"] in {"member", "viewer"}):
                 return "role.denied"
             if R.person_id(S, R.unb64u(e["pk_pub"])).hex() != e["person"][
@@ -1527,6 +1793,8 @@ class F1State:
             ):
                 return "device.cert"
         if t == "device.added":
+            if e["device"] in self.tombstones:
+                return "device.exists"
             if e["device"] in self.revoked:
                 return "device.invalid"
             if e["device"] in self.certs and e["device"] not in self.removed:
@@ -1536,10 +1804,29 @@ class F1State:
             cert = self.certs.get(e["device"])
             if cert is None:
                 return "device.unknown"
-            pk = self.members["p_" + cert["o"]["person_id"]]["pk_pub"]
+            pk = self.device_keys[e["device"]]
             result = R.verify_revocation(S, e["revocation"], R.unb64u(pk), cert["o"])
             if "ok" not in result or e["reason"] != e["revocation"]["o"]["reason"]:
                 return "device.cert"
+            prior = self.effective.get(e["device"])
+            if prior and strength(e["revocation"]) <= strength(prior):
+                return "device.exists"
+        if t == "restore":
+            # Evidence for every entry precedes *any* effective-revocation comparison.
+            for entry in e["revocations"]:
+                if not revocation_evidence_ok(entry):
+                    return "device.cert"
+                device = "d_" + entry["revocation"]["o"]["device_id"]
+                if device in self.certs and (
+                    self.certs[device]["o"]["person_id"] != entry["revocation"]["o"]["person_id"]
+                    or self.device_keys[device] != entry["pk_pub"]
+                ):
+                    return "device.cert"
+            for entry in e["revocations"]:
+                rev = entry["revocation"]
+                prior = self.effective.get("d_" + rev["o"]["device_id"])
+                if prior and R.cj(prior) != R.cj(rev) and strength(rev) <= strength(prior):
+                    return "device.exists"
         if t == "device.removed":
             cert = self.certs.get(e["device"])
             if cert is None:
@@ -1548,6 +1835,10 @@ class F1State:
                 return "role.denied"
         if t == "restore" and (e["from_seq"] != len(lines) or e["head"] != head(lines[-1])):
             return "restore.bad_head"
+        if t == "gate.approved" and e["gate_gen"] != self.gens[log][GATES.index(e["gate"])]:
+            return "gate.stale"
+        if t == "gate.invalidated" and e["voided"] != self.retired.get((log, e["gate"]), []):
+            return "gate.invalidated_mismatch"
         if t == "question.asked":
             q = e["question"]
             qid = question_id(self.ws, log, q["id"])
@@ -1570,7 +1861,32 @@ class F1State:
                 return "answer.bad_option"
         return "ok"
 
+    def raise_gates(self, log, indexes):
+        # Default F1 policies in these scenarios: code is off, plan applies to feature/epic.
+        for i in indexes:
+            gate = GATES[i]
+            if gate == "code" or (
+                gate == "plan" and self.ticket_types[log] not in {"feature", "epic"}
+            ):
+                continue
+            self.gens[log][i] += 1
+            old = self.approvals[log].pop(gate, None)
+            if old:
+                self.retired.setdefault((log, gate), []).append(old["id"])
+
+    def apply_revocation(self, rev):
+        device = "d_" + rev["o"]["device_id"]
+        if self.effective.get(device) == rev:
+            return
+        self.revoked.add(device)
+        self.effective[device] = rev
+        self.revocations.append(rev)
+        if rev["o"]["reason"] == "compromised":
+            self.grants = {k: g for k, g in self.grants.items() if g["actor"]["device"] != device}
+
     def added_cert_result(self, e):
+        if e["device"] in self.tombstones:
+            return "device.exists"
         cert, a = e["cert"], e["actor"]
         o = cert["o"]
         if e["device"] != "d_" + o["device_id"] or a["id"] != "p_" + o["person_id"]:
@@ -1614,37 +1930,63 @@ class F1State:
         if "device_cert" in e:
             c = e["device_cert"]
             self.certs["d_" + c["o"]["device_id"]] = c
+            self.device_keys["d_" + c["o"]["device_id"]] = self.members["p_" + c["o"]["person_id"]][
+                "pk_pub"
+            ]
         if t == "device.added":
             self.certs[e["device"]] = e["cert"]
+            self.device_keys[e["device"]] = self.members[e["actor"]["id"]]["pk_pub"]
             self.removed.discard(e["device"])
         if t == "device.removed":
             self.removed.add(e["device"])
         if t == "device.revoked":
-            self.revoked.add(e["device"])
-            self.revocations.append(e["revocation"])
-            if log == "workspace" and self.restore_open and e["actor"]["kind"] == "host":
-                self.restore_end = e["seq"]
+            self.apply_revocation(e["revocation"])
         if t == "grant.issued":
             self.grants[e["grant"]] = e
         if t == "ticket.created":
             self.owners[log] = e["owner"]
+            self.ticket_types[log] = e["ticket_type"]
+            self.gens[log] = [0, 0, 0, 0]
+            self.approvals[log] = {}
+        if t == "ticket.updated":
+            paths = set(e["set"]) | {"body." + k for k in e.get("sections", {})}
+            requirements = {"ticket.type", "ticket.size", "ticket.acceptance"} | {
+                "body." + k for k in G_SECTIONS["requirements"]
+            }
+            bounds = [
+                requirements,
+                requirements | {"ticket.tasks", "body.plan", "body.decisions"},
+                {
+                    "ticket.type",
+                    "ticket.size",
+                    "ticket.acceptance",
+                    "ticket.links",
+                    "body.verification",
+                    "body.findings",
+                },
+                {"ticket.type", "ticket.size", "ticket.acceptance", "ticket.links"},
+            ]
+            changed = [i for i, bound in enumerate(bounds) if paths & bound]
+            if changed:
+                self.raise_gates(log, range(min(changed), 4))
+        if t == "gate.approved":
+            self.approvals[log][e["gate"]] = e
+            self.raise_gates(log, range(GATES.index(e["gate"]) + 1, 4))
         if t == "question.asked":
             self.questions[log, e["question"]["id"]] = e
         if t == "question.answered":
             self.answers[log, e["question"]] = e["id"]
-        # The re-append window after a workspace restore holds only host device.revoked lines; any
-        # other workspace event closes it, so a much later host revocation can't widen it.
-        if (
-            log == "workspace"
-            and t != "restore"
-            and not (t == "device.revoked" and e["actor"]["kind"] == "host")
-        ):
-            self.restore_open = False
         if t == "restore":
             self.seen[log].update(e["abandoned_decisions"])
-            if log == "workspace":
-                self.restore_start = self.restore_end = e["seq"]
-                self.restore_open = True
+            for uid in self.gens if log == "workspace" else [log]:
+                self.raise_gates(uid, range(4))
+            for entry in e["revocations"]:
+                device = "d_" + entry["revocation"]["o"]["device_id"]
+                if device not in self.certs:
+                    self.tombstones.add(device)
+                    self.certs[device] = entry["device_cert"]
+                    self.device_keys[device] = entry["pk_pub"]
+                self.apply_revocation(entry["revocation"])
         if log != "workspace":
             self.last_order = (e["ws_seq"], e["at"], log, e["seq"])
             self.log_order[log] = (e["ws_seq"], e["at"])
@@ -1680,12 +2022,26 @@ def check_scenario_step(state, step, index, replay=False):
                 )
                 == len(lines) + 1
             )
-    before = deepcopy(state.__dict__) if step.get("schema_refused") else None
+    before = deepcopy(state.__dict__)
     result = state.append(e, log, replay=replay)
     assert result == step["expect"], (index, step.get("note"))
-    if step.get("schema_refused"):
-        assert result != "ok"
+    if result != "ok":
         assert state.__dict__ == before
+    for uid, expected in step.get("after", {}).get("tickets", {}).items():
+        assert state.gens[uid] == expected["gens"]
+        if "approved" in expected:
+            assert list(state.approvals[uid]) == expected["approved"]
+        if "counting" in expected:
+            assert {g: [e["actor"]["id"]] for g, e in state.approvals[uid].items()} == expected[
+                "counting"
+            ]
+    if "workspace" in step.get("after", {}):
+        assert sorted(state.revoked) == step["after"]["workspace"]["devices_revoked"]
+    if "raised" in step:
+        for uid in state.gens:
+            assert [
+                g for i, g in enumerate(GATES) if state.gens[uid][i] > before["gens"][uid][i]
+            ] == step["raised"]
 
 
 @by_name(SCENARIOS)
@@ -1790,28 +2146,135 @@ def test_checkpoint_lower_n_extra_uid_diverges(monkeypatch):
     assert checkpoint_offer(held, offered) == ("chain.diverged", None)
 
 
-def test_restore_window_replayed_workspace_first():
-    """§5.10: the re-append window closes at the first other workspace event.
-
-    The shared scenario appends ticket steps before the late host revocation, so a window that never
-    closed would not be noticed there. Replaying the whole workspace log first, then the ticket steps,
-    must still accept every ticket step.
-    """
-    c = next(
-        s
-        for s in load("restore")["scenarios"]
-        if s["name"] == "restore_window_ends_before_a_later_host_revocation"
-    )
-    state = F1State(c["workspace_id"])
-    ordered = [s for s in c["steps"] if s["log"] == "workspace"] + [
-        s for s in c["steps"] if s["log"] != "workspace"
-    ]
-    for i, step in enumerate(ordered):
-        check_scenario_step(state, step, i, replay=True)
-
-
 def test_agent_event_with_person_fields_refused_at_append():
     """§5.11 step 0 / §5.2: an agent or host event carrying sig, auth or roster_v is refused before any other check."""
     state = F1State("ws")
     e = {"type": "log.added", "actor": {"kind": "agent"}, "seq": 99, "prev": None, "sig": "x"}
     assert state.judge(e, "01TICKET") == "validation.field_set"
+
+
+def checkpoint_at(clock, last_at):
+    """§5.10: checkpoint writers never move their timestamp backwards."""
+    return max(clock, last_at)
+
+
+def restore_at(clock, last_at, held):
+    baseline = held["o"]["at"] if held else last_at
+    if milliseconds(baseline) > milliseconds(clock) + 300000:
+        raise ValueError("held checkpoint too far in the future")
+    return max(clock, last_at, baseline)
+
+
+def test_checkpoint_and_restore_clock_rules():
+    held = CP["workspace_n_held"]
+    at = held["o"]["at"]
+    assert checkpoint_at("2026-10-10T10:00:00Z", at) == at
+    assert checkpoint_at("2026-10-10T11:00:00Z", at) == "2026-10-10T11:00:00Z"
+    assert restore_at(at, "2026-10-10T10:00:00Z", held) == at
+    from datetime import datetime, timedelta
+
+    clock = datetime.fromisoformat(at) - timedelta(seconds=300)
+    boundary = clock.strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert restore_at(boundary, boundary, held) == at
+    with pytest.raises(ValueError):
+        restore_at((clock - timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ"), boundary, held)
+
+
+@pytest.mark.parametrize("acc,h", [("sha256:" + "00" * 31, ZERO_ACC), (ZERO_ACC, "00" * 32)])
+def test_accumulator_requires_two_decoded_32_byte_inputs(acc, h):
+    with pytest.raises(ValueError):
+        log_acc(acc, h)
+
+
+@pytest.mark.parametrize(
+    "kind,log", [("workspace_checkpoint", "workspace_log"), ("ticket_checkpoint", "ticket_log")]
+)
+def test_checkpoint_accumulators_from_full_logs(kind, log):
+    o = CP[kind]["signed"]["o"]
+    entry = o["workspace_log"] if kind == "workspace_checkpoint" else o
+    assert fold(ZERO_ACC, CP[log]["heads"]) == entry["acc"]
+
+
+class RestoreCommit:
+    """Small atomic-publication model for §5.10's durable evidence/source contract.
+
+    A single durable snapshot represents the transaction boundary. This verifies semantics,
+    not any production store's filesystem or crash-recovery implementation.
+    """
+
+    def __init__(self, held, evidence):
+        self.durable = {"held": held, "evidence": evidence, "transitions": {}}
+
+    def commit(self, event, target, fault=None):
+        from copy import deepcopy
+
+        old = self.durable
+        prior = old["transitions"].get(event["id"])
+        if prior:
+            return "prior_result" if prior == (event, target) else "chain.diverged"
+        expected_source = checkpoint_ref(old["held"]) if old["held"] else None
+        if event["source"] != expected_source:
+            return "chain.diverged"
+        carried = {x["revocation"]["o"]["device_id"]: x for x in event["revocations"]}
+        for device, entry in old["evidence"].items():
+            if device not in carried or strength(carried[device]["revocation"]) < strength(
+                entry["revocation"]
+            ):
+                return "validation.restore"
+        if not restore_schema_ok(event, "workspace") or not all(
+            revocation_evidence_ok(x) for x in carried.values()
+        ):
+            return "validation.restore"
+        staged = deepcopy(old)
+        staged["evidence"].update(carried)
+        staged["transitions"][event["id"]] = (event, target)
+        staged["held"] = target
+        if fault == "before_commit":
+            return "no_accepted_restore"
+        self.durable = staged
+        return "revocation_and_transition_retained"
+
+
+@by_name(load("restore")["host_cases"])
+def test_restore_atomic_publication(c):
+    from copy import deepcopy
+
+    scenario = load("restore")["scenarios"][0]
+    event = deepcopy(next(x["event"] for x in scenario["steps"] if x["event"]["type"] == "restore"))
+    evidence = {x["revocation"]["o"]["device_id"]: x for x in event["revocations"]}
+    store = RestoreCommit(None, {} if c.get("learned") else evidence)
+    before = deepcopy(store.durable)
+    target = CP["workspace_n_held"]
+    if "missing" in c:
+        event["revocations"] = []
+    if c["name"] == "stale_source":
+        store.durable["held"] = target
+        before = deepcopy(store.durable)
+    if c["name"] == "exact_restore_retry":
+        store.commit(event, target)
+        before = deepcopy(store.durable)
+    result = store.commit(event, target, c.get("fault"))
+    assert result == c["expect"]
+    if result == "revocation_and_transition_retained":
+        assert store.durable["evidence"] == evidence
+        assert store.durable["transitions"][event["id"]] == (event, target)
+        assert store.durable["held"] == target
+    else:
+        assert store.durable == before
+
+
+def test_restore_line_cap_includes_lf():
+    from copy import deepcopy
+
+    e = deepcopy(CP["transition_cases"][0]["restore"]["event"])
+    e["abandoned_decisions"] = []
+    e["note"] = ""
+    remaining = 524288 - len(cjt(e)) - 1
+    # Each additional 26-byte id takes 29 bytes (quotes and comma), except the first.
+    count = (remaining + 1) // 29
+    e["abandoned_decisions"] = [f"{i:026d}" for i in range(count)]
+    e["note"] = "x" * (524288 - len(cjt(e)) - 1)
+    assert len(cjt(e)) + 1 == 524288
+    assert restore_schema_ok(e, "workspace")
+    e["note"] += "x"
+    assert not restore_schema_ok(e, "workspace")
