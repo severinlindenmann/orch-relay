@@ -39,6 +39,24 @@
    "name": "self_revocation_refused_before_append",
    "note": "the host refuses a restore listing its own signer before the append; replay of an existing such line keeps pre-event authorization (scenarios owner_authorized_before_self_revocation*)",
    "self_revocation": true
+  },
+  {
+   "expect": "device.invalid",
+   "name": "restore_signer_revoked_in_durable_evidence_lost",
+   "note": "the signer's revocation sits only in the given-up part: the kept chain authorizes the restore, the host's durable revocation evidence refuses it before the append, whatever the reason (F1 5.10 host rule, C3); a host-side append check, so it is not a model scenario",
+   "signer_revoked": "lost"
+  },
+  {
+   "expect": "device.invalid",
+   "name": "restore_signer_revoked_in_durable_evidence_retired",
+   "note": "the signer's revocation sits only in the given-up part: the kept chain authorizes the restore, the host's durable revocation evidence refuses it before the append, whatever the reason (F1 5.10 host rule, C3); a host-side append check, so it is not a model scenario",
+   "signer_revoked": "retired"
+  },
+  {
+   "expect": "device.invalid",
+   "name": "restore_signer_revoked_in_durable_evidence_compromised",
+   "note": "the signer's revocation sits only in the given-up part: the kept chain authorizes the restore, the host's durable revocation evidence refuses it before the append, whatever the reason (F1 5.10 host rule, C3); a host-side append check, so it is not a model scenario",
+   "signer_revoked": "compromised"
   }
  ],
  "pins": "workspace restore and revocations; replay_only steps replay successfully but admit refuses chain.bad_ws_seq; schema_refused marks steps refused by schema validation before the model",
