@@ -234,6 +234,7 @@ class HostStub:
                 "epoch": 1,
                 "list_seq": 1,
                 "issued_ms": NOW,
+                "wk_commit": P.b64u(R.wk_commit(WS_BYTES, 1, WK)),
                 "persons": [],
                 "members": [{"device_id": DEVICE, "person_id": PERSON, "scopes": ["look"]}],
             },

@@ -145,10 +145,18 @@ def prepare_fixture(d, name, case):
                 }
             )
             con.execute("UPDATE devices SET cert=? WHERE device_id=?", (P.cj(cert), DEVICE))
-        elif scenario in {"stale_epoch", "rotation_required", "stale_list"}:
+        elif scenario in {
+            "stale_epoch",
+            "bad_epoch",
+            "rotation_required",
+            "stale_list",
+            "wk_commit_changed",
+        }:
+            # bad_epoch: the held epoch 2 is above the fixture's epoch 1 (epochs never fall).
+            # wk_commit_changed: the held epoch-1 list keeps the publication's own wk_commit.
             o = copy.deepcopy(BODY["member_list"]["o"])
             o["list_seq"] = 1
-            o["epoch"] = 2 if scenario == "stale_epoch" else 1
+            o["epoch"] = 2 if scenario in {"stale_epoch", "bad_epoch"} else 1
             con.execute(
                 "INSERT INTO member_lists VALUES (?,?,?,?)",
                 (WS, o["list_seq"], o["epoch"], P.cj(signed(o, "wsk_a.sig"))),
