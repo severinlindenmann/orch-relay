@@ -8,10 +8,10 @@ from pathlib import Path
 DB_NAME = "relay.sqlite3"
 
 
-def connect(path: Path) -> sqlite3.Connection:
+def connect(path: Path, **options) -> sqlite3.Connection:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(path, timeout=5)
+    con = sqlite3.connect(path, timeout=5, **options)
     con.execute("PRAGMA busy_timeout=5000")
     _set_wal(con)
     con.execute("PRAGMA synchronous=FULL")

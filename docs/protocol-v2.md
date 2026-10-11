@@ -2135,6 +2135,10 @@ private half; the publicly derived reference key is only a test artifact.
 - **Per workspace:** ≤ 1 024 queued requests, ≤ 16 MiB queued requests, ≤ 16 MiB undelivered responses. (G0a review 10) Each device may consume at most
   2 MiB of that response budget across its sessions; excess is 429 `quota_exceeded`, without eviction.
 - **Global:** ≤ 256 MiB of queued bodies and ≤ 4 096 concurrent long polls (503 `overloaded`).
+- **Anonymous pair long polls (G3 review 2):** ≤ 4 concurrent per canonical client address (429
+  `quota_exceeded`) and ≤ 512 in total, a separate share of the 4 096 (503 `overloaded`). Waiting
+  polls hold no lock or transaction: commits wake them, a read-only check re-authorizes at least
+  every second, and only a ready check re-runs the full fenced transaction.
 - **Client addresses.**
   - The peer address is used, or Caddy's `X-Forwarded-For` only when the peer is the configured proxy.
   - Addresses are canonicalized: IPv4-mapped IPv6 becomes IPv4, and IPv6 is grouped by /64.

@@ -30,6 +30,7 @@ def create_app(data_dir: Path | str | None = None, instance: str | None = None) 
             maintenance.cancel()
             with suppress(asyncio.CancelledError):
                 await maintenance
+            app.state.bridge.close()
 
     app = FastAPI(title="orch-relay", version=__version__, lifespan=lifespan)
     app.state.data_dir = data

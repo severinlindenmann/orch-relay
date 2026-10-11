@@ -5,8 +5,8 @@ import math
 import secrets
 import sqlite3
 import struct
+import threading
 import time
-from contextlib import closing
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -99,15 +99,71 @@ def notices(con, ws):
     }
 
 
+POLL_CEILING = 4096  # all concurrent long polls (protocol §19, P3-D17)
+PAIR_POLL_CEILING = 512  # anonymous pair polls, a separate share of POLL_CEILING
+PAIR_POLLS_PER_ADDRESS = 4  # per canonical client address
+DEVICE_POLLS = 6
+POLL_TICK = 1.0  # slow re-authorization tick for waiting polls, in seconds
+
+
 class Bridge:
+    """Long polls wait on in-memory wakeups, never on the directory lock.
+
+    The first step of a poll is the full write transaction. While waiting, a poll is
+    woken by commits that may make it ready (see wake()) or by the slow tick, and then
+    runs probe(): a read-only snapshot without collect() that re-checks authorization,
+    fencing and whether anything is ready. Only a ready probe re-runs the full
+    transaction, which re-checks everything again before handing data over.
+    """
+
     def __init__(self, directory):
         self.d = directory
         self.polls = {}
+        self.waiters = {}  # wake key -> set of asyncio.Event; touched on the event loop only
+        self.local = threading.local()
+        self.connections = []
+        self.connections_lock = threading.Lock()
+
+    def connection(self, purpose):
+        """A per-thread connection reused across transactions ("read" is query-only)."""
+        cache = self.local.__dict__.setdefault("connections", {})
+        con = cache.get(purpose)
+        if con is None:
+            con = db.connect(self.d.path, check_same_thread=False)
+            con.row_factory = sqlite3.Row
+            if purpose == "read":
+                con.execute("PRAGMA query_only=ON")
+            with self.connections_lock:
+                self.connections.append(con)
+            cache[purpose] = con
+        if con.in_transaction:
+            con.rollback()
+        return con
+
+    def close(self):
+        with self.connections_lock:
+            for con in self.connections:
+                con.close()
+            self.connections.clear()
+        self.local = threading.local()
+
+    def wake(self, *keys):
+        for key in keys:
+            for event in self.waiters.get(key, ()):
+                event.set()
+
+    def wake_all(self):
+        """Revocations, membership and other directory commits may end any poll."""
+        for events in self.waiters.values():
+            for event in events:
+                event.set()
 
     def sweep(self):
-        with self.d.lock, closing(db.connect(self.d.path)) as con, con:
+        with self.d.lock:
+            con = self.connection("write")
             con.execute("BEGIN IMMEDIATE")
-            collect(con, self.d.clock())
+            with con:
+                collect(con, self.d.clock())
 
     async def maintenance(self):
         while True:
@@ -368,8 +424,8 @@ class Bridge:
 
     def transaction(self, route, params, method, raw, query, headers, peer, token, first):
         d = self.d
-        with d.lock, closing(db.connect(d.path)) as con:
-            con.row_factory = sqlite3.Row
+        with d.lock:
+            con = self.connection("write")
             con.execute("BEGIN IMMEDIATE")
             with con:
                 now = d.clock()
@@ -453,6 +509,108 @@ class Bridge:
                     con.execute("UPDATE bridge_msgs SET delivered=1 WHERE n=?", (row["n"],))
                 return {"chunks": chunks}, bool(chunks)
 
+    def ready(self, con, route, params, query, headers, token, now):
+        """Read-only mirror of a waiting poll step: may the full transaction hand over data?
+
+        Expired rows are filtered rather than collected; the maintenance sweep deletes them.
+        """
+        d = self.d
+        ws, rid, offer = params.get("ws"), params.get("rid"), params.get("offer")
+        after = integer(query["after"]) if "after" in query else -1
+        if route == "pair":
+            if not con.execute("SELECT 1 FROM workspaces WHERE workspace_id=?", (ws,)).fetchone():
+                return True
+            return bool(
+                con.execute(
+                    "SELECT 1 FROM bridge_msgs WHERE workspace_id=? AND rid=? AND direction=2 "
+                    "AND idx>? AND offer=? AND expires_ms>? LIMIT 1",
+                    (ws, rid, after, offer, now),
+                ).fetchone()
+            )
+        session = d.authenticate(con, headers, now)
+        if route == "cert_requests":
+            if session["kind"] != "device" or session["person_id"] != params["person"]:
+                return True
+            return bool(
+                con.execute(
+                    "SELECT 1 FROM cert_requests WHERE person_id=? AND primary_device_id=? "
+                    "AND state='open' AND expires_ms>? LIMIT 1",
+                    (params["person"], session["subject_id"], now),
+                ).fetchone()
+            )
+        d.workspace_access(con, session, ws, write=route == "host_poll")
+        if route == "bridge":
+            if session["kind"] != "device":
+                return True
+            return bool(
+                con.execute(
+                    "SELECT 1 FROM bridge_msgs WHERE workspace_id=? AND rid=? AND direction=2 "
+                    "AND idx>? AND offer IS NULL AND device_id=? AND expires_ms>? LIMIT 1",
+                    (ws, rid, after, session["subject_id"], now),
+                ).fetchone()
+            )
+        d.fence(con, headers, ws, now)
+        holder = con.execute("SELECT * FROM holders WHERE workspace_id=?", (ws,)).fetchone()
+        if holder["poll_token"] != token:
+            return True  # replaced: the full step answers empty
+        position = max(holder["cursor"], integer(query.get("after", "0")))
+        if "next" in query:
+            position = max(position, P.parse_json(P.unb64u(query["next"]))["n"])
+        for row in con.execute(
+            "SELECT device_id,offer FROM bridge_msgs WHERE workspace_id=? AND direction=1 "
+            "AND n>? AND expires_ms>? ORDER BY n",
+            (ws, position, now),
+        ):
+            if row["offer"] is not None:
+                return True
+            try:
+                self.eligible(con, ws, row["device_id"], now)
+                return True
+            except Refusal:
+                continue
+        return any(notices(con, ws).values())
+
+    def probe(self, route, params, query, headers, token):
+        con = self.connection("read")
+        con.execute("BEGIN")
+        try:
+            return self.ready(con, route, params, query, headers, token, self.d.clock())
+        except Refusal:
+            return True  # the full transaction raises the authoritative refusal
+        finally:
+            con.rollback()
+
+    def admission_session(self, headers):
+        con = self.connection("read")
+        con.execute("BEGIN")
+        try:
+            return self.d.authenticate(con, headers, self.d.clock())
+        finally:
+            con.rollback()
+
+    def admit(self, key):
+        """Concurrency caps; callers run on the event loop, so no lock is needed."""
+        if sum(self.polls.values()) >= POLL_CEILING:
+            refuse("overloaded", 503, 1)
+        if key[0] == "pair":
+            if sum(v for k, v in self.polls.items() if k[0] == "pair") >= PAIR_POLL_CEILING:
+                refuse("overloaded", 503, 1)
+            if self.polls.get(key, 0) >= PAIR_POLLS_PER_ADDRESS:
+                fail("quota_exceeded")
+        if key[0] == "device" and self.polls.get(key, 0) >= DEVICE_POLLS:
+            fail("quota_exceeded")
+        self.polls[key] = self.polls.get(key, 0) + 1
+
+    def committed(self, route, params, method):
+        """Wake waiting polls a successful transaction may have made ready."""
+        ws, rid = params.get("ws"), params.get("rid")
+        if route in ("bridge", "pair") and method == "POST":
+            self.wake(("ws", ws), ("rid", ws, rid))
+        elif route in ("hold", "host_poll"):
+            self.wake(("ws", ws))  # new generation fences; a new poll replaces the old one
+        elif route == "cert_requests" and method == "POST":
+            self.wake(("person", params["person"]))
+
     async def handle(self, request, route):
         binary = route in ("bridge", "pair") and request.method == "POST"
         cap = (
@@ -461,7 +619,8 @@ class Bridge:
             else (65536 if route == "cert_requests" else 16384)
         )
         key = None
-        admitted = False
+        event = None
+        wake_key = None
         try:
             if len(request.query_params.multi_items()) != len(request.query_params):
                 fail("malformed")
@@ -492,39 +651,47 @@ class Bridge:
                 0
             ].strip() != ("application/octet-stream" if binary else "application/json"):
                 fail("malformed")
+            params, headers = dict(request.path_params), dict(request.headers)
+            peer = request.client.host if request.client else "unknown"
             if wait:
-                with self.d.lock, closing(db.connect(self.d.path)) as con:
-                    con.row_factory = sqlite3.Row
-                    if route != "pair":
-                        session = self.d.authenticate(con, request.headers, self.d.clock())
-                        key = (session["kind"], session["subject_id"])
-                    else:
-                        key = ("pair", request.client.host if request.client else "unknown")
-                    if sum(self.polls.values()) >= 4096:
-                        refuse("overloaded", 503, 1)
-                    if key[0] == "device" and self.polls.get(key, 0) >= 6:
-                        fail("quota_exceeded")
-                    self.polls[key] = self.polls.get(key, 0) + 1
-                    admitted = True
-            token, first, deadline = secrets.token_hex(16), True, time.monotonic() + wait
-            while True:
-                result, ready = await run_in_threadpool(
-                    self.transaction,
-                    route,
-                    dict(request.path_params),
-                    request.method,
-                    bytes(raw),
-                    query,
-                    dict(request.headers),
-                    request.client.host if request.client else "unknown",
-                    token,
-                    first,
+                if route == "pair":
+                    address = canonical_address(
+                        peer, headers.get("x-forwarded-for"), self.d.trusted_proxy
+                    )
+                    candidate = ("pair", address)
+                else:
+                    session = await run_in_threadpool(self.admission_session, headers)
+                    candidate = (session["kind"], session["subject_id"])
+                self.admit(candidate)
+                key = candidate
+                # Register before the first step so a commit racing it still wakes us.
+                wake_key = (
+                    ("ws", params["ws"])
+                    if route == "host_poll"
+                    else ("person", params["person"])
+                    if route == "cert_requests"
+                    else ("rid", params["ws"], params["rid"])
                 )
-                if ready or not wait or time.monotonic() >= deadline:
-                    return JSONResponse(result, status_code=202 if binary else 200)
-                first = False
-                self.d.assert_can_wait()
-                await asyncio.sleep(min(0.05, max(0, deadline - time.monotonic())))
+                event = asyncio.Event()
+                self.waiters.setdefault(wake_key, set()).add(event)
+            token, deadline = secrets.token_hex(16), time.monotonic() + wait
+            step = (route, params, request.method, bytes(raw), query, headers, peer, token)
+            result, ready = await run_in_threadpool(self.transaction, *step, True)
+            self.committed(route, params, request.method)
+            while wait and not ready:
+                remaining = deadline - time.monotonic()
+                if remaining > 0:
+                    self.d.assert_can_wait()
+                    try:
+                        await asyncio.wait_for(event.wait(), min(POLL_TICK, remaining))
+                    except TimeoutError:
+                        pass
+                    event.clear()
+                if await run_in_threadpool(self.probe, route, params, query, headers, token):
+                    result, ready = await run_in_threadpool(self.transaction, *step, False)
+                if remaining <= 0:
+                    break
+            return JSONResponse(result, status_code=202 if binary else 200)
         except Refusal as error:
             return JSONResponse(
                 {"error": error.code, **getattr(error, "details", {})},
@@ -536,7 +703,12 @@ class Bridge:
         except (ValueError, TypeError, KeyError, AttributeError):
             return JSONResponse({"error": "malformed"}, status_code=400)
         finally:
-            if admitted:
+            if event is not None:
+                events = self.waiters[wake_key]
+                events.discard(event)
+                if not events:
+                    del self.waiters[wake_key]
+            if key is not None:
                 self.polls[key] -= 1
                 if not self.polls[key]:
                     del self.polls[key]
@@ -545,6 +717,7 @@ class Bridge:
 def install(app):
     bridge = Bridge(app.state.directory)
     app.state.bridge = bridge
+    app.state.directory.changed = bridge.wake_all
 
     def endpoint(route):
         async def handle(request: Request):

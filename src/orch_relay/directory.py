@@ -183,6 +183,7 @@ class Directory:
         self.window_expiry = []
         self.windows = {}  # (purpose, identity, duration) -> (window end, count)
         self.clock = lambda: time.time_ns() // 1_000_000
+        self.changed = None  # event-loop callback after committed writes (wakes long polls)
         self.random = secrets.token_bytes
         self.dummy_pub = (
             ec.generate_private_key(ec.SECP256R1())
@@ -759,7 +760,7 @@ def install(app, data):
                 raw.extend(chunk)
             if len(request.query_params.multi_items()) != len(request.query_params):
                 return JSONResponse({"error": "malformed"}, status_code=400)
-            return await run_in_threadpool(
+            response = await run_in_threadpool(
                 directory.handle,
                 route,
                 request.path_params.get("ident"),
@@ -769,6 +770,15 @@ def install(app, data):
                 dict(request.headers),
                 request.client.host if request.client else "unknown",
             )
+            # Revocations, membership, sessions and certificates can end or ready a long poll.
+            if (
+                directory.changed
+                and response.status_code == 200
+                and request.method != "GET"
+                and route not in ("challenge", "login", "accounts")
+            ):
+                directory.changed()
+            return response
 
         return handle
 
