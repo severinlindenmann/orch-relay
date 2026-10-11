@@ -1327,6 +1327,52 @@ def revocation_evidence_ok(entry):
         return False
 
 
+def restore_envelope_ok(e, log):
+    """F1 §§5.1–5.3 / P3 R0, before signature or authorization checks."""
+    from datetime import datetime
+
+    ulid = r"[0-7][0-9A-HJKMNP-TV-Z]{25}"
+    actor = e["actor"]
+    if not (
+        type(e["v"]) is int
+        and e["v"] == 2
+        and type(e["hash_v"]) is int
+        and e["hash_v"] == 1
+        and e["type"] == "restore"
+        and re.fullmatch(ulid, e["id"])
+        and type(e["seq"]) is int
+        and e["seq"] >= 1
+        and type(e["roster_v"]) is int
+        and e["roster_v"] >= 0
+        and (log == "workspace" or type(e["ws_seq"]) is int and e["ws_seq"] >= 1)
+        and isinstance(actor, dict)
+        and set(actor) == {"kind", "id", "device"}
+        and actor["kind"] == "person"
+        and re.fullmatch(r"p_[0-9a-f]{32}", actor["id"])
+        and re.fullmatch(r"d_[0-9a-f]{32}", actor["device"])
+        and e["auth"]
+        in {
+            "passphrase",
+            "secure-enclave",
+            "secure-enclave-unlocked",
+            "webauthn",
+            "tpm",
+            "windows-hello",
+        }
+        and all(
+            e[k] is None if e["seq"] == 1 else HASH_RE.fullmatch(e[k]) for k in ("based_on", "prev")
+        )
+        and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", e["at"])
+        and isinstance(e["abandoned_decisions"], list)
+        and all(re.fullmatch(ulid, ident) for ident in e["abandoned_decisions"])
+    ):
+        return False
+    datetime.strptime(e["at"], "%Y-%m-%dT%H:%M:%SZ")
+    for key in ("sig", "host_sig"):
+        R.unb64u(e[key], 64)
+    return True
+
+
 def restore_schema_ok(e, log):
     try:
         entries, source = e["revocations"], e["source"]
@@ -1359,6 +1405,7 @@ def restore_schema_ok(e, log):
         abandoned = e["abandoned"]
         return (
             required <= set(e) <= required | {"note"}
+            and restore_envelope_ok(e, log)
             and (
                 abandoned is None
                 or (
@@ -2312,7 +2359,7 @@ def resign_transition(c):
     target = c["offered"]
     entry = target["o"]["workspace_log"] if log == "workspace" else target["o"]["tickets"][log]
     c["proofs"][log] = [head(e)]
-    entry.update(seq=e["seq"], head=head(e), acc=log_acc(r["acc_from"], head(e)))
+    entry.update(head=head(e), acc=log_acc(r["acc_from"], head(e)))
     target["sig"] = R.b64u(
         S.sign(published_f1_key("wsk"), L["sig_checkpoint"].encode() + cjt(target["o"]))
     )
@@ -2385,3 +2432,76 @@ def test_restore_bundle_revokes_its_signer(reason):
     resign_transition(c)
     # Empty local knowledge: historical bundle validity itself must reject the signer.
     assert offer_local_transition(c) == ("chain.diverged", None)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("v", 3),
+        ("v", True),
+        ("hash_v", 2),
+        ("hash_v", True),
+        ("type", "log.added"),
+        ("id", "not-a-ulid"),
+        ("seq", True),
+        ("seq", 0),
+        ("roster_v", -1),
+        ("roster_v", True),
+        ("roster_v", "1"),
+        ("auth", "unknown"),
+        ("auth", []),
+        ("based_on", None),
+        ("based_on", "not-a-hash"),
+        ("prev", None),
+        ("at", "2026-10-10"),
+        ("at", "2026-02-30T10:00:40Z"),
+        ("actor", None),
+        ("actor", {"kind": "agent"}),
+        ("abandoned_decisions", "01J9ZK00000000000000000002"),
+        ("abandoned_decisions", ["not-a-ulid"]),
+        ("abandoned_decisions", [1]),
+        ("from_seq", True),
+        ("from_seq", 0),
+        ("head", "bad"),
+        ("source", {"n": True, "hash": ZERO_ACC}),
+        ("abandoned", {"seq": True, "head": ZERO_ACC}),
+        ("reason", "unknown"),
+        ("revocations", {}),
+    ],
+)
+def test_restore_signed_schema_refusal(field, value):
+    c = local_transition()
+    c["restore"]["event"][field] = value
+    resign_transition(c)
+    assert not restore_schema_ok(c["restore"]["event"], "workspace")
+    assert offer_local_transition(c) == ("chain.diverged", None)
+
+
+@pytest.mark.parametrize(
+    "field,value", [("extra", "x"), ("kind", "host"), ("id", "p_bad"), ("device", "d_bad")]
+)
+def test_restore_signed_actor_schema(field, value):
+    c = local_transition()
+    c["restore"]["event"]["actor"][field] = value
+    resign_transition(c)
+    assert not restore_schema_ok(c["restore"]["event"], "workspace")
+    assert offer_local_transition(c) == ("chain.diverged", None)
+
+
+@pytest.mark.parametrize("value", [0, True, "1", None])
+def test_restore_ticket_ws_seq_schema(value):
+    c = local_transition()
+    e = c["restore"]["event"]
+    e["ws_seq"] = value
+    assert not restore_schema_ok(e, "ticket")
+    e["ws_seq"] = 1
+    assert restore_schema_ok(e, "ticket")
+    assert not restore_schema_ok(e, "workspace")
+
+
+@pytest.mark.parametrize("field", ["sig", "host_sig"])
+@pytest.mark.parametrize("value", [None, "bad", "=" * 86])
+def test_restore_signature_encoding_schema(field, value):
+    c = local_transition()
+    c["restore"]["event"][field] = value
+    assert not restore_schema_ok(c["restore"]["event"], "workspace")
