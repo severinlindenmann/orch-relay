@@ -1260,6 +1260,7 @@ class F1State:
         self.restore_start = None
         self.restore_end = None
         self.restore_open = False
+        self.log_order = {}
         self.last_order = None
         self.repos = {}
 
@@ -1298,6 +1299,9 @@ class F1State:
                 e["ws_seq"] > len(self.logs.get("workspace", []))
                 or (not replay and e["ws_seq"] < len(self.logs.get("workspace", [])))
                 or (not replay and self.last_order and current < self.last_order)
+                # §5.5 holds on replay too, per log: ws_seq never decreases along a ticket log, and at never
+                # goes back within one ws_seq. Only the cross-log merged order above is append-only.
+                or (log in self.log_order and (e["ws_seq"], e["at"]) < self.log_order[log])
                 or (
                     self.restore_start is not None
                     and self.restore_start <= e["ws_seq"] < self.restore_end
@@ -1543,6 +1547,7 @@ class F1State:
                 self.restore_open = True
         if log != "workspace":
             self.last_order = (e["ws_seq"], e["at"], log, e["seq"])
+            self.log_order[log] = (e["ws_seq"], e["at"])
         return result
 
 
