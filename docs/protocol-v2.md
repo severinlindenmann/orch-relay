@@ -5,7 +5,7 @@ exchange, and what each of them does with an input that is not right:
 
 - **orch-core**: the workspace host (`orch serve` / `orch host`);
 - **orch-relay**: directory, relay (bridge v2), drop and push;
-- **orch mobile**: the PWA, and every other browser device.
+- **orch-mobile**: the native app (D45/D46, P3 design §7).
 
 orch-publish implements §12.1.
 
@@ -50,8 +50,8 @@ What changes:
 - **Keys.** A random workspace key `WK_e` per epoch, sealed to each member device (spec D2). `MK` no
   longer exists. Every use of `WK_e` goes through HKDF with its own label (§3). `K_bridge` replaces
   `K_ws`.
-- **Suites.** Ed25519 + X25519 by default. P-256 is a separate suite id, used per deployment and never
-  negotiated (§1).
+- **Suites (D46, P3 design §7).** Suite 2 (P-256) is the only deployment suite. Suite 1 remains
+  test-only; suites are never negotiated (§1).
 - **Header.** The magic is now `"ORB2"`, the version 2. The `key_version` byte becomes `suite`, and a 4-byte
   `epoch` is added before the salt: 108 bytes in all (§8.1). v1 envelopes are dropped.
 - **Identities.**
@@ -84,7 +84,11 @@ What changes:
 
 ### 1.1 The two suites
 
-| | Suite 1 `ed25519-x25519` (primary, spec D22) | Suite 2 `p256` (fallback) |
+**D45/D46 (P3 design §7).** Deployments MUST use suite 2. Suite 1 and its vectors are test-only.
+Native devices use platform cryptography; references below to browser/WebCrypto behavior describe
+the historical suite-1 client, not a deployment requirement.
+
+| | Suite 1 `ed25519-x25519` (test-only, D46) | Suite 2 `p256` (deployment, D46) |
 |---|---|---|
 | Signature | Ed25519 (RFC 8032, pure), 64 bytes | ECDSA P-256 with SHA-256, raw `r \|\| s`, 64 bytes (IEEE P1363) |
 | Signing public key | 32 bytes | 65 bytes, uncompressed point |
@@ -274,6 +278,7 @@ Every derivation, signature, AEAD associated data, hash and MAC has its own labe
 | `sig_sk_grant` | `orch/v2/sig/sk-grant\|` | signature | the space owner | an `SK_e` sealed to one device |
 | `sig_bridge` | `orch/v2/sig/bridge\|` | signature | `dk_sig` (requests), `WSK` (responses) | bridge envelope |
 | `sig_cert_request` | `orch/v2/sig/cert-request\|` | signature | `WSK` | request to the primary device |
+| `sig_cert_rejection` | `orch/v2/sig/cert-rejection\|` | signature | `PK` | primary rejection (P3-D11, §8.4) |
 | `sig_enroll_request` | `orch/v2/sig/enroll-request\|` | signature | the new agent device key | scoped agent enrolment |
 | `sig_drop_object` | `orch/v2/sig/drop-object\|` | signature | author `dk_sig` or `WSK` | Drop version descriptor |
 | `sig_drop_claim` | `orch/v2/sig/drop-claim\|` | signature | `WSK` | claim |
@@ -446,6 +451,9 @@ to whom. Vector: `label_sealed`.
 
 ### 6.1 Device certificate
 
+**P3-D5.** Certificate upload is session-less and PK-authorized, under the recovery quotas
+of §19.1. Exact retries are free; no replacement of a stored certificate with different bytes.
+
 A signed object (§2.4), signed by `PK` with `sig_device_cert`, of kind `device_cert`, with exactly these
 fields:
 
@@ -483,6 +491,11 @@ A verifier refuses:
 Vectors: `certs.cases` (16 cases, including a certificate signed under the revocation label).
 
 ### 6.2 Revocation
+
+**P3-D5/D7.** Submission is session-less and PK-authorized (§19.1). The relay atomically
+deletes sessions, mailboxes, queued responses, grants and card-key wraps and records durable
+`rotation_due` obligations (§19.5). Public revocation lookup remains available without a session.
+Reason upgrades preserve the stronger reason (`compromised > lost = retired`).
 
 A signed object, signed by `PK` with `sig_revocation`, of kind `revocation`, with exactly the fields
 `{v, suite, kind, person_id, device_id, revoked_ms, reason}`. `reason` is one of `lost`, `retired` or
@@ -556,6 +569,10 @@ is not part of this contract.
 
 ### 7.1 The directory card
 
+**P3-D4.** First publication is self-authenticating and session-less; later writes require
+W(g). The same verified card is idempotent, including its signed cleartext and sealed hash.
+A conflicting card at the same sequence remains `stale_card`. See §19.1 for quotas.
+
 The card has two layers (spec §5.3):
 
 - **A one-time delegation**, signed by the owner's `PK` once, when the workspace is created. It never
@@ -624,7 +641,8 @@ only, it may be `http://localhost`, `http://127.0.0.1` or `http://[::1]`, with a
 - `workspace_id` and `owner_person_id` never change (`other_workspace`).
 - `wsk_pub` never changes (`wsk_changed`).
 - The delegation never changes, byte for byte in its canonical form (`delegation_changed`).
-- `card_seq` strictly increases (`stale_card`).
+- `card_seq` strictly increases (`stale_card`), except the same verified card is an idempotent retry
+  (P3-D4).
 - `wxk_version` stays the same with the same key, or rises by exactly 1 with a different key
   (`wxk_changed_without_version`, `bad_wxk_version`).
 
@@ -635,11 +653,12 @@ signed by another person, a delegation for another `WSK`, and a changed delegati
 
 ### 7.2 Member list and epochs
 
-A signed object, signed by `WSK` with `sig_member_list`:
+**P3-D6 / D39.** A signed object, signed by `WSK` with `sig_member_list`:
 
 ```
 {"v":2, "suite", "kind":"member_list", "workspace_id", "epoch", "list_seq", "issued_ms",
- "members": [{"device_id": hex, "scopes": [...]}, ...]}          sorted by device_id, no duplicates
+ "persons": [person_id, ...],                                  sorted, unique hex ids
+ "members": [{"device_id": hex, "person_id": hex, "scopes": [...]}, ...]}          sorted by device_id, no duplicates
 ```
 
 `list_seq` counts every list, and `epoch` counts keys. Adding a device does not change the epoch; removing
@@ -657,13 +676,36 @@ order two lists of one epoch.
 7. if any previous member is missing, `epoch` MUST be the previous one + 1 (`rotation_required`);
 8. for every member:
    - not revoked (`revoked`);
-   - a valid certificate of the **card owner** (`other_person`; spec D1 C is out of scope);
+   - a stored, valid, unexpired certificate whose person equals the entry's `person_id`, and is
+     the card owner **or is in this list's `persons`** (`other_person`; P3-D6 / D39);
+     the certificate verifies under that person's directory account key;
    - not a scoped agent, and `scopes` a prefix no longer than its `scopes_max` (`scope_exceeded`);
-9. a WK grant exists for **every** member at this list's epoch (`missing_grant`).
+9. a WK grant is supplied for **every** member at this list's epoch in the same publication
+   (`missing_grant`; P3-D7).
 
-This is the spec's order: seal, upload, then publish.
+**P3-D6.** `persons` is a WSK-signed authorization statement, not proof of F1 roles. A WSK
+holder can add a foreign person (and can already leak WK). In P3 lists have one person in practice.
+Devices verify signed snapshots and persist increasing `list_seq` and non-decreasing epochs; they
+need not see every intermediate list, so may accept forward epoch jumps. The +1 rule above is
+for relay publication. Restricted tickets are deferred to P8 (P3-D14); P3 hosts refuse `not_visible`.
+F1's existing signature context, `roster_v`, `grant.issued` and `auth` supersede #24's older
+`list_seq`, session-grant and `presence` event proposal (P3 design §7).
 
-On acceptance, the relay deletes the mailboxes, grants and push subscriptions of the devices that left.
+**P3-D7.** The publication body is exactly `{member_list, grants: [wk_grant],
+card_key_wraps?: {card_seq, wraps: [{device_id, sealed}]}}`. It is an authenticated HTTP
+container, **not another signed kind**: the list and each grant carry their existing signatures.
+All grants must name this workspace, this epoch and a member of this list; no duplicate devices.
+Wrap devices are unique current-list members and `card_seq` equals the current card. Sealed
+values use §5.3. The relay cannot check their plaintext. Limits: 1,024 members, 2 MiB whole body.
+The relay checks all signatures and certificates against the proposed list's `persons`, including
+new people, and commits the list, grants and wraps together or changes nothing. Different bytes
+for an existing `(device, epoch)` grant are `grant_conflict`. An exact-body retry returns its
+committed result before freshness checks, after session and holder authorization. Hosts persist
+the key and sealed publication bytes before sending; they resend those bytes, never reseal.
+There is no rotation-abandon route or label. Lost keys after commit require the next rotation.
+
+On acceptance, the relay deletes mailboxes, queued responses, grants and card-key wraps of departed
+devices (P3-D7; push subscriptions from P4).
 Vectors: `member_lists`.
 
 **Host rules (spec §5.4).**
@@ -674,9 +716,9 @@ Vectors: `member_lists`.
   - on a removal;
   - on `orch keys rotate`.
 - **How it rotates:**
-  1. generate `WK_{e+1}`;
-  2. upload a grant for every remaining device;
-  3. publish the list;
+  1. generate and durably persist `WK_{e+1}` (P3-D7);
+  2. seal and persist a grant for every remaining device;
+  3. publish the list, grants and optional card-key wraps atomically;
   4. seal everything new under `e+1`.
 - **What it keeps.** It keeps every old `WK` to read old content. It never seals new content under an old
   epoch (§8.5).
@@ -702,6 +744,9 @@ Vectors: `member_lists`.
 An SK grant (shared Drop spaces) is the same, with `kind: "sk_grant"`, `space_id` in place of
 `workspace_id`, purpose `sk`, and signed by the space owner's key (`WSK`, or the owning device's `dk_sig`).
 Vectors: `wk_grants`.
+
+**P3-D8.** A current epoch is confirmed by a verified member list as well as its signed grant;
+an unsigned HTTP hint never raises a device's epoch.
 
 ### 7.4 WXK rotation (spec D27)
 
@@ -781,8 +826,13 @@ Vectors: `bridge.seal`, `hkdf` (`k_bridge_epoch_1`, `k_bridge_epoch_2`, `k_pair`
 1. **Link.** The host's Remote tab shows, as a QR code (10 minutes, single use):
 
    ```
-   https://<relay>/app/pair#v2.<workspace_id hex>.<offer_id hex>.<b64u S>.<b64u wsk_pin>.<b64u pk_pin>
+   https://<relay>/pair#v2.<workspace_id hex>.<offer_id hex>.<b64u S>.<b64u wsk_pin>.<b64u pk_pin>
    ```
+
+   **D45/D46 (P3 design §7).** The native link is also
+   `orch://pair?relay=<percent-encoded relay origin>#v2.<the same five fields>`.
+   `/app/pair` remains an HTTPS alias. Passkey registration is removed from native pairing;
+   the checkpoint baseline amendment waits for the separate checkpoint/restore contract group.
 
    The spec's link has four fields after `v2`. **DECIDED HERE:** a fifth, `pk_pin`, because spec §7 step 4
    says the QR carries a pin of the owner's `PK`. The phone parses the link strictly (vectors
@@ -858,7 +908,7 @@ Vectors: `bridge.seal`, `hkdf` (`k_bridge_epoch_1`, `k_bridge_epoch_2`, `k_pair`
    1. uploads the certificate to the directory, if new;
    2. uploads a WK grant for the current epoch;
    3. publishes the new member list;
-   4. registers the platform passkey exactly as in v1 §9.2, with the v2 challenge (§8.7).
+   4. completes native pairing; no platform passkey registration (D45/D46, P3 design §7).
 
 The device polls with `{"op":"pair_status"}` (epoch 0, signed with its new key, read-only). Answers are
 exactly one of:
@@ -987,6 +1037,25 @@ or was rejected, signing after a rejection or after expiry), `cert_request.chall
 `challenge_for_another_workspace`, `challenge_expired`, `cert_pending_with_a_pk_not_of_the_pin`). Round
 trips: `test_round_trip_pairing_through_cert_pending`, `test_round_trip_r1_attack_fails`.
 
+**P3-D11.** Queue routes are in §19. The primary uses a device session of the addressee,
+including for a challenge or rejection. A rejection is exactly:
+
+```
+{"o": {"v":2, "suite", "kind":"cert_rejection", "request_id", "workspace_id", "person_id"},
+ "sig": b64u(Sign(PK, "orch/v2/sig/cert-rejection|" || cj(o)))}
+```
+
+The relay verifies requests under the card's WSK and challenges/rejections under the account PK.
+Identifiers must match the stored request; a challenge has the request's expiry, valid device keys
+and the derived device id. The state machine is `open → challenged → signed`, with `rejected`
+from open or challenged, and `expired` from either at `expires_ms`. Challenges cannot be replaced:
+same bytes are idempotent, different bytes are `replayed`. Rejection after signing is `already_signed`;
+challenge or certificate completion after rejection is `replayed`. Exact terminal retries are
+idempotent while the record is retained. Expired non-terminal requests return 410 `expired`.
+The request becomes signed only when a stored, valid certificate matches **both keys**, device and
+person of its challenge. An unrelated certificate can be stored but cannot complete the request.
+Scopes are sealed: the host checks them. Terminal records remain until `expires_ms + 60 s`.
+
 ### 8.5 Epochs on the bridge
 
 - A request MUST use the host's current epoch.
@@ -1053,6 +1122,9 @@ Every refusal after step 4 is recorded before it is sent (v1 §5.3). Vectors: `b
 
 ### 8.7 Ops, meta and WebAuthn
 
+**D45/D46 (P3 design §7).** Native clients do not use the WebAuthn ops below. Their replacement
+is deferred with Type (mobile D-5); the historical vectors remain test-only.
+
 **Request ops.** These are v1's, plus five:
 
 - v1's: `http`, `cancel`, `pair`, `pair_status`, `credential_begin`, `credential_finish`, `assert`;
@@ -1097,6 +1169,12 @@ epoch makes the device fetch grants (`fetch_grants`); any other is dropped (§8.
 
 ### 8.9 What the relay checks on the bridge
 
+**P3-D8/D9/D10/D16/D17/D22.** §19.3 and §19.6 add epoch hints, replay coalescing,
+non-consuming polls, durable host cursors and holder fencing. Limits cover the whole envelope.
+The relay checks membership; operations and scopes stay sealed. New old-epoch response bytes
+are accepted only for a known rid with `LAST | REFUSAL`; an identical stored replay does not
+extend TTL. Request and response epochs must match.
+
 The relay holds no keys. It MUST still enforce, before it queues anything:
 
 - **Route and header.** The route's workspace equals the header's. The magic, version and suite are right.
@@ -1111,6 +1189,10 @@ Sealed bodies live 60 s (v1). **DECIDED HERE:** the relay checks the header's de
 and the member list. This is defence in depth: a removed device cannot even queue.
 
 ## 9. Push
+
+**D45/D46 (P3 design §7).** Delivery uses APNs and the native Notification Service Extension
+(NSE), not Web Push or a service worker. The signed/sealed payload remains as below; delivery
+registration is P4.
 
 The relay sees only the outer object, and forwards it as the Web Push payload (spec §6.3):
 
@@ -1452,6 +1534,10 @@ after the nonce expired is stale anyway (vector `replay_after_nonce_retention_is
 
 ### 12.2 Relay sessions
 
+**P3-D2/D17.** See §19.4 for concurrent 15-minute tokens, dummy-key verification for unknown
+ids, refusal of revoked devices after signature verification, expiry/revocation checks on every
+request and at long-poll handoff, and challenge budgets. There is no refresh token.
+
 The client gets `{challenge (32 bytes), expires_ms (60 s)}` from the relay and answers with:
 
 ```
@@ -1475,6 +1561,10 @@ Vectors: `relay_auth`, `relay_auth.cases` (valid then reused, expired, another o
 kind, another key, an unknown kind).
 
 ## 13. Questions (spec §8)
+
+**P3 design §7 / D40.** The host records a verified decision verbatim as F1 `evidence`. Every
+`decision_id` and admitted person-event id is single-use forever, across restores. The existing
+F1 `cj({contract, suite, workspace_id, log, event})` context remains the signature input.
 
 - `question_id` of a ticket question is the F1-derived id: the first 16 bytes, in hex, of
   `H("orch/v2/question-id|" || cj({"workspace_id", "ticket", "question"}))` (ticket format F1 §5.6, row
@@ -1524,6 +1614,7 @@ shows its own fixed text per code.
 | Code | Fields | Note |
 |---|---|---|
 | `malformed` | — | |
+| `not_visible` | — | restricted ticket, P3-D14 |
 | `not_member` | — | was v1 `not_paired` |
 | `revoked` | — | |
 | `bad_signature` | — | |
@@ -1552,10 +1643,14 @@ Every answer to an epoch-0 request, refusals included, also carries `wsk_pub`.
 
 | Status | Codes |
 |---|---|
-| 400 | `malformed`, `wrong_suite`, `cert_invalid`, `cert_expired`, `delegation_mismatch` |
-| 401 | `bad_signature`, `stale_timestamp` (`server_ms`), `unknown_workspace`, `replay`, `unknown_challenge`, `expired` |
-| 403 | `revoked`, `other_person`, `scope_exceeded`, `not_eligible`, `not_for_this_device` |
-| 409 | `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version`, `stale_list`, `bad_epoch`, `rotation_required`, `missing_grant`, `already_claimed` (`claimed_by`), `version_conflict` (`current`) |
+| 400 | `malformed`, `wrong_suite`, `cert_invalid`, `cert_expired`, `delegation_mismatch`, `too_large` (P3-D1/D17) |
+| 401 | `bad_signature`, `stale_timestamp` (`server_ms`), `unknown_workspace`, `replay`, `unknown_challenge`, `expired`, `unauthenticated` (P3-D2) |
+| 403 | `revoked`, `other_person`, `scope_exceeded`, `not_eligible`, `not_for_this_device`, `cert_expired` (membership publication, P3-D7) |
+| 404 | `not_found` (P3-D1) |
+| 409 | `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version`, `stale_list`, `bad_epoch`, `rotation_required`, `missing_grant`, `already_claimed` (`claimed_by`), `version_conflict` (`current`), `account_exists`, `cert_conflict`, `grant_conflict`, `rid_conflict`, `retry_exhausted`, `chunk_conflict`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed` (P3-D3/D5/D7–D11/D22) |
+| 410 | `expired` (P3-D11) |
+| 429 | `rate_limited`, `quota_exceeded` (P3-D5/D17; `Retry-After`) |
+| 503 | `overloaded` (P3-D17; `Retry-After`) |
 | 428 | `precondition_required` |
 
 **Primary device (local, never on the wire):**
@@ -1648,6 +1743,10 @@ suite in its own test suite.
 
 ## 17. Decisions taken here
 
+**P3 amendment.** P3-D1–D11, P3-D14–D17 and P3-D22 below and in §19 supersede the earlier
+HTTP, membership and bridge transport rules. D45/D46 select native clients and suite 2.
+Checkpoint/restore decisions P3-D12/D13/D18–D21/D23–D25 are deferred to the next contract group.
+
 Each is marked **DECIDED HERE** where it is used; the reviewer may reverse any of them. Items marked
 *(review)* were added or changed after the first review of PR #23.
 
@@ -1729,6 +1828,9 @@ amended).
     seen and refuse a lower one.
   - Epochs: never move backwards on a device (§7.3).
 
+**D45/D46 (P3 design §7):** R2 is closed by native distribution, R5 by suite-2 deployment.
+The historical web risks below apply only to a future browser client.
+
 **Open:**
 
 - **R2, web-delivered JavaScript** (spec §4) is unchanged. A compromised `/app` at pairing time owns the
@@ -1752,3 +1854,335 @@ amended).
   to be pinned by a vector.
 - **F3:** the `http` meta mapping (method, path, header allow-list) and `new_ticket` belong to the host
   API, as in v1 F3.
+
+
+## 19. Relay HTTP API (P3-D1)
+
+**P3-D1 (routes and fixtures; C3).**
+
+- All routes start with `/v2`.
+- Bodies reuse the FakeRelay's shapes (host-api v0 §1 and §3), without `host_api` and without the `Orch-Host-API`
+  header.
+- Errors use §14's form, `{"error": code, …}`. JSON is strict per §2.3. `Retry-After` is integer
+  delta-seconds.
+- This is more than a prefix change for the phone. G0 therefore publishes request/response fixtures
+  (`tests/http_fixtures/*.json`, one per row below, including refusals) that the relay tests, the phone's
+  adapter and its FakeRelay all consume.
+
+Common semantics:
+
+- **Position cursors** (`after`, `after_n`, `after_seq`) are decimal integers, exclusive, and strictly increasing per
+  stream. **Checkpoint references** (`to`, `hash`) are `h_checkpoint` values. `next` is an opaque string that the
+  client passes back unchanged.
+- **Pagination** returns at most `limit` items (the default and maximum are listed per route) and **at most 4 MiB per
+  response on every route**, plus `next` (null at the end).
+- **Long polls** take `wait` from 0 to 25 s.
+
+The **Auth** column uses these codes:
+
+| Code | Meaning |
+|---|---|
+| none | no session |
+| D | device session |
+| W(g) | workspace session that holds the current holder generation `g` (header `Orch-Holder: g`, P3-D10) |
+| W | workspace session, any generation (read routes) |
+| D(m) | device session of a current, unrevoked member of `{ws}` with an unexpired certificate, checked in the same transaction as the read or write |
+| D(p) | device session of the same person |
+
+### 19.1 Directory and sessions
+
+| Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
+|---|---|---|---|---|---|
+| `POST /v2/session/challenge` | none | `{}` → `{challenge, expires_ms}` | 60 s, single use; per address ≤ 16 outstanding and 60/min; global ≤ 65 536 outstanding, excess **refused** (P3-D17) | 429 `rate_limited` | §12.2 |
+| `POST /v2/session/login` | none | `{challenge, kind, id, sig}` → `{token, expires_ms}` | challenge consumed on every attempt; 15 min; concurrent tokens allowed | 400 `malformed`, `cert_expired`, `cert_invalid`; 401 `unknown_challenge`, `expired`, `bad_signature`; 403 `revoked` | §12.2, §4 |
+| `POST /v2/session/logout` | D or W | `{}` → `{}` | idempotent; safe to retry with an expired token (200) | — | new |
+| `POST /v2/accounts` | none | `{invite, pk_pub, device_cert, challenge, sig}` → `{person_id}` | `sig` is the new device's login signature over a fresh challenge; the exact same request → 200 (by digest) | 400 `malformed`, `cert_invalid`; 401 `bad_signature`, `unknown_challenge`; 403 `not_eligible` (one code for unknown, used or expired); 409 `account_exists` | spec §6.1 (P3-D3) |
+| `PUT /v2/devices/{device}` | none | `{cert}` → `{device_id}` | self-authenticating under the account `PK`; per address 30/h; per person 64/day, charged only after the signature verifies; an exact retry is free | 400 `cert_invalid`, `cert_expired`; 403 `revoked`, `other_person` (no account); 409 `cert_conflict` | §6.1, §8.3, §8.4 (P3-D5) |
+| `GET /v2/devices/{device}` | D(p), or W whose `ever_persons` contains the person | → `{cert}` | | 403 `not_eligible`; 404 `not_found` | §6.1 |
+| `POST /v2/revocations` | none | `{record}` → `{device_id}` | authority is `PK`; per address 10/min; per person 32/day, charged only after the signature verifies, with 8/day reserved for revocations of devices not yet revoked; an exact retry is free | 400 `malformed`; 401 `bad_signature`; 403 `other_person` | §6.2 (P3-D5) |
+| `GET /v2/devices/{device}/revocation` | none | → `{record}` | per address 60/min | 404; 429 | §6.2, gaps 24 |
+| `GET /v2/persons/{person}/revocations?after=&limit=` | D(p), or W whose `ever_persons` contains the person | → `{revocations, next}` | limit ≤ 256 | 403 | §6.2 |
+| `PUT /v2/workspaces/{ws}/card` | none for the first card; W(g) after | `{card}` → `{card_seq}` | first card: per address 10/h, per owner account 10/h, first writer wins in one transaction; same card → 200 | §7.1 codes: 400 `malformed`, `wrong_suite`, `delegation_mismatch`; 401 `bad_signature`; 403 `other_person`; 409 `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version` | §7.1 (P3-D4) |
+| `GET /v2/workspaces/{ws}/card` | D(m) or W | → `{card}` | | 403; 404 | §7.1 |
+
+**P3-D3 (accounts; C5).** Accounts come only from single-use invite codes made by the admin CLI
+(`orch-relay invite create --ttl 7d`, stored hashed). The request carries the first device certificate (`PK`-signed)
+and a fresh login signature by that device over a relay challenge. That proves the applicant holds the device key now.
+Invite use and the request digest commit in one transaction. A replay of a captured certificate without the device key
+fails. Registering someone's `pk_pub` would need their device key, and an account alone grants nothing.
+
+**P3-D4 (first card; C5).** The first card takes no session: a workspace login needs a card. It is
+self-authenticating (the account `PK` signs the delegation, `WSK` signs the card). The first writer wins in one
+transaction. Quotas are per owner account and per address, not per attacker-chosen workspace id. A captured genuine
+card that wins first publication is the genuine card; the host then logs in with the same `WSK` and moves `card_seq`
+on.
+
+**P3-D5 (PK-only recovery; C6).**
+
+- Revocations and device certificates are accepted without a session. Each is authorized by its `PK` signature
+  alone, under strict per-address and per-person quotas.
+- So a person who kept only the recovery code, and so `PK` (D50), can bootstrap: upload a new device certificate, log
+  in with it, and revoke the lost device.
+- The public record route reveals whether a known device id is revoked. §8 states this; login adds no further oracle.
+- **Quota denial (challenge 2, finding 10).** Person quotas are charged only after the signature verifies, exact retries
+  are free, windows are kept for their full duration (hour, day), never idle-pruned, and a reserved share stays
+  available for revocations, so invalid or replayed submissions cannot block a recovery.
+
+### 19.2 Members and epochs
+
+| Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
+|---|---|---|---|---|---|
+| `PUT /v2/workspaces/{ws}/membership` | W(g) | `{member_list, grants: [wk_grant], card_key_wraps?: {card_seq, wraps}}` → `{list_seq, epoch}` | one transaction; the exact same body → 200; ≤ 1024 members, ≤ 2 MiB | 401 `bad_signature`; 403 `revoked`, `other_person`, `scope_exceeded`, `cert_expired`; 409 `other_workspace`, `stale_list`, `bad_epoch`, `rotation_required`, `missing_grant`, `grant_conflict`, `stale_card`, `fenced` | §7.2, §7.3 (P3-D7) |
+| `PUT /v2/workspaces/{ws}/card-keys` | W(g) | `{card_seq, wraps: [{device_id, sealed}]}` → `{stored}` | only devices of the current list; same → no-op | 403; 409 `stale_card`, `fenced` | §5.3 |
+| `GET /v2/workspaces/{ws}/grants[?epoch=e]` | D(m) | → `{grants}` (own device, ascending, from `first_epoch` on) | | 403; 404 | §7.3 |
+| `GET /v2/workspaces/{ws}/members` | D(m) or W | → `{member_list}` | | 403; 404 | §7.2 |
+| `GET /v2/workspaces/{ws}/card-key?card_seq=N` | D(m) | → `{workspace_id, device_id, card_seq, sealed}` | | 403; 404 | host-api §3 |
+
+**P3-D7 (atomic membership publication; replaces the rotation-abandon proposal; C8, C9).** A list, all grants for its
+epoch and optionally the card-key wraps for new devices are published in **one request and one transaction**:
+
+1. Every §7.2 check, with check 8 per P3-D6 and check 9 against the grants in the same body.
+2. The write-time re-check of each grant's and wrap's device certificate: stored, owned by the card owner or by a person
+   in **this list's** `persons`, unexpired now, not revoked.
+3. The write.
+
+Consequences:
+
+- **No staging deadlock for a new person (C8).** That person's grants are judged against the list that adds them.
+- **No partial rotation state at the relay (C9).** A host that loses `WK_{e+1}` before the commit generates a new one;
+  nothing was published.
+- **The host persists `WK_{e+1}` durably before sending.** If the response is lost, it resends the exact body
+  (idempotent).
+- **If a committed key is lost anyway** (disk loss), the host rotates again to `e+2` at once. Committed grants are
+  never deleted until a later list replaces them.
+- **The rotation-abandon route and label of orch-mobile's FakeRelay amendment are dropped.** Phones already accept
+  forward epoch jumps.
+- **`grant_conflict`.** Other bytes for an already-committed `(device, epoch)` are refused.
+- **Retries (challenge 2, finding 11).** An exact-body retry of a committed publication returns its result before any
+  freshness check. The host persists the sealed grants it sent and resends the same bytes, never reseals, so a retry
+  never hits `grant_conflict`.
+
+**P3-D6 (persons, D39; C8).** Each member entry is `{device_id, person_id, scopes}`, and the list carries
+`persons: [person_id]` (sorted, unique). Check 8: the certificate's person is the card owner **or** in `persons`
+(`other_person` otherwise).
+
+The guarantee is narrower than F1:
+
+- `persons` is the host's WSK-signed statement. It does not establish F1 roles; readers of the workspace log still
+  replay `member.added` and roles.
+- A WSK holder could add a foreign person. Such a holder can leak `WK` anyway.
+
+In P3, lists have one person in practice.
+
+### 19.3 Bridge, pairing and the `cert_pending` queues
+
+| Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
+|---|---|---|---|---|---|
+| `POST /v2/workspaces/{ws}/bridge/{rid}` (device) | D(m) | raw ORB2, direction 1 → 202 `{}` | ≤ 1 MiB whole envelope; P3-D9 coalescing; budgets of P3-D17 | 400 `malformed`, `wrong_suite`; 403 `not_for_this_device`, `not_eligible`, `revoked`; 409 `rid_conflict`, `stale_epoch` (`epoch`); 429 | §8.1, §8.9 |
+| `GET /v2/workspaces/{ws}/bridge/{rid}?after=i&wait=s` (device) | D(m), own mailbox | → `{chunks: [{id, idx, last, stream, envelope}]}` | non-consuming | 401; 403 | §8.8 |
+| `POST /v2/workspaces/{ws}/host/hold` | W | `{gen: int \| null, take_over: bool}` → `{gen, lease_s: 40, cursor}` | `gen` = the current generation: renews the lease, same `gen`; `gen: null`: a new generation when the lease is expired or `take_over` is set, otherwise 409; a stale `gen` → 409 `fenced` | 409 `holder_conflict`, `fenced` | P3-D10 |
+| `GET /v2/workspaces/{ws}/host/poll?after=n&wait=s` | W(g) | → `{items: [{n, route, device, rid, offer, envelope}], notices: {revocations_cursor, cert_requests, rotation_due}, next}` | non-consuming; `after` acknowledges everything up to it (stored as `holders.cursor`); renews the lease; ≤ 16 items or 4 MiB | 409 `fenced`; 401 | P3-D10 |
+| `POST /v2/workspaces/{ws}/bridge/{rid}` (host) | W(g) | raw ORB2, direction 2 → 202 `{}` | ≤ 256 KiB whole chunk; same `(device, rid, idx)` and bytes → no-op; other bytes → 409; epoch rule P3-D22 | 400; 403 `not_eligible`, `revoked`; 409 `chunk_conflict`, `stale_epoch`, `fenced`; 429 | §8.1, §8.5, §8.9 |
+| `POST /v2/workspaces/{ws}/pair/{offer}/{rid}` | none (device), W(g) (host answer) | raw epoch-0 ORB2 → 202 | ≤ 64 KiB; per workspace and per address 60/min; global 6 000/min | 400; 401 `unknown_workspace`; 429 | §8.3, §8.9 |
+| `GET /v2/workspaces/{ws}/pair/{offer}/{rid}?after=i&wait=s` | none | → `{chunks}` | per address 120/min; global 12 000/min | 429 | §8.3 |
+| `POST /v2/persons/{person}/cert-requests` | W(g), card owner = person | `{request}` → `{request_id}` | ≤ 1 open per workspace, ≤ 64 open per person; same → 200 | 401 `bad_signature`; 403 `other_person`, `not_for_this_device`; 409 `request_open`, `replayed` | §8.4 step 1 |
+| `GET /v2/persons/{person}/cert-requests?wait=s` | D(p), addressee only | → `{requests}` | open only | 403 | §8.4 step 2 |
+| `POST /v2/cert-requests/{id}/challenge` | D(p), addressee | `{challenge}` → `{}` | `open` → `challenged` only; same bytes → 200; another challenge → 409 | 401; 409 `replayed`; 410 `expired` | §8.4 step 3 |
+| `POST /v2/cert-requests/{id}/rejection` | D(p), addressee | `{rejection}` → `{}` | `open` or `challenged` → `rejected`; repeat → 200 | 401; 409 `already_signed`; 410 | new (P3-D11) |
+| `GET /v2/cert-requests/{id}` | W, the requester | → `{state, challenge, cert, rejection}` | kept until expiry + 60 s | 404 | §8.4 |
+
+**P3-D8 (epoch at the relay; C10).** A device request for a **new** rid, whose header epoch is not the current list
+epoch, is refused with 409 `stale_epoch {"epoch": current}`. This is an unsigned hint. The device:
+
+- refetches the list and its grants (both signed);
+- never raises its epoch from the hint;
+- refetches at most 3 times per minute, then backs off 20, 40 and 60 s.
+
+An **identical resend** of a known rid (P3-D9) skips the epoch check, so the host can answer from its rid store with the
+stored bytes. The relay's order is: session and membership → shape → replay store → epoch.
+
+**P3-D9 (replay store and coalescing; C11).** The relay keeps `(ws, device, rid)` for 900 s from the **first** receipt.
+A resend never extends this; the only exception is that the record lives on until every dependent queued message has
+expired (`keep_until_ms`):
+
+- **Same bytes:**
+  - If an undelivered copy exists (its `n` is above the holder's acknowledged cursor), the resend is coalesced: 202,
+    nothing new queued.
+  - Otherwise it is queued again, at most once per 10 s and at most 8 times per rid. After that cap the relay answers
+    409 `retry_exhausted`, so a device never takes a 202 for a delivery promise (challenge 2, finding 9). A new copy
+    lives 60 s from its own receipt, and the `rid_seen` and `rid_chunks` rows are kept until every dependent message
+    has expired, so conflict detection never ends before them. Records and chunk digests are bounded per device
+    (P3-D17).
+- **Other bytes:** 409 `rid_conflict`.
+
+The relay never checks `seq` or `ts_ms`: the host's sealed refusals do that. The host's durable rid store stays the only
+exactly-once authority.
+
+**P3-D10 (durable host cursor and fencing; C12).** This replaces the consuming poll:
+
+- **Hold.** The host first takes a holder generation `gen` (`host/hold`). A new generation needs an expired lease or
+  an explicit `take_over` (no silent automatic takeover). The lease is 40 s; the host renews it every 15 s, by a poll or
+  by `host/hold` with `gen` set to its current generation.
+- **One live poll per generation.** A new poll cancels the previous one of the same `gen`.
+- **Compare-and-set (challenge 2, finding 8).** Every cursor move and every host write is a compare-and-set on
+  `(gen, lease unexpired)`, re-checked after a long-poll wakeup before data is handed over.
+- **Fencing.** Every host write carries `Orch-Holder: gen`: response chunks, pair answers, membership, card, card keys,
+  cert requests. A stale generation is 409 `fenced`, so an old host process that wakes up after a
+  takeover cannot interleave writes.
+- **Delivery.** The poll is non-consuming: items have a strictly increasing `n` and stay until their 60 s expiry. The
+  host passes `after` = the end of the **contiguous prefix** of items it has durably completed (recorded in its rid
+  store), never the highest `n` seen; the relay moves the cursor only forward. A lost HTTP response is harmless: the
+  next poll returns the same items. Delivery is **at-least-once within the 60 s retention**; later, the device's
+  resend is the recovery.
+- **Authorization at handoff.** The relay filters each item against membership and revocation in the same transaction
+  that reads it. Devices' response polls do the same.
+- **Limit.** Fencing protects an honest host from its own stale twin. It does not protect against a WSK holder, who
+  can always take over (design §8).
+
+**P3-D11 (cert queues; C13).** One transactional state machine per request:
+
+- **States:** `open` → `challenged` → `signed`; `rejected` from `open` or `challenged`; `expired` from any non-terminal
+  state at `expires_ms`.
+- **Validation.** The relay verifies the request under the card's `WSK`, and the challenge and the rejection under
+  the account's `PK`.
+- **No replacement.** It refuses to replace a challenge.
+- **When the request becomes `signed`.** Only when a certificate is stored (`PUT devices`) whose `dk_sig_pub`,
+  `dk_kx_pub`, `device_id` and person equal the challenge's. Scopes are inside the sealed inner request, so the host
+  checks them, not the relay.
+- **Rejection** is a new signed kind, `cert_rejection {v, suite, kind, request_id, workspace_id, person_id}`, under
+  `orch/v2/sig/cert-rejection|`.
+- **FakeRelay change.** The primary must now use a device session; its session-less submission in the FakeRelay
+  changes.
+
+**P3-D16 (scopes).** On the bridge the relay enforces membership only. Ops and scopes are sealed. The typing lease has
+no relay part.
+
+**P3-D22 (old-epoch responses; C19, Q10; challenge 2, finding 13).** A defence against honest-host mistakes, not a
+confidentiality boundary against a malicious host (the relay sees a flag, not the sealed refusal). A response chunk's
+epoch must equal its request's (`rid_seen.req_epoch`), and the chunk must answer a known request (rid). Once the list
+epoch has moved past that epoch, the relay accepts an old-epoch chunk only if it has the `LAST | REFUSAL` shape, or if it
+is byte-identical to a chunk already accepted for that rid (a stored replay, `rid_chunks`). Everything else is 409
+`stale_epoch`. The device validates the refusal itself (§8.8). Replaying stored bytes never extends a chunk's
+TTL. This cannot constrain a compromised relay.
+
+
+### 19.4 Authentication and budgets
+
+**Login** is §12.2 unchanged:
+
+- The signed bytes are `"orch/v2/sig/relay-auth|" || suite || lp16(origin) || challenge || kind || id`.
+- `origin` is the instance's configured origin (`ORCH_RELAY_ORIGIN`), never one the client names.
+- Check order: the challenge is known (and removed whatever follows), unexpired, a valid `kind`, then the signature.
+
+**Unknown ids** are verified against a fixed dummy P-256 key: same timing, the same 401 `bad_signature`, and the
+challenge is consumed.
+
+**Revoked devices get no session** (the owner's decision):
+
+- The answer is 403 `revoked`, and only after the signature verifies.
+- An expired certificate gets 400 `cert_expired`.
+- The device reads its record session-less and verifies it under its pinned `PK` before wiping.
+
+**P3-D2 (sessions; C4).**
+
+- **Lifetime.** Bearer tokens last 15 minutes, with no refresh. A new login never invalidates other live tokens:
+  clients reauthenticate single-flight and may overlap tokens.
+- **Every route re-checks** expiry, revocation and certificate expiry against the database at request time. Long polls
+  re-check immediately before handing over data, not only every few seconds.
+- **Scope.** A device token is scoped to the relay; each workspace route authorizes against the current list. A
+  workspace token is scoped to its workspace.
+- **Tokens are stored as SHA-256 hashes.** That protects a database dump. It does not make a stolen bearer useless:
+  a stolen token works until it expires or the device is revoked (design §8).
+- Agents never see tokens (spec §5.5).
+
+**P3-D17 (budgets; C7).** All limits are refusals, never evictions of existing state:
+
+- **Challenges:** 16 outstanding and 60 per minute per address. The global ceiling of 65 536 outstanding is a refusal
+  (429), never the eviction of other clients' challenges.
+- **Per device, across all its sessions:** ≤ 128 live request mailboxes per workspace, 20 posts/s, 6 concurrent long
+  polls, ≤ 8 MiB of queued requests.
+- **Per workspace:** ≤ 1 024 queued requests, ≤ 16 MiB queued requests, ≤ 16 MiB undelivered responses.
+- **Global:** ≤ 256 MiB of queued bodies and ≤ 4 096 concurrent long polls (503 `overloaded`).
+- **Client addresses.**
+  - The peer address is used, or Caddy's `X-Forwarded-For` only when the peer is the configured proxy.
+  - Addresses are canonicalized: IPv4-mapped IPv6 becomes IPv4, and IPv6 is grouped by /64.
+  - Windows are kept for their full duration (minute, hour, day) and pruned only after it ends; per-person windows
+    are charged only after a signature verifies (§19.1 P3-D5).
+- **Per device:** at most 4 096 `rid_seen` records and 64 chunk digests per rid.
+
+
+### 19.5 The relay side of revocation (#12, §6.2)
+
+On a verified revocation, from the revocation route, the relay does the following in one transaction:
+
+- it stores the revocation, or upgrades the stored reason (compromised over lost/retired);
+- it deletes the device's sessions, request mailboxes, queued responses, grants and card-key wraps in every workspace;
+- it refuses the device on every route;
+- it sets `rotation_due` for each workspace whose current list names the device.
+
+`rotation_due` is durable: one row per obligating device, with the revocation's cursor and epoch. It is cleared only by
+a committed list with a higher epoch that excludes the device, in a transaction serialized with revocation intake, so a
+newer obligation is never cleared by an older publication. The host sees it in its poll until then. There is no
+un-revoke.
+
+
+### 19.6 Exact HTTP shapes and common refusals (P3-D1/D2/D10/D17)
+
+`tests/http_fixtures/*.json` is the executable example corpus (one file per route role).
+There are no public invite-management routes: invite creation is the admin CLI (P3-D3).
+Checkpoint, restore, genesis, staging, baseline and proof routes wait for the next contract group.
+
+Requests and responses use `application/json`, except ORB2 posts (`application/octet-stream`).
+JSON field sets shown above are exact. GET requests have no body. Empty success bodies are `{}`,
+including 202. Bearer authorization is `Authorization: Bearer <token>`; `Orch-Holder` is a decimal
+generation. The first card is the only unfenced workspace write. Logout returns 200 for an
+unknown/expired token as well as an already-logged-out token.
+
+All routes can refuse 400 `malformed` for invalid fields, paths, query or strict JSON; bounded
+requests can refuse 400 `too_large`. Authenticated routes can refuse 401 `unauthenticated`,
+400 `cert_expired`, or 403 `revoked`; a wrong principal or inaccessible workspace/person is
+403 `not_eligible`. W(g) routes additionally refuse 409 `fenced` for missing, stale or expired
+holder authority. Signature objects of another deployment suite are 400 `wrong_suite`.
+Route-table bare statuses mean: 400 `malformed`, 401 `unauthenticated`, 403 `not_eligible`,
+404 `not_found`, 410 `expired`, 429 `rate_limited` or `quota_exceeded`. Rate windows return
+429 `rate_limited`; storage/concurrency caps return 429 `quota_exceeded`; shared global bridge
+budgets return 503 `overloaded`. Each 429/503 includes integer delta-seconds `Retry-After`.
+Challenges' global cap specifically uses 429 `rate_limited`.
+
+Identifiers are lower-case 16-byte hex; binary JSON values (including ORB2 poll envelopes,
+challenges, public keys and signatures) are canonical b64u. All positions fit JSON's safe integer
+range. `wait` is an integer 0..25, default 0. Omitted `after` starts before the first item
+(including chunk index 0); supplied positions are exclusive non-negative decimal integers.
+Revocation feed `limit` defaults to 256; each entry is `{cursor, record}`, ascending cursor.
+Host poll `next` is null at end, otherwise an opaque continuation passed as `next` with the
+same `after`; it never acknowledges items. A poll's `after` acknowledges only the host's
+contiguous durably completed prefix and cannot exceed the highest delivered position. Invalid
+forward acknowledgements are 400 `malformed`; older cursors never move the stored cursor back.
+A cancelled same-generation poll returns an empty success; it cannot later deliver stale data.
+
+Host poll `route` is `bridge` or `pair`; `offer` is null for bridge and the offer id for pair.
+`notices` is exactly `{revocations_cursor, cert_requests: [request_id],
+rotation_due: [{device_id, revocation_cursor, epoch}]}`; arrays are sorted by id. The cursor
+is the latest relevant revocation-feed position (0 if none). `cert_requests` lists requester
+records with challenge/rejection/certificate results to fetch. Cert-request GET always returns
+all four fields `{state, challenge, cert, rejection}`, using null when absent.
+
+P3-D9's ten-second requeue interval also refuses 409 `retry_exhausted` until eligible (no
+202 delivery promise without a queued copy). Eight requeues exclude the first receipt.
+P3-D22 refuses an unknown response rid with 409 `stale_epoch` and the current epoch hint.
+A stored chunk replay returns 202 without refreshing its TTL or resurrecting expired bytes.
+If a matching known chunk index has different bytes, `chunk_conflict` precedes the epoch rule.
+`LAST | REFUSAL` may also carry `STREAM`; a refusal always has LAST.
+
+Exact-body idempotency means identical HTTP bytes. Send `cj(body)` and persist it. Signature
+verification always uses `cj(o)` independently of HTTP whitespace. Membership retries still
+require current session and holder authorization, but skip certificate/list/card freshness.
+P3-D7 grant checks bind workspace/device/epoch, exact field set and signature; sealed bytes
+are opaque but must have the §5.3 suite framing and valid ephemeral public key. Wraps have
+the same framing check. A malformed grant/wrap is 400 `malformed`, bad grant signature is
+401 `bad_signature`, a grant outside this publication is 403 `not_for_this_device`.
+
+P3-D11 request signature/shape/context precede insertion. Open means open or challenged and
+unexpired, for quota purposes. Request and challenge times use §8.4. Context mismatch is
+403 `other_person` (person), 409 `other_workspace` (workspace), or 403 `not_for_this_device`
+(request/addressee). Invalid certificate keys in a challenge are 400 `malformed`.
