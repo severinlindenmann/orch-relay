@@ -12,32 +12,29 @@ from ref import checkpoints as C
 from ref import orch_protocol_ref as R
 
 HERE = Path(__file__).parent
-F1 = json.loads((HERE / "vectors/f1_receiver_f1094b3.json").read_text())
+F1 = json.loads((HERE / "vectors/f1_receiver_4f00d9c.json").read_text())
 S = R.SUITES[2]
 V = json.loads(R.VECTORS.read_text())["suites"]["2"]
 CASES = {c["name"]: c for c in V["checkpoints"]["cases"]}
+MERGED = "4f00d9ce32e8e512366c908c36b43f35142747c9"  # orch-core develop, the merge of #377
 
 
 def by_name(cases):
     return pytest.mark.parametrize("c", cases, ids=lambda c: c["name"])
 
 
-def test_extract_matches_the_f1_snapshot_once_resynced():
-    """The extract is a byte-faithful subset of orch-core f1094b3 checkpoint.json. When
-    tests/vectors/f1 is re-synced to f1094b3 (PR #41), the subset must equal that snapshot."""
+def test_extract_matches_the_f1_snapshot():
+    """The extract is a byte-faithful subset of orch-core checkpoint.json at the #377 merge, which is also the
+    commit tests/vectors/f1 pins (SOURCE)."""
     src = F1["source"]
-    assert src["commit"].startswith("f1094b3")
-    assert len(F1["transition_cases"]) == 25 and len(F1["workspace_n_offers"]) == 12
-    snapshot = HERE / "vectors/f1/checkpoint.json"
-    if "f1094b3" not in (HERE / "vectors/f1/SOURCE").read_text():
-        pytest.skip("tests/vectors/f1 still pins an older orch-core commit (PR #41 re-syncs it)")
-    raw = snapshot.read_bytes()
+    assert src["commit"] == MERGED
+    assert f"Commit: {MERGED}" in (HERE / "vectors/f1/SOURCE").read_text()
+    assert len(F1["transition_cases"]) == 88 and len(F1["workspace_n_offers"]) == 30
+    raw = (HERE / "vectors/f1/checkpoint.json").read_bytes()
     assert hashlib.sha256(raw).hexdigest() == src["sha256"]
     full = json.loads(raw)
     assert all(full[k] == F1[k] for k in src["keys"])
-
-
-F52 = json.loads((HERE / "vectors/f1_receiver_orch52.json").read_text())
+    assert set(F1) == {"source", "note", *src["keys"]} and F1["note"] == full["note"]
 
 
 def judge(f1, held, offered, now, **kw):
@@ -53,77 +50,94 @@ def judge(f1, held, offered, now, **kw):
     )
 
 
-@by_name(F1["transition_cases"])
-def test_f1_transition_cases_against_reference_judge(c):
-    # f1094b3 predates the pinned card and the clock: pin the bundle's own delegation, judge at T.at.
-    restore = c["restore"]
-    got = judge(
-        F1,
-        c["held"],
-        c["offered"],
-        c["offered"]["o"]["at"],
-        restore=restore,
-        applied=c["applied"],
-        proofs=c["proofs"],
-        known=c.get("known_revocations", []),
-        card=restore.get("delegation"),
-    )
-    assert got == (c["expect"], c["recorded"])
-
-
-@by_name(F1["workspace_n_offers"])
-def test_f1_workspace_n_offers_against_reference_judge(c):
-    got = judge(
-        F1,
-        F1["workspace_n_held"],
-        c["checkpoint"],
-        c["checkpoint"]["o"]["at"],
-        restore=c.get("restore"),
-        applied=c.get("applied", []),
-        proofs=c.get("proofs"),
-    )
-    assert got == (c["expect"], c.get("recorded"))
-
-
-@by_name(F52["transition_cases"])
-def test_orch52_transition_cases_against_reference_judge(c):
-    """orch-52's receiver cases (fix/restore-receiver-vectors head, not yet merged): one defect each."""
-    kw = {
+def view(c):
+    """The case's receiver view (orch-core #377 ReceiverView): every field given, {} / [] meaning none."""
+    return {
         "restore": c["restore"],
         "applied": c["applied"],
         "proofs": c["proofs"],
         "card": c["pinned_delegation"],
+        "known": c["known_revocations"],
+        "known_devices": c["known_devices"],
     }
+
+
+@by_name(F1["transition_cases"])
+def test_f1_transition_cases_against_reference_judge(c):
+    """orch-core #377's receiver cases: one defect each, judged with the case's own view and clock."""
     got = judge(
-        F52,
-        c["held"],
-        c["offered"],
-        c["now"],
-        known=c.get("known_revocations", []),
-        known_devices=c.get("known_devices"),
-        **kw,
+        F1, c["held"], c["offered"], c["now"], **view(c), learned_later=c["learned_later_in_walk"]
     )
-    assert got == (c["expect"], c["recorded"])
-    if "learned_later_in_walk" in c:
+    alarms = (c["restore"]["event"]["actor"]["device"],) if c.get("alarm") else ()
+    assert got == (c["expect"], c["recorded"], alarms)
+    if c["learned_later_in_walk"]:  # only the receiver's order separates this case from a refusal
         again = judge(
-            F52, c["held"], c["offered"], c["now"], known=c["learned_later_in_walk"], **kw
+            F1,
+            c["held"],
+            c["offered"],
+            c["now"],
+            **{**view(c), "known": c["learned_later_in_walk"]},
         )
-        assert again == ("chain.diverged", None)
+        assert again == ("chain.diverged", None, ())
 
 
-@by_name(F52["workspace_n_offers"])
-def test_orch52_workspace_n_offers_against_reference_judge(c):
-    held = c["held"] if "held" in c else F52["workspace_n_held"]
-    got = judge(
-        F52,
-        held,
-        c["checkpoint"],
-        c["now"],
-        restore=c.get("restore"),
-        applied=c.get("applied", []),
-        proofs=c.get("proofs"),
+@by_name(F1["workspace_n_offers"])
+def test_f1_workspace_n_offers_against_reference_judge(c):
+    held = c["held"] if "held" in c else F1["workspace_n_held"]
+    got = judge(F1, held, c["checkpoint"], c["now"], proofs=c.get("proofs"), known_devices={})
+    assert got == (c["expect"], None, ())
+
+
+def test_judge_requires_the_receivers_known_devices():
+    """orch-core #377 B1: every ReceiverView field is required; forgetting known_devices fails loudly."""
+    c = F1["workspace_n_offers"][0]
+    with pytest.raises(TypeError):
+        judge(F1, F1["workspace_n_held"], c["checkpoint"], c["now"])
+
+
+def _evidence_case():
+    c = copy.deepcopy(
+        next(
+            x
+            for x in F1["transition_cases"]
+            if x["name"] == "own_evidence_for_a_known_active_device"
+        )
     )
-    assert got == (c["expect"], c.get("recorded"))
+    assert judge(F1, c["held"], c["offered"], c["now"], **view(c))[0] == "ok"
+    return c
+
+
+def test_judge_with_explicit_none_known_devices_refuses():
+    """An explicit None is not "no devices" ({} is): it fails closed instead of skipping evidence binding."""
+    c = _evidence_case()
+    got = judge(F1, c["held"], c["offered"], c["now"], **{**view(c), "known_devices": None})
+    assert got == ("chain.diverged", None, ())
+
+
+def test_known_device_without_a_stored_key_binds_the_person_only():
+    """orch-core binds person and, only when it stores one, the key: a None pk_pub is "no key", not a value."""
+    c = _evidence_case()
+    device, kd = next(iter(c["known_devices"].items()))
+    keyless = {device: {"person_id": kd["person_id"], "pk_pub": None}}
+    got = judge(F1, c["held"], c["offered"], c["now"], **{**view(c), "known_devices": keyless})
+    assert got[0] == "ok"
+    absent = {device: {"person_id": kd["person_id"]}}
+    got = judge(F1, c["held"], c["offered"], c["now"], **{**view(c), "known_devices": absent})
+    assert got[0] == "ok"
+    other = {device: {"person_id": "ff" * 16, "pk_pub": None}}
+    got = judge(F1, c["held"], c["offered"], c["now"], **{**view(c), "known_devices": other})
+    assert got == ("chain.diverged", None, ())
+
+
+def test_walk_alarm_case_alarms_through_the_device_state():
+    """The walk raises C3 alarms itself (raise_alarms over every learned revocation, across walks): the
+    shared alarm case, replayed as device state, alarms for the signer and keeps the transition."""
+    c = next(x for x in F1["transition_cases"] if x.get("alarm"))
+    signer = c["restore"]["device_cert"]["o"]
+    dev = {"signers": {c["restore"]["event"]["id"]: {"device": signer["device_id"]}}, "alarms": []}
+    later = {x["revocation"]["o"]["device_id"]: x["revocation"] for x in c["learned_later_in_walk"]}
+    C.raise_alarms(dev, later)
+    assert dev["alarms"] == [signer["device_id"]]
 
 
 def test_f1_known_revocation_of_signer_refuses_on_ticket_logs_too():
@@ -141,17 +155,9 @@ def test_f1_known_revocation_of_signer_refuses_on_ticket_logs_too():
             }
         }
         got = judge(
-            F1,
-            c["held"],
-            c["offered"],
-            c["offered"]["o"]["at"],
-            restore=c["restore"],
-            applied=[],
-            proofs=c["proofs"],
-            known=[{"revocation": rev}],
-            card=c["restore"]["delegation"],
+            F1, c["held"], c["offered"], c["now"], **{**view(c), "known": [{"revocation": rev}]}
         )
-        assert got == ("chain.diverged", None), reason
+        assert got == ("chain.diverged", None, ()), reason
 
 
 def _publication(name="ticket_restore"):
@@ -294,21 +300,23 @@ def test_device_refuses_a_restore_line_over_the_line_cap(monkeypatch):
 
 def test_known_evidence_must_match_the_receivers_stored_key():
     # PR #41 completeness rule: person ids agree, but the receiver stored another key for the device.
-    c = next(x for x in F52["transition_cases"] if x["name"] == "receiver_retired_to_lost")
+    c = next(x for x in F1["transition_cases"] if x["name"] == "receiver_retired_to_lost")
     kw = {
         "restore": c["restore"],
         "applied": c["applied"],
         "proofs": c["proofs"],
         "card": c["pinned_delegation"],
+        "known_devices": c["known_devices"],
     }
     known = copy.deepcopy(c["known_revocations"])
     carried = {e["revocation"]["o"]["device_id"]: e for e in c["restore"]["event"]["revocations"]}
     known[0]["pk_pub"] = carried[known[0]["revocation"]["o"]["device_id"]]["pk_pub"]
-    assert judge(F52, c["held"], c["offered"], c["now"], known=known, **kw)[0] == "ok"
+    assert judge(F1, c["held"], c["offered"], c["now"], known=known, **kw)[0] == "ok"
     known[0]["pk_pub"] = c["restore"]["pk_pub"]  # the owner's key, not the device person's
-    assert judge(F52, c["held"], c["offered"], c["now"], known=known, **kw) == (
+    assert judge(F1, c["held"], c["offered"], c["now"], known=known, **kw) == (
         "chain.diverged",
         None,
+        (),
     )
 
 
@@ -338,10 +346,10 @@ def test_known_holder_is_strict_about_its_state():
 
 
 def test_device_binds_evidence_for_a_known_active_device():
-    """orch-52 #377 / re-review F2: the PoC, as a test. The receiver knows the device only as active."""
+    """orch-core #377 / re-review F2: the PoC, as a test. The receiver knows the device only as active."""
     c = next(
         x
-        for x in F52["transition_cases"]
+        for x in F1["transition_cases"]
         if x["name"] == "foreign_evidence_for_a_known_revoked_device"
     )
     kw = {
@@ -352,11 +360,11 @@ def test_device_binds_evidence_for_a_known_active_device():
     }
     rev = c["known_revocations"][0]["revocation"]["o"]
     assert (
-        judge(F52, c["held"], c["offered"], c["now"], known=[], **kw)[0] == "ok"
+        judge(F1, c["held"], c["offered"], c["now"], known=[], known_devices={}, **kw)[0] == "ok"
     )  # nothing known: accepted
     active = {rev["device_id"]: {"person_id": rev["person_id"]}}
-    got = judge(F52, c["held"], c["offered"], c["now"], known=[], known_devices=active, **kw)
-    assert got == ("chain.diverged", None)
+    got = judge(F1, c["held"], c["offered"], c["now"], known=[], known_devices=active, **kw)
+    assert got == ("chain.diverged", None, ())
 
 
 def test_resumed_endpoint_must_be_the_requested_hash(monkeypatch):
@@ -375,7 +383,7 @@ def test_resumed_endpoint_must_be_the_requested_hash(monkeypatch):
 
 
 def test_device_binds_evidence_for_a_known_device_to_its_stored_key():
-    c = next(x for x in F52["transition_cases"] if x["name"] == "receiver_retired_to_lost")
+    c = next(x for x in F1["transition_cases"] if x["name"] == "receiver_retired_to_lost")
     kw = {
         "restore": c["restore"],
         "applied": c["applied"],
@@ -387,7 +395,7 @@ def test_device_binds_evidence_for_a_known_device_to_its_stored_key():
     ok = {d: {"person_id": person, "pk_pub": item["pk_pub"]}}
     assert (
         judge(
-            F52,
+            F1,
             c["held"],
             c["offered"],
             c["now"],
@@ -399,7 +407,7 @@ def test_device_binds_evidence_for_a_known_device_to_its_stored_key():
     )
     bad = {d: {"person_id": person, "pk_pub": c["restore"]["pk_pub"]}}
     got = judge(
-        F52,
+        F1,
         c["held"],
         c["offered"],
         c["now"],
@@ -407,7 +415,7 @@ def test_device_binds_evidence_for_a_known_device_to_its_stored_key():
         known_devices=bad,
         **kw,
     )
-    assert got == ("chain.diverged", None)
+    assert got == ("chain.diverged", None, ())
 
 
 def test_alarms_read_round_two_signer_format():

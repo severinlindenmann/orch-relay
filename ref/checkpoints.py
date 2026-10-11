@@ -1,7 +1,7 @@
 """P3-D12/13/18–25 checkpoint relay contract; test support, never server code.
 
 State is JSON-portable. dispatch preflights on a copy and commits only a success.
-F1 event/checkpoint encodings are pinned to orch-core f1094b3.
+F1 event/checkpoint encodings are pinned to orch-core 4f00d9ce (the merge of #377).
 """
 import copy
 import re
@@ -599,7 +599,7 @@ def baseline(state, body, now, delete=False, role=None):
 
 # ---------------------------------------------------------------------------------------------
 # Device side (§19.8 "Device synchronisation"): the checkpoint-only receiver and its sync walk.
-# judge_offer ports orch-core f1094b3 store/checkpoints.judge_offer with the relay's primitives and
+# judge_offer ports orch-core 4f00d9ce (#377) store/checkpoints.judge_offer with the relay's primitives and
 # returns F1's codes, so F1's transition_cases/workspace_n_offers run against it unchanged.
 # ---------------------------------------------------------------------------------------------
 DIVERGED, INCOMPLETE, FUTURE = 'chain.diverged', 'sync.incomplete', 'checkpoint.future'
@@ -642,56 +642,66 @@ def offer_ok(S, o):
         return False
 
 
-def judge_offer(S, held, offered, *, genesis, workspace_id, now, wsk_pub, restore=None, applied=(), proofs=None,
-                known=(), revoked=(), card=None, known_devices=None, initial_proof=False):
-    """held/offered are checkpoint `o` objects; now is the receiver clock in ms. Returns (code, recorded id).
+def judge_offer(S, held, offered, *, genesis, workspace_id, now, wsk_pub, known_devices, restore=None, applied=(),
+                proofs=None, known=(), revoked=(), card=None, learned_later=(), initial_proof=False):
+    """held/offered are checkpoint `o` objects; now is the receiver clock in ms.
+    Returns (code, recorded id, alarms), orch-core's Verdict.
 
-    Ports orch-core judge_offer as of orch-52's fix/restore-receiver-vectors (9918c805), F1 codes included.
+    Ports orch-core judge_offer at 4f00d9ce (#377: ReceiverView, Verdict), F1 codes included.
+    known_devices ({device_id: {person_id, pk_pub?}}) is required, as every ReceiverView field is (B1): {} says
+    the receiver knows no device; it binds carried evidence for every device the receiver knows, active or
+    revoked. learned_later are revocations first learned after this judgment (a higher-n bundle of the walk):
+    they never refuse; a compromised one of an accepted restore's signer is reported in alarms (C3).
     Relay additions: `revoked` (device ids learned out of band; they refuse a signer but are not demanded in
     a restore's evidence, protocol-v2 §19.8) and initial_proof (full proof from acc_0 for a first checkpoint,
-    where F1 accepts it without ancestry). known_devices ({device_id: {person_id, pk_pub?}}, orch-52 #377)
-    binds carried evidence for every device the receiver already knows, active or revoked. The walk passes
-    the pairing-pinned owner PK as restore['pk_pub']."""
+    where F1 accepts it without ancestry). The walk passes the pairing-pinned owner PK as restore['pk_pub']."""
     if not offer_ok(S, offered):
-        return DIVERGED, None
+        return DIVERGED, None, ()
     if offered['genesis'] != genesis:
-        return 'trust.genesis_mismatch', None
+        return 'trust.genesis_mismatch', None, ()
     if offered['workspace_id'] != workspace_id or (held and held['workspace_id'] != workspace_id):
-        return DIVERGED, None
+        return DIVERGED, None, ()
     h = {'workspace': held['workspace_log'], **held['tickets']} if held else {}
     o = {'workspace': offered['workspace_log'], **offered['tickets']}
     proofs = {} if proofs is None else proofs
     if held and offered['n'] == held['n']:
-        return ('ok' if offered == held else DIVERGED), None
+        return ('ok' if offered == held else DIVERGED), None, ()
     if held and offered['n'] < held['n']:
         bad = any(k not in h or v['seq'] > h[k]['seq'] or (v['seq'] == h[k]['seq'] and v != h[k]) for k, v in o.items())
-        return (DIVERGED if bad else 'ignored'), None
+        return (DIVERGED if bad else 'ignored'), None, ()
     if timestamp(offered['at']) > now + SKEW:
-        return FUTURE, None
+        return FUTURE, None, ()
     if held and (offered['at'] < held['at'] or h.keys() - o.keys()):
-        return DIVERGED, None
+        return DIVERGED, None, ()
     if not isinstance(proofs, dict):
-        return INCOMPLETE, None
+        return INCOMPLETE, None, ()
     restored = None
     if restore is not None:
         code, restored = judge_restore(S, held, offered, h, o, restore, proofs, genesis, applied, wsk_pub,
-                                       known, revoked, card, known_devices or {})
+                                       known, revoked, card, known_devices)
         if code != 'ok':
-            return code, None
+            return code, None, ()
     if held is None and restore is None and not initial_proof:
-        return 'ok', None
+        return 'ok', None, ()
     for log, entry in o.items():
         if restored and log == restored[0]:
             continue
         old = h.get(log, EMPTY)
         if entry['seq'] < old['seq'] or (entry['seq'] == old['seq'] and entry != old):
-            return DIVERGED, None
+            return DIVERGED, None, ()
         heads = proofs.get(log, [])
         if not extension(old, entry, heads):
-            return INCOMPLETE, None
+            return INCOMPLETE, None, ()
         if initial_proof and log == 'workspace' and old['seq'] == 0 and heads[0] != genesis:
-            return INCOMPLETE, None
-    return 'ok', restored[1] if restored else None
+            return INCOMPLETE, None, ()
+    if not restored:
+        return 'ok', None, ()
+    _, restore_id, signer = restored
+    # C3: learned after the judgment, a compromised revocation of the signer alarms and never refuses.
+    alarms = tuple(sorted({'d_' + signer for later in learned_later
+                           if later['revocation']['o']['device_id'] == signer and
+                           later['revocation']['o']['reason'] == 'compromised'}))
+    return 'ok', restore_id, alarms
 
 
 def judge_restore(S, held, offered, h, o, restore, proofs, genesis, applied, wsk_pub, known, revoked, card,
@@ -712,7 +722,7 @@ def judge_restore(S, held, offered, h, o, restore, proofs, genesis, applied, wsk
             return diverged
         if c and R.verify_object(S, wsk, c, 'workspace_checkpoint') is None:
             return diverged
-        # The delegation's content must be the pinned card's (orch-52 24305776), not any the PK signed.
+        # The delegation's content must be the pinned card's (orch-core #377), not any the PK signed.
         if not isinstance(card, dict) or not isinstance(restore['delegation'], dict) or \
                 restore['delegation'].get('o') != card.get('o'):
             return diverged
@@ -749,7 +759,7 @@ def judge_restore(S, held, offered, h, o, restore, proofs, genesis, applied, wsk
             # Evidence for a device the receiver knows (active or revoked) is from its person and key.
             kd = known_devices.get(d)
             if kd is not None and (item['revocation']['o']['person_id'] != kd['person_id'] or
-                                   ('pk_pub' in kd and item['pk_pub'] != kd['pk_pub'])):
+                                   (kd.get('pk_pub') is not None and item['pk_pub'] != kd['pk_pub'])):
                 return diverged
         for item in known:
             rev = item['revocation']['o']
@@ -759,7 +769,7 @@ def judge_restore(S, held, offered, h, o, restore, proofs, genesis, applied, wsk
                 return diverged
             # Evidence for a device the receiver knows is from its known person (and stored key).
             if got is not None and (got['revocation']['o']['person_id'] != rev['person_id'] or
-                                    ('pk_pub' in item and got['pk_pub'] != item['pk_pub'])):
+                                    (item.get('pk_pub') is not None and got['pk_pub'] != item['pk_pub'])):
                 return diverged
             if log == 'workspace' and (got is None or (
                     rev['reason'] == 'compromised' and got['revocation']['o']['reason'] != 'compromised')):
@@ -794,10 +804,10 @@ def judge_restore(S, held, offered, h, o, restore, proofs, genesis, applied, wsk
         tail = proofs.get(log)
         if not isinstance(tail, list) or not tail or log not in o or not extension(retained, o[log], tail):
             return INCOMPLETE, None
-        # A consistent proof whose first head is another event: T is signed over another head (orch-52).
+        # A consistent proof whose first head is another event: T is signed over another head (orch-core #377).
         if tail[0] != event_head(ev):
             return diverged
-        return 'ok', (log, ev['id'])
+        return 'ok', (log, ev['id'], signer)
     except (KeyError, TypeError, ValueError, IndexError, AttributeError, Refusal):
         return diverged
 
@@ -894,10 +904,11 @@ def sync_walk(S, dev, relay, now, endpoint=None, script=None, max_heads=None):
                 for log, e in entries(x).items() if log != skip and e['seq'] > old.get(log, EMPTY)['seq']}
 
     def judge(work, x, **kw):
+        # (code, recorded): the walk raises C3 alarms itself, across walks, from every learned revocation.
         return judge_offer(S, work['o'] if work else None, x['o'], genesis=genesis, workspace_id=ws, now=now,
                            wsk_pub=dev['wsk_pub'], applied=dev['applied'],
                            card=dev['card'], revoked=set(dev['local']), initial_proof=True,
-                           known_devices=known_devices(), **kw)
+                           known_devices=known_devices(), **kw)[:2]
 
     def known_devices():
         out = dict(dev['devices'])

@@ -316,7 +316,7 @@
   {
    "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
    "name": "settings_repo_refusals",
-   "now": "2026-10-10T10:11:20Z",
+   "now": "2026-10-10T10:12:10Z",
    "pins": "F1 step 0: malformed repo fields refuse append and break replay at the line; decision 94 aliases refuse settings",
    "steps": [
     {
@@ -2006,6 +2006,7 @@
      "schema_refused": true
     },
     {
+     "append_code": "validation.event",
      "event": {
       "actor": {
        "device": "d_c65032f21d43401cc223b05723c1e5b4",
@@ -2016,8 +2017,143 @@
       "auth": "passphrase",
       "based_on": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
       "hash_v": 1,
-      "host_sig": "ImjFWhFbGc69w1rh0TqpPOLeW_Ir0QEXMCQjDk4OMWuY5UcDCuDE9op8wGuiCcCRBBwMNpONBzirff0ePpG5jg",
+      "host_sig": "P95i2F_9kx-wbRINsL8zrKQIAuql3y3PyoAat67PGjOZeR4iFAUDZ6LNbUKSqKiFWMuLS2uosRJl7sKbuoSIeQ",
       "id": "01J9ZK0000000000000000001H",
+      "prev": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "roster_v": 3,
+      "seq": 4,
+      "set": {
+       "repos": {
+        "a": {
+         "default_branch": "feat/\u0301branch",
+         "path": "../a"
+        }
+       }
+      },
+      "sig": "LKRdFS4WghpklA5a-Znx62AVBfxNa0snA2znbltQa7OaO92CLJqjG6PrZjJMvRlDxHL1MCu-At9L05LRoSHEmA",
+      "type": "settings.changed",
+      "v": 2
+     },
+     "expect": "validation.event",
+     "log": "workspace",
+     "replay_expect": "chain.broken",
+     "schema_refused": true
+    },
+    {
+     "append_code": "validation.event",
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:08:20Z",
+      "auth": "passphrase",
+      "based_on": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "hash_v": 1,
+      "host_sig": "JccYsicBO5mBguF4m2An4LCDKXx1F2nou6dpvzUvJDwcuQYoBGX1JK0bieWxluKoU5b7oBCB1wy6Gr8pda1mog",
+      "id": "01J9ZK0000000000000000001J",
+      "prev": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "roster_v": 3,
+      "seq": 4,
+      "set": {
+       "repos": {
+        "a": {
+         "default_branch": "feat/\u0903branch",
+         "path": "../a"
+        }
+       }
+      },
+      "sig": "q-g8QLDlKxImTl592z0OtniMzR8C5Ga-B6-_HCwQ_fio3TUOGHKAXDjLSZahSJvpeKAT9a9vjmRuLpG8mvASRw",
+      "type": "settings.changed",
+      "v": 2
+     },
+     "expect": "validation.event",
+     "log": "workspace",
+     "replay_expect": "chain.broken",
+     "schema_refused": true
+    },
+    {
+     "append_code": "validation.event",
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:08:30Z",
+      "auth": "passphrase",
+      "based_on": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "hash_v": 1,
+      "host_sig": "MaGyPfcTAY5uVlA3sBKv5TriMSBr8ELFyzhsVYWMmeSBV7XK6qa-VNnys8g9V3DbS_GM7EWIbHtJEck8WvfnPA",
+      "id": "01J9ZK0000000000000000001K",
+      "prev": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "roster_v": 3,
+      "seq": 4,
+      "set": {
+       "repos": {
+        "a": {
+         "default_branch": "feat/part/\u20ddbranch",
+         "path": "../a"
+        }
+       }
+      },
+      "sig": "Vhd9yCuVWkFLIqoUUH8I5xlsZ9wncD8ZbNGIY2DPtQoqAjK0h7NWq7D6iDM16JAseRMfWF7IGlH8waB6KYKnUg",
+      "type": "settings.changed",
+      "v": 2
+     },
+     "expect": "validation.event",
+     "log": "workspace",
+     "replay_expect": "chain.broken",
+     "schema_refused": true
+    },
+    {
+     "append_code": "validation.event",
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:08:40Z",
+      "auth": "passphrase",
+      "based_on": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "hash_v": 1,
+      "host_sig": "Gx79VwO405m3RXkGx0slNT1QY1SugrmrT3rIaKdEAsJx9_EYvjaI8WXo2WdUw9by7PZdG-SDlH0obmrIrAN3Kw",
+      "id": "01J9ZK0000000000000000001M",
+      "prev": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "roster_v": 3,
+      "seq": 4,
+      "set": {
+       "repos": {
+        "a": {
+         "default_branch": "feat/\ud803\udd69branch",
+         "path": "../a"
+        }
+       }
+      },
+      "sig": "9RXX0cK-Gy90H5EaVlnU9AT4Ps-NPru37WvSX5UiG101OlULJNyLKerja_TT6tAbAIakb3Cq19ceA1FBin4l6g",
+      "type": "settings.changed",
+      "v": 2
+     },
+     "expect": "validation.event",
+     "log": "workspace",
+     "replay_expect": "chain.broken",
+     "schema_refused": true
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:08:50Z",
+      "auth": "passphrase",
+      "based_on": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "hash_v": 1,
+      "host_sig": "DqsXRr79EhB5319bsqtxe5pE8WPYMnC54X--iJvyD_r3X-uE1_zwSOdpd7d7wxmbFOPZet2lgnr6Y23tQ7hv5g",
+      "id": "01J9ZK0000000000000000001N",
       "prev": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
       "roster_v": 3,
       "seq": 4,
@@ -2029,7 +2165,7 @@
         }
        }
       },
-      "sig": "k1n9eXcis2P00lWVEW26V3eg1HmGktRb3yujXrutO72GtX4ddxqif-yX0p2cDRPAHXPYoOVQLI2CbQdV9PPNDA",
+      "sig": "bqJJ7xwmjEnH-78VWZ4hzaNXvjBc-WhhleSm6T3GsQZ3HkVH5AOagVlq679flLJyt4N9AcSes2awEdOpFMDFKQ",
       "type": "settings.changed",
       "v": 2
      },
@@ -2043,12 +2179,12 @@
        "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
        "kind": "person"
       },
-      "at": "2026-10-10T10:08:20Z",
+      "at": "2026-10-10T10:09:00Z",
       "auth": "passphrase",
       "based_on": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
       "hash_v": 1,
-      "host_sig": "Hjuhf9a57Fr_n9hgXclZVa3FdVIzbiCHcKaIDyBJ8uJchFBuUdSIGbctzbFjK9rhGRkRKeVo4OfTdKXi1Wvrew",
-      "id": "01J9ZK0000000000000000001J",
+      "host_sig": "zGJHVgX8Th4xqfqPsAF8Xq0kHhX5MhA-7gY4bg4SC2riZDolhr_jh4vRV2PKgC6gWzhAVeoZ3MSphCC81OO7Eg",
+      "id": "01J9ZK0000000000000000001P",
       "prev": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
       "roster_v": 3,
       "seq": 4,
@@ -2060,7 +2196,7 @@
         }
        }
       },
-      "sig": "O-ZGxReDENSAowOeu_DCXEQrpQT9B9xKpNRYy-eNYfNWs-dKwSQw-gLMXekREdMFtSJyAZSeaQeVgsNgvE4YJQ",
+      "sig": "nHHxb_eWYceKIm6zPR335MZLWLzqRkggtY3DhOtW1tnv_8I-uie4OvbGlzxVrduqLZZNg_UtE3IW3EuPNEHPDw",
       "type": "settings.changed",
       "v": 2
      },
@@ -2074,13 +2210,13 @@
        "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
        "kind": "person"
       },
-      "at": "2026-10-10T10:08:30Z",
+      "at": "2026-10-10T10:09:10Z",
       "auth": "passphrase",
-      "based_on": "sha256:07edc34d9a7b34321016810a716db631ed8a4f92115ab8fc17f0c2d3f793dfc2",
+      "based_on": "sha256:989b5bfa1782f3f1859a6cbf8d738e6076c6121cd43f80ac336a700f43cd5f10",
       "hash_v": 1,
-      "host_sig": "zF59lapM4xk5q_MItYs_Av5KXwwzRNFuHF--WcoC69oOuLvuPWMfcr8NH4dDRiY4AncoS0GRE8uSNOl86LNnyA",
-      "id": "01J9ZK0000000000000000001K",
-      "prev": "sha256:07edc34d9a7b34321016810a716db631ed8a4f92115ab8fc17f0c2d3f793dfc2",
+      "host_sig": "Ing3etrUhlJo8Ykl6TwF6-_VYir_nZlaymh_TNtdValLGH6wVh7bRcWK5zCLb6wFubM9_LcrrYoiUhb2c7tfvw",
+      "id": "01J9ZK0000000000000000001Q",
+      "prev": "sha256:989b5bfa1782f3f1859a6cbf8d738e6076c6121cd43f80ac336a700f43cd5f10",
       "roster_v": 3,
       "seq": 5,
       "set": {
@@ -2091,7 +2227,7 @@
         }
        }
       },
-      "sig": "J1f_MwkPSAKiGURJKZSwLzDVozuCdzsKxyu-cJ-vmCQebTJakzYUQg7HrUBh_kcN74oo84xIT9FmJF0DoDErHQ",
+      "sig": "xwd8QIVgazyUGFJ6m4S6AaOS10lhQKgKvQ_AtxqcDXi2yPUT6KuV-SLokz8rNKdMwyaK6SZzSF-lmPrKoRcRqw",
       "type": "settings.changed",
       "v": 2
      },
@@ -2105,13 +2241,13 @@
        "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
        "kind": "person"
       },
-      "at": "2026-10-10T10:08:40Z",
+      "at": "2026-10-10T10:09:20Z",
       "auth": "passphrase",
-      "based_on": "sha256:07edc34d9a7b34321016810a716db631ed8a4f92115ab8fc17f0c2d3f793dfc2",
+      "based_on": "sha256:989b5bfa1782f3f1859a6cbf8d738e6076c6121cd43f80ac336a700f43cd5f10",
       "hash_v": 1,
-      "host_sig": "mLBkZkVeBw-88QO-EIaceq7NnuE5-qmexTaswvbHuHAe4_aFBpVDXsMfQ-xhrdZL9R1rZBKmN_TyqdwdyhcANA",
-      "id": "01J9ZK0000000000000000001M",
-      "prev": "sha256:07edc34d9a7b34321016810a716db631ed8a4f92115ab8fc17f0c2d3f793dfc2",
+      "host_sig": "IgJIPmw2wAGo2z7KnIU6x6W-ybLamTAU-fz5AXXI7ElZUYZq1EDSzmBbewMFvlHGaPeX08PhSPnFwJiLpfae2g",
+      "id": "01J9ZK0000000000000000001R",
+      "prev": "sha256:989b5bfa1782f3f1859a6cbf8d738e6076c6121cd43f80ac336a700f43cd5f10",
       "roster_v": 3,
       "seq": 5,
       "set": {
@@ -2123,7 +2259,7 @@
         }
        }
       },
-      "sig": "Ms6mgQkoriP5fVpLHu0JLnuQt0h3quwEELsSwMliYaTEv9-RIYaXdNi0mTSoblusKXQbs6uTS-WVt_74lbdsLg",
+      "sig": "Q1LdBB5zvRYeQDHGxMpdl2Y1MUR-qdniragU7bc5juZK_30TzfY7kc74KqQSO1PAbnCqJOn8umV877hrOxPaXA",
       "type": "settings.changed",
       "v": 2
      },
@@ -2138,174 +2274,26 @@
        "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
        "kind": "person"
       },
-      "at": "2026-10-10T10:08:50Z",
-      "auth": "passphrase",
-      "based_on": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
-      "hash_v": 1,
-      "host_sig": "D1N7064fZOUQXNlFKg00bCLBH2h4HcN3pHLCXDhBxep2NvvAgkjbUms_OskkYwSzEaQ2q_njo2ivNpNw3Thonw",
-      "id": "01J9ZK0000000000000000001N",
-      "prev": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
-      "roster_v": 3,
-      "seq": 6,
-      "set": {
-       "repos": {
-        "c": {
-         "path": "../same"
-        },
-        "d": {
-         "path": "../same"
-        }
-       }
-      },
-      "sig": "KnuGI5BYGFJD-hmST3Jv-W9L4ipaubw9i0yPvsDFJK5eSW6UBeUy3eg5kFkQ3nZhxEqu4WvvyUGilbVPwNGUbA",
-      "type": "settings.changed",
-      "v": 2
-     },
-     "expect": "validation.event",
-     "log": "workspace",
-     "note": "decision 94: duplicate normalized paths or case-insensitive names, including unchanged repos",
-     "replay_expect": "chain.broken",
-     "schema_refused": true
-    },
-    {
-     "append_code": "validation.event",
-     "event": {
-      "actor": {
-       "device": "d_c65032f21d43401cc223b05723c1e5b4",
-       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
-       "kind": "person"
-      },
-      "at": "2026-10-10T10:09:00Z",
-      "auth": "passphrase",
-      "based_on": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
-      "hash_v": 1,
-      "host_sig": "EV_jtBNwdvGEk7pfu0Fc88AGFWNllEIhHvSkxXrCLQI1vRPCzv8JMbc_Wa3KVgM45xsJzdlo4cL237c7CPeUyQ",
-      "id": "01J9ZK0000000000000000001P",
-      "prev": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
-      "roster_v": 3,
-      "seq": 6,
-      "set": {
-       "repos": {
-        "c": {
-         "path": "../same"
-        },
-        "d": {
-         "path": "../other/../same/./"
-        }
-       }
-      },
-      "sig": "pgVwG7YOPcF3wcKfBEEC-EAtwjxkE0TqiBxverbfuYUKGbwC4_7MfyhFPHQKrwHEN-oOafgG_phsVbzWhJHMEA",
-      "type": "settings.changed",
-      "v": 2
-     },
-     "expect": "validation.event",
-     "log": "workspace",
-     "note": "decision 94: duplicate normalized paths or case-insensitive names, including unchanged repos",
-     "replay_expect": "chain.broken",
-     "schema_refused": true
-    },
-    {
-     "append_code": "validation.event",
-     "event": {
-      "actor": {
-       "device": "d_c65032f21d43401cc223b05723c1e5b4",
-       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
-       "kind": "person"
-      },
-      "at": "2026-10-10T10:09:10Z",
-      "auth": "passphrase",
-      "based_on": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
-      "hash_v": 1,
-      "host_sig": "i_AWHZYBuyIoACsPIqH6N_ozOi8ffrlD7MBEqNaxsLaq4XtfaLeI9Z5dd8FR0Ed0o3k9wqJHbv8Mh0gLTqjPcw",
-      "id": "01J9ZK0000000000000000001Q",
-      "prev": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
-      "roster_v": 3,
-      "seq": 6,
-      "set": {
-       "repos": {
-        "c": {
-         "path": "../Same"
-        },
-        "d": {
-         "path": "../same"
-        }
-       }
-      },
-      "sig": "P6tLtO4DNOSzMRH8oq3zN1wTrQvFn3hjlHaGDfEpqbIi8RSmZosdrX6rbKfejw8BvBOiRNNbRHhZddzS9QmUwQ",
-      "type": "settings.changed",
-      "v": 2
-     },
-     "expect": "validation.event",
-     "log": "workspace",
-     "note": "decision 94: duplicate normalized paths or case-insensitive names, including unchanged repos",
-     "replay_expect": "chain.broken",
-     "schema_refused": true
-    },
-    {
-     "append_code": "validation.event",
-     "event": {
-      "actor": {
-       "device": "d_c65032f21d43401cc223b05723c1e5b4",
-       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
-       "kind": "person"
-      },
-      "at": "2026-10-10T10:09:20Z",
-      "auth": "passphrase",
-      "based_on": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
-      "hash_v": 1,
-      "host_sig": "0s9CU4C_NyLXLMOhQ6LaICTd05xSdYf2Z7QDsYRyiXsyJDmlgEhWUlQh9Ignhq_03OR87Vqx8CXoJuYJPgLaVA",
-      "id": "01J9ZK0000000000000000001R",
-      "prev": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
-      "roster_v": 3,
-      "seq": 6,
-      "set": {
-       "repos": {
-        "c": {
-         "path": "../Street"
-        },
-        "d": {
-         "path": "../STREET"
-        }
-       }
-      },
-      "sig": "oAMuANrkQqmP_gGb_ntzjHvxsmO0Egtg3LnRzGoJw1mBQtKZP14DUzl0jny_TeDp0Zy0A065wBcIi33oszsFaA",
-      "type": "settings.changed",
-      "v": 2
-     },
-     "expect": "validation.event",
-     "log": "workspace",
-     "note": "decision 94: duplicate normalized paths or case-insensitive names, including unchanged repos",
-     "replay_expect": "chain.broken",
-     "schema_refused": true
-    },
-    {
-     "append_code": "validation.event",
-     "event": {
-      "actor": {
-       "device": "d_c65032f21d43401cc223b05723c1e5b4",
-       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
-       "kind": "person"
-      },
       "at": "2026-10-10T10:09:30Z",
       "auth": "passphrase",
-      "based_on": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
+      "based_on": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
       "hash_v": 1,
-      "host_sig": "x9rH_79-BGCZKS-Zil8qmC9Cs1d-MuFgFSOI7UODlG69T51DkttQFJ2qLB8gLVJ5kwwfDPbagDu8VJXFFRFi-A",
+      "host_sig": "NSmOgaWbmMRAC-T3peegZnKAoBP7wE2p8rmwpQ8_MT44OAzBhnpLVBFq51lZlEJs21gLx7yQ7uR_ezZTKOadGw",
       "id": "01J9ZK0000000000000000001S",
-      "prev": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
+      "prev": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
       "roster_v": 3,
       "seq": 6,
       "set": {
        "repos": {
         "c": {
-         "path": "//same"
+         "path": "../same"
         },
         "d": {
-         "path": "/same"
+         "path": "../same"
         }
        }
       },
-      "sig": "DkxkZQaf9nNrBy9u19DK_ckBi1tn2p99g7oBmAzGfGb2lcfoy-j7yFwUKg4osDFlMUet7l6xt559Iag18Fp72w",
+      "sig": "wrQBkORwNntXaVuR48J_ZPOsSJ8nihVvc8bj2NPc2LWdCELiMhrsHamaz_LeC_vO4Db30xtbaAfxk3F41qZdJQ",
       "type": "settings.changed",
       "v": 2
      },
@@ -2325,11 +2313,196 @@
       },
       "at": "2026-10-10T10:09:40Z",
       "auth": "passphrase",
-      "based_on": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
+      "based_on": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
       "hash_v": 1,
-      "host_sig": "00RyXklKtLDha-bCpbsXOrg2NOJJLziqKVDouiX_08u1RKu59qvG7JS8TXQPUqoCl68eueWc8iWtL3eO23suIA",
+      "host_sig": "CSRhD5S4mxsVFLbU27q6pv6BJemprZO9OHjfBJSiw9mZwZm97oEvsUEwWKbH8SHvIoz44zF1M7tdnbZyk0RaNQ",
       "id": "01J9ZK0000000000000000001T",
-      "prev": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
+      "prev": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
+      "roster_v": 3,
+      "seq": 6,
+      "set": {
+       "repos": {
+        "c": {
+         "path": "../same"
+        },
+        "d": {
+         "path": "../other/../same/./"
+        }
+       }
+      },
+      "sig": "H4vA01j0M6v-iWhPWkN9agwVDBVPxFYJw0K4bj6373mGtYCLrLn8tibQjfVWSbNnzyii6F6rs2bfosa1pPMNbQ",
+      "type": "settings.changed",
+      "v": 2
+     },
+     "expect": "validation.event",
+     "log": "workspace",
+     "note": "decision 94: duplicate normalized paths or case-insensitive names, including unchanged repos",
+     "replay_expect": "chain.broken",
+     "schema_refused": true
+    },
+    {
+     "append_code": "validation.event",
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:09:50Z",
+      "auth": "passphrase",
+      "based_on": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
+      "hash_v": 1,
+      "host_sig": "2852RFXeDo5aob9VlWUDzYqHLHq37ectuuA5EmwtJdifnwVnfmtVxNIifjcBsh0E8cc0TjNTiELuJT5xSl1Q1A",
+      "id": "01J9ZK0000000000000000001V",
+      "prev": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
+      "roster_v": 3,
+      "seq": 6,
+      "set": {
+       "repos": {
+        "c": {
+         "path": "../Same"
+        },
+        "d": {
+         "path": "../same"
+        }
+       }
+      },
+      "sig": "owVC5QcUefVUATSzw8PscC6s1Ms5qL9mIJwRQQS1Emp-VOlDdrezBX60quzQO3yhql7w6ZpwEe1CZ2ORcAi6Iw",
+      "type": "settings.changed",
+      "v": 2
+     },
+     "expect": "validation.event",
+     "log": "workspace",
+     "note": "decision 94: duplicate normalized paths or case-insensitive names, including unchanged repos",
+     "replay_expect": "chain.broken",
+     "schema_refused": true
+    },
+    {
+     "append_code": "validation.event",
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:10:00Z",
+      "auth": "passphrase",
+      "based_on": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
+      "hash_v": 1,
+      "host_sig": "EFrG24LntZSxLEdgzgy0wvrffY4yMOcgAdTv5Dsn4nErstzAK_H8LEaUZiRvfjWoopnEiDgrNsizfjRfONIQ3g",
+      "id": "01J9ZK0000000000000000001W",
+      "prev": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
+      "roster_v": 3,
+      "seq": 6,
+      "set": {
+       "repos": {
+        "c": {
+         "path": "../Street"
+        },
+        "d": {
+         "path": "../STREET"
+        }
+       }
+      },
+      "sig": "XtPyzHQeMMW6P1XEAf5Edw4nLUBLNCKZhn1Lg4eXBEOjT-TJcvcLDRQxDEjzI7RwuRf3vMQFfNiA9YZZmYUzjQ",
+      "type": "settings.changed",
+      "v": 2
+     },
+     "expect": "validation.event",
+     "log": "workspace",
+     "note": "decision 94: duplicate normalized paths or case-insensitive names, including unchanged repos",
+     "replay_expect": "chain.broken",
+     "schema_refused": true
+    },
+    {
+     "append_code": "validation.event",
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:10:10Z",
+      "auth": "passphrase",
+      "based_on": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
+      "hash_v": 1,
+      "host_sig": "tPa6FDnGTyt0IOC7vi1OBoF1G2zoYS4HL0zBKAkX0UCOn6stYPT4nNXir0ecvpUBBmbQxblL_CA4T8qC5Pv_yQ",
+      "id": "01J9ZK0000000000000000001X",
+      "prev": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
+      "roster_v": 3,
+      "seq": 6,
+      "set": {
+       "repos": {
+        "c": {
+         "path": "../K"
+        },
+        "d": {
+         "path": "../k"
+        }
+       }
+      },
+      "sig": "QgdmDfts2OqADvCA7a2oni4pCw_SG-8ZhluhnaRZS7cA9yI3-FuS1nnNkibNFPaE-bQrvvqTTo35w1RZ2YANCA",
+      "type": "settings.changed",
+      "v": 2
+     },
+     "expect": "validation.event",
+     "log": "workspace",
+     "note": "decision 94: duplicate normalized paths or case-insensitive names, including unchanged repos",
+     "replay_expect": "chain.broken",
+     "schema_refused": true
+    },
+    {
+     "append_code": "validation.event",
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:10:20Z",
+      "auth": "passphrase",
+      "based_on": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
+      "hash_v": 1,
+      "host_sig": "a9byScBrEjIInramlimWS4x4M9zSR5XLbmdFJwAjlsrpSv30jlNRz-FFSNmnuo5w-BRWm7q1VwomqEcNA14Tbw",
+      "id": "01J9ZK0000000000000000001Y",
+      "prev": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
+      "roster_v": 3,
+      "seq": 6,
+      "set": {
+       "repos": {
+        "c": {
+         "path": "//same"
+        },
+        "d": {
+         "path": "/same"
+        }
+       }
+      },
+      "sig": "x8CVQZUKT0QR1Vho5Q9vhetUTnjOQ3tP5BYU2WWcImpq66CHINyA2V6IOyoHxMSzIC_uFFJph6ugFJo3Vapfeg",
+      "type": "settings.changed",
+      "v": 2
+     },
+     "expect": "validation.event",
+     "log": "workspace",
+     "note": "decision 94: duplicate normalized paths or case-insensitive names, including unchanged repos",
+     "replay_expect": "chain.broken",
+     "schema_refused": true
+    },
+    {
+     "append_code": "validation.event",
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:10:30Z",
+      "auth": "passphrase",
+      "based_on": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
+      "hash_v": 1,
+      "host_sig": "241mLRQLEYvhgjyzz9sY2v0ToPtg-ow4QI8EunskgFXWwN9yyeElk9qFPICwHS4JBmrpO1f7OSLFkJVL334sOA",
+      "id": "01J9ZK0000000000000000001Z",
+      "prev": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
       "roster_v": 3,
       "seq": 6,
       "set": {
@@ -2342,7 +2515,7 @@
         }
        }
       },
-      "sig": "7jcDBquCJAyEyTUwqaLEUYObxkPJqLjcvssSJdZkpg7P8G3qGTGMV9ZpZtwaXhc64_Ifu-Z5KdYAq9zXTuAbHg",
+      "sig": "f0e6qIO_OlJXLHAWlVGC4k273vRL_qcGeFF1rG1kEmINTSFq1b7iax1rMZT2RT2bMIZny4WM8deXFqddxT9ECw",
       "type": "settings.changed",
       "v": 2
      },
@@ -2359,13 +2532,13 @@
        "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
        "kind": "person"
       },
-      "at": "2026-10-10T10:09:50Z",
+      "at": "2026-10-10T10:10:40Z",
       "auth": "passphrase",
-      "based_on": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
+      "based_on": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
       "hash_v": 1,
-      "host_sig": "Yk6mysGbe2AB2g1JkyAZn6JyDF83OxavhCds0UkR-CHw12nV3kgokztFaCouhdhPQUb6d_zXHoAwn3ZBMLtsJg",
-      "id": "01J9ZK0000000000000000001V",
-      "prev": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
+      "host_sig": "7VgUMbADPlzcezwLZ_s3gcb09bchQms2aWvM0GxDpRjDwo5wslR-PAVZL0XSv_P8w0-wtpS3CgoqE_UDYkzt6g",
+      "id": "01J9ZK00000000000000000020",
+      "prev": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
       "roster_v": 3,
       "seq": 6,
       "set": {
@@ -2375,7 +2548,7 @@
         }
        }
       },
-      "sig": "ByMOeecguJerqL2vvlCInX4oyDoXRTJUYclcNqZlpTnlBqYrLguZNr29RC11oeq7OTKCSrxWAxr9HK2PKpUp0Q",
+      "sig": "9aRnHVrjCKkBlcXveVq0ig2--o8vaBmAu_dPnmTFvyldK8VWSpB7bn4wVlBMcQHKpVjMX2htbUI6SHg5dInzXA",
       "type": "settings.changed",
       "v": 2
      },
@@ -2391,13 +2564,13 @@
        "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
        "kind": "person"
       },
-      "at": "2026-10-10T10:10:00Z",
+      "at": "2026-10-10T10:10:50Z",
       "auth": "passphrase",
-      "based_on": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
+      "based_on": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
       "hash_v": 1,
-      "host_sig": "vsA0Nc6S_gNQ9GwVrs2X-hYNQ9WPnbY-D5TJHRQejV0AoXp1FsXJd_rTIS3yFdcfv9DK7E99d1hAsypYhjZrPg",
-      "id": "01J9ZK0000000000000000001W",
-      "prev": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
+      "host_sig": "wfOjNf_gFmoH-ey-gaLjfEUOK0NP2m1_CN5eoxF5Chw84NMsd1gDw7NKvbU9G6cxOrU0puysnwfI8KCNbVYkKw",
+      "id": "01J9ZK00000000000000000021",
+      "prev": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
       "roster_v": 3,
       "seq": 6,
       "set": {
@@ -2407,7 +2580,7 @@
         }
        }
       },
-      "sig": "HwJu5A-ULX-bQZa33eYLMR80oYuPw73RWaSMFgwdNRd4tNu8aAdpoKKAh02bszL5PLuqXd8CoY6m-Z4KN4pgVg",
+      "sig": "-Q71A7qEzkmIbYAaXzBHlSZY1wGJoie3qAl7eUoT3oRcEtksJh2A4pBez45MGvdAj8YGeCZmgjkWP7yBvrOvhQ",
       "type": "settings.changed",
       "v": 2
      },
@@ -2423,13 +2596,13 @@
        "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
        "kind": "person"
       },
-      "at": "2026-10-10T10:10:10Z",
+      "at": "2026-10-10T10:11:00Z",
       "auth": "passphrase",
-      "based_on": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
+      "based_on": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
       "hash_v": 1,
-      "host_sig": "3t4qXMhjK3ARXpL4LKZTiedd0qAvs0txJZxcfnvno6VbQK6S-KWERY-Av85bHi3jueoUdgI_wEGMLEQvHhmQkg",
-      "id": "01J9ZK0000000000000000001X",
-      "prev": "sha256:7592f84beb3a1360e49b6512188f31988fac30aa2c3482b1e0d3a6a58614bff6",
+      "host_sig": "ksOqE8awie7cqKMUlbGNbIM-hJwaKCKWv6_3ViLxkwH2jz8LnCcYNWhJm2SA_ezw5XU61QGuULQEvN-TG-dvrg",
+      "id": "01J9ZK00000000000000000022",
+      "prev": "sha256:12cd02d1f05afc4e4f518ed8251f3806c5680c5c1fc45bd4e24f1c11bb1655c1",
       "roster_v": 3,
       "seq": 6,
       "set": {
@@ -2440,7 +2613,7 @@
         "b": null
        }
       },
-      "sig": "Wr1wQF8oZBtRQw9owzTrFNeTayxwxzIoYmuCy7Aa0REVvy7KuiCi4Gp7BMYshqoWXi2-oBL7AEVwA7dXHi1hsw",
+      "sig": "x45NTH9pZneh0MQ5H6UWGFadWSuslDd48ScLto9Auk0XNH34kD5ydOIVyXprKvlZdRbclV6l3DvgTTT6Vl2kaw",
       "type": "settings.changed",
       "v": 2
      },
@@ -2455,13 +2628,13 @@
        "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
        "kind": "person"
       },
-      "at": "2026-10-10T10:10:20Z",
+      "at": "2026-10-10T10:11:10Z",
       "auth": "passphrase",
-      "based_on": "sha256:5c5f78a044a90768fb5dac4e58407f46d1aa7feb495c07cf321df85d2deb094b",
+      "based_on": "sha256:77b30c2ac649bf36625440d482a9fb1e172eccddd4be5d60a411b148608721dd",
       "hash_v": 1,
-      "host_sig": "JulRTGB0haeUa-mT6kQOjqFG4DzrycmRFJxlHfYshYlBgukH81ni6M7IpbDkhuE6efaMawiO-KKlFhxFSt-KAQ",
-      "id": "01J9ZK0000000000000000001Y",
-      "prev": "sha256:5c5f78a044a90768fb5dac4e58407f46d1aa7feb495c07cf321df85d2deb094b",
+      "host_sig": "8otIG7bJqyP0aio0nx_6NP4g1KyRPYSmY6HpStJTVl_cLiCrHsT_esHdh-9xkeM1q2NW0mN4kwsC6UTfeszXig",
+      "id": "01J9ZK00000000000000000023",
+      "prev": "sha256:77b30c2ac649bf36625440d482a9fb1e172eccddd4be5d60a411b148608721dd",
       "roster_v": 3,
       "seq": 7,
       "set": {
@@ -2480,7 +2653,7 @@
         }
        }
       },
-      "sig": "qA1CpVouIyHNsn1fopCZhievuZCP5V7Ux0m4w0saobyoYClNvhuRDLXuStoLz6_geIO4AJ6P0lT-gY0Ge-X3qw",
+      "sig": "692fwan46vIc_WBFfhOKNWO3laFS0PuC8nFr-Pzy3n2VtTwRRoXmA2VLSbXHW4RO_JDITcsN1TciBoXB5Y9ymA",
       "type": "settings.changed",
       "v": 2
      },
