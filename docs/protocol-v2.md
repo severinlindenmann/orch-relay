@@ -672,7 +672,8 @@ order two lists of one epoch.
 1. the signature with the card's `wsk_pub`;
 2. the shape: field set, sorted unique hex ids, `epoch ≥ 1`;
 3. `workspace_id` is the card's, **including on the first list** (`other_workspace`);
-4. the first list has `epoch = 1` and `list_seq = 1`;
+4. the first list has `epoch = 1` and `list_seq = 1` (`bad_epoch`); it must include a
+   certificate-bound member device of the delegation owner (`other_person`), keeping the owner in `ever_persons`;
 5. `list_seq` strictly increases (`stale_list`);
 6. `epoch` is the previous one or the previous one + 1 (`bad_epoch`; epochs never skip);
 7. if any previous member is missing, `epoch` MUST be the previous one + 1 (`rotation_required`);

@@ -262,6 +262,12 @@ def build(vectors=None):
             elif name == "card_put" and code == "delegation_mismatch":
                 refused_request["json"]["card"] = copy.deepcopy(next(
                     c["card"] for c in v["card"]["cases"] if c["name"] == "delegation_for_another_wsk"))
+            elif name == "membership" and code in {"not_for_this_device", "other_workspace", "bad_epoch", "rotation_required"}:
+                vector_name = {"not_for_this_device": "grant_wrong_epoch", "other_workspace": "other_workspace",
+                               "bad_epoch": "rotation_due_survives_same_epoch_and_restart",
+                               "rotation_required": "rotation_due_survives_same_epoch_and_restart"}[code]
+                refused_request["json"] = copy.deepcopy(next(
+                    c["args"]["body"] for c in v["p3"]["cases"] if c["name"] == vector_name))
             elif code == "missing_grant":
                 refused_request["json"]["grants"] = refused_request["json"]["grants"][:-1]
             elif code == "unauthenticated":

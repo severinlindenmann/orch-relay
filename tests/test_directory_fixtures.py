@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from directory_support import prepare_case
 from fastapi.testclient import TestClient
+from members_support import prepare_fixture
 
 from orch_relay import proto as P
 from orch_relay.app import create_app
@@ -33,10 +34,10 @@ CASES = [
 
 @pytest.mark.parametrize("name,case", CASES, ids=[f"{n}-{c['name']}" for n, c in CASES])
 def test_http_example(tmp_path, name, case):
-    if name not in G1:
-        pytest.skip("G2 members/epochs" if name in G2 else "G3 bridge/pairing")
+    if name not in G1 | G2:
+        pytest.skip("G3 bridge/pairing")
     with TestClient(create_app(tmp_path)) as client:
-        prepare_case(client.app.state.directory, name, case)
+        (prepare_fixture if name in G2 else prepare_case)(client.app.state.directory, name, case)
         request = case["request"]
         kwargs = {"headers": request["headers"], "params": request["query"]}
         if "json" in request:

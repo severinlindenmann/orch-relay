@@ -29,7 +29,7 @@ from . import proto as P
 
 MINUTE, HOUR, DAY = 60_000, 3_600_000, 86_400_000
 MAX_RESPONSE = 4 * 1024 * 1024
-BODY_CAPS = {"accounts": 65536, "card": 65536}
+BODY_CAPS = {"accounts": 65536, "card": 65536, "card_keys": 65536, "membership": 2097152}
 
 
 def body_cap(route):
@@ -37,6 +37,20 @@ def body_cap(route):
 
 
 STATUS = {
+    **dict.fromkeys(
+        (
+            "stale_list",
+            "stale_epoch",
+            "bad_epoch",
+            "rotation_required",
+            "missing_grant",
+            "grant_conflict",
+            "wrap_conflict",
+        ),
+        409,
+    ),
+    "scope_exceeded": 403,
+    "not_for_this_device": 403,
     "unknown_challenge": 401,
     "expired": 401,
     "bad_signature": 401,
@@ -229,7 +243,10 @@ class Directory:
         return state
 
     def issue(self, address, now):
-        while self.challenge_expiry and self.challenge_expiry[0][0] <= now:
+        # Bound cleanup after clock jumps; stale counts conservatively retain capacity.
+        for _ in range(64):
+            if not self.challenge_expiry or self.challenge_expiry[0][0] > now:
+                break
             expires, challenge = heapq.heappop(self.challenge_expiry)
             if self.challenges.get(challenge, (None,))[0] == expires:
                 self.remove_challenge(challenge)
@@ -500,18 +517,9 @@ class Directory:
                 (did, o["person_id"], P.cj(record), o["reason"], now, cursor),
             )
         con.execute("DELETE FROM sessions WHERE kind='device' AND subject_id=?", (did,))
-        for table in (
-            "wk_grants",
-            "card_key_wraps",
-            "bridge_msgs",
-            "sk_grants",
-            "push_subscriptions",
-        ):
-            # Bridge/drop/push tables arrive in subsequent groups; never create a competing schema.
-            if con.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
-            ).fetchone():
-                con.execute(f"DELETE FROM {table} WHERE device_id=?", (did,))
+        from .members import prune_device
+
+        prune_device(con, did)
         con.execute(
             """INSERT INTO rotation_due(workspace_id, device_id, revocation_cursor, epoch)
             SELECT m.workspace_id, m.device_id, ?, COALESCE((SELECT epoch FROM member_lists l
@@ -575,6 +583,11 @@ class Directory:
         return {"card_seq": o["card_seq"]}
 
     def dispatch(self, con, route, ident, method, body, raw, query, headers, address, now):
+        from . import members
+
+        if route in members.ROUTES:
+            P.unhex(ident)
+            return members.dispatch(self, con, route, ident, body, raw, query, headers, now)
         allowed = {"after", "limit", "next"} if route == "feed" else set()
         if any(k not in allowed for k in query) or len(query) != len(set(query.keys())):
             fail("malformed")
@@ -710,7 +723,7 @@ class Directory:
             return JSONResponse(result)
         except Refusal as e:
             return JSONResponse(
-                {"error": e.code},
+                {"error": e.code, **getattr(e, "details", {})},
                 status_code=e.status,
                 headers={"Retry-After": str(e.retry or 1)} if e.status == 429 else None,
             )
@@ -753,6 +766,11 @@ def install(app, data):
         return handle
 
     for path, methods, route in (
+        ("workspaces/{ident}/membership", ["PUT"], "membership"),
+        ("workspaces/{ident}/members", ["GET"], "members"),
+        ("workspaces/{ident}/grants", ["GET"], "grants"),
+        ("workspaces/{ident}/card-keys", ["PUT"], "card_keys"),
+        ("workspaces/{ident}/card-key", ["GET"], "card_key"),
         ("session/challenge", ["POST"], "challenge"),
         ("session/login", ["POST"], "login"),
         ("session/logout", ["POST"], "logout"),
