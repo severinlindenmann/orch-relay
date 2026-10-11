@@ -294,12 +294,11 @@ def test_stream_caps_precede_parsing_and_auth(tmp_path):
         assert d.challenges == {} and d.windows == {}
 
 
-def test_canonical_retry_at_full_quota_and_invalid_signature(tmp_path):
+def test_canonical_retry_at_full_person_quota_and_invalid_signature(tmp_path):
     with TestClient(create_app(tmp_path)) as c:
         d = c.app.state.directory
         seed(d)
         d.windows[("certificate-person", PERSON, DAY)] = (NOW + DAY, 64)
-        d.windows[("certificate-address", "testclient", HOUR)] = (NOW + HOUR, 30)
         before = dict(d.windows)
         cert = signed(CERT["o"])
         r = c.put("/v2/devices/" + DEVICE, json={"cert": cert})
@@ -307,7 +306,11 @@ def test_canonical_retry_at_full_quota_and_invalid_signature(tmp_path):
         cert["sig"] = P.b64u(bytes(64))
         r = c.put("/v2/devices/" + DEVICE, json={"cert": cert})
         assert r.status_code == 400 and r.json() == {"error": "cert_invalid"}
-        assert d.windows == before
+        assert (
+            d.windows[("certificate-person", PERSON, DAY)]
+            == before[("certificate-person", PERSON, DAY)]
+        )
+        assert d.windows[("certificate-address", "testclient", HOUR)][1] == 2
         with closing(db.connect(d.path)) as con:
             assert (
                 P.parse_json(
@@ -352,7 +355,8 @@ def test_ipv6_parent_challenge_limits(tmp_path):
     assert error.value.status == 429
     assert len(d.challenges) == 256
     assert d.issue("2001:db8:1234:100::/64", NOW)
-    d.challenges.clear()
+    for challenge in list(d.challenges):
+        d.remove_challenge(challenge)
     d.windows[("challenge-parent", "2001:db8:1234::/56", MINUTE)] = (NOW + MINUTE, 960)
     with pytest.raises(Refusal):
         d.issue("2001:db8:1234:20::/64", NOW)

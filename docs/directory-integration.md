@@ -9,7 +9,9 @@ Run blocking database operations through `run_in_threadpool`. Use `db.connect`
 (with `sqlite3.Row`) and `BEGIN IMMEDIATE`, then perform authorization and mutation
 in the same transaction. Acquire `directory.lock` before the transaction if using
 the shared ephemeral state. Never wait for a long poll while holding this lock or
-a database transaction. At handoff open a fresh transaction and reauthorize.
+a database transaction. G3 can call `directory.assert_can_wait()` before waiting
+to assert that the current thread does not own the lock. At handoff open a fresh
+transaction and reauthorize.
 
 Shared authorization methods:
 
@@ -87,14 +89,20 @@ Contract interpretations and fixture repairs:
 - The full canonical signed delegation is immutable (§7.1); the reference helper
   compares only its `o`. HTTP enforces the stricter normative rule. Existing card
   vectors agree with both. A changed delegation signature alone is refused.
-- Recovery quotas (address and person) charge only verified state changes. Expired,
-  revoked, conflicting and invalid certificate submissions, canonical retries, and
-  weaker/superseded revocations are free. Certificates compare `cj(o)` after verifying
-  the submitted signature; re-signing or whitespace changes preserve the original
-  stored certificate. Exact accepted HTTP receipts survive restart. First-card owner
+- Recovery address windows charge every submission before parsing or signature
+  verification (30/hour certificates, 10/minute revocations). Exact accepted HTTP
+  retries are recognized by their persisted digest and remain free, including at
+  a full address budget; certificate retries still check revocation and expiry.
+  Accepted canonical retries and weaker revocations also persist a receipt so
+  subsequent byte-identical retries remain free.
+  Person quotas charge only verified state changes. Canonical retries and weaker
+  revocations are free for person quotas. Certificates compare `cj(o)` after
+  verification and preserve the original stored certificate. First-card owner
   quota is checked and charged only after both signatures verify.
 - Fixed UTC-aligned minute/hour/day windows match the P3 quota vectors. Live
-  windows are never idle-pruned. Restart drops them as specified by P3-D15.
+  windows are never pruned before expiry. Challenges and all rate windows reset on
+  restart (P3-D15 accepted limit), including daily person recovery quotas and the
+  reserved revocation-share counter. A restart therefore grants fresh budgets.
 - Revocation feeds serve the current strongest record per device. Upgrades get a
   new cursor. `next` is opaque b64u of the person, original after, and last cursor;
   pass it with the original after value. Authorization is checked on each page.

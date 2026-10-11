@@ -97,7 +97,7 @@ def prepare_case(directory, name, case):
     directory.clock = lambda: case["given"].get("now_ms", NOW)
     request = case["request"]
     challenge = request.get("json", {}).get("challenge", LOGIN["challenge"])
-    directory.challenges[challenge] = (NOW + 60_000, "testclient")
+    directory.add_challenge(challenge, NOW + 60_000, "testclient", None)
     with closing(db.connect(directory.path)) as con, con:
         con.execute(
             "INSERT INTO invites(code_hash,expires_ms) VALUES (?,?)",
@@ -152,9 +152,10 @@ def prepare_case(directory, name, case):
         ):
             con.execute("DELETE FROM workspaces")
         if scenario == "unknown_challenge":
-            directory.challenges.clear()
+            directory.remove_challenge(challenge)
         elif scenario == "expired":
-            directory.challenges[challenge] = (NOW, "testclient")
+            directory.remove_challenge(challenge)
+            directory.add_challenge(challenge, NOW, "testclient", None)
         elif scenario == "cert_expired" and name != "device_put":
             con.execute("UPDATE devices SET expires_ms=?", (NOW,))
         elif scenario == "cert_invalid" and not account_route:

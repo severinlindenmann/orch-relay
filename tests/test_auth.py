@@ -134,10 +134,12 @@ def test_challenge_global_cap_and_full_minute(tmp_path):
     with TestClient(create_app(tmp_path)) as c:
         d = c.app.state.directory
         d.clock = lambda: NOW
-        d.challenges = {str(i): (NOW + 60_000, "other") for i in range(65_536)}
+        for i in range(65_536):
+            d.add_challenge(str(i), NOW + 60_000, "other", None)
         assert c.post("/v2/session/challenge", json={}).status_code == 429
         assert len(d.challenges) == 65_536
-        d.challenges.clear()
+        for challenge in list(d.challenges):
+            d.remove_challenge(challenge)
         for _ in range(60):
             r = c.post("/v2/session/challenge", json={})
             assert r.status_code == 200
@@ -177,10 +179,8 @@ def test_relay_auth_vectors(tmp_path, case):
         d = c.app.state.directory
         seed(d)
         d.origin = case["origin"]
-        d.challenges = {
-            P.b64u(bytes.fromhex(k)): (v, "testclient")
-            for k, v in case["state"]["challenges"].items()
-        }
+        for k, v in case["state"]["challenges"].items():
+            d.add_challenge(P.b64u(bytes.fromhex(k)), v, "testclient", None)
         for step in case["steps"]:
             d.clock = lambda step=step: step["now_ms"]
             r = c.post(

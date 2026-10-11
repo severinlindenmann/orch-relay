@@ -5,7 +5,9 @@ with SQLite transactions; BEGIN IMMEDIATE also serializes the admin CLI and late
 """
 
 import hashlib
+import heapq
 import ipaddress
+import logging
 import math
 import os
 import re
@@ -13,6 +15,7 @@ import secrets
 import sqlite3
 import threading
 import time
+from collections import Counter
 from contextlib import closing
 
 from cryptography.hazmat.primitives import serialization
@@ -115,6 +118,8 @@ def canonical_address(peer, forwarded, trusted_proxy):
         proxy = ipaddress.ip_address(trusted_proxy) if trusted_proxy else None
         if proxy and proxy.version == 6 and proxy.ipv4_mapped:
             proxy = proxy.ipv4_mapped
+        if address == proxy and not forwarded:
+            logging.getLogger(__name__).warning("Trusted proxy sent no X-Forwarded-For")
         if address == proxy and forwarded:
             # Caddy appends its immediate peer; never trust an attacker-chosen leftmost hop.
             address = ipaddress.ip_address(forwarded.split(",")[-1].strip())
@@ -157,7 +162,11 @@ class Directory:
         self.path, self.origin, self.trusted_proxy = path, origin, trusted_proxy
         origin.encode("ascii")
         self.lock = threading.RLock()
-        self.challenges = {}  # canonical challenge -> (expires_ms, canonical address)
+        self.challenges = {}  # challenge -> (expires_ms, canonical address, /56 parent)
+        self.challenge_expiry = []
+        self.challenge_addresses = Counter()
+        self.challenge_parents = Counter()
+        self.window_expiry = []
         self.windows = {}  # (purpose, identity, duration) -> (window end, count)
         self.clock = lambda: time.time_ns() // 1_000_000
         self.random = secrets.token_bytes
@@ -167,7 +176,18 @@ class Directory:
             .public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
         )
 
+    def assert_can_wait(self):
+        """G3 must call before a long-poll wait, outside its database transaction."""
+        assert not self.lock._is_owned(), "long poll cannot wait while holding directory.lock"
+
     def rate(self, purpose, identity, duration, cap, now, charge=True):
+        # Bounded lazy cleanup avoids scanning all live windows or a restart-sized backlog.
+        for _ in range(64):
+            if not self.window_expiry or self.window_expiry[0][0] > now:
+                break
+            old_end, old_key = heapq.heappop(self.window_expiry)
+            if self.windows.get(old_key, (None,))[0] == old_end:
+                del self.windows[old_key]
         key = (purpose, identity, duration)
         end, count = self.windows.get(key, ((now // duration + 1) * duration, 0))
         if now >= end:
@@ -175,26 +195,51 @@ class Directory:
         if count >= cap:
             fail("rate_limited", max(1, math.ceil((end - now) / 1000)))
         if charge:
+            if key not in self.windows or self.windows[key][0] != end:
+                heapq.heappush(self.window_expiry, (end, key))
             self.windows[key] = (end, count + 1)
 
     def consume(self, challenge, now):
         P.unb64u(challenge, 32)
-        state = self.challenges.pop(challenge, None)
+        state = self.remove_challenge(challenge)
         if state is None:
             fail("unknown_challenge")
         if now >= state[0]:
             fail("expired")
         return P.unb64u(challenge, 32)
 
+    def add_challenge(self, challenge, expires, address, parent):
+        self.challenges[challenge] = (expires, address, parent)
+        self.challenge_addresses[address] += 1
+        if parent:
+            self.challenge_parents[parent] += 1
+        heapq.heappush(self.challenge_expiry, (expires, challenge))
+
+    def remove_challenge(self, challenge):
+        state = self.challenges.pop(challenge, None)
+        if state is not None:
+            for counts, key in (
+                (self.challenge_addresses, state[1]),
+                (self.challenge_parents, state[2]),
+            ):
+                if key is not None:
+                    counts[key] -= 1
+                    if not counts[key]:
+                        del counts[key]
+        return state
+
     def issue(self, address, now):
-        self.challenges = {c: s for c, s in self.challenges.items() if s[0] > now}
+        while self.challenge_expiry and self.challenge_expiry[0][0] <= now:
+            expires, challenge = heapq.heappop(self.challenge_expiry)
+            if self.challenges.get(challenge, (None,))[0] == expires:
+                self.remove_challenge(challenge)
+        parent = ipv6_parent(address)
+        # dict length is the incrementally maintained global outstanding count.
         if (
             len(self.challenges) >= 65_536
-            or sum(s[1] == address for s in self.challenges.values()) >= 16
+            or self.challenge_addresses[address] >= 16
+            or (parent and self.challenge_parents[parent] >= 256)
         ):
-            fail("rate_limited", 60)
-        parent = ipv6_parent(address)
-        if parent and sum(ipv6_parent(s[1]) == parent for s in self.challenges.values()) >= 256:
             fail("rate_limited", 60)
         self.rate("challenge", address, MINUTE, 60, now, False)
         if parent:
@@ -203,7 +248,7 @@ class Directory:
         challenge = P.b64u(self.random(32))
         while challenge in self.challenges:
             challenge = P.b64u(self.random(32))
-        self.challenges[challenge] = (now + MINUTE, address)
+        self.add_challenge(challenge, now + MINUTE, address, parent)
         return {"challenge": challenge, "expires_ms": now + MINUTE}
 
     def device_status(self, con, device, now):
@@ -280,18 +325,21 @@ class Directory:
 
     def store_device(self, con, cert):
         o = cert["o"]
-        con.execute(
-            "INSERT INTO devices VALUES (?,?,?,?,?,?,?)",
-            (
-                o["device_id"],
-                o["person_id"],
-                P.cj(cert),
-                o["dk_sig_pub"],
-                o["dk_kx_pub"],
-                P.cj(o["scopes_max"]),
-                o["expires_ms"],
-            ),
-        )
+        try:
+            con.execute(
+                "INSERT INTO devices VALUES (?,?,?,?,?,?,?)",
+                (
+                    o["device_id"],
+                    o["person_id"],
+                    P.cj(cert),
+                    o["dk_sig_pub"],
+                    o["dk_kx_pub"],
+                    P.cj(o["scopes_max"]),
+                    o["expires_ms"],
+                ),
+            )
+        except sqlite3.IntegrityError:
+            fail("cert_conflict")
 
     def account(self, con, body, raw, now):
         fields(body, "invite pk_pub device_cert challenge sig")
@@ -318,7 +366,12 @@ class Directory:
             fail("bad_signature")
         if con.execute("SELECT 1 FROM accounts WHERE person_id=?", (o["person_id"],)).fetchone():
             fail("account_exists")
-        con.execute("INSERT INTO accounts VALUES (?,?,?)", (o["person_id"], body["pk_pub"], now))
+        try:
+            con.execute(
+                "INSERT INTO accounts VALUES (?,?,?)", (o["person_id"], body["pk_pub"], now)
+            )
+        except sqlite3.IntegrityError:
+            fail("account_exists")
         self.store_device(con, body["device_cert"])
         con.execute(
             "UPDATE invites SET used_ms=?, used_by=?, request_digest=? WHERE code_hash=?",
@@ -373,6 +426,7 @@ class Directory:
         return {"token": token, "expires_ms": now + 900_000}
 
     def recovery(self, con, body, raw, address, now, device=None):
+        """Verify and apply recovery; handle() has already enforced the address budget."""
         revocation = device is None
         kind = "revocation" if revocation else "certificate"
         field = "record" if revocation else "cert"
@@ -417,13 +471,12 @@ class Directory:
             and prior
             and (prior["reason"] == "compromised" or o["reason"] != "compromised")
         ):
+            # Cache accepted no-ops too: a byte-identical retry must bypass address budgets.
+            con.execute("INSERT INTO recovery_receipts VALUES (?,?,?)", (kind, digest(raw), did))
             return {"device_id": did}
-        duration, cap = (MINUTE, 10) if revocation else (HOUR, 30)
-        self.rate(kind + "-address", address, duration, cap, now, False)
         self.rate(kind + "-person", person, DAY, 32 if revocation else 64, now, False)
         if revocation and prior:
             self.rate("revocation-repeat", person, DAY, 24, now, False)
-        self.rate(kind + "-address", address, duration, cap, now)
         self.rate(kind + "-person", person, DAY, 32 if revocation else 64, now)
         if revocation and prior:
             self.rate("revocation-repeat", person, DAY, 24, now)
@@ -623,21 +676,34 @@ class Directory:
         try:
             if len(raw) > body_cap(route):
                 fail("too_large")
-            if method == "GET":
-                if raw:
-                    fail("malformed")
-                body = None
-            else:
-                if headers.get("content-type", "").split(";")[0].strip() != "application/json":
-                    fail("malformed")
-                body = P.parse_json(raw)
             address = canonical_address(peer, headers.get("x-forwarded-for"), self.trusted_proxy)
             with self.lock, closing(db.connect(self.path)) as con:
                 con.row_factory = sqlite3.Row
                 now = self.clock()
-                self.windows = {k: v for k, v in self.windows.items() if v[0] > now}
                 con.execute("BEGIN IMMEDIATE")
                 with con:
+                    if route == "revocations" or (route == "device" and method == "PUT"):
+                        revocation = route == "revocations"
+                        kind = "revocation" if revocation else "certificate"
+                        receipt = con.execute(
+                            "SELECT subject_id FROM recovery_receipts "
+                            "WHERE kind=? AND request_digest=?",
+                            (kind, digest(raw)),
+                        ).fetchone()
+                        if not receipt or (not revocation and receipt["subject_id"] != ident):
+                            duration, cap = (MINUTE, 10) if revocation else (HOUR, 30)
+                            self.rate(kind + "-address", address, duration, cap, now)
+                    if method == "GET":
+                        if raw:
+                            fail("malformed")
+                        body = None
+                    else:
+                        if (
+                            headers.get("content-type", "").split(";")[0].strip()
+                            != "application/json"
+                        ):
+                            fail("malformed")
+                        body = P.parse_json(raw)
                     result = self.dispatch(
                         con, route, ident, method, body, raw, query, headers, address, now
                     )
