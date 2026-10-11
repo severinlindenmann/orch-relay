@@ -87,6 +87,21 @@ def test_strict_parse(c):
     except ValueError:
         ok = False
     assert ok == c["ok"]
+    if "canonical" in c:
+        assert R.cj(R.parse_json(c["text"].encode())).decode() == c["canonical"]
+
+
+def test_depth_rule_is_root_is_level_one():
+    """§2.3: 16 nested containers are accepted, 17 refused; scalars add no level."""
+    def nest(n, leaf):
+        return "[" * n + leaf + "]" * n
+    assert R.cj(R.parse_json(nest(16, "").encode())) == nest(16, "").encode()
+    assert R.cj(R.parse_json(nest(16, "1").encode())) == nest(16, "1").encode()
+    for n in (17, 18):
+        with pytest.raises(ValueError):
+            R.parse_json(nest(n, "").encode())
+        with pytest.raises(ValueError):
+            R.cj(json.loads(nest(n, "")))
 
 
 @by_name(VEC["encodings"]["b64u"])

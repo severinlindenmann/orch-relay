@@ -66,9 +66,10 @@ def unhex(s, n: int) -> bytes:
     return bytes.fromhex(s)
 
 
-def _check_json(v, depth=0):
-    """The JSON subset every signed or sealed object uses (§2.3)."""
-    if depth > 16:
+def _check_json(v, depth=1):
+    """The JSON subset every signed or sealed object uses (§2.3). The root value is level 1, so 16 nested
+    containers pass and 17 are refused (scalars add no level)."""
+    if isinstance(v, (list, dict)) and depth > 16:
         raise ValueError("too deep")
     if v is None or isinstance(v, bool):
         return
@@ -118,8 +119,11 @@ def parse_json(raw: bytes):
     """Strict parse (§2.3): UTF-8, no duplicate key, no NaN/Infinity, no float, the subset only."""
     if not isinstance(raw, (bytes, bytearray)):
         raise ValueError("bytes expected")
-    v = json.loads(bytes(raw).decode("utf-8"), object_pairs_hook=_no_dupes, parse_constant=_no_constant,
-                   parse_float=_no_float)
+    try:
+        v = json.loads(bytes(raw).decode("utf-8"), object_pairs_hook=_no_dupes, parse_constant=_no_constant,
+                       parse_float=_no_float)
+    except RecursionError:
+        raise ValueError("too deep") from None
     _check_json(v)
     return v
 
@@ -206,6 +210,11 @@ LABELS = {
     "sig_webauthn_bind": "orch/v2/sig/webauthn-bind|",
     "sig_relay_auth": "orch/v2/sig/relay-auth|",
     "sig_publish": "orch/v2/publish|",
+    # orch-core ticket format F1 (orch-v2-ticket-format.md §5.3, §5.5, §5.6, §5.10): signed events and checkpoints
+    "sig_ticket_event": "orch/v2/sig/ticket-event|",
+    "sig_ws_event": "orch/v2/sig/ws-event|",
+    "sig_host_event": "orch/v2/sig/host-event|",
+    "sig_checkpoint": "orch/v2/sig/checkpoint|",
     # hashes (ids, pins, commitments, challenges)
     "h_device_id": "orch/v2/id/device|",
     "h_person_id": "orch/v2/id/person|",
@@ -218,6 +227,14 @@ LABELS = {
     "h_drop_parent": "orch/v2/drop-parent|",
     "h_ws_envelope": "orch/v2/ws-envelope-hash|",
     "h_question": "orch/v2/question|",
+    "h_section": "orch/v2/section|",
+    "h_value": "orch/v2/value|",
+    "h_gate": "orch/v2/gate|",
+    "h_policy": "orch/v2/policy|",
+    "h_people": "orch/v2/people|",
+    "h_question_id": "orch/v2/question-id|",
+    "h_event": "orch/v2/event|",
+    "h_grant_secret": "orch/v2/grant-secret|",
     "h_assert": "orch/v2/assert|",
     "h_webauthn_reg": "orch/v2/webauthn-reg|",
     # MAC
@@ -1937,7 +1954,7 @@ def _verify_cosig(suite: Suite, cos: dict, peer: dict, hb: bytes, body: bytes, n
         ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), cred_pub).verify(
             unb64u(cos["signature"]), ad + H(cdj), ec.ECDSA(hashes.SHA256()))
         return True
-    except (ValueError, KeyError, TypeError, InvalidSignature, AttributeError):
+    except (ValueError, KeyError, TypeError, InvalidSignature, AttributeError, RecursionError):
         return False
 
 

@@ -1,0 +1,17 @@
+{
+ "labels": {
+  "event": "orch/v2/event|",
+  "gate": "orch/v2/gate|",
+  "grant_secret": "orch/v2/grant-secret|",
+  "people": "orch/v2/people|",
+  "policy": "orch/v2/policy|",
+  "question": "orch/v2/question|",
+  "question_id": "orch/v2/question-id|",
+  "section": "orch/v2/section|",
+  "sig_checkpoint": "orch/v2/sig/checkpoint|",
+  "sig_host_event": "orch/v2/sig/host-event|",
+  "sig_ticket_event": "orch/v2/sig/ticket-event|",
+  "sig_ws_event": "orch/v2/sig/ws-event|",
+  "value": "orch/v2/value|"
+ }
+}
