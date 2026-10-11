@@ -492,27 +492,35 @@ class Relay:
         )
 
     def stage(self, key):
+        """The set's metadata only: page PUTs never re-read the set (no O(n^2) staging)."""
         row = self.con.execute(
-            "SELECT expires_ms,manifest FROM checkpoint_staging WHERE workspace_id=? AND source=? AND target=?",
+            "SELECT expires_ms,manifest IS NOT NULL FROM checkpoint_staging "
+            "WHERE workspace_id=? AND source=? AND target=?",
             (self.ws, *key),
         ).fetchone()
-        if row is None:
-            return None
-        pages = {
-            r[0]: r[1]
+        return {"expires_ms": row[0], "manifest": bool(row[1])} if row else None
+
+    def staged(self, sql, key, *args):
+        return self.con.execute(
+            sql
+            + " WHERE workspace_id=? AND source=? AND target=?"
+            + "".join(f" AND {a}=?" for a in args[::2]),
+            (self.ws, *key, *args[1::2]),
+        )
+
+    def completeness(self, key):
+        if not self.stage(key)["manifest"]:
+            return {"complete": False, "missing": []}
+        missing = [
+            r[0]
             for r in self.con.execute(
-                "SELECT i,body FROM checkpoint_staging_pages WHERE workspace_id=? AND source=? AND target=?",
+                "SELECT s.i FROM checkpoint_staging_slots s WHERE s.workspace_id=? AND s.source=? "
+                "AND s.target=? AND NOT EXISTS (SELECT 1 FROM checkpoint_staging_pages p WHERE "
+                "p.workspace_id=s.workspace_id AND p.source=s.source AND p.target=s.target AND p.i=s.i) "
+                "ORDER BY s.pos",
                 (self.ws, *key),
             )
-        }
-        return {"expires_ms": row[0], "wire_manifest": row[1], "wire_pages": pages}
-
-    @staticmethod
-    def completeness(stage):
-        if stage["wire_manifest"] is None:
-            return {"complete": False, "missing": []}
-        manifest = P.parse_json(stage["wire_manifest"])
-        missing = [d["i"] for d in manifest["pages"] if d["i"] not in stage["wire_pages"]]
+        ]
         return {"complete": not missing, "missing": missing}
 
     def put_staging(self, source, target, i, body, wire, global_cap):
@@ -531,8 +539,7 @@ class Relay:
                 "INSERT INTO checkpoint_staging VALUES (?,?,?,?,NULL,0)",
                 (self.ws, *key, self.now + HOUR),
             )
-            stage = {"expires_ms": self.now + HOUR, "wire_manifest": None, "wire_pages": {}}
-        manifest = P.parse_json(stage["wire_manifest"]) if stage["wire_manifest"] else None
+            stage = {"expires_ms": self.now + HOUR, "manifest": False}
         if i is not None:
             need(len(wire) <= PAGE_CAP, "too_large", 413)
             need(isinstance(body, dict))
@@ -548,11 +555,21 @@ class Relay:
             for h in body["heads"]:
                 hash_bytes(h)
             need(body["digest"] == page_digest(body))
-            if i in stage["wire_pages"]:
-                need(stage["wire_pages"][i] == wire, "staging_conflict", 409)
+            existing = self.staged(
+                "SELECT body FROM checkpoint_staging_pages", key, "i", i
+            ).fetchone()
+            if existing is not None:
+                need(existing[0] == wire, "staging_conflict", 409)
                 return {}
-            if manifest is not None:
-                need(descriptor(i, body) in manifest["pages"], "staging_conflict", 409)
+            if stage["manifest"]:
+                slot = self.staged(
+                    "SELECT descriptor FROM checkpoint_staging_slots", key, "i", i
+                ).fetchone()
+                need(
+                    slot is not None and P.parse_json(slot[0]) == descriptor(i, body),
+                    "staging_conflict",
+                    409,
+                )
             self.charge_stage(key, len(wire), global_cap)
             self.con.execute(
                 "INSERT INTO checkpoint_staging_pages VALUES (?,?,?,?,?)", (self.ws, *key, i, wire)
@@ -560,9 +577,11 @@ class Relay:
             return {}
         need(isinstance(body, dict) and set(body) == {"pages"} and isinstance(body["pages"], list))
         need(len(wire) <= PAGE_CAP, "too_large", 413)
-        if manifest is not None:
-            need(stage["wire_manifest"] == wire, "staging_conflict", 409)
-            return self.completeness(stage)
+        if stage["manifest"]:
+            stored = self.staged("SELECT manifest FROM checkpoint_staging", key).fetchone()[0]
+            need(stored == wire, "staging_conflict", 409)
+            return self.completeness(key)
+        staged = {r[0] for r in self.staged("SELECT i FROM checkpoint_staging_pages", key)}
         previous, seen, order = {}, set(), []
         for d in body["pages"]:
             need(
@@ -580,18 +599,25 @@ class Relay:
             need(group not in previous or previous[group] == d["after_seq"])
             previous[group] = d["after_seq"] + d["count"]
             order.append((*group, d["after_seq"]))
-            if d["i"] in stage["wire_pages"]:
-                page = P.parse_json(stage["wire_pages"][d["i"]])
-                need(descriptor(d["i"], page) == d, "staging_conflict", 409)
+            if d["i"] in staged:
+                raw = self.staged("SELECT body FROM checkpoint_staging_pages", key, "i", d["i"])
+                need(
+                    descriptor(d["i"], P.parse_json(raw.fetchone()[0])) == d,
+                    "staging_conflict",
+                    409,
+                )
         need(order == sorted(order))
-        need(set(stage["wire_pages"]) <= seen, "staging_conflict", 409)
+        need(staged <= seen, "staging_conflict", 409)
         self.charge_stage(key, len(wire), global_cap)
         self.con.execute(
             "UPDATE checkpoint_staging SET manifest=? WHERE workspace_id=? AND source=? AND target=?",
             (wire, self.ws, *key),
         )
-        stage["wire_manifest"] = wire
-        return self.completeness(stage)
+        self.con.executemany(
+            "INSERT INTO checkpoint_staging_slots VALUES (?,?,?,?,?,?)",
+            [(self.ws, *key, d["i"], pos, P.cj(d)) for pos, d in enumerate(body["pages"])],
+        )
+        return self.completeness(key)
 
     # --- publication (P3-D13/D20/D24/D25) ------------------------------------------------------------
 
@@ -696,15 +722,22 @@ class Relay:
             409,
         )
         key = stage_key(body["source_hash"], h)
-        raw = self.stage(key)
+        meta = self.stage(key)
         need(
-            raw is not None and raw["expires_ms"] > self.now and self.completeness(raw)["complete"],
+            meta is not None
+            and meta["expires_ms"] > self.now
+            and self.completeness(key)["complete"],
             "staging_incomplete",
             409,
         )
         stage = {
-            "manifest": P.parse_json(raw["wire_manifest"]),
-            "pages": {i: P.parse_json(b) for i, b in raw["wire_pages"].items()},
+            "manifest": P.parse_json(
+                self.staged("SELECT manifest FROM checkpoint_staging", key).fetchone()[0]
+            ),
+            "pages": {
+                i: P.parse_json(b)
+                for i, b in self.staged("SELECT i,body FROM checkpoint_staging_pages", key)
+            },
         }
         used = set()
         old = entries(held) if held else {}

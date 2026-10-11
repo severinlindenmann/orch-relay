@@ -38,6 +38,14 @@ CREATE TABLE checkpoint_staging_pages (
     PRIMARY KEY(workspace_id, source, target, i),
     FOREIGN KEY(workspace_id, source, target) REFERENCES checkpoint_staging ON DELETE CASCADE
 );
+-- The manifest's descriptors, one row each (pos = manifest order), so a page PUT checks one
+-- slot instead of re-reading the manifest or the set.
+CREATE TABLE checkpoint_staging_slots (
+    workspace_id TEXT NOT NULL, source TEXT NOT NULL, target TEXT NOT NULL, i INTEGER NOT NULL,
+    pos INTEGER NOT NULL, descriptor BLOB NOT NULL,
+    PRIMARY KEY(workspace_id, source, target, i),
+    FOREIGN KEY(workspace_id, source, target) REFERENCES checkpoint_staging ON DELETE CASCADE
+);
 -- Applied restore transitions (R5: applied ids only), ordered by target_n.
 CREATE TABLE checkpoint_transitions (
     workspace_id TEXT NOT NULL, restore_id TEXT NOT NULL, target_n INTEGER NOT NULL,
