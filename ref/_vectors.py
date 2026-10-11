@@ -75,6 +75,8 @@ def build() -> dict:
         "ed25519_small_order": R.ed25519_small_order_encodings(),
         "suites": {str(sid): _suite(R.SUITES[sid]) for sid in (1, 2)},
     }
+    from ref._p3_vectors import add_p3
+    add_p3(out)
     return out
 
 
@@ -400,7 +402,9 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
     def mlist(epoch, seq, members, signer=wsk_a, ws=ws_a):
         return R.sign_object(S, signer, {"v": 2, "suite": S.id, "kind": "member_list", "workspace_id": ws.hex(),
                                          "epoch": epoch, "list_seq": seq, "issued_ms": NOW,
-                                         "members": sorted(({"device_id": dev[n].hex(), "scopes": sc}
+                                         "persons": [],
+                                         "members": sorted(({"device_id": dev[n].hex(),
+                                                            "person_id": certs[n]["o"]["person_id"], "scopes": sc}
                                                             for n, sc in members), key=lambda m: m["device_id"])})
 
     full = ["look", "decide", "operate", "type"]

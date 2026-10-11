@@ -719,3 +719,38 @@ def test_primary_open_requests(S, c):
             got = R.primary_sign_cert(S, pk, prim, s["request_id"], label, s["now_ms"], None,
                                       ["look", "decide", "operate", "type"])
             assert got == s["expect"]
+
+
+@each_suite("p3", "cases")
+def test_p3_contract_cases(S, c):
+    from ref._p3_vectors import replay
+    got = replay(S, c)
+    assert got == c["expect"]
+    # Failed membership publications never partially commit grants, lists, wraps or obligations.
+    if c["op"] == "membership" and "refuse" in got["result"]:
+        assert got["state"] == c["state"]
+    if "no_ttl_extension" in c["name"] or "not_resurrected" in c["name"]:
+        assert got["state"] == c["state"]
+    if c["name"] == "rotation_due_clears_higher_excluding_list":
+        assert not got["state"]["rotation_due"]
+    if c["name"] == "rotation_due_survives_same_epoch_and_restart":
+        assert got["state"]["rotation_due"] == c["state"]["rotation_due"]
+    if c["name"] == "login_preserves_concurrent_tokens":
+        assert len(got["state"]["tokens"]) == 2
+    if c["op"] == "login":
+        assert not got["state"]["challenges"]
+
+
+@pytest.mark.parametrize("sid", SUITES)
+def test_p3_whole_envelope_size_boundaries(sid):
+    S = R.SUITES[int(sid)]
+    v = VEC["suites"][sid]
+    from dataclasses import replace
+    source = bytes.fromhex(v["p3"]["objects"]["bridge_request"])
+    for c in v["p3"]["envelope_sizes"]:
+        h = replace(R.Header.decode(source), direction=c["direction"], epoch=0 if c["pair"] else 1)
+        raw = h.encode() + bytes(c["limit"] - R.HEADER_LEN)
+        args = (S, raw, h.workspace.hex(), h.rid.hex(), h.direction)
+        kwargs = {"offer": h.stream.hex()} if c["pair"] else {}
+        assert R.relay_envelope_check(*args, **kwargs) == {"ok": True}
+        assert R.relay_envelope_check(S, raw + b"\0", *args[2:], **kwargs) == {"refuse": "too_large"}
