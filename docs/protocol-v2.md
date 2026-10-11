@@ -2201,7 +2201,7 @@ aggregate hash (`uv run python tests/http_fixtures/manifest.py --write|--check`;
 manifest). Bump `revision` whenever any fixture changes. Consumers (orch-mobile, orch-core) vendor the
 corpus at a named commit and verify the manifest in their CI.
 There are no public invite-management routes: invite creation is the admin CLI (P3-D3).
-Checkpoint, restore, genesis, staging, baseline and proof routes wait for the next contract group.
+Checkpoint, restore, genesis, staging, baseline and proof routes are specified in §19.8 (P3-D12/D13/D18–D25).
 
 Requests and responses use `application/json`, except ORB2 posts (`application/octet-stream`).
 JSON field sets shown above are exact. GET requests have no body. Empty success bodies are `{}`,
@@ -2210,7 +2210,7 @@ generation. The first card is the only unfenced workspace write. Logout returns 
 unknown/expired token as well as an already-logged-out token.
 
 All routes can refuse 400 `malformed` for invalid fields, paths, query or strict JSON; bounded
-JSON requests refuse 413 `too_large` before parsing (G0a review 2); bounded ORB2 requests
+JSON requests refuse 413 `too_large` before parsing (G0a review 2), except the P3-D20 final checkpoint request (400); bounded ORB2 requests
 retain 400 `too_large`. Authenticated routes can refuse 401 `unauthenticated`.
 (G0a review 6) Only D sessions can fail session checks with 400 `cert_expired` or 403 `revoked`;
 W sessions have no device certificate. Membership uses only 403 `cert_expired`, because the
@@ -2224,7 +2224,7 @@ Route-table bare statuses mean: 400 `malformed`, 401 `unauthenticated`, 403 `not
 budgets return 503 `overloaded`. Each 429/503 includes integer delta-seconds `Retry-After`.
 Challenges' global cap specifically uses 429 `rate_limited`.
 
-Identifiers are lower-case 16-byte hex; binary JSON values (including ORB2 poll envelopes,
+Identifiers are lower-case 16-byte hex, except §19.8 checkpoint hashes, log accumulators and ticket ULIDs; binary JSON values (including ORB2 poll envelopes,
 challenges, public keys and signatures) are canonical b64u. All positions fit JSON's safe integer
 range. `wait` is an integer 0..25, default 0. Omitted `after` starts before the first item
 (including chunk index 0); supplied positions are exclusive non-negative decimal integers.
@@ -2360,7 +2360,7 @@ validity, latestness or disclosure of every restore. A WSK holder can fabricate 
 the retained endpoint from a held node. Omit retained pages when the relay already holds the path.
 The manifest lists every page, sorted by `(kind, log, after_seq)`, with unique nonnegative page indices and
 contiguous ranges within each kind/log. Its descriptors must match page metadata, counts and digests.
-Pages are nonempty and at most 4 MiB each. Identical retries are no-ops; different content at an existing
+Pages are nonempty and at most 4 MiB each. Identical retries are no-ops; different HTTP bytes at an existing
 index or a different terminal manifest is `staging_conflict`. A manifest may precede missing pages and
 returns their indices. An unlisted page is a conflict. At most two live sets and 64 MiB of page bytes are
 allowed per workspace. Expiry is one hour from set creation, never extended by retries.
@@ -2414,7 +2414,9 @@ a PK-certified, unrevoked operate device. Full hosts replay owner role, membersh
 removal and scopes at from_seq. The relay's current-list check catches honest-host mistakes; WSK signs
 those lists, so they are not authorization evidence in bundles. No host mandate may sign these restores.
 P8's owner-signed roster is required to close this stated gap. Historical devices check certificate expiry
-against line.at, not today's clock, as well as the source/target anchors and known revocations.
+against line.at, not today's clock, plus source/target anchors and in-bundle revocations. A later local
+lost/retired revocation does not invalidate history; a later compromised revocation raises an alarm without
+changing validity. Durable local revocations and tombstones still prevent resurrection (P3-D24/D25).
 
 **Reads, retention and pairing (P3-D13/D19/D20).** A GET returns an immutable endpoint E. Page transitions
 with `after_n=k&to=E`, ordered by target_n, exclusively after k and no later than E.n; k does not need to
@@ -2430,6 +2432,13 @@ when none exists. POST baselines pins it for seven days (16 per workspace); retr
 DELETE releases it early, idempotently, by the host or initialized member. A device must fetch and verify
 that baseline before initialization; it never downgrades it and relay emptiness cannot override a non-null
 baseline. After 24 hours without retrieval it asks the host for a current reference under the same rule.
+
+**Host publication (P3-D21).** Under the append lock, persist the exact C/T, full signed restore,
+certificate, delegation and durable branch proofs in the outbox alongside the append. After releasing the
+lock, publish in order with backoff; delete only after 200. The restore follows its named source and later
+checkpoints wait behind it. Decision/person-event admission tombstones survive restores. No network call
+holds the store lock. The owner's client independently compares the proposed source with the relay;
+flushing the outbox is not a prerequisite to signing.
 
 **Transport details requiring design sign-off (G0b, P3-D13/D19/D20).** The source design leaves the following
 encodings unspecified. The reference and fixtures use explicit candidate conventions; these are not F1
