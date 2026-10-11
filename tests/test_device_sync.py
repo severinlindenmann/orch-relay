@@ -12,11 +12,11 @@ from ref import checkpoints as C
 from ref import orch_protocol_ref as R
 
 HERE = Path(__file__).parent
-F1 = json.loads((HERE / "vectors/f1_receiver_4f00d9c.json").read_text())
+F1 = json.loads((HERE / "vectors/f1_receiver_e9a26d9.json").read_text())
 S = R.SUITES[2]
 V = json.loads(R.VECTORS.read_text())["suites"]["2"]
 CASES = {c["name"]: c for c in V["checkpoints"]["cases"]}
-MERGED = "4f00d9ce32e8e512366c908c36b43f35142747c9"  # orch-core develop, the merge of #377
+MERGED = "e9a26d95c247c4ff7794ae9abfc816a9032e576f"  # orch-core #387 (receiver revocation split), on develop
 
 
 def by_name(cases):
@@ -24,12 +24,12 @@ def by_name(cases):
 
 
 def test_extract_matches_the_f1_snapshot():
-    """The extract is a byte-faithful subset of orch-core checkpoint.json at the #377 merge, which is also the
+    """The extract is a byte-faithful subset of orch-core checkpoint.json at #387 (e9a26d95), which is also the
     commit tests/vectors/f1 pins (SOURCE)."""
     src = F1["source"]
     assert src["commit"] == MERGED
     assert f"Commit: {MERGED}" in (HERE / "vectors/f1/SOURCE").read_text()
-    assert len(F1["transition_cases"]) == 88 and len(F1["workspace_n_offers"]) == 30
+    assert len(F1["transition_cases"]) == 115 and len(F1["workspace_n_offers"]) == 30
     raw = (HERE / "vectors/f1/checkpoint.json").read_bytes()
     assert hashlib.sha256(raw).hexdigest() == src["sha256"]
     full = json.loads(raw)
@@ -50,49 +50,69 @@ def judge(f1, held, offered, now, **kw):
     )
 
 
+REFUSED = ("chain.diverged", None, (), ())
+NOTHING = {"known_devices": {}, "known": [], "local": [], "learned_later": []}
+
+
 def view(c):
-    """The case's receiver view (orch-core #377 ReceiverView): every field given, {} / [] meaning none."""
+    """The case's receiver view (orch-core #387 ReceiverView): every field given, {} / [] meaning none."""
     return {
         "restore": c["restore"],
         "applied": c["applied"],
         "proofs": c["proofs"],
         "card": c["pinned_delegation"],
         "known": c["known_revocations"],
+        "local": c["local_revocations"],
         "known_devices": c["known_devices"],
+        "learned_later": [],
     }
 
 
 @by_name(F1["transition_cases"])
 def test_f1_transition_cases_against_reference_judge(c):
-    """orch-core #377's receiver cases: one defect each, judged with the case's own view and clock."""
+    """orch-core #387's receiver cases: one defect each, judged with the case's own view and clock."""
     got = judge(
-        F1, c["held"], c["offered"], c["now"], **view(c), learned_later=c["learned_later_in_walk"]
+        F1,
+        c["held"],
+        c["offered"],
+        c["now"],
+        **{**view(c), "learned_later": c["learned_later_in_walk"]},
     )
     alarms = (c["restore"]["event"]["actor"]["device"],) if c.get("alarm") else ()
-    assert got == (c["expect"], c["recorded"], alarms)
+    assert got == (c["expect"], c["recorded"], alarms, tuple(c["unpublished"]))
     if c["learned_later_in_walk"]:  # only the receiver's order separates this case from a refusal
-        again = judge(
-            F1,
-            c["held"],
-            c["offered"],
-            c["now"],
-            **{**view(c), "known": c["learned_later_in_walk"]},
-        )
-        assert again == ("chain.diverged", None, ())
+        for field in ("known", "local"):  # held when judging, in either collection
+            again = judge(
+                F1,
+                c["held"],
+                c["offered"],
+                c["now"],
+                **{**view(c), field: c["learned_later_in_walk"]},
+            )
+            if (
+                c["name"] == "cross_person_compromised_learned_later_no_alarm"
+            ):  # another person's: never refuses
+                assert again == ("ok", c["recorded"], (), ()), field
+            else:
+                assert again == REFUSED, field
 
 
 @by_name(F1["workspace_n_offers"])
 def test_f1_workspace_n_offers_against_reference_judge(c):
     held = c["held"] if "held" in c else F1["workspace_n_held"]
-    got = judge(F1, held, c["checkpoint"], c["now"], proofs=c.get("proofs"), known_devices={})
-    assert got == (c["expect"], None, ())
+    got = judge(F1, held, c["checkpoint"], c["now"], proofs=c.get("proofs"), **NOTHING)
+    assert got == (c["expect"], None, (), ())
 
 
-def test_judge_requires_the_receivers_known_devices():
-    """orch-core #377 B1: every ReceiverView field is required; forgetting known_devices fails loudly."""
+@pytest.mark.parametrize("missing", sorted(NOTHING))
+def test_judge_requires_every_receiver_view_field(missing):
+    """orch-core #377 B1 / #387: every ReceiverView field is required (local_revocations included); forgetting one
+    fails loudly instead of meaning "nothing known"."""
     c = F1["workspace_n_offers"][0]
+    fields = {k: v for k, v in NOTHING.items() if k != missing}
+    assert judge(F1, F1["workspace_n_held"], c["checkpoint"], c["now"], **NOTHING)[0] == c["expect"]
     with pytest.raises(TypeError):
-        judge(F1, F1["workspace_n_held"], c["checkpoint"], c["now"])
+        judge(F1, F1["workspace_n_held"], c["checkpoint"], c["now"], **fields)
 
 
 def _evidence_case():
@@ -111,7 +131,7 @@ def test_judge_with_explicit_none_known_devices_refuses():
     """An explicit None is not "no devices" ({} is): it fails closed instead of skipping evidence binding."""
     c = _evidence_case()
     got = judge(F1, c["held"], c["offered"], c["now"], **{**view(c), "known_devices": None})
-    assert got == ("chain.diverged", None, ())
+    assert got == REFUSED
 
 
 def test_known_device_without_a_stored_key_binds_the_person_only():
@@ -126,7 +146,7 @@ def test_known_device_without_a_stored_key_binds_the_person_only():
     assert got[0] == "ok"
     other = {device: {"person_id": "ff" * 16, "pk_pub": None}}
     got = judge(F1, c["held"], c["offered"], c["now"], **{**view(c), "known_devices": other})
-    assert got == ("chain.diverged", None, ())
+    assert got == REFUSED
 
 
 def test_walk_alarm_case_alarms_through_the_device_state():
@@ -134,30 +154,38 @@ def test_walk_alarm_case_alarms_through_the_device_state():
     shared alarm case, replayed as device state, alarms for the signer and keeps the transition."""
     c = next(x for x in F1["transition_cases"] if x.get("alarm"))
     signer = c["restore"]["device_cert"]["o"]
-    dev = {"signers": {c["restore"]["event"]["id"]: {"device": signer["device_id"]}}, "alarms": []}
-    later = {x["revocation"]["o"]["device_id"]: x["revocation"] for x in c["learned_later_in_walk"]}
-    C.raise_alarms(dev, later)
+    signed = {"device": signer["device_id"], "person_id": signer["person_id"]}
+    dev = {"signers": {c["restore"]["event"]["id"]: signed}, "alarms": []}
+    C.raise_alarms(dev, [x["revocation"] for x in c["learned_later_in_walk"]])
     assert dev["alarms"] == [signer["device_id"]]
+    # #387: matched by device and person, like the refusal; another person's revocation of the id never alarms.
+    other = {
+        "signers": {c["restore"]["event"]["id"]: {**signed, "person_id": "ff" * 16}},
+        "alarms": [],
+    }
+    C.raise_alarms(other, [x["revocation"] for x in c["learned_later_in_walk"]])
+    assert other["alarms"] == []
 
 
-def test_f1_known_revocation_of_signer_refuses_on_ticket_logs_too():
-    # Review 1 in F1 terms: known revocations refuse the signer whatever the log.
+@pytest.mark.parametrize("field", ["known", "local"])
+def test_f1_held_revocation_of_signer_refuses_device_and_person(field):
+    # Review 1 / C3 in F1 terms: a held revocation (either collection) refuses the signer whatever the reason;
+    # #387: only when it names the signer's device and person.
     c = copy.deepcopy(
         next(x for x in F1["transition_cases"] if x["name"] == "restore_accumulator_fold")
     )
-    signer = c["restore"]["device_cert"]["o"]["device_id"]
+    assert judge(F1, c["held"], c["offered"], c["now"], **view(c))[0] == "ok"
+    signer = c["restore"]["device_cert"]["o"]
     for reason in ("lost", "retired", "compromised"):
-        rev = {
-            "o": {
-                "device_id": signer,
-                "reason": reason,
-                "person_id": c["restore"]["device_cert"]["o"]["person_id"],
-            }
-        }
-        got = judge(
-            F1, c["held"], c["offered"], c["now"], **{**view(c), "known": [{"revocation": rev}]}
-        )
-        assert got == ("chain.diverged", None, ()), reason
+        # Another person's revocation of the signer's id never refuses as C3. Held as chain-learned, a workspace
+        # restore would still have to carry it (completeness, which it cannot for its own signer): F1 does the same.
+        other = "chain.diverged" if field == "known" else "ok"
+        for person, expect in ((signer["person_id"], "chain.diverged"), ("ff" * 16, other)):
+            rev = {"o": {"device_id": signer["device_id"], "reason": reason, "person_id": person}}
+            got = judge(
+                F1, c["held"], c["offered"], c["now"], **{**view(c), field: [{"revocation": rev}]}
+            )
+            assert got[0] == expect, (reason, person)
 
 
 def _publication(name="ticket_restore"):
@@ -307,17 +335,15 @@ def test_known_evidence_must_match_the_receivers_stored_key():
         "proofs": c["proofs"],
         "card": c["pinned_delegation"],
         "known_devices": c["known_devices"],
+        "local": [],
+        "learned_later": [],
     }
     known = copy.deepcopy(c["known_revocations"])
     carried = {e["revocation"]["o"]["device_id"]: e for e in c["restore"]["event"]["revocations"]}
     known[0]["pk_pub"] = carried[known[0]["revocation"]["o"]["device_id"]]["pk_pub"]
     assert judge(F1, c["held"], c["offered"], c["now"], known=known, **kw)[0] == "ok"
     known[0]["pk_pub"] = c["restore"]["pk_pub"]  # the owner's key, not the device person's
-    assert judge(F1, c["held"], c["offered"], c["now"], known=known, **kw) == (
-        "chain.diverged",
-        None,
-        (),
-    )
+    assert judge(F1, c["held"], c["offered"], c["now"], known=known, **kw) == REFUSED
 
 
 def test_initial_requires_registered_members_and_the_owner_key():
@@ -357,6 +383,8 @@ def test_device_binds_evidence_for_a_known_active_device():
         "applied": c["applied"],
         "proofs": c["proofs"],
         "card": c["pinned_delegation"],
+        "local": [],
+        "learned_later": [],
     }
     rev = c["known_revocations"][0]["revocation"]["o"]
     assert (
@@ -364,7 +392,7 @@ def test_device_binds_evidence_for_a_known_active_device():
     )  # nothing known: accepted
     active = {rev["device_id"]: {"person_id": rev["person_id"]}}
     got = judge(F1, c["held"], c["offered"], c["now"], known=[], known_devices=active, **kw)
-    assert got == ("chain.diverged", None, ())
+    assert got == REFUSED
 
 
 def test_resumed_endpoint_must_be_the_requested_hash(monkeypatch):
@@ -389,6 +417,8 @@ def test_device_binds_evidence_for_a_known_device_to_its_stored_key():
         "applied": c["applied"],
         "proofs": c["proofs"],
         "card": c["pinned_delegation"],
+        "local": [],
+        "learned_later": [],
     }
     item = c["restore"]["event"]["revocations"][0]
     d, person = item["revocation"]["o"]["device_id"], item["revocation"]["o"]["person_id"]
@@ -415,11 +445,429 @@ def test_device_binds_evidence_for_a_known_device_to_its_stored_key():
         known_devices=bad,
         **kw,
     )
-    assert got == ("chain.diverged", None, ())
+    assert got == REFUSED
 
 
 def test_alarms_read_round_two_signer_format():
-    dev = {"signers": {"r1": "d1", "r2": {"device": "d2", "person_id": "p"}}, "alarms": []}
-    rev = {"o": {"reason": "compromised"}}
-    C.raise_alarms(dev, {"d1": rev, "d2": rev})
+    """A round-2 signer record (bare device id) resolves its person through the known devices; alarms are per
+    (device, person). Unresolvable, it raises no alarm: matching by device alone let any keypair holder raise a false
+    C3 alarm (PR #52 review F3)."""
+    dev = {
+        "signers": {"r1": "d1", "r2": {"device": "d2", "person_id": "p"}, "r3": "d3"},
+        "devices": {"d1": {"person_id": "p"}},
+        "alarms": [],
+    }
+    revs = [
+        {"o": {"reason": "compromised", "device_id": d, "person_id": "q"}}
+        for d in ("d1", "d2", "d3")
+    ]
+    C.raise_alarms(
+        dev, revs
+    )  # q is nobody's person here: no alarm, also not for the unresolvable d3
+    assert dev["alarms"] == []
+    C.raise_alarms(
+        dev,
+        [{"o": {"reason": "compromised", "device_id": d, "person_id": "p"}} for d in ("d1", "d2")],
+    )
     assert dev["alarms"] == ["d1", "d2"]
+    C.raise_alarms(dev, [{"o": {"reason": "lost", "device_id": "d3", "person_id": "p"}}])
+    assert dev["alarms"] == ["d1", "d2"]
+
+
+def test_legacy_signer_false_alarm_poc():
+    """PR #52 review F3 PoC: the committed laptop signer stored in the legacy bare-id form; bob's compromised
+    "revocation" of the laptop id (contested) must not alarm, alice's own must."""
+    case = CASES["walk_contested_revocation_alarms_committed_signer"]
+    dev = copy.deepcopy(case["steps"][-1]["input"]["body"]["device"])
+    bob = CASES["device_learn_admission"]["steps"][2]["input"]["body"]["evidence"]
+    alice = case["steps"][-1]["input"]["body"]["evidence"]
+    dev["local"], dev["contested"], dev["alarms"] = {}, {}, []
+    dev["signers"] = {k: v["device"] for k, v in dev["signers"].items()}
+    got = C.device_learn(S, dev, bob)["device"]
+    assert got["alarms"] == [] and got["contested"]  # evidence kept, no alarm
+    got = C.device_learn(S, got, alice)["device"]
+    assert got["alarms"] == [alice["revocation"]["o"]["device_id"]]
+
+
+# --- F1 §5.10 at orch-core e9a26d95 (#387): the receiver runtime (signed material from the walk vectors) ---------
+
+
+def _walk_result(name, step=-1):
+    return CASES[name]["steps"][step]["expect"]
+
+
+def _learned_device():
+    """A device that chain-learned the laptop's lost revocation from an accepted restore (with provenance)."""
+    dev = copy.deepcopy(_walk_result("walk_chain_learned_with_provenance")["device"])
+    ((laptop, item),) = dev["revocations"].items()
+    return dev, laptop, item
+
+
+def test_chain_learned_entries_carry_their_occurrence():
+    """Provenance names the accepted checkpoint by hash, the restore event, its seq, head and accumulator node:
+    never a height alone. The head and node re-derive from the stored line and the T the walk accepted."""
+    dev, laptop, item = _learned_device()
+    prov = item["provenance"]
+    assert set(prov) == {"checkpoint", "log", "event", "seq", "head", "acc"}
+    assert set(prov["checkpoint"]) == {"n", "hash"} and prov["checkpoint"] == C.reference(
+        dev["held"]
+    )
+    entry = dev["held"]["o"]["workspace_log"]
+    assert (
+        prov["seq"] == entry["seq"]
+        and prov["head"] == entry["head"]
+        and prov["acc"] == entry["acc"]
+    )
+    assert C.evidence_ok(S, item) == laptop
+
+
+def test_another_workspace_sees_chain_evidence_only_as_local():
+    """Cross-workspace isolation: chain-learned evidence of one workspace, given to another workspace's device, is
+    out of band there (verified, its own reason, no provenance), never chain-learned."""
+    _, laptop, item = _learned_device()
+    other = C.device_initial("ff" * 16, "w", "pk", "g", {}, {})
+    got = C.device_learn(S, other, item)["device"]
+    assert got["revocations"] == {} and set(got["local"]) == {laptop}
+    assert (
+        "provenance" not in got["local"][laptop]
+        and C.evidence_ok(S, got["local"][laptop]) == laptop
+    )
+    assert other["local"] == {}  # device_learn never mutates its input
+
+
+def test_device_learn_keeps_the_strongest_local_reason():
+    _, laptop, lost = _learned_device()
+    bad = _walk_result("walk_failed_walk_drops_alarm_of_uncommitted_transition")["device"]["local"][
+        laptop
+    ]
+    assert bad["revocation"]["o"]["reason"] == "compromised"
+    dev = C.device_initial("ff" * 16, "w", "pk", "g", {}, {})
+    dev = C.device_learn(S, dev, bad)["device"]
+    dev = C.device_learn(S, dev, lost)[
+        "device"
+    ]  # weaker: admitted, but the compromised reason stays
+    assert dev["local"][laptop]["revocation"]["o"]["reason"] == "compromised"
+
+
+@pytest.mark.parametrize("defect", ["extra_field", "other_key", "unsigned", "not_a_dict"])
+def test_unverifiable_evidence_is_never_admitted(defect):
+    _, _laptop, item = _learned_device()
+    item = {k: item[k] for k in ("revocation", "device_cert", "pk_pub")}
+    if defect == "extra_field":
+        item["note"] = "x"
+    elif defect == "other_key":
+        item["pk_pub"] = CASES["walk_plain_growth"]["state"]["wsk_pub"]
+    elif defect == "unsigned":
+        item["revocation"] = {**item["revocation"], "sig": item["device_cert"]["sig"]}
+    else:
+        item = [item]
+    assert C.evidence_ok(S, item) is None
+    dev = C.device_initial("ff" * 16, "w", "pk", "g", {}, {})
+    assert C.admit_local(S, dev, item) is False and dev["local"] == {}
+    with pytest.raises(C.Refusal):
+        C.device_learn(S, dev, item)
+
+
+def test_failed_walk_refusal_carries_only_what_changed():
+    """A refused walk returns `device` only when it kept new evidence or alarms; H, applied ids, signers and the
+    chain-learned revocations are those of the committed state."""
+    case = CASES["walk_failed_walk_keeps_evidence_and_alarms_committed_signer"]
+    committed = case["steps"][0]["expect"]["device"]
+    failed = case["steps"][1]["expect"]
+    kept = failed["device"]
+    for key in ("held", "applied", "signers", "revocations", "devices", "forward", "pending"):
+        assert kept[key] == committed[key], key
+    assert kept["local"] != committed["local"] and kept["alarms"] != committed["alarms"]
+    plain = _walk_result("walk_spliced_proof_page")
+    assert plain == {
+        "status": 409,
+        "error": "sync_incomplete",
+    }  # nothing verified: no device in the refusal
+
+
+def test_unexpected_walk_errors_still_keep_verified_evidence(monkeypatch):
+    """A non-Refusal error late in a walk (here: a crash in the final judge) is `malformed`, and the evidence the walk
+    verified before it is kept like for any refusal."""
+    case = CASES["walk_failed_walk_drops_alarm_of_uncommitted_transition"]
+    state = copy.deepcopy(case["state"])
+    step = copy.deepcopy(case["steps"][0]["input"])
+    real = C.judge_offer
+    calls = []
+
+    def judge(*a, **k):
+        calls.append(1)
+        if (
+            k.get("restore") is not None
+            and k["restore"]["event"]["id"] == "01ZZZZZZZZZZZZZZZZZZZZZZZZ"
+        ):
+            raise KeyError("boom")
+        return real(*a, **k)
+
+    monkeypatch.setattr(C, "judge_offer", judge)
+    got = C.dispatch(S, state, **step)
+    assert got["status"] == 400 and got["error"] == "malformed"
+    assert got["device"] == case["steps"][0]["expect"]["device"]
+
+
+def _poisoned_device():
+    """Security review flags (1)/(2), PoC: another person (bob) certifies the laptop's device id under his own key
+    and revokes it. The device does not know the laptop yet, so bob's evidence binds it first (F1 row 151). Then
+    alice, the laptop's real person and the workspace owner, revokes it as compromised."""
+    case = CASES["device_learn_admission"]
+    bob = case["steps"][2]["input"]["body"]["evidence"]
+    alice = _walk_result("walk_failed_walk_drops_alarm_of_uncommitted_transition")["device"][
+        "local"
+    ]
+    ((laptop, alice_bad),) = alice.items()
+    dev = copy.deepcopy(
+        CASES["walk_failed_walk_drops_alarm_of_uncommitted_transition"]["steps"][0]["input"]["body"]
+    )
+    dev = C.device_learn(S, dev, bob)["device"]
+    assert (
+        dev["local"][laptop]["revocation"]["o"]["person_id"] == bob["revocation"]["o"]["person_id"]
+    )
+    return dev, laptop, alice_bad
+
+
+def test_poisoned_binding_never_drops_a_genuine_signer_revocation():
+    """The first binding stays bob's (no replacement), but alice's verified revocation is kept, not discarded, and
+    still refuses her laptop as a restore signer (C3): without it the poisoned binding failed open."""
+    dev, laptop, alice_bad = _poisoned_device()
+    got = C.dispatch(S, {}, "device_learn", {"device": dev, "evidence": alice_bad})
+    assert got["status"] == 200 and got["admitted"] is False
+    told = got["device"]
+    assert (
+        told["local"][laptop]["revocation"]["o"]["person_id"]
+        != alice_bad["revocation"]["o"]["person_id"]
+    )
+    assert list(told["contested"].values()) == [alice_bad]
+    case = CASES[
+        "walk_retry_after_failed_walk_refuses_former_alarm"
+    ]  # the relay of t1, signed by the laptop
+    state = copy.deepcopy(case["state"])
+    step = {**case["steps"][0]["input"], "body": told}
+    assert C.dispatch(S, state, **step) == {"status": 409, "error": "chain_diverged"}
+    # Control (up to t1): with only bob's (poisoning) evidence the laptop's restore is accepted, as F1 requires;
+    # before the fix alice's revocation was refused (revocation_conflict) and this was the device's state: fail open.
+    t1 = CASES["walk_failed_walk_keeps_evidence_and_alarms_committed_signer"]["steps"][0]["input"][
+        "endpoint"
+    ]
+    upto = {**step, "endpoint": t1}
+    assert C.dispatch(S, copy.deepcopy(case["state"]), **{**upto, "body": dev})["status"] == 200
+    assert C.dispatch(S, copy.deepcopy(case["state"]), **{**upto, "body": told}) == {
+        "status": 409,
+        "error": "chain_diverged",
+    }
+
+
+# --- PR #52 review F2: bounded held evidence and harvest -----------------------------------------------------------
+
+
+def _throwaway(n, device_template=None):
+    """Evidence by a fresh throwaway person n (a self-made key, no membership): a certificate of a device under that
+    person, and its compromised revocation. device_template None: a fresh device id too."""
+    priv = S.sig_key(hashlib.sha256(b"FAKE throwaway person %d" % n).digest())
+    pk = S.sig_pub(priv)
+    person = R.person_id(S, pk).hex()
+    o = copy.deepcopy(device_template)
+    if o is None:
+        dk = S.sig_pub(S.sig_key(hashlib.sha256(b"FAKE throwaway device %d" % n).digest()))
+        bob = CASES["device_learn_admission"]["steps"][2]["input"]["body"]["evidence"][
+            "device_cert"
+        ]["o"]
+        o = {**bob, "dk_sig_pub": R.b64u(dk), "device_id": R.device_id(S, dk).hex()}
+    o["person_id"] = person
+    cert = R.sign_object(S, priv, o)
+    rev = R.sign_object(
+        S,
+        priv,
+        {
+            "v": 2,
+            "suite": S.id,
+            "kind": "revocation",
+            "person_id": person,
+            "device_id": o["device_id"],
+            "revoked_ms": o["created_ms"] + 1000,
+            "reason": "compromised",
+        },
+    )
+    item = {"revocation": rev, "device_cert": cert, "pk_pub": R.b64u(pk)}
+    assert C.evidence_ok(S, item) == o["device_id"]
+    return item
+
+
+def _member_device():
+    """A device that knows alice's laptop (a member) and alice's own compromised revocation of it."""
+    case = CASES["walk_contested_revocation_alarms_committed_signer"]
+    dev = copy.deepcopy(case["steps"][-1]["input"]["body"]["device"])
+    dev["local"], dev["contested"], dev["alarms"] = {}, {}, []
+    alice = case["steps"][-1]["input"]["body"]["evidence"]
+    return dev, alice
+
+
+def _held(dev):
+    return [*dev["local"].values(), *dev["contested"].values()]
+
+
+@pytest.mark.parametrize("alice_first", [True, False])
+def test_throwaway_flood_never_evicts_a_member_revocation_per_device(monkeypatch, alice_first):
+    """orch-52: a flood of throwaway persons "revoking" the laptop id never evicts alice's genuine revocation; over
+    the per-device cap their evidence is dropped, and alice's evicts theirs."""
+    monkeypatch.setattr(C, "MAX_PERSONS_PER_DEVICE", 3)
+    dev, alice = _member_device()
+    laptop = alice["revocation"]["o"]["device_id"]
+    flood = [_throwaway(i, alice["device_cert"]["o"]) for i in range(6)]
+    order = [alice, *flood] if alice_first else [*flood, alice]
+    for item in order:
+        dev = C.device_learn(S, dev, item)["device"]
+    mine = [x for x in _held(dev) if x["revocation"]["o"]["device_id"] == laptop]
+    assert len(mine) == 3
+    assert alice in mine
+    # Over the cap a new non-member entry is dropped, it evicts nothing: the earliest throwaways stay (no churn).
+    assert [x for x in mine if x != alice] == flood[: 2 if alice_first else 3][-2:]
+
+
+def test_throwaway_flood_bounded_in_total_and_member_kept(monkeypatch):
+    monkeypatch.setattr(C, "MAX_HELD_EVIDENCE", 4)
+    dev, alice = _member_device()
+    flood = [_throwaway(100 + i) for i in range(8)]
+    for item in flood:  # fresh device ids: unbound, first-come into local until the cap
+        dev = C.device_learn(S, dev, item)["device"]
+    assert _held(dev) == flood[:4]  # the new ones are dropped, nothing is evicted by them
+    dev = C.device_learn(S, dev, alice)["device"]
+    assert len(_held(dev)) == 4 and alice in _held(dev)
+    dev = C.device_learn(S, dev, _throwaway(200))["device"]
+    assert len(_held(dev)) == 4 and alice in _held(dev)
+
+
+def test_walk_harvest_is_bounded_before_signature_checks(monkeypatch):
+    """A bundle's entries are harvested only within LINE_CAP and up to MAX_HELD_EVIDENCE per walk, counted before
+    any signature check (evidence_ok)."""
+    case = CASES["walk_failed_walk_drops_alarm_of_uncommitted_transition"]
+    step = case["steps"][0]["input"]
+    assert case["steps"][0]["expect"]["device"]["local"]  # unbounded: the evidence is kept
+    checks = []
+    real = C.evidence_ok
+    monkeypatch.setattr(C, "evidence_ok", lambda *a: checks.append(1) or real(*a))
+    monkeypatch.setattr(C, "MAX_HELD_EVIDENCE", 0)
+    got = C.dispatch(S, copy.deepcopy(case["state"]), **step)
+    assert got == {"status": 409, "error": "chain_diverged"} and checks == []
+    monkeypatch.setattr(C, "MAX_HELD_EVIDENCE", 4096)
+    sizes = {t["restore_id"]: len(R.cj(t["line"])) + 1 for t in case["state"]["transitions"]}
+    carrying = [t["restore_id"] for t in case["state"]["transitions"] if t["line"]["revocations"]]
+    assert len(carrying) == 1
+    cap = sizes[carrying[0]] - 1  # only the line that carries evidence is over the cap
+    assert all(size <= cap for rid, size in sizes.items() if rid != carrying[0])
+    monkeypatch.setattr(C, "LINE_CAP", cap)
+    got = C.dispatch(S, copy.deepcopy(case["state"]), **step)
+    assert got == {"status": 409, "error": "chain_diverged"} and checks == []
+
+
+def _person_key(n):
+    priv = S.sig_key(hashlib.sha256(b"FAKE member person %d" % n).digest())
+    return priv, R.person_id(S, S.sig_pub(priv)).hex()
+
+
+def _evidence_by(priv, n):
+    """priv's certificate of a fresh device n and its compromised revocation."""
+    pk = S.sig_pub(priv)
+    person = R.person_id(S, pk).hex()
+    dk = S.sig_pub(S.sig_key(hashlib.sha256(b"FAKE member device %d" % n).digest()))
+    bob = CASES["device_learn_admission"]["steps"][2]["input"]["body"]["evidence"]["device_cert"][
+        "o"
+    ]
+    o = {
+        **bob,
+        "dk_sig_pub": R.b64u(dk),
+        "device_id": R.device_id(S, dk).hex(),
+        "person_id": person,
+    }
+    cert = R.sign_object(S, priv, o)
+    rev = R.sign_object(
+        S,
+        priv,
+        {
+            "v": 2,
+            "suite": S.id,
+            "kind": "revocation",
+            "person_id": person,
+            "device_id": o["device_id"],
+            "revoked_ms": o["created_ms"] + 1000,
+            "reason": "compromised",
+        },
+    )
+    return {"revocation": rev, "device_cert": cert, "pk_pub": R.b64u(pk)}
+
+
+def test_member_flood_cannot_bypass_the_caps(monkeypatch):
+    """Background review flag (3), PoC: a member person (here: one the device knows from a known device, as any
+    workspace member or a person of chain-learned evidence is) floods with self-made devices. Member evidence used to
+    be admitted over the cap without limit; the per-person cap bounds it and alice's genuine entry is still stored."""
+    monkeypatch.setattr(C, "MAX_HELD_EVIDENCE", 4)
+    monkeypatch.setattr(C, "MAX_ENTRIES_PER_PERSON", 3)
+    dev, alice = _member_device()
+    priv, mallory = _person_key(1)
+    dev["devices"]["ee" * 16] = {"person_id": mallory}  # mallory is a member
+    for i in range(10):
+        dev = C.device_learn(S, dev, _evidence_by(priv, i))["device"]
+    assert len(_held(dev)) <= 4
+    dev = C.device_learn(S, dev, alice)["device"]
+    assert alice in _held(dev)
+
+
+@pytest.mark.parametrize("binding", ["absent", "other_person"])
+def test_legacy_signer_resolves_to_the_card_owner(binding):
+    """Background review flag (2), PoC: a round-2 bare-id signer whose device is missing from the known devices
+    (state migration) or bound there to another person (a first-come chain binding) must still alarm on the owner's
+    compromised revocation: a restore signer is always the card's owner."""
+    case = CASES["walk_contested_revocation_alarms_committed_signer"]
+    dev, alice = _member_device()
+    laptop = alice["revocation"]["o"]["device_id"]
+    dev["signers"] = {k: v["device"] for k, v in dev["signers"].items()}
+    if binding == "absent":
+        del dev["devices"][laptop]
+    else:
+        dev["devices"][laptop] = {"person_id": "ee" * 16}
+    got = C.device_learn(S, dev, alice)["device"]
+    assert got["alarms"] == [laptop]
+    bob = CASES["device_learn_admission"]["steps"][2]["input"]["body"]["evidence"]
+    other = C.device_learn(S, {**dev, "alarms": []}, bob)["device"]
+    assert other["alarms"] == []
+    assert case  # the vector the device comes from
+
+
+@pytest.mark.parametrize("cap", ["MAX_PERSONS_PER_DEVICE", "MAX_HELD_EVIDENCE"])
+def test_member_evidence_about_another_device_evicts_throwaways(monkeypatch, cap):
+    """Tier 1 (a member person about a device not bound to them) evicts non-member entries at a full cap instead of
+    being dropped: throwaway persons cannot fill a cap to keep a member's revocation out."""
+    monkeypatch.setattr(C, cap, 2)
+    dev, _ = _member_device()
+    priv, mallory = _person_key(2)
+    dev["devices"]["ee" * 16] = {"person_id": mallory}
+    mine = _evidence_by(priv, 50)
+    for i in range(2):
+        dev = C.device_learn(S, dev, _throwaway(300 + i, mine["device_cert"]["o"]))["device"]
+    assert len(_held(dev)) == 2
+    dev = C.device_learn(S, dev, mine)["device"]
+    assert mine in _held(dev) and len(_held(dev)) == 2
+
+
+def test_committed_signer_pair_is_protected_from_the_per_person_cap(monkeypatch):
+    """The owner's revocation of a committed signer device whose known-device binding names another person is still
+    an authenticated pair (the signer record): never dropped by the per-person cap, and it alarms."""
+    monkeypatch.setattr(C, "MAX_ENTRIES_PER_PERSON", 0)
+    dev, alice = _member_device()
+    laptop = alice["revocation"]["o"]["device_id"]
+    dev["devices"][laptop] = {"person_id": "ee" * 16}
+    got = C.device_learn(S, dev, alice)["device"]
+    assert alice in _held(got) and got["alarms"] == [laptop]
+
+
+def test_resubmitting_evidence_never_churns(monkeypatch):
+    """Re-delivering the same (or a weaker) entry needs no room and evicts nothing."""
+    monkeypatch.setattr(C, "MAX_HELD_EVIDENCE", 2)
+    dev, _alice = _member_device()
+    flood = [_throwaway(400 + i) for i in range(2)]
+    for item in [*flood, *flood, *flood]:
+        dev = C.device_learn(S, dev, item)["device"]
+    assert _held(dev) == flood

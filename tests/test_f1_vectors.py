@@ -648,7 +648,7 @@ def test_vector_files_match_the_recorded_sha256():
         for line in (F1 / "SOURCE").read_text().splitlines()
         if line.startswith("sha256:")
     )
-    assert "Commit: 4f00d9ce32e8e512366c908c36b43f35142747c9" in (F1 / "SOURCE").read_text()
+    assert "Commit: e9a26d95c247c4ff7794ae9abfc816a9032e576f" in (F1 / "SOURCE").read_text()
     assert {p.name for p in F1.iterdir()} == {n + ".json" for n in FILE_KEYS} | {"SOURCE"}
     files = sorted(p.name for p in F1.glob("*.json"))
     assert files == sorted(rec) and set(files) == {name + ".json" for name in FILE_KEYS}
@@ -1297,7 +1297,8 @@ def workspace_offer_shape_ok(signed):
 
 
 # Receiver state. Since orch-core #377 every shared transition case carries its own receiver view (`now`,
-# `pinned_delegation`, `known_devices`, `known_revocations`, `learned_later_in_walk`) and every offer its `now`.
+# `pinned_delegation`, `known_devices`, `known_revocations`, `learned_later_in_walk`) and every offer its `now`;
+# since #387 also `local_revocations` (out of band) and the expected `unpublished`.
 # The workspace card's PK-signed delegation (P3-D24: "the card's delegation"). Relays hold it with the card and
 # devices pin it with the genesis; it is the delegation of the genesis event whose head is the pinned genesis.
 # Only a fallback for local regressions: shared cases use their own `pinned_delegation`.
@@ -1329,10 +1330,16 @@ def test_card_delegation_is_the_pinned_genesis_owner():
     }
 
 
-def test_receiver_view_has_no_defaults_for_known_devices():
-    """orch-core #377 B1: forgetting the receiver's known devices fails loudly instead of trusting nothing."""
+@pytest.mark.parametrize("missing", ["known_devices", "local"])
+def test_receiver_view_has_no_defaults(missing):
+    """orch-core #377 B1 / #387: forgetting the receiver's known devices or its out-of-band revocations
+    (`local_revocations`) fails loudly instead of meaning "nothing known"."""
+    fields = {"known_devices": {}, "local": []}
+    offered = CP["workspace_checkpoint"]["signed"]
+    assert receiver_verdict(None, offered, now=VECTOR_CLOCK, **fields)[0] == "ok"
+    del fields[missing]
     with pytest.raises(TypeError):
-        receiver_verdict(None, CP["workspace_checkpoint"]["signed"], now=VECTOR_CLOCK)
+        receiver_verdict(None, offered, now=VECTOR_CLOCK, **fields)
 
 
 @pytest.mark.parametrize("kind", ["ticket_checkpoint", "workspace_checkpoint"])
@@ -1549,15 +1556,16 @@ def entries(signed):
     return {"workspace": signed["o"]["workspace_log"], **signed["o"]["tickets"]}
 
 
-def transition_ok(held, offered, restore, applied, known, card, known_devices):
+def transition_ok(held, offered, restore, applied, known, local, card, known_devices):
     """P3-D24 receiver policy intentionally does not infer the owner's current roster role.
 
     It is bound to the workspace card's owner: the bundle's delegation must carry the pinned card's content (`o`).
-    `known_devices` (device id -> person_id and optional pk_pub, active or revoked) and `known` (revocations held
-    when judging) are the receiver's own knowledge; evidence a bundle carries for such a device must be of that person
-    and key (orch-core #377). Returns (code, retained, signer).
+    `known_devices` (device id -> person_id and optional pk_pub, active or revoked), `known` (chain-learned
+    revocations held when judging) and `local` (out-of-band ones, orch-core #387) are the receiver's own knowledge;
+    evidence a bundle carries for such a device must be of that person and key (orch-core #377). Returns (code,
+    retained, signer, signer person).
     """
-    diverged = "chain.diverged", None, None
+    diverged = "chain.diverged", None, None, None
     try:
         e, log, C = restore["event"], restore["log"], restore["C"]
         cert, pk, delegation = (
@@ -1600,18 +1608,19 @@ def transition_ok(held, offered, restore, applied, known, card, known_devices):
         if not all(revocation_evidence_ok(x) for x in e["revocations"]):
             return diverged
         carried = {x["revocation"]["o"]["device_id"]: x for x in e["revocations"]}
-        signer = cert["o"]["device_id"]
+        signer, signer_person = cert["o"]["device_id"], cert["o"]["person_id"]
         # The bundle revokes its own signer: a log-free receiver cannot place the revocation.
         if signer in carried:
             return diverged
-        # F1 §5.10 / R4 (orch-core #377): evidence for a device the receiver knows, active or revoked, is from its
-        # known person (and stored key, where the receiver has one).
+        # F1 §5.10 / R4 (orch-core #377, #387): evidence for a device the receiver knows, active or revoked, from
+        # known_devices or either revocation collection, is from its known person (and stored key, where it has one).
+        held_revs = [*known, *local]
         knowledge = [
             (d, mine["person_id"], mine.get("pk_pub")) for d, mine in known_devices.items()
         ]
         knowledge += [
             (x["revocation"]["o"]["device_id"], x["revocation"]["o"]["person_id"], x.get("pk_pub"))
-            for x in known
+            for x in held_revs
         ]
         for device, person, pk_pub in knowledge:
             got = carried.get(device)
@@ -1620,13 +1629,18 @@ def transition_ok(held, offered, restore, applied, known, card, known_devices):
                 or (pk_pub is not None and got["pk_pub"] != pk_pub)
             ):
                 return diverged
+        # §19.8 R1 / C3: held when judged, chain-learned or out of band, any reason, any host-chosen position, every
+        # log; it must name the signer's device and person (#387: another person's revocation of the id is not one).
+        if any(
+            x["revocation"]["o"]["device_id"] == signer
+            and x["revocation"]["o"]["person_id"] == signer_person
+            for x in held_revs
+        ):
+            return diverged
         for x in known:
             r = x["revocation"]
             device = r["o"]["device_id"]
-            # §19.8 R1 / C3: held when judged, any reason, any host-chosen position, every log.
-            if device == signer:
-                return diverged
-            # Completeness (R4) applies to workspace restores only; a ticket restore carries [].
+            # Completeness (R4), chain-learned evidence only, applies to workspace restores; a ticket restore carries [].
             if log == "workspace" and (
                 device not in carried or strength(carried[device]["revocation"]) < strength(r)
             ):
@@ -1640,12 +1654,12 @@ def transition_ok(held, offered, restore, applied, known, card, known_devices):
         if log == "workspace" and old["seq"] == 0:
             forward = restore.get("forward_heads")
             if not isinstance(forward, list) or not forward or forward[0] != CP["genesis"]:
-                return "sync.incomplete", None, None
+                return "sync.incomplete", None, None, None
         if old["seq"] > retained["seq"]:
             if log_acc(restore["acc_before"], e["head"]) != retained["acc"]:
-                return "sync.incomplete", None, None
+                return "sync.incomplete", None, None, None
             if not growth_ok(retained, old, restore.get("abandoned_heads")):
-                return "sync.incomplete", None, None
+                return "sync.incomplete", None, None, None
             abandoned = e["abandoned"]
             if (
                 not abandoned
@@ -1654,18 +1668,18 @@ def transition_ok(held, offered, restore, applied, known, card, known_devices):
             ):
                 return diverged
         elif not growth_ok(old, retained, restore.get("forward_heads", [])):
-            return "sync.incomplete", None, None
+            return "sync.incomplete", None, None, None
         # A workspace restore to seq 1 retains the pinned genesis itself.
         if (
             log == "workspace"
             and e["from_seq"] == 1
             and (e["head"] != CP["genesis"] or retained["acc"] != log_acc(ZERO_ACC, CP["genesis"]))
         ):
-            return "sync.incomplete", None, None
-        return "ok", retained, signer
+            return "sync.incomplete", None, None, None
+        return "ok", retained, signer, signer_person
     except (KeyError, TypeError, ValueError, IndexError):
         # Incomplete accumulator evidence is not evidence of equivocation.
-        return "sync.incomplete", None, None
+        return "sync.incomplete", None, None, None
 
 
 def receiver_verdict(
@@ -1678,21 +1692,23 @@ def receiver_verdict(
     *,
     now,
     known_devices,
+    local,
     card=CARD_DELEGATION,
     learned_later=(),
 ):
     """A receiver with held H (or None), its one sampled clock `now`, the workspace card's delegation and its own
-    knowledge (`known_devices`, `known` revocations, `learned_later` in the walk). Returns (code, restore_id, alarms).
+    knowledge (`known_devices`, chain-learned `known` and out-of-band `local` revocations, `learned_later` in the
+    walk). Returns (code, restore_id, alarms, unpublished), orch-core #387's Verdict.
 
     Order follows orch-core #377 `judge_offer`: shape and signature, the pinned genesis (`trust.genesis_mismatch`),
     the workspace, equal or lower n, then the clock ceiling: `o.at > now + 300 s` is the retryable
     `checkpoint.future` (`o.at == now + 300 s` is accepted), then the forward rules, the restore and the growth.
     """
-    diverged = ("chain.diverged", None, ())
+    diverged = ("chain.diverged", None, (), ())
     if not workspace_offer_shape_ok(offered):
         return diverged
     if offered["o"]["genesis"] != CP["genesis"]:
-        return "trust.genesis_mismatch", None, ()
+        return "trust.genesis_mismatch", None, (), ()
     if offered["o"]["workspace_id"] != CP["workspace_id"] or (
         held and held["o"]["workspace_id"] != CP["workspace_id"]
     ):
@@ -1701,26 +1717,26 @@ def receiver_verdict(
     if held:
         h, o = held["o"], offered["o"]
         if o["n"] == h["n"]:
-            return ("ok", None, ()) if o == h else diverged
+            return ("ok", None, (), ()) if o == h else diverged
         if o["n"] < h["n"]:
             stale = new.keys() <= old.keys() and all(
                 new[k]["seq"] < old[k]["seq"] or new[k] == old[k] for k in new
             )
-            return ("ignored", None, ()) if stale else diverged
+            return ("ignored", None, (), ()) if stale else diverged
     if milliseconds(offered["o"]["at"]) > milliseconds(now) + FUTURE_CEILING_MS:
-        return "checkpoint.future", None, ()
+        return "checkpoint.future", None, (), ()
     if held and (offered["o"]["at"] < held["o"]["at"] or not old.keys() <= new.keys()):
         return diverged
     proofs = {} if proofs is None else proofs
     if not isinstance(proofs, dict):
-        return "sync.incomplete", None, ()
+        return "sync.incomplete", None, (), ()
     restored = None
     if restore:
-        result, retained, signer = transition_ok(
-            held, offered, restore, applied, known, card, known_devices
+        result, retained, signer, signer_person = transition_ok(
+            held, offered, restore, applied, known, local, card, known_devices
         )
         if result != "ok":
-            return result, None, ()
+            return result, None, (), ()
         restored = restore["log"], retained, signer
         # orch-core checks the restored log's tail first, before the other logs.
         log, e, tail = restore["log"], restore["event"], proofs.get(restore["log"])
@@ -1730,12 +1746,12 @@ def receiver_verdict(
             or log not in new
             or not growth_ok(retained, new[log], tail)
         ):
-            return "sync.incomplete", None, ()
+            return "sync.incomplete", None, (), ()
         if tail[0] != head(e):
             # A WSK-signed T whose entry at from_seq + 1 is another event than this restore (orch-core #377).
             return diverged
     elif held is None:
-        return "ok", None, ()
+        return "ok", None, (), ()
     for log, target in new.items():
         prior = old.get(log, {"seq": 0, "head": None, "acc": ZERO_ACC})
         if restored and log == restored[0]:
@@ -1743,23 +1759,39 @@ def receiver_verdict(
         if height_conflict(prior, target):
             return diverged
         if prior != target and not growth_ok(prior, target, proofs.get(log, [])):
-            return "sync.incomplete", None, ()
+            return "sync.incomplete", None, (), ()
     if not restored:
-        return "ok", None, ()
+        return "ok", None, (), ()
     signer = restored[2]
     e = restore["event"]
-    # C3: a `compromised` revocation of the signer learned only later in the walk never refuses; it raises an alarm.
+    # C3: a `compromised` revocation of the signer (device and person, #387) learned only later in the walk never
+    # refuses; it raises an alarm.
     alarms = tuple(
         sorted(
             {
                 "d_" + signer
                 for x in learned_later
                 if x["revocation"]["o"]["device_id"] == signer
+                and x["revocation"]["o"]["person_id"] == signer_person
                 and x["revocation"]["o"]["reason"] == "compromised"
             }
         )
     )
-    return "ok", e["id"], alarms
+    # revocation.unpublished (#387): an accepted workspace restore that lacks a held out-of-band revocation, or
+    # carries it with a weaker reason. Another person's revocation of the signer's own device id is dropped: the
+    # restore's certificate establishes that binding (a same-person one has refused above).
+    unpublished = set()
+    if restore["log"] == "workspace":
+        carried = {x["revocation"]["o"]["device_id"]: x for x in e["revocations"]}
+        for x in local:
+            device = x["revocation"]["o"]["device_id"]
+            if device == signer:
+                continue
+            if device not in carried or strength(carried[device]["revocation"]) < strength(
+                x["revocation"]
+            ):
+                unpublished.add("d_" + device)
+    return "ok", e["id"], alarms, tuple(sorted(unpublished))
 
 
 def checkpoint_offer(*args, **kw):
@@ -1769,7 +1801,7 @@ def checkpoint_offer(*args, **kw):
 
 def plain_offer(held, offered, proofs=None, *, now):
     """A plain (restore-free) offer to a receiver that knows no devices or revocations."""
-    return checkpoint_offer(held, offered, proofs=proofs, now=now, known_devices={})
+    return checkpoint_offer(held, offered, proofs=proofs, now=now, known_devices={}, local=[])
 
 
 @by_name(CP["transition_cases"])
@@ -1783,25 +1815,32 @@ def test_checkpoint_transition(c):
         c["known_revocations"],
         now=c["now"],
         known_devices=c["known_devices"],
+        local=c["local_revocations"],
         card=c["pinned_delegation"],
         learned_later=c["learned_later_in_walk"],
     )
     alarms = (c["restore"]["event"]["actor"]["device"],) if c.get("alarm") else ()
-    assert got == (c["expect"], c["recorded"], alarms)
+    assert got == (c["expect"], c["recorded"], alarms, tuple(c["unpublished"]))
     if c["learned_later_in_walk"]:
-        # Only the receiver's order separates this case from a refusal: held when judged, it refuses.
-        earlier = receiver_verdict(
-            c["held"],
-            c["offered"],
-            c["restore"],
-            c["applied"],
-            c["proofs"],
-            c["learned_later_in_walk"],
-            now=c["now"],
-            known_devices=c["known_devices"],
-            card=c["pinned_delegation"],
-        )
-        assert earlier == ("chain.diverged", None, ())
+        # Only the receiver's order separates this case from a refusal: held when judged, in either collection, it
+        # refuses; another person's revocation of the signer's device id never does (#387).
+        for known, local in ((c["learned_later_in_walk"], []), ([], c["learned_later_in_walk"])):
+            earlier = receiver_verdict(
+                c["held"],
+                c["offered"],
+                c["restore"],
+                c["applied"],
+                c["proofs"],
+                known,
+                now=c["now"],
+                known_devices=c["known_devices"],
+                local=local,
+                card=c["pinned_delegation"],
+            )
+            if c["name"] == "cross_person_compromised_learned_later_no_alarm":
+                assert earlier == ("ok", c["recorded"], (), ())
+            else:
+                assert earlier == ("chain.diverged", None, (), ())
 
 
 @by_name(load("restore")["schema_cases"])
@@ -1820,9 +1859,9 @@ def test_workspace_checkpoint_receiver(c):
     # A `held` key (null: an uninitialized receiver) replaces workspace_n_held; plain offers know nothing.
     held = c["held"] if "held" in c else CP["workspace_n_held"]
     got = receiver_verdict(
-        held, c["checkpoint"], proofs=c.get("proofs"), now=c["now"], known_devices={}
+        held, c["checkpoint"], proofs=c.get("proofs"), now=c["now"], known_devices={}, local=[]
     )
-    assert got == (c["expect"], None, ())
+    assert got == (c["expect"], None, (), ())
 
 
 # --- Stateful append verification for the shared protocol scenarios ---
@@ -2464,8 +2503,14 @@ class RestoreCommit:
         if event["source"] != expected_source:
             return "chain.diverged"
         carried = {x["revocation"]["o"]["device_id"]: x for x in event["revocations"]}
+        signer = event["actor"]["device"][2:]
+        # orch-core #387 (F1 §5.10 host rule, C3): a restore signer revoked in the host's durable revocation evidence
+        # is refused before the append, whatever the reason, even when the kept chain (which lost the revocation with
+        # the given-up part) still authorizes it. Checked before the self-revocation and completeness rules.
+        if signer in old["evidence"]:
+            return "device.invalid"
         # orch-core #377: the host refuses a restore that lists its own signer before the append.
-        if event["actor"]["device"][2:] in carried:
+        if signer in carried:
             return "validation.restore"
         for device, entry in old["evidence"].items():
             if device not in carried or strength(carried[device]["revocation"]) < strength(
@@ -2498,7 +2543,7 @@ def test_restore_atomic_publication(c):
     target = CP["workspace_n_held"]
     if "missing" in c:
         event["revocations"] = []
-    if c.get("self_revocation"):
+    if c.get("self_revocation") or c.get("signer_revoked"):
         signer = event["actor"]["device"]
         cert = next(
             x["event"]["device_cert"]
@@ -2506,11 +2551,17 @@ def test_restore_atomic_publication(c):
             if "d_" + x["event"].get("device_cert", {"o": {"device_id": ""}})["o"]["device_id"]
             == signer
         )
-        own = local_revocation_evidence(cert, reason="retired")
+        own = local_revocation_evidence(cert, reason=c.get("signer_revoked", "retired"))
         assert revocation_evidence_ok(own)
-        event["revocations"] = sorted(
-            [*event["revocations"], own], key=lambda x: x["revocation"]["o"]["device_id"]
-        )
+        if c.get("signer_revoked"):
+            # Only the host's durable evidence holds the signer's revocation (it sat in the given-up part); the
+            # restore carries everything else the host holds.
+            store.durable["evidence"][own["revocation"]["o"]["device_id"]] = own
+            before = deepcopy(store.durable)
+        else:
+            event["revocations"] = sorted(
+                [*event["revocations"], own], key=lambda x: x["revocation"]["o"]["device_id"]
+            )
     if c["name"] == "stale_source":
         store.durable["held"] = target
         before = deepcopy(store.durable)
@@ -2596,8 +2647,9 @@ def resign_transition(c, person="dk_sev1", host="wsk"):
     assert fold(r["acc_from"], c["proofs"][log]) == entry["acc"]
 
 
-def offer_local_transition(c, now=None, known=None, card=None, known_devices=None):
-    """The case's own receiver view (now, pinned delegation, known devices and revocations) unless overridden."""
+def offer_local_transition(c, now=None, known=None, card=None, known_devices=None, local=None):
+    """The case's own receiver view (now, pinned delegation, known devices and both revocation collections) unless
+    overridden."""
     return checkpoint_offer(
         c["held"],
         c["offered"],
@@ -2607,6 +2659,7 @@ def offer_local_transition(c, now=None, known=None, card=None, known_devices=Non
         c["known_revocations"] if known is None else known,
         now=c["now"] if now is None else now,
         known_devices=c["known_devices"] if known_devices is None else known_devices,
+        local=c["local_revocations"] if local is None else local,
         card=c["pinned_delegation"] if card is None else card,
     )
 
