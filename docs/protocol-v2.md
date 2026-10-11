@@ -2846,14 +2846,34 @@ holds two collections, per workspace:
   order, recovery is a re-pair). Evidence first learned out of band is promoted when an accepted restore later
   carries it.
 - *Contested* (`contested`, relay refinement after a security review): verified evidence that contradicts the
-  binding is still kept, keyed by device and person. It changes no binding and is no judgment input, but it refuses
-  a restore signer of that device **and** person (checked by the walk after the judge has verified the signer's
-  certificate) and it alarms for a committed signer. Without it the row-151 rule failed *open* for signers: bob
+  binding is still kept, keyed by device and person. It changes no binding and is no input to identity, completeness
+  or `unpublished`, but it refuses a restore signer of that device **and** person inside `judge_offer` (a relay-only
+  `contested` input; another person's contested entry never refuses or alarms, vector
+  `walk_contested_other_person_never_refuses_or_alarms`) and it alarms for a committed signer pair. Without it the row-151 rule failed *open* for signers: bob
   (any person) certifies the id of alice's not-yet-known laptop under his own key and revokes it; a relay delivers
   it first (feed, or the entries of any bundle in a walk that fails, which needs no WSK); alice's own compromised
   revocation of her laptop then contradicts bob's binding and was discarded, and bob's revocation does not match
   the laptop's signer person, so a restore signed with the stolen laptop key was accepted (vector
   `walk_contested_revocation_still_refuses_its_signer`).
+- *Bounds (PR #52 review F2).* Held out-of-band evidence (local plus contested) is capped per device id (8 persons)
+  and in total (4096 entries). Over a cap, evidence of a non-member person (one the device knows neither from its
+  known devices nor from chain-learned evidence) is dropped and evicts nothing; a member's evidence evicts
+  non-member evidence (weaker reason first) and is never evicted by non-member evidence, so a flood of throwaway
+  persons cannot push out the owner's genuine revocation. A walk harvests bundle entries only from lines within
+  `LINE_CAP` and at most 4096 per walk, both counted before any signature check.
+
+**Open: the row-151 denial of service (F1 at e9a26d95; to be fixed by re-pinning).** Any keypair holder can certify
+the public key of a device the receiver does not yet know under their own person key and revoke it; no membership
+is needed, because the device id is public and the evidence verifies under the key it carries. Delivered first
+(through `device_learn`, the relay feed, or the entries of a bogus bundle line in a walk that fails, which needs no
+WSK), it binds the device to that person in `local`. From then on every honest workspace restore that carries the
+owner's genuine revocation of that device fails evidence identity and is refused `chain_diverged`, permanently (the
+owner's evidence lands in `contested`, which binds nothing, and a re-pair can be poisoned again); the genuine
+evidence is also never forwarded. The relay cannot fix this alone: the shared F1 vectors
+`out_of_band_foreign_evidence_for_a_revoked_device*` require evidence identity to consult `local_revocations`, and the
+relay stays byte-faithful to them. orch-52 has decided the fix (no first-come bindings: out-of-band evidence never
+binds a device; revocations retained per (device, person); completeness per pair; a format change for restore
+`revocations`). The relay re-pins to the orch-core commit that implements it, which also replaces `contested`.
 
 The two collections keep **separate reasons**: a chain-learned `lost` and a local `compromised` of one device are two
 entries, and the local upgrade never becomes chain-learned merely because the weaker one is. What each is used for:
@@ -2900,13 +2920,14 @@ that F1 reports as learned later (`Verdict.alarms`) is the alarm the walk raises
 **Remaining relay-side differences from F1 (none changes a verdict on a shared case):** (1) the reference walk is
 all-or-nothing over E, so a bundle accepted inside a walk that later fails contributes no chain evidence (F1 lets a
 receiver persist each accepted bundle; both are atomic, the relay's is coarser). (2) A round-2 device state that
-stored a signer as a bare device id has no recorded person; such a signer alarms by device alone (more alarms, never
-fewer). (3) The relay server's R1 refuses a signer revoked in any revocation it holds by device id; this equals F1's
+stored a signer as a bare device id resolves its person through the known devices; if that fails the evidence is
+kept but no alarm is raised (matching by device alone let any keypair holder raise a false C3 alarm). (3) The relay server's R1 refuses a signer revoked in any revocation it holds by device id; this equals F1's
 device-and-person match there because evidence is bound to the registry's first person (R4), so a held revocation of
 a registered owner device is always of that person. (4) The relay server does not report `revocation.unpublished`
 in its publication result (G4 follow-up, transport detail 6 (c)). (5) `contested` evidence (above) refuses its own person's device as a
 signer and alarms although F1 says contradicting evidence is not an input: stricter than F1 (fails closed), raised
-with orch-52.
+with orch-52. (6) The caps on held evidence and on the per-walk harvest are relay additions. F1 C3 is kept as is:
+every held revocation of the signer pair refuses, whatever its reason; refusing only on `compromised` was rejected.
 
 **Reads, retention and pairing (P3-D13/D19/D20).** A GET returns an immutable endpoint E. Page transitions
 with `after_n=k&to=E`, ordered by target_n, exclusively after k and no later than E.n; k does not need to

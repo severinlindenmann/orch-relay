@@ -648,7 +648,7 @@ def verdict(code, recorded=None, alarms=(), unpublished=()):
 
 
 def judge_offer(S, held, offered, *, genesis, workspace_id, now, wsk_pub, known_devices, known, local, learned_later,
-                restore=None, applied=(), proofs=None, card=None, initial_proof=False):
+                restore=None, applied=(), proofs=None, card=None, initial_proof=False, contested=()):
     """held/offered are checkpoint `o` objects; now is the receiver clock in ms.
     Returns (code, recorded id, alarms, unpublished), orch-core's Verdict.
 
@@ -663,7 +663,9 @@ def judge_offer(S, held, offered, *, genesis, workspace_id, now, wsk_pub, known_
     the signer only when it names the signer's device and person. An accepted workspace restore reports in
     unpublished the sorted, de-duplicated d_ ids of local revocations it does not carry, or carries weaker
     (revocation.unpublished, non-blocking). Relay addition: initial_proof (full proof from acc_0 for a first
-    checkpoint, where F1 accepts it without ancestry). The walk passes the pairing-pinned owner PK as
+    checkpoint, where F1 accepts it without ancestry) and contested (verified evidence contradicting the receiver's
+    binding of its device: no input to identity, completeness or unpublished, but it refuses a signer of the same
+    device and person, like every held revocation, C3). The walk passes the pairing-pinned owner PK as
     restore['pk_pub']."""
     if not offer_ok(S, offered):
         return verdict(DIVERGED)
@@ -688,7 +690,7 @@ def judge_offer(S, held, offered, *, genesis, workspace_id, now, wsk_pub, known_
     restored = None
     if restore is not None:
         code, restored = judge_restore(S, held, offered, h, o, restore, proofs, genesis, applied, wsk_pub,
-                                       known, local, card, known_devices)
+                                       known, local, card, known_devices, contested)
         if code != 'ok':
             return verdict(code)
     if held is None and restore is None and not initial_proof:
@@ -716,7 +718,7 @@ def judge_offer(S, held, offered, *, genesis, workspace_id, now, wsk_pub, known_
 
 
 def judge_restore(S, held, offered, h, o, restore, proofs, genesis, applied, wsk_pub, known, local, card,
-                  known_devices):
+                  known_devices, contested=()):
     """The restore half of judge_offer: ('ok', (log, id, signer, signer person, unpublished)) or (code, None)."""
     diverged = DIVERGED, None
     try:
@@ -782,7 +784,7 @@ def judge_restore(S, held, offered, h, o, restore, proofs, genesis, applied, wsk
         # position; it must name the signer's device and person (another person's "revocation" of this device id is
         # not a revocation of this signing identity, orch-core #387).
         if any(k['revocation']['o']['device_id'] == signer and k['revocation']['o']['person_id'] == signer_person
-               for k in held_revs):
+               for k in [*held_revs, *contested]):
             return diverged
         for item in known:  # completeness: chain-learned evidence only, a workspace restore carries it at its strength
             rev = item['revocation']['o']
@@ -869,14 +871,21 @@ def device_initial(ws, wsk_pub, owner_pk, genesis, card, devices, held=None):
 
 
 def raise_alarms(dev, revocations):
-    """P3-D24, F1 row 150: a compromised revocation of a device that signed a committed transition, matched by device
-    and person (#387), raises the alarm. revocations are revocation objects. Round-2 device state stored the signer
-    as a bare device id: such a signer has no recorded person and matches by device (more alarms, never fewer)."""
-    signed = sorted({(s, '') if isinstance(s, str) else (s['device'], s.get('person_id') or '')
-                     for s in dev['signers'].values()})
-    for d, person in signed:
+    """P3-D24, F1 row 150: a compromised revocation of a committed signer pair (device and person, #387) raises the
+    alarm. revocations are revocation objects. A round-2 signer record (a bare device id, or one without a person)
+    resolves its person through the known devices; an unresolvable one raises no alarm (its evidence is still kept):
+    matching by device alone would let any keypair holder raise a false C3 alarm."""
+    devices = dev.get('devices', {})
+    pairs = set()
+    for s in dev['signers'].values():
+        d = s if isinstance(s, str) else s['device']
+        person = None if isinstance(s, str) else s.get('person_id')
+        person = person or (devices.get(d) or {}).get('person_id')
+        if person:
+            pairs.add((d, person))
+    for d, person in sorted(pairs):
         if d not in dev['alarms'] and any(
-                r['o']['reason'] == 'compromised' and r['o']['device_id'] == d and person in ('', r['o']['person_id'])
+                r['o']['reason'] == 'compromised' and r['o']['device_id'] == d and r['o']['person_id'] == person
                 for r in revocations):
             dev['alarms'].append(d)
 
@@ -906,6 +915,40 @@ def binding(dev, d, extra=None):
     return (kd['person_id'], kd.get('pk_pub')) if kd else None
 
 
+# Held out-of-band evidence caps (review F2): per device id (local plus contested persons) and in total. A walk also
+# harvests at most MAX_HELD_EVIDENCE entries, before any signature check.
+MAX_PERSONS_PER_DEVICE = 8
+MAX_HELD_EVIDENCE = 4096
+
+
+def member_persons(dev):
+    """Persons the device knows from authenticated knowledge: known devices and chain-learned evidence."""
+    return ({kd['person_id'] for kd in dev['devices'].values()} |
+            {x['revocation']['o']['person_id'] for x in dev['revocations'].values()})
+
+
+def make_room(dev, d, person):
+    """May a new held entry for (d, person) be stored? Over a cap, non-member evidence is dropped, never stored by
+    evicting anything; member evidence evicts non-member evidence (weaker reason first, then the oldest), and is
+    kept over the cap when nothing non-member is left. So a flood of throwaway persons never evicts a member's
+    genuine revocation (orch-52)."""
+    members = member_persons(dev)
+    held = [('local', k, x) for k, x in dev['local'].items()] + [('contested', k, x) for k, x in dev['contested'].items()]
+    for in_scope, cap in ((lambda x: x['revocation']['o']['device_id'] == d, MAX_PERSONS_PER_DEVICE),
+                          (lambda x: True, MAX_HELD_EVIDENCE)):
+        scoped = [e for e in held if in_scope(e[2])]
+        if len(scoped) < cap:
+            continue
+        if person not in members:
+            return False
+        victims = [e for e in scoped if e[2]['revocation']['o']['person_id'] not in members]
+        if victims:
+            store, key, _ = min(victims, key=lambda e: STRENGTH[e[2]['revocation']['o']['reason']])
+            del dev[store][key]
+            held = [e for e in held if (e[0], e[1]) != (store, key)]
+    return True
+
+
 def admit_local(S, dev, item, extra=None):
     """Admit verified out-of-band evidence into dev['local'] (strongest reason kept). Evidence that does not verify,
     or contradicts the device's known person binding, is not admitted and is never an input to judgment."""
@@ -919,10 +962,14 @@ def admit_local(S, dev, item, extra=None):
         # named person of that person's device certificate is still that person's revocation (C3, alarms).
         key = d + ':' + person
         old = dev['contested'].get(key)
+        if old is None and not make_room(dev, d, person):
+            return False
         if old is None or STRENGTH[item['revocation']['o']['reason']] > STRENGTH[old['revocation']['o']['reason']]:
             dev['contested'][key] = {k: item[k] for k in ('revocation', 'device_cert', 'pk_pub')}
         return False
     old = dev['local'].get(d)
+    if old is None and not make_room(dev, d, person):
+        return False
     if old is None or STRENGTH[item['revocation']['o']['reason']] > STRENGTH[old['revocation']['o']['reason']]:
         dev['local'][d] = {k: item[k] for k in ('revocation', 'device_cert', 'pk_pub')}
     return True
@@ -1035,7 +1082,8 @@ def _walk(S, dev, relay, now, endpoint, script, max_heads, seen):
         return judge_offer(S, work['o'] if work else None, x['o'], genesis=genesis, workspace_id=ws, now=now,
                            wsk_pub=dev['wsk_pub'], applied=dev['applied'], card=dev['card'], initial_proof=True,
                            known_devices=dev['devices'], known=list(learned.values()),
-                           local=list(dev['local'].values()), learned_later=(), **kw)
+                           local=list(dev['local'].values()), learned_later=(),
+                           contested=list(dev['contested'].values()), **kw)
 
     def refuse_unless(code, wanted):
         need(code == wanted, WALK_CODES.get(code, 'chain_diverged'), 409)
@@ -1048,6 +1096,7 @@ def _walk(S, dev, relay, now, endpoint, script, max_heads, seen):
     work = dev['held']
     learned = copy.deepcopy(dev['revocations'])  # monotonic: only ever grows or strengthens
     flagged = set()
+    harvest = [MAX_HELD_EVIDENCE]
     after = work['o']['n'] if work else 0
     walked = False
     while work is None or end['o']['n'] > work['o']['n']:
@@ -1056,9 +1105,14 @@ def _walk(S, dev, relay, now, endpoint, script, max_heads, seen):
             need(isinstance(b, dict) and set(b) == BUNDLE_FIELDS and b['restore_id'] == b['line']['id'],
                  'chain_diverged', 409)
             # Evidence the walk verifies stays local evidence even if this bundle or the walk fails (F1 row 150).
-            listed = b['line'].get('revocations') if isinstance(b['line'], dict) else None
-            seen.extend(('evidence', item) for item in (listed if isinstance(listed, list) else [])
-                        if evidence_ok(S, item) is not None)
+            # Bounded before any signature check: the line within LINE_CAP, at most MAX_HELD_EVIDENCE per walk.
+            line_ = b['line']
+            listed = line_.get('revocations') if isinstance(line_, dict) else None
+            if isinstance(listed, list) and len(R.cj(line_)) + 1 <= LINE_CAP:
+                for item in listed[:harvest[0]]:
+                    harvest[0] -= 1
+                    if evidence_ok(S, item) is not None:
+                        seen.append(('evidence', item))
             # Ascending order and the E bound follow from T.n == target_n and each judged step (n grows,
             # and the final judge refuses a work state above E); they need no separate check.
             need(type(b['target_n']) is int, 'chain_diverged', 409)
@@ -1077,10 +1131,6 @@ def _walk(S, dev, relay, now, endpoint, script, max_heads, seen):
                        'device_cert': b['cert'], 'delegation': b['authz']['delegation']}
             # Signatures, source binding, owner policy and revocations first; only then fetch proofs.
             refuse_unless(judge(work, t, restore=restore)[0], INCOMPLETE)
-            # Contested evidence (not a judgment input) still refuses its own person's device as the signer: the
-            # judge has verified the certificate, so its device and person are the signer's (security review).
-            signer = b['cert']['o']
-            need(signer['device_id'] + ':' + signer['person_id'] not in dev['contested'], 'chain_diverged', 409)
             top_seq = entries(t).get(log, EMPTY)['seq']
             if type(fs) is int and 1 <= fs < old['seq']:
                 full = heads(log, ZERO, b['target_hash'], top_seq)

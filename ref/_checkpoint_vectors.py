@@ -1043,3 +1043,11 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     bob_first['devices'][laptop_id] = committed_t1['device']['devices'][laptop_id]
     alarmed = run(c, st, 'device_learn', {'device': bob_first, 'evidence': laptop_bad})
     assert alarmed['admitted'] is False and alarmed['device']['alarms'] == [laptop_id]
+    # PR #52 review F4: the contested refusal and alarm are keyed by (device, person). Bob's compromised
+    # "revocation" of alice's known laptop is contested, but it never refuses alice's laptop-signed restore and never
+    # alarms (a device-only key would refuse here).
+    bobbed = C.device_learn(S, dev(ticket_base, devices=laptop_known), bob_laptop)
+    assert bobbed['admitted'] is False and list(bobbed['device']['contested']) == [laptop_id + ':' + x['bob_id']]
+    out = sync('walk_contested_other_person_never_refuses_or_alarms', late, bobbed['device'],
+               endpoint=C.checkpoint_hash(t1))
+    assert out['device']['alarms'] == [] and out['device']['applied'] == [b1['line']['id']]
