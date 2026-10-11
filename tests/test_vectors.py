@@ -227,6 +227,50 @@ def test_member_lists(S, c):
     assert got == c["expect"]
 
 
+@each_suite("wk_commit")
+def test_wk_commit_values(S, c):
+    """G2b: wk_commit = b64u(SHA-256("orch/v2/wk-commit|" || workspace_id || u32(epoch) || WK)), computed here
+    without the reference."""
+    raw = (b"orch/v2/wk-commit|" + bytes.fromhex(c["workspace_id"]) + c["epoch"].to_bytes(4, "big")
+           + bytes.fromhex(c["wk"]))
+    assert R.b64u(hashlib.sha256(raw).digest()) == c["wk_commit"]
+    assert R.b64u(R.wk_commit(bytes.fromhex(c["workspace_id"]), c["epoch"], bytes.fromhex(c["wk"]))) == c["wk_commit"]
+
+
+def test_wk_commit_epoch_range():
+    for epoch in (0, R.MAX_EPOCH + 1):
+        with pytest.raises(ValueError):
+            R.wk_commit(bytes(16), epoch, bytes(32))
+
+
+@each_suite("member_list_snapshots")
+def test_member_list_snapshots(S, c):
+    """G2b §7.3 D1-D4: replay each device step from the JSON alone, including the persisted state after it."""
+    v = VEC["suites"][str(S.id)]
+    ws, dev = bytes.fromhex(c["card_workspace_id"]), bytes.fromhex(v["ids"]["device_" + c["device"]])
+    priv = S.kx_key(bytes.fromhex(v["keys"][c["device"] + ".kx"]["seed"]))
+    wsk_pub = bytes.fromhex(c["wsk_pub"])
+    state = copy.deepcopy(c["state"])
+    for step in c["steps"]:
+        if step["op"] == "list":
+            got = R.device_accept_member_list(S, wsk_pub, c["card_workspace_id"], state, step["signed"])
+        elif step["op"] == "seal":
+            got = R.device_sealing_key(S, wsk_pub, ws, dev, priv, state, step["grants"])
+        else:
+            got = R.device_reading_key(S, wsk_pub, ws, dev, priv, state, step["grants"], step["epoch"])
+        assert got == step["expect"]
+        assert state == step["state"]
+
+
+def test_member_list_snapshot_twin_has_other_signature_bytes():
+    v = VEC["suites"]["2"]
+    c = next(c for c in v["member_list_snapshots"] if c["name"] == "same_list_seq_high_s_twin_no_alarm")
+    first = next(c for c in v["member_lists"] if c["name"] == "first_list")["signed"]
+    twin = c["steps"][0]["signed"]
+    assert twin["o"] == first["o"] and twin["sig"] != first["sig"]
+    assert c["steps"][0]["expect"] == {"ok": "noop"}
+
+
 # --- bridge v2 (§8) ------------------------------------------------------------------------------------
 
 def _strip(r):
