@@ -349,6 +349,7 @@ class Relay:
         self.d, self.con, self.ws, self.now = directory, con, ws, now
         self.nodes = {}
         self.wake = set()
+        self.visits = 0  # staged descriptors folded by this publication (work bound, review R1)
 
     def log(self, name):
         if name not in self.nodes:
@@ -684,10 +685,11 @@ class Relay:
         return genesis
 
     def proof_pages(self, stage, kind, log, start, used):
+        # Descriptors are grouped by (kind, log) once per publication (review R1): scanning the
+        # manifest per log cost tickets x pages under the global lock.
         current = {k: start[k] for k in ("seq", "head", "acc")}
-        for d in stage["manifest"]["pages"]:
-            if d["kind"] != kind or d["log"] != log:
-                continue
+        for d in stage["groups"].get((kind, log), ()):
+            self.visits += 1
             p = stage["pages"][d["i"]]
             need(
                 p["after_seq"] == current["seq"] and p["from_acc"] == current["acc"],
@@ -769,7 +771,10 @@ class Relay:
                 i: P.parse_json(b)
                 for i, b in self.staged("SELECT i,body FROM checkpoint_staging_pages", key)
             },
+            "groups": {},
         }
+        for d in stage["manifest"]["pages"]:
+            stage["groups"].setdefault((d["kind"], d["log"]), []).append(d)  # manifest order
         used = set()
         old = entries(held) if held else {}
         offered = entries(target)
@@ -994,9 +999,7 @@ class Relay:
         if line["from_seq"] < old["seq"]:
             retained = nodes.at_seq(old, line["from_seq"])
             # A stored path needs no retained page; a supplied one must bind to that branch.
-            pages = [
-                d for d in stage["manifest"]["pages"] if d["kind"] == "retained" and d["log"] == log
-            ]
+            pages = stage["groups"].get(("retained", log), [])
             if pages:
                 first = stage["pages"][pages[0]["i"]]
                 start = nodes.get(first["from_acc"])
