@@ -180,11 +180,25 @@ def prepare_fixture(client, name, case):
         elif scenario == "rid_conflict":
             seen(con)
             con.execute("UPDATE rid_seen SET req_digest='different'")
+        elif (
+            scenario in ("retry_exhausted", "expired_identical_chunk")
+            and name == "bridge_host_post"
+        ):
+            # P3-D27: this exact chunk was accepted earlier and its copy has expired.
+            from orch_relay.directory import digest
+
+            con.execute(
+                "INSERT INTO rid_chunks VALUES (?,?,?,0,?,?)",
+                (WS, DEVICE, RID, digest(binary(name)), 8 if scenario == "retry_exhausted" else 0),
+            )
         elif scenario == "retry_exhausted":
             seen(con)
             con.execute("UPDATE rid_seen SET requeues=8")
         elif scenario == "chunk_conflict":
-            con.execute("INSERT INTO rid_chunks VALUES (?,?,?,0,'different')", (WS, DEVICE, RID))
+            con.execute(
+                "INSERT INTO rid_chunks(workspace_id,device_id,rid,idx,digest) VALUES (?,?,?,0,'different')",
+                (WS, DEVICE, RID),
+            )
         elif scenario == "expired":
             if name == "bridge_host_post":
                 con.execute("DELETE FROM rid_seen")

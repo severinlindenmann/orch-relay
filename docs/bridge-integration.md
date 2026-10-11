@@ -20,12 +20,18 @@ capacity. Bodies remain available for non-consuming retry until their original
 60-second expiry and still count against global retained-byte capacity. Expiry,
 revocation and departure release capacity by deleting rows. Never delete
 `rid_seen` or `rid_chunks` during membership pruning: replay evidence must survive.
+Pruning instead sets the device's `rid_chunks.restores` to the cap (P3-D27), so a
+re-added device never gets an old chunk stored again.
 
 Requests coalesce while a live unacknowledged copy exists. A requeue creates a
 new 60-second copy, at least ten seconds after the last receipt/requeue, up to
 eight requeues. First receipt fixes the 900-second replay lifetime; only a later
 dependent message can extend its keep-until time. Identical response retries do
-not recreate or refresh bodies. Chunk conflicts precede the old-epoch exception.
+not refresh live bodies. Migration `0007_chunk_restores` adds `rid_chunks.restores`:
+an identical retry whose body expired is stored again (P3-D27) only for the
+current epoch or `LAST | REFUSAL`, before first receipt + 900 s, at most eight
+times per chunk, charged to budgets, never past or extending keep-until.
+Chunk conflicts precede the old-epoch exception.
 
 Holder acquisition/renewal and all G3 host writes use the existing Directory
 fence. Host polls are non-consuming and capped at 16 items and 4 MiB of encoded

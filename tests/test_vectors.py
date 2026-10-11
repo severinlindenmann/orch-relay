@@ -785,6 +785,19 @@ def test_p3_contract_cases(S, c):
         assert not got["state"]["challenges"]
 
 
+@each_suite("p3", "restore")
+def test_p3_restore_cases(S, c):
+    """P3-D27: bounded exact-bytes re-store. Only stores and restores change state, and a
+    re-store never moves keep_until_ms."""
+    from ref._p3_vectors import replay
+    got = replay(S, c)
+    assert got == c["expect"]
+    if got["result"].get("ok") not in ("stored", "restored"):
+        assert got["state"] == c["state"]
+    if got["result"] == {"ok": "restored"}:
+        assert got["state"]["keep_until_ms"] == c["state"]["keep_until_ms"]
+
+
 @pytest.mark.parametrize("sid", SUITES)
 def test_p3_whole_envelope_size_boundaries(sid):
     S = R.SUITES[int(sid)]

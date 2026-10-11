@@ -228,7 +228,10 @@ def publish(con, ws, body, raw, workspace, now):
 
 
 def prune_device(con, did, ws=None):
-    """G3 queues use device_id/workspace_id; replay metadata is deliberately retained."""
+    """G3 queues use device_id/workspace_id; replay metadata is deliberately retained.
+
+    Its chunk records are exhausted instead (P3-D27), so nothing is restored after a re-add.
+    """
     for table in (
         "wk_grants",
         "card_key_wraps",
@@ -242,6 +245,14 @@ def prune_device(con, did, ws=None):
         ).fetchone():
             clause, args = ("", (did,)) if ws is None else (" AND workspace_id=?", (did, ws))
             con.execute(f"DELETE FROM {table} WHERE device_id=?" + clause, args)
+    # P3-D27: a removed (or revoked) device's chunks are never stored again, even after a
+    # re-add. Exhaust the cap rather than delete: the digests keep chunk_conflict in force.
+    from .bridge import MAX_RESTORES
+
+    clause, args = ("", (did,)) if ws is None else (" AND workspace_id=?", (did, ws))
+    con.execute(
+        "UPDATE rid_chunks SET restores=? WHERE device_id=?" + clause, (MAX_RESTORES, *args)
+    )
 
 
 def dispatch(directory, con, route, ws, body, raw, query, headers, now):

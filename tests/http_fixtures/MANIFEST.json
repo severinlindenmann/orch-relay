@@ -1,5 +1,5 @@
 {
-  "aggregate": "a339529f2291d664cb1a637f66a5b2be26c29505a90caac896925dbfe5951754",
+  "aggregate": "125f8e684e26d02051ac27145b2b5bb3bb3970d9bbf9304b1376e0d1ed06fa6f",
   "files": {
     "README.md": "a4a11f1d535366d9fd22bc2d9f913c79010fee55191bc46a361e99e88072be58",
     "accounts.json": "25068c96173a565bfc86917e454136df2dafa9b8642d3badb8ea89a1cc1151cc",
@@ -7,7 +7,7 @@
     "baseline_post.json": "37ef1d23c4cfd2b986b5b919356ad6c6e39a63c0eeb82f80473caeee11fbe470",
     "bridge_device_poll.json": "3e6ba249aa83db67c2da3e34d7d8923c9ca3d429525e513215dc0dfc123493b2",
     "bridge_device_post.json": "5716a532ae884a26fbe69ee9c1a4ffc414f7fa0a72c1b37d040510988521a06f",
-    "bridge_host_post.json": "90841a23fc737c5f719e24bdd98ba71f991ae4d8f67685519093ca294e50940e",
+    "bridge_host_post.json": "48eab51f77c7f9a3beb0b40c6ba9095d797e914a5b52d097a545df9404fc1bda",
     "card_get.json": "6e00a623862e6b2c4cdf3b74c4b1efa3b4da59ed4dc7d2518f33d018108255c5",
     "card_key.json": "94c1dd1ebc6984b9a9feedc6ee804756519f0c0a3429a1ef0b552004a2519a9a",
     "card_keys.json": "ddb9bcd383522bc7dcd6d41a208d72c25882057d40329567ad34faed1f7cc6a3",
@@ -42,5 +42,5 @@
     "staging_page.json": "7752567049fddccf983c3dbad5af71c5e3c45c842f785b8aa8b4755689728b7a",
     "transitions.json": "a952cbfdc2db199ff1f6cab403fb91bf2b5aee3371fb9a6fd09bbbfacb2a0f92"
   },
-  "revision": 4
+  "revision": 5
 }

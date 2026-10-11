@@ -29,6 +29,8 @@ from .directory import (
 )
 
 MIB = 1024 * 1024
+RESTORE_WINDOW = 900000  # P3-D27: restores only before first receipt + 900 s
+MAX_RESTORES = 8  # P3-D27: restorations per stored response chunk
 HEADER = struct.Struct(">4sBBBB16s16s16s16sQQI16s")
 
 
@@ -228,6 +230,26 @@ class Bridge:
         ).fetchone():
             fail("not_eligible")
 
+    @staticmethod
+    def restorable(con, key, h, seen, epoch, offer, now):
+        """P3-D27: may an identical resend of a stored chunk store its bytes again?
+
+        False means a stored replay (202, no change). Runs after fencing, the target's
+        eligibility and chunk_conflict; the caller then applies the cap and budgets.
+        """
+        if offer is not None:
+            return False  # pairing answers are never restored
+        if con.execute(
+            "SELECT 1 FROM bridge_msgs WHERE workspace_id=? AND device_id=? AND rid=? AND direction=2 AND offer IS NULL AND idx=? AND expires_ms>?",
+            (*key, h["idx"], now),
+        ).fetchone():
+            return False  # a live duplicate: its TTL is never refreshed
+        if h["epoch"] != epoch and h["flags"] & 5 != 5:
+            return False  # old-epoch data stays expired (P3-D22)
+        if now >= seen["first_ms"] + RESTORE_WINDOW:
+            refuse("expired", 410)  # immutable, from the first receipt; never keep_until_ms
+        return True
+
     def hold(self, con, ws, body, now):
         fields(body, "gen take_over")
         gen = body["gen"]
@@ -357,13 +379,29 @@ class Bridge:
             if seen is None or seen["offer"] != offer:
                 refuse("expired", 410)
             chunk = con.execute(
-                "SELECT digest FROM rid_chunks WHERE workspace_id=? AND device_id=? AND rid=? AND idx=?",
+                "SELECT digest,restores FROM rid_chunks WHERE workspace_id=? AND device_id=? AND rid=? AND idx=?",
                 (*key, h["idx"]),
             ).fetchone()
             if chunk:
                 if chunk[0] != hashed:
                     refuse("chunk_conflict", 409)
-                return {}, False  # stored replay
+                if not self.restorable(con, key, h, seen, epoch, offer, now):
+                    return {}, False  # stored replay: no TTL change, nothing charged
+                if chunk[1] >= MAX_RESTORES:
+                    refuse("retry_exhausted", 409)
+                charge()
+                self.budget(con, ws, device, 2, len(raw))
+                con.execute(
+                    "UPDATE rid_chunks SET restores=restores+1 WHERE workspace_id=? AND device_id=? AND rid=? AND idx=?",
+                    (*key, h["idx"]),
+                )
+                # Never past the record and never extending it (P3-D27).
+                expires = min(now + 60000, seen["keep_until_ms"])
+                con.execute(
+                    "INSERT INTO bridge_msgs(workspace_id,device_id,rid,direction,offer,idx,flags,stream,body,expires_ms) VALUES (?,?,?,2,NULL,?,?,?,?,?)",
+                    (*key, h["idx"], h["flags"], h["stream"], raw, expires),
+                )
+                return {}, True
             charge()
             if h["epoch"] != seen["req_epoch"] or (
                 offer is None and epoch != h["epoch"] and h["flags"] & 5 != 5
@@ -378,7 +416,10 @@ class Bridge:
             ):
                 fail("quota_exceeded")
             self.budget(con, ws, device if offer is None else None, 2, len(raw))
-            con.execute("INSERT INTO rid_chunks VALUES (?,?,?,?,?)", (*key, h["idx"], hashed))
+            con.execute(
+                "INSERT INTO rid_chunks(workspace_id,device_id,rid,idx,digest) VALUES (?,?,?,?,?)",
+                (*key, h["idx"], hashed),
+            )
             con.execute(
                 "UPDATE rid_seen SET keep_until_ms=max(keep_until_ms,?) WHERE workspace_id=? AND device_id=? AND rid=?",
                 (now + 60000, *key),
