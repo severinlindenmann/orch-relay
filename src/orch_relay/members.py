@@ -1,7 +1,17 @@
 """Atomic membership and key publication, protocol-v2 §19.2 and §19.7."""
 
 from . import proto as P
-from .directory import DAY, Refusal, check_suite, checked, digest, fail, fields, integer
+from .directory import (
+    DAY,
+    Refusal,
+    check_suite,
+    checked,
+    digest,
+    fail,
+    fields,
+    integer,
+    usable_account,
+)
 
 ROUTES = {"membership", "members", "grants", "card_keys", "card_key"}
 MAX_EPOCH = 2**32 - 1  # §7.2 check 2: epochs are u32 (bridge header, commitments)
@@ -52,7 +62,7 @@ def certificate(con, member, owner, persons, now):
         or person not in {owner, *persons}
     ):
         fail("other_person")
-    account = con.execute("SELECT pk_pub FROM accounts WHERE person_id=?", (person,)).fetchone()
+    account = usable_account(con, person)
     if account is None:
         fail("other_person")
     try:
