@@ -3100,3 +3100,12 @@ def test_forward_proof_must_derive_acc_from(case):
     c["restore"]["acc_from"] = "sha256:" + "44" * 32
     resign_transition(c)
     assert offer_local_transition(c) == ("sync.incomplete", None)
+
+
+def test_restore_seq_true_is_not_seq_one():
+    """`seq: true` equals 1 in Python; with the seq-1 nulls it must still fail the integer rule."""
+    e = local_transition()["restore"]["event"]
+    e.update(seq=True, based_on=None, prev=None)
+    assert not restore_schema_ok(e, "workspace")
+    e["seq"] = 1
+    assert restore_schema_ok(e, "workspace")
