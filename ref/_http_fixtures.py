@@ -23,7 +23,7 @@ ROUTES = [
     ("revocation_feed", "GET", "/v2/persons/{person}/revocations", "client", "D(p)|W", "403:not_eligible"),
     ("card_put", "PUT", "/v2/workspaces/{ws}/card", "host", "first|W(g)", "400:wrong_suite,delegation_mismatch 401:bad_signature 403:other_person 409:other_workspace,wsk_changed,delegation_changed,stale_card,wxk_changed_without_version,bad_wxk_version 429:rate_limited"),
     ("card_get", "GET", "/v2/workspaces/{ws}/card", "client", "D(m)|W", "403:not_eligible 404:not_found"),
-    ("membership", "PUT", "/v2/workspaces/{ws}/membership", "host", "W(g)", "400:cert_invalid 401:bad_signature 403:revoked,other_person,scope_exceeded,cert_expired,not_for_this_device 409:other_workspace,stale_list,bad_epoch,stale_epoch,rotation_required,missing_grant,grant_conflict,stale_card,wrap_conflict,fenced"),
+    ("membership", "PUT", "/v2/workspaces/{ws}/membership", "host", "W(g)", "400:cert_invalid 401:bad_signature 403:revoked,other_person,scope_exceeded,cert_expired,not_for_this_device 409:other_workspace,stale_list,bad_epoch,rotation_required,missing_grant,grant_conflict,stale_card,wrap_conflict,fenced"),
     ("card_keys", "PUT", "/v2/workspaces/{ws}/card-keys", "host", "W(g)", "403:not_eligible,not_for_this_device 409:stale_card,wrap_conflict,fenced"),
     ("grants", "GET", "/v2/workspaces/{ws}/grants", "device", "D(m)", "403:not_eligible 404:not_found"),
     ("members", "GET", "/v2/workspaces/{ws}/members", "client", "D(m)|W", "403:not_eligible 404:not_found"),
@@ -262,10 +262,9 @@ def build(vectors=None):
             elif name == "card_put" and code == "delegation_mismatch":
                 refused_request["json"]["card"] = copy.deepcopy(next(
                     c["card"] for c in v["card"]["cases"] if c["name"] == "delegation_for_another_wsk"))
-            elif name == "membership" and code in {"not_for_this_device", "other_workspace", "bad_epoch", "stale_epoch", "rotation_required"}:
+            elif name == "membership" and code in {"not_for_this_device", "other_workspace", "bad_epoch", "rotation_required"}:
                 vector_name = {"not_for_this_device": "grant_wrong_epoch", "other_workspace": "other_workspace",
                                "bad_epoch": "rotation_due_survives_same_epoch_and_restart",
-                               "stale_epoch": "rotation_due_survives_same_epoch_and_restart",
                                "rotation_required": "rotation_due_survives_same_epoch_and_restart"}[code]
                 refused_request["json"] = copy.deepcopy(next(
                     c["args"]["body"] for c in v["p3"]["cases"] if c["name"] == vector_name))
