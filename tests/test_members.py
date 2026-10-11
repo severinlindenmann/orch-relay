@@ -282,8 +282,9 @@ def test_wk_commit_fixed_within_epoch(tmp_path):
         assert r.status_code == 409 and r.json() == {"error": "wk_commit_changed"}
 
 
-def test_wk_commit_check_skips_legacy_previous_row(tmp_path):
-    """A dev row signed before G2b has no wk_commit: check 7b is skipped for that one publication."""
+def test_wk_commit_legacy_previous_row_fails_closed(tmp_path):
+    """No legacy skip: a stored pre-G2b list without wk_commit refuses a same-epoch list
+    (wk_commit_changed); the host recovers by rotating to a higher epoch."""
     with TestClient(create_app(tmp_path)) as c:
         d = c.app.state.directory
         load_state(d)
@@ -291,7 +292,11 @@ def test_wk_commit_check_skips_legacy_previous_row(tmp_path):
         legacy = {k: v for k, v in BODY["member_list"]["o"].items() if k != "wk_commit"}
         with closing(db.connect(d.path)) as con, con:
             con.execute("UPDATE member_lists SET list=?", (P.cj(signed(legacy, "wsk_a.sig")),))
-        assert put(c, changed(list_seq=2, wk_commit=commit(1, "second key"))).status_code == 200
+        before = snapshot(d)
+        r = put(c, changed(list_seq=2))
+        assert r.status_code == 409 and r.json() == {"error": "wk_commit_changed"}
+        assert snapshot(d) == before
+        assert put(c, changed(list_seq=3, epoch=2)).json() == {"list_seq": 3, "epoch": 2}
 
 
 @pytest.mark.parametrize(

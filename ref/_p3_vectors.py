@@ -137,6 +137,20 @@ def add_p3(out):
         case("wk_commit_changed_same_epoch", "membership", committed,
              {**args, "body": {**body, "member_list": sign({**lo, "list_seq": 2, "wk_commit": commit(1, "P3 wk, second key")})}},
              "wk_commit_changed")
+        # §19.7 order, pinned with two faults: the list rules (stale_list, then 7b) run before grant_conflict.
+        # A host that regenerated WK_1 and re-sealed the grants gets wk_commit_changed, not grant_conflict.
+        resealed = [R.make_wk_grant(S, priv("wsk_a"), bytes.fromhex(ws), bytes.fromhex(ids["device_" + n]),
+                                    bytes.fromhex(keys[n + ".kx"]["pub"]), 1, R.fake("P3 wk, second key"),
+                                    R.fake("P3 eph resealed " + n))
+                    for n in ("phone", "bob_phone")]
+        case("resealed_same_epoch_wk_commit_changed_before_grant_conflict", "membership", committed,
+             {**args, "body": {**body, "grants": resealed,
+                               "member_list": sign({**lo, "list_seq": 2, "wk_commit": commit(1, "P3 wk, second key")})}},
+             "wk_commit_changed")
+        case("resealed_same_list_seq_stale_list_before_grant_conflict", "membership", committed,
+             {**args, "body": {**body, "grants": resealed,
+                               "member_list": sign({**lo, "wk_commit": commit(1, "P3 wk, second key")})}},
+             "stale_list")
         # G2b H3: a container-only refusal (stale_card) resends the same signed list and grants with new wraps.
         moved = copy.deepcopy(st); moved["card_seq"] = 2
         case("container_only_refusal_stale_card", "membership", moved, args, "stale_card")

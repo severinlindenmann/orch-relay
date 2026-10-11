@@ -1910,7 +1910,7 @@
       "given": {
         "scenario": "wk_commit_changed",
         "now_ms": 1790000000000,
-        "condition": "Held list is (list_seq 1, epoch 1) with the publication's wk_commit; this list keeps epoch 1 with another wk_commit."
+        "condition": "Held list (list_seq 1, epoch 1) carries wk_commit A; this list (list_seq 2) keeps epoch 1 with wk_commit B."
       },
       "request": {
         "method": "PUT",

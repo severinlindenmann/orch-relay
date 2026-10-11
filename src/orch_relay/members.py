@@ -14,7 +14,8 @@ def positive(value, maximum=P.MAX_SAFE_INT):
 
 
 def stored_wk_commit(raw):
-    """wk_commit of a stored list; None for a legacy dev row signed before G2b (check 7b skips it)."""
+    """wk_commit of a stored list. A pre-G2b dev row has none, so 7b refuses a same-epoch list over it
+    (the host recovers by rotating to a higher epoch; wipe such dev databases)."""
     signed = P.parse_json(raw)
     o = signed.get("o") if isinstance(signed, dict) else None
     return o.get("wk_commit") if isinstance(o, dict) else None
@@ -159,10 +160,8 @@ def publish(con, ws, body, raw, workspace, now):
     }
     if old_ids - members.keys() and o["epoch"] <= epoch:
         fail("rotation_required")
-    if previous and o["epoch"] == epoch:
-        held = stored_wk_commit(previous["list"])
-        if held is not None and held != o["wk_commit"]:
-            fail("wk_commit_changed")
+    if previous and o["epoch"] == epoch and stored_wk_commit(previous["list"]) != o["wk_commit"]:
+        fail("wk_commit_changed")
     if not isinstance(body["grants"], list):
         fail("malformed")
     grants = {}

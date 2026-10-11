@@ -263,7 +263,12 @@ reading (proto §7.3 D1–D6).
 
 Host rules H1–H8 are in proto §7.2 and orch-core host §11 (#382). In short: durable high-water marks `LHW`/`EHW` and
 holder sets, write-ahead before the first send, exact-bytes resends for transient outcomes, burning on every content or
-divergence refusal, the holder rule, one list per `list_seq`, a 1024 jump after host-state loss, and alarms. The
+divergence refusal, the holder rule, one list per `list_seq`, a 1024 jump after host-state loss, and alarms.
+**Liveness limit:** the rotation target is `min(EHW + 1, committed + 2^16)` and the clamp wins; when `EHW + 1`
+exceeds `committed + 2^16` the host cannot rotate without a second key for a burned epoch, so it alarms, keeps the
+gate up and the workspace is frozen until an operator intervenes (about 65,000 burns, or about 63 H7 jumps with no
+commit in between). The relay checks list rules before grants, so a re-sealed same-epoch key gets
+`wk_commit_changed`; there is no legacy-row exception (wipe pre-G2b dev databases). The
 alarm definition is orch-52's wider one: **content and divergence refusals** count, **the count resets on a 2xx**,
 3 consecutive ones raise the alarm with exponential backoff up to 5 minutes, and **a rotation uncommitted for 10
 minutes** alarms whatever the cause. A **burned key never seals anything**: under it the host only answers the §8.5

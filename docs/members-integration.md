@@ -45,10 +45,12 @@ Contract clarifications in this group:
   (`rotation_required`); the same epoch with another `wk_commit` is 409
   `wk_commit_changed`. The `member_lists` vectors `first_list_not_epoch_1` and
   `epoch_skips` were replaced; the `bad_epoch` fixture now uses a falling epoch.
+  There is no legacy skip: a stored pre-G2b list without `wk_commit` refuses
+  same-epoch lists, so wipe development databases from before G2b.
 - `other_person` covers an ownerless first list; no new refusal code is needed.
 - Membership refusal fixtures now use appropriate signed vector artifacts:
-  other-workspace, grant-device/epoch mismatch, invalid first-list sequence, and
-  removal without rotation. A stale-epoch fixture was added. Copy the updated shared corpus downstream.
+  other-workspace, grant-device/epoch mismatch, falling epoch (`bad_epoch`),
+  removal without rotation and a same-epoch `wk_commit` change. Copy the updated shared corpus downstream.
 - Identical card-key submissions return the number of submitted unique wraps,
   including no-ops. Existing older-sequence wraps remain addressable; a newer
   sequence can coexist, and departure/revocation prunes all sequences.

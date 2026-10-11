@@ -477,8 +477,9 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
     ml("wk_commit_changed_same_epoch", l1["o"], mlist(1, 2, two, wk_commit=other))
     ml("wk_commit_same_epoch_same_commit_accepted", l1["o"], mlist(1, 2, two + [("laptop", full)]))
     ml("wk_commit_new_epoch_free", l1["o"], mlist(2, 2, two))
-    ml("wk_commit_legacy_prev_without_commit", {k: v for k, v in l1["o"].items() if k != "wk_commit"},
-       mlist(1, 2, two, wk_commit=other))
+    # No legacy skip: a previous list without wk_commit (a pre-G2b dev row) fails closed at the same epoch.
+    ml("wk_commit_prev_missing_same_epoch_refused", {k: v for k, v in l1["o"].items() if k != "wk_commit"},
+       mlist(1, 2, two))
     ml("list_seq_not_increasing", l1["o"], mlist(1, 1, [("primary", full), ("phone", ["look"])]))
     ml("revoked_member", l1["o"], mlist(2, 2, [("primary", full), ("phone", ["look"])]),
        lambda d: d["revoked"].add(dev["phone"].hex()))
@@ -807,11 +808,18 @@ def _snapshots(S, k, pub, dev, ws, wsk, mlist, l1, two, full, wk_of, other, fake
     case("grant_wk_commit_mismatch_not_used_for_sealing",
          [("seal", [grant(1, second_wk)]), ("seal", [grant(1, second_wk), grant(1)])], [l1])
     case("missing_grant_blocks_sending_no_fallback", [("seal", [grant(1)]), ("seal", [])], [l1, l2])
-    case("jumped_epoch_old_grant_readable_without_list", [("read", (1, [grant(1)])), ("seal", [grant(3)])], [mlist(3, 3, two)])
+    case("jumped_epoch_old_grant_readable_without_list", [("read", (1, [grant(1)])), ("seal", [grant(3)]),
+                                                          ("read", (4, [grant(4)]))], [mlist(3, 3, two)])
     case("old_epoch_grant_mismatch_with_known_list_refused",
          [("read", (1, [grant(1, second_wk)])), ("read", (1, [grant(1)])), ("read", (2, []))], [l1, l2])
     case("first_snapshot_any_epoch_any_list_seq", [("list", mlist(R.EPOCH_STEP, 9, two)), ("seal", [grant(R.EPOCH_STEP)])])
     case("lower_list_seq_ignored", [("list", l1)], [l1, mlist(1, 2, two)])
+    # Alarm before stale: a lower list_seq at a known epoch with another wk_commit is WSK-signed proof of two keys.
+    case("lower_list_seq_other_wk_commit_alarm", [("list", mlist(1, 1, two, wk_commit=other)), ("seal", [grant(1)])],
+         [mlist(1, 2, two)])
+    # Same list_seq, other content (here another wk_commit): conflicting_snapshot, which does not block sealing.
+    case("same_list_seq_other_wk_commit_conflicting_snapshot_no_block",
+         [("list", mlist(1, 1, two, wk_commit=other)), ("seal", [grant(1)])], [l1])
     case("epoch_falls_refused", [("list", mlist(1, 4, two))], [l1, l2])
     case("removal_without_higher_epoch_refused", [("list", mlist(1, 2, [("primary", full)]))], [l1])
     return cases

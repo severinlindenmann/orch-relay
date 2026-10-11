@@ -146,7 +146,7 @@ def condition_for(name, code):
     if name == "membership" and code == "bad_epoch":
         return "Held list is (list_seq 1, epoch 2); this list's epoch 1 falls below it. Epochs may skip, never fall."
     if name == "membership" and code == "wk_commit_changed":
-        return "Held list is (list_seq 1, epoch 1) with the publication's wk_commit; this list keeps epoch 1 with another wk_commit."
+        return "Held list (list_seq 1, epoch 1) carries wk_commit A; this list (list_seq 2) keeps epoch 1 with wk_commit B."
     if code == "rate_limited" and name == "bridge_device_post":
         return "Acknowledged rid has no live copy; 1001 ms remain before another requeue (Retry-After: 2)."
     return f"{name}: {CONDITIONS[code]}"

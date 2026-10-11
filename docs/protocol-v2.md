@@ -696,7 +696,8 @@ bridge header, Drop `key_version`, push keys). `epoch` is a u32, `1 … 2^32−1
    cap keeps a buggy host from exhausting the u32 space in one step;
 7. if any previous member is missing, `epoch > previous.epoch` (`rotation_required`); a skip satisfies it;
 7b. if `epoch == previous.epoch`, `wk_commit` equals the previous list's `wk_commit` (409 `wk_commit_changed`).
-   A stored list without `wk_commit` (a development row signed before G2b) skips 7b for that one publication;
+   There is no legacy exception: a stored list without `wk_commit` refuses every same-epoch list, and the host
+   recovers by rotating to a higher epoch. Relay databases from before G2b are development data and MUST be wiped;
 8. for every member:
    - not revoked (`revoked`);
    - a stored, valid, unexpired certificate whose person equals the entry's `person_id`, and is
@@ -705,6 +706,13 @@ bridge header, Drop `key_version`, push keys). `epoch` is a u32, `1 … 2^32−1
    - not a scoped agent, and `scopes` a prefix no longer than its `scopes_max` (`scope_exceeded`);
 9. a WK grant is supplied for **every** member at this list's epoch in the same publication
    (`missing_grant`; P3-D7).
+
+**Order (normative).** Checks 1–7b run before any grant is looked at; then the grants (shape, `other_workspace`,
+`not_for_this_device`, `grant_conflict`); then checks 8 and 9 per member in list order (certificate, then that
+member's grant). So a host that regenerated a key at the held epoch and re-sealed its grants gets
+`wk_commit_changed`, not `grant_conflict`, and the same body at the held `list_seq` gets `stale_list` (vectors
+`p3.resealed_same_epoch_wk_commit_changed_before_grant_conflict`,
+`p3.resealed_same_list_seq_stale_list_before_grant_conflict`).
 
 **What the relay cannot check (G2b).** Grants are sealed, so the relay cannot compare a grant's `WK` with
 `wk_commit`. Its part is the field's presence and shape, the epoch ranges, and same-epoch consistency (7b).
@@ -794,8 +802,13 @@ store and serve a body it reports as refused.
   relay's verified list above `LHW`/`EHW` or with content the host never exposed, no local `WK` for the relay's
   committed epoch, or a takeover by an instance without the latest store): `GET members` and verify it with the
   `WSK`; set `LHW := max(local, relay list_seq) + 1024` and `EHW := max(local, relay epoch) + 1024`; rotate at
-  once to `EHW + 1`. The host never allocates an epoch above `committed + 2^16` (the relay would refuse it); if
-  that clamp blocks a rotation, it alarms and keeps the gate up.
+  once to `EHW + 1`.
+- **The clamp (liveness limit).** The rotation target is `min(EHW + 1, committed + 2^16)`, and **the clamp wins**:
+  the relay refuses anything above `committed + 2^16` (check 6), and every epoch up to `EHW` is already allocated,
+  so a target below `EHW + 1` is never usable (it would be a second key for a burned epoch). When
+  `EHW + 1 > committed + 2^16` the host does not rotate: it alarms and keeps the rotation gate up, and the workspace
+  is frozen for new sealing until an operator intervenes (for example a fresh workspace). Reaching it takes about
+  65,000 burns, or about 63 H7 jumps of 1024 with no commit in between.
 - **H8, refusal alarms** (the orch-52 / #382 definition). The host counts the **content and divergence**
   refusals of H3 only; transient outcomes neither count nor back off. The count resets on a 2xx. After **3
   consecutive** counted refusals it raises an operator alarm (`host.status`) and backs off exponentially between
@@ -841,13 +854,19 @@ an unsigned HTTP hint never raises a device's epoch.
   raises `conflicting_snapshot`. An epoch below the head's is refused (`bad_epoch`), and so is a removal without
   a higher epoch (`rotation_required`). **New:** two verified lists at one epoch with different `wk_commit` raise
   the local alarm `wk_commit_conflict`; the device stops sealing at that epoch until a verified list at a
-  **higher** epoch arrives.
+  **higher** epoch arrives. The alarm is checked **before** the `stale_list` refusal: a lower `list_seq` at a known
+  epoch with another `wk_commit` is WSK-signed proof of two keys at one epoch, so it raises `wk_commit_conflict`
+  (vector `lower_list_seq_other_wk_commit_alarm`). A list at the head's own `list_seq` with other content raises
+  `conflicting_snapshot` even if its `wk_commit` differs too, and that alarm does **not** block sealing: D3's
+  grant/commit match against the head still keeps the device off the other key (vector
+  `same_list_seq_other_wk_commit_conflicting_snapshot_no_block`).
 - **D3, sealing key.** The device seals and sends only under `head.epoch`, with a WSK-verified grant whose
   unsealed `WK` matches `head.wk_commit`. A grant that does not match is discarded for sealing. If none matches,
   **sending is blocked** (`no_key`): the device refetches grants and never falls back to an older epoch.
-- **D4, reading.** For an older epoch any WSK-verified grant for that epoch opens old content; if the device
-  holds a verified list for that epoch, the key must match its `wk_commit` (otherwise `wk_commit_mismatch`). A
-  device that jumped epochs keeps reading old content.
+- **D4, reading.** For the head epoch or an older one, any WSK-verified grant for that epoch opens content; if
+  the device holds a verified list for that epoch, the key must match its `wk_commit` (otherwise
+  `wk_commit_mismatch`). A device that jumped epochs keeps reading old content. An epoch above the head (or any
+  epoch before a first verified list) is refused locally (`future_epoch`): epochs move only per D5.
 - **D5, epoch moves** are unchanged: only on a verified list, or on a verified host `stale_epoch` naming a higher
   epoch, after which the device demands a list at `≥` that epoch. If bounded refetches bring nothing, it shows
   "relay is withholding the new key", not a timeout.
@@ -1826,7 +1845,7 @@ are FAKE (`SHA-256("FAKE orch v2 test vector: " || label)`), and so is every "ra
 | `card` | delegation, sealed part, `ck_commit`, card-key wrap, 16 update cases |
 | `wk_grants`, `member_lists` | grants; 34 member-list cases (§7.2), including the G2b first-list, skip, fall, u32, removal and `wk_commit` rules |
 | `wk_commit` | the commitment for given `workspace_id`, epoch and `WK` (§7.2, G2b) |
-| `member_list_snapshots` | device steps (§7.3 D1–D4): high-s twin no-op, conflicting content, `wk_commit_conflict`, grant/commit mismatch, no fallback, reading after a jump, first contact, lower `list_seq`, fall, removal |
+| `member_list_snapshots` | device steps (§7.3 D1–D4): high-s twin no-op, conflicting content (also with another `wk_commit`, no sealing block), `wk_commit_conflict` (also from a lower `list_seq`), grant/commit mismatch, no fallback, reading after a jump and `future_epoch`, first contact, lower `list_seq`, fall, removal |
 | `bridge.seal`, `bridge.host_cases`, `bridge.device_cases`, `bridge.pair_answers`, `bridge.links`, `bridge.sas` | §8, including the R1 attack |
 | `cert_request` | 10 primary cases, the challenge and its code, the certificate, a second signature refused, the attack challenge (§8.4) |
 | `enroll`, `webauthn`, `question_hash`, `decisions` | §6.4, §8.7, §13 |

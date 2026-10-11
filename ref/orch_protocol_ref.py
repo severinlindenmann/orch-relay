@@ -820,13 +820,12 @@ def _member_list_shape(o: dict) -> dict | None:
     return None
 
 
-def relay_accept_member_list(suite: Suite, wsk_pub: bytes, card_ws: str, prev: dict | None, signed,
-                             dir_state: dict, now_ms: int) -> dict:
-    """§7.2. card_ws: the workspace id of the card whose wsk_pub verifies. dir_state: {"owner_pk_pub": bytes,
-    "certs": {device hex: signed cert}, "revoked": set, "grants": {(device hex, epoch)}}.
+def relay_member_list_rules(suite: Suite, wsk_pub: bytes, card_ws: str, prev: dict | None, signed) -> dict:
+    """§7.2 checks 1-7b, which run before any grant or certificate check (the relay's order, §19.7).
     G2b: one WK per epoch, ever; a refused publication burns its epoch and list_seq, so epochs may skip (never
     fall) and the first list may use any epoch 1..2^16 and any list_seq. The relay cannot open grants: it checks
-    wk_commit's shape and that a same-epoch list keeps it; devices check grants against it."""
+    wk_commit's shape and that a same-epoch list keeps it; devices check grants against it. A previous list
+    without wk_commit (a pre-G2b dev row) is refused by 7b like any other mismatch: wipe such databases."""
     o = verify_object(suite, wsk_pub, signed, "member_list")
     if o is None:
         return {"refuse": "bad_signature"}
@@ -844,11 +843,26 @@ def relay_accept_member_list(suite: Suite, wsk_pub: bytes, card_ws: str, prev: d
         removed = {m["device_id"] for m in prev["members"]} - set(ids)
         if removed and o["epoch"] <= prev["epoch"]:
             return {"refuse": "rotation_required"}                  # check 7
-        if o["epoch"] == prev["epoch"] and prev.get("wk_commit") is not None \
-                and prev["wk_commit"] != o["wk_commit"]:
-            return {"refuse": "wk_commit_changed"}                  # check 7b (legacy rows without it: skipped)
+        if o["epoch"] == prev["epoch"] and prev.get("wk_commit") != o["wk_commit"]:
+            return {"refuse": "wk_commit_changed"}                  # check 7b
     elif not 1 <= o["epoch"] <= EPOCH_STEP:
         return {"refuse": "bad_epoch"}                              # check 4: any list_seq >= 1
+    return {"ok": o}
+
+
+def relay_accept_member_list(suite: Suite, wsk_pub: bytes, card_ws: str, prev: dict | None, signed,
+                             dir_state: dict, now_ms: int) -> dict:
+    """§7.2. card_ws: the workspace id of the card whose wsk_pub verifies. dir_state: {"owner_pk_pub": bytes,
+    "certs": {device hex: signed cert}, "revoked": set, "grants": {(device hex, epoch)}}.
+    Checks 1-7b (relay_member_list_rules), then checks 8 and 9 per member."""
+    result = relay_member_list_rules(suite, wsk_pub, card_ws, prev, signed)
+    if "refuse" in result:
+        return result
+    return _member_list_members(suite, result["ok"], dir_state, now_ms)
+
+
+def _member_list_members(suite: Suite, o: dict, dir_state: dict, now_ms: int) -> dict:
+    """§7.2 checks 8 and 9, per member in list order (certificate, then its grant), then persons."""
     for m in o["members"]:
         did = m["device_id"]
         if did in dir_state["revoked"]:
@@ -966,8 +980,12 @@ def device_sealing_key(suite: Suite, wsk_pub: bytes, ws: bytes, dev: bytes, dk_k
 
 def device_reading_key(suite: Suite, wsk_pub: bytes, ws: bytes, dev: bytes, dk_kx_priv, dstate: dict, grants,
                        epoch: int) -> dict:
-    """§7.3 D4 (G2b): any WSK-verified grant for an older epoch opens old content; if the device holds a
-    verified list for that epoch, the key must match its wk_commit (wk_commit_mismatch otherwise)."""
+    """§7.3 D4 (G2b): any WSK-verified grant for the head epoch or an older one opens content; if the device holds
+    a verified list for that epoch, the key must match its wk_commit (wk_commit_mismatch otherwise). An epoch above
+    the head, or any epoch before a first verified list, is refused (future_epoch)."""
+    head = dstate.get("head")
+    if head is None or epoch > head["epoch"]:
+        return {"refuse": "future_epoch"}       # D4 is for the head epoch and older ones; epochs move only per D5
     known = dstate.get("wk_commits", {}).get(str(epoch))
     opened = False
     for wk in _opened_grants(suite, wsk_pub, ws, dev, dk_kx_priv, grants, epoch):
@@ -2390,7 +2408,13 @@ def relay_membership(suite, wsk_pub, ws, state, directory, body, now_ms):
         o = verify_object(suite, wsk_pub, body["member_list"], "member_list")
         if o is None:
             return {"refuse": "bad_signature"}
-        if len(o["members"]) > 1024 or not isinstance(body["grants"], list):
+        if len(o["members"]) > 1024:
+            return {"refuse": "malformed"}
+        # §19.7 order: list rules (checks 1-7b) first, then grants (grant_conflict), then certificates.
+        rules = relay_member_list_rules(suite, wsk_pub, ws, state["list"], body["member_list"])
+        if "refuse" in rules:
+            return rules
+        if not isinstance(body["grants"], list):
             return {"refuse": "malformed"}
         ids = {m["device_id"] for m in o["members"]}
         grants = {}
@@ -2411,7 +2435,7 @@ def relay_membership(suite, wsk_pub, ws, state, directory, body, now_ms):
                 return {"refuse": "grant_conflict"}
             grants[key] = g
         ds = {**directory, "grants": {(g["o"]["device_id"], g["o"]["epoch"]) for g in grants.values()}}
-        result = relay_accept_member_list(suite, wsk_pub, ws, state["list"], body["member_list"], ds, now_ms)
+        result = _member_list_members(suite, o, ds, now_ms)
         if "refuse" in result:
             return result
         wraps = body.get("card_key_wraps")

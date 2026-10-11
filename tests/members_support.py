@@ -153,7 +153,8 @@ def prepare_fixture(d, name, case):
             "wk_commit_changed",
         }:
             # bad_epoch: the held epoch 2 is above the fixture's epoch 1 (epochs never fall).
-            # wk_commit_changed: the held epoch-1 list keeps the publication's own wk_commit.
+            # wk_commit_changed: the held epoch-1 list carries the base publication's wk_commit A;
+            # the fixture body keeps epoch 1 with wk_commit B.
             o = copy.deepcopy(BODY["member_list"]["o"])
             o["list_seq"] = 1
             o["epoch"] = 2 if scenario in {"stale_epoch", "bad_epoch"} else 1
