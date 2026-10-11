@@ -57,7 +57,7 @@ def test_strict_parse_precedes_any_mutation(raw):
         "status": 400,
         "error": "malformed",
     }
-    assert state == before
+    assert C.contract(state) == C.contract(before)
 
 
 @pytest.mark.parametrize(
@@ -68,7 +68,7 @@ def test_actual_transport_byte_caps_before_parsing(op, cap, status):
     state = copy.deepcopy(CASES["first_checkpoint_full_proof"]["state"])
     before = copy.deepcopy(state)
     assert C.dispatch(S, state, op, b" " * (cap + 1)) == {"status": status, "error": "too_large"}
-    assert state == before
+    assert C.contract(state) == C.contract(before)
 
 
 def test_page_quota_64_mib_and_retry_does_not_charge_twice(monkeypatch):
@@ -83,7 +83,7 @@ def test_page_quota_64_mib_and_retry_does_not_charge_twice(monkeypatch):
     second = {**first, "i": 1}
     before = copy.deepcopy(state)
     assert C.dispatch(S, state, **second) == {"status": 429, "error": "quota_exceeded"}
-    assert state == before
+    assert C.contract(state) == C.contract(before)
     assert C.STAGE_CAP == size
 
 
@@ -97,7 +97,7 @@ def test_checkpoint_object_cap_exact_boundary(monkeypatch):
     before = copy.deepcopy(state)
     monkeypatch.setattr(C, "CP_CAP", size - 1)
     assert C.dispatch(S, state, **publication) == {"status": 400, "error": "too_large"}
-    assert state == before
+    assert C.contract(state) == C.contract(before)
     monkeypatch.setattr(C, "CP_CAP", size)
     assert C.dispatch(S, state, **publication)["status"] == 200
 
@@ -112,7 +112,7 @@ def test_real_line_cap_is_not_replaced_by_a_payload_only_cap(monkeypatch):
     before = copy.deepcopy(state)
     monkeypatch.setattr(C, "LINE_CAP", size - 1)
     assert C.dispatch(S, state, **publication) == {"status": 400, "error": "too_large"}
-    assert state == before
+    assert C.contract(state) == C.contract(before)
     monkeypatch.setattr(C, "LINE_CAP", size)
     assert C.dispatch(S, state, **publication)["status"] == 200
 
@@ -133,7 +133,7 @@ def test_invalid_offer_does_not_poison_restore_id_or_consume_staging():
     bad["body"]["restore"]["authz"] = {}
     before = copy.deepcopy(state)
     assert C.dispatch(S, state, **bad)["error"] == "restore_not_owner"
-    assert state == before
+    assert C.contract(state) == C.contract(before)
     assert C.dispatch(S, state, **valid)["status"] == 200
     assert len(state["transitions"]) == 1
 
@@ -146,7 +146,7 @@ def test_staging_retries_compare_http_bytes_not_only_parsed_objects():
     first["body"] = json.dumps(first["body"], indent=2)
     before = copy.deepcopy(state)
     assert C.dispatch(S, state, **first) == {"status": 409, "error": "staging_conflict"}
-    assert state == before
+    assert C.contract(state) == C.contract(before)
 
 
 def test_restore_covers_revoked_device_first_introduced_by_payload():
@@ -165,7 +165,7 @@ def test_restore_covers_revoked_device_first_introduced_by_payload():
         "error": "restore_missing_revocation",
         "devices": [device],
     }
-    assert state == before
+    assert C.contract(state) == C.contract(before)
 
 
 @pytest.mark.parametrize("invalid_evidence", [False, True])
@@ -180,25 +180,27 @@ def test_historical_owner_rejects_bundle_revocation(invalid_evidence):
         "status": 409,
         "error": "restore_invalid" if invalid_evidence else "restore_not_owner",
     }
-    assert state == before
+    assert C.contract(state) == C.contract(before)
 
 
-@pytest.mark.parametrize("reason", ["lost", "retired", "compromised"])
-def test_historical_owner_ignores_later_local_revocation_and_completeness(reason):
-    case = CASES["historical_signer_later_lost"]
+@pytest.mark.parametrize("reason", [None, "lost", "retired", "compromised"])
+def test_historical_owner_refuses_any_known_signer_revocation_not_completeness(reason):
+    # Review 1: a known revocation of the signer refuses, whatever its reason. Relay-local
+    # completeness (an unrelated device absent from the bundle) is still not demanded.
+    case = CASES["historical_signer_known_lost_before_line_at_refused"]
     state = copy.deepcopy(case["state"])
     request = case["steps"][0]["input"]
     signer = request["body"]["cert"]["o"]["device_id"]
-    key = S.sig_key(bytes.fromhex(V["keys"]["person_alice.sig"]["seed"]))
-    state["revocations"][signer] = R.sign_object(
-        S, key, {**state["revocations"][signer]["o"], "reason": reason}
-    )
-    # An unrelated relay-known device is also absent from this historical bundle.
+    known = state["revocations"].pop(signer)
+    if reason:
+        key = S.sig_key(bytes.fromhex(V["keys"]["person_alice.sig"]["seed"]))
+        state["revocations"][signer] = R.sign_object(S, key, {**known["o"], "reason": reason})
     other = CASES["B1_weaker"]["state"]
     state["revocations"].update(other["revocations"])
     state["ever_devices"] = sorted(set(state["ever_devices"]) | set(other["ever_devices"]))
-    assert C.dispatch(S, state, **request) == {"status": 200}
-    assert state.get("alarms", []) == ([signer] if reason == "compromised" else [])
+    expected = {"status": 409, "error": "restore_not_owner"} if reason else {"status": 200}
+    assert C.dispatch(S, state, **request) == expected
+    assert "alarms" not in state
 
 
 @pytest.mark.parametrize("as_text", [False, True])
@@ -214,7 +216,7 @@ def test_baseline_raw_request_cap_boundary(as_text, extra_bytes):
     result = C.dispatch(S, state, **request)
     if extra_bytes:
         assert result == {"status": 413, "error": "too_large"}
-        assert state == before
+        assert C.contract(state) == C.contract(before)
     else:
         assert result == case["steps"][0]["expect"]
         assert len(state["baselines"]) == 1

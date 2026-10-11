@@ -21,6 +21,9 @@ STAGE_CAP = 64 * 1024 * 1024
 REQUEST_CAPS = {'genesis': 65536, 'page': PAGE_CAP, 'manifest': PAGE_CAP,
                 'baseline': 16384, 'publish': REQUEST_CAP}
 STRENGTH = {'lost': 1, 'retired': 1, 'compromised': 2}
+# Failed final publications per workspace per hour (§19.8, P3-D17 style refusal, never eviction).
+FAILURE_BUDGET = 16
+BUNDLE_FIELDS = {'restore_id', 'log', 'source_hash', 'target_hash', 'target_n', 'line', 'cert', 'authz'}
 
 
 class Refusal(Exception):
@@ -83,12 +86,12 @@ def initial(ws, wsk_pub, owner_pk, delegation, members):
             'members': members, 'persons': {delegation['o']['owner_person_id']: owner_pk},
             'ever_devices': sorted(members), 'revocations': {}, 'genesis': None, 'held': None,
             'checkpoints': {}, 'gone': [], 'nodes': {}, 'staging': {}, 'transitions': [],
-            'baselines': {}, 'receipts': {}}
+            'baselines': {}, 'receipts': {}, 'failures': []}
 
 
-def owner(S, state, cert, now, extra=(), historical=False):
-    checked = R.verify_cert(S, cert, R.unb64u(state['owner_pk']), now,
-                            (set() if historical else set(state['revocations'])) | set(extra))
+def owner(S, state, cert, now, extra=()):
+    # Every known revocation refuses the signer, at the relay and at a historical receiver alike (review 1).
+    checked = R.verify_cert(S, cert, R.unb64u(state['owner_pk']), now, set(state['revocations']) | set(extra))
     need('ok' in checked, 'restore_not_owner', 409)
     c = checked['ok']
     need(c['person_id'] == state['delegation']['o']['owner_person_id'] and
@@ -103,10 +106,7 @@ def genesis(S, state, body, now):
     if state['genesis']:
         need(pin == state['genesis']['pin'], 'genesis_mismatch', 409)
         return {}
-    try:
-        cert = owner(S, state, body['cert'], now)
-    except Refusal as exc:
-        raise Refusal('restore_not_owner', 403) from exc
+    cert = owner(S, state, body['cert'], now)
     o = R.verify_object(S, R.unb64u(cert['dk_sig_pub']), pin, 'genesis_pin')
     need(o is not None, 'bad_signature', 401)
     need(set(o) == {'v', 'suite', 'kind', 'workspace_id', 'wsk_pub', 'genesis'})
@@ -164,8 +164,7 @@ def staging(state, body, now, source, target, i=None, wire=None):
             return {}
         if st['manifest'] is not None:
             need(descriptor(i, body) in st['manifest']['pages'], 'staging_conflict', 409)
-        total = sum(len(p) // 2 for s in state['staging'].values() for p in s['wire_pages'].values())
-        need(total + len(wire) <= STAGE_CAP, 'quota_exceeded', 429)
+        need(staged_bytes(state) + len(wire) <= STAGE_CAP, 'quota_exceeded', 429)
         st['pages'][str(i)] = body
         st['wire_pages'][str(i)] = wire.hex()
         return {}
@@ -191,9 +190,16 @@ def staging(state, body, now, source, target, i=None, wire=None):
             need(descriptor(d['i'], st['pages'][str(d['i'])]) == d, 'staging_conflict', 409)
     need(order == sorted(order))
     need(set(st['pages']) <= {str(i) for i in seen}, 'staging_conflict', 409)
+    need(staged_bytes(state) + len(wire) <= STAGE_CAP, 'quota_exceeded', 429)
     st['manifest'] = body
     st['wire_manifest'] = wire.hex()
     return completeness(st)
+
+
+def staged_bytes(state):
+    # Page and manifest bytes share the per-workspace quota (review 11).
+    return sum(len(p) // 2 for s in state['staging'].values()
+               for p in [*s['wire_pages'].values(), s['wire_manifest'] or ''])
 
 
 def node(state, log, acc):
@@ -295,7 +301,10 @@ def restore_shape(line):
     need(isinstance(line['revocations'], list))
 
 
-def revocation_evidence(S, state, line, log):
+def revocation_evidence(S, state, line, log, persons=None):
+    """F1 B1 entries. A known person's pk_pub must equal the stored key; any other person is accepted
+    self-certifying, because verify_cert binds person_id = H(h_person_id || suite || pk_pub) (review 5)."""
+    persons = state['persons'] if persons is None else persons
     need(log == 'workspace' or line['revocations'] == [], 'restore_invalid', 409)
     listed = {}
     order = []
@@ -303,7 +312,7 @@ def revocation_evidence(S, state, line, log):
         need(set(item) == {'revocation', 'device_cert', 'pk_pub'}, 'restore_invalid', 409)
         pk = R.unb64u(item['pk_pub'])
         c = item['device_cert']['o']
-        need(state['persons'].get(c['person_id']) == item['pk_pub'], 'restore_invalid', 409)
+        need(persons.get(c['person_id'], item['pk_pub']) == item['pk_pub'], 'restore_invalid', 409)
         checked = R.verify_cert(S, item['device_cert'], pk, c['created_ms'])
         need('ok' in checked, 'restore_invalid', 409)
         rev = R.verify_revocation(S, item['revocation'], pk, checked['ok'])
@@ -324,17 +333,17 @@ def revocation_coverage(state, listed, signer, log):
 
 
 def owner_policy(S, state, bundle, now, extra=(), historical=False):
-    """P3-D24: historical receivers omit the relay-only current-list/current-clock checks."""
+    """P3-D24: historical receivers omit the relay-only current-list/current-clock checks.
+
+    They never omit a revocation they already know: any known revocation of the signer, of any reason
+    and whatever its revoked_ms, refuses (review 1). "Later" knowledge is defined by the receiver's own
+    commit order (sync_walk), never by the host-chosen line.at."""
     line = bundle['line']
     if historical:
         # Internal evidence is mandatory even when relay-local completeness is irrelevant.
         listed = revocation_evidence(S, state, line, 'ticket' if 'ws_seq' in line else 'workspace')
         extra = set(extra) | set(listed)
-    cert = owner(S, state, bundle['cert'], timestamp(line['at']), extra, historical)
-    if historical and state['revocations'].get(cert['device_id'], {}).get('o', {}).get('reason') == 'compromised':
-        alarms = state.setdefault('alarms', [])
-        if cert['device_id'] not in alarms:
-            alarms.append(cert['device_id'])
+    cert = owner(S, state, bundle['cert'], timestamp(line['at']), extra)
     if not historical:
         owner(S, state, bundle['cert'], now, extra)
         need('operate' in state['members'].get(cert['device_id'], []), 'restore_not_owner', 409)
@@ -349,9 +358,12 @@ def owner_policy(S, state, bundle, now, extra=(), historical=False):
 def restore_check(S, state, body, target, held, stage, used, now):
     bundle = body['restore']
     try:
-        need(set(bundle) == {'line', 'cert', 'authz'})
+        need(set(bundle) == {'line', 'cert', 'authz', 'log'})
         line = bundle['line']
         restore_shape(line)
+        log = bundle['log']
+        # The request names its log (review 3): exactly one signed context is ever verified.
+        need((log == 'workspace') == ('ws_seq' not in line))
         need(len(R.cj(line)) + 1 <= LINE_CAP, 'too_large', 400)
     except (KeyError, TypeError, ValueError, Refusal) as exc:
         if isinstance(exc, Refusal) and exc.result['error'] == 'too_large':
@@ -359,13 +371,10 @@ def restore_check(S, state, body, target, held, stage, used, now):
         raise Refusal('restore_invalid') from exc
     need(line['source'] == reference(held), 'restore_source_mismatch', 409)
     need(line['id'] not in {t['restore_id'] for t in state['transitions']}, 'restore_reused', 409)
-    # The design omits log from the final request. Resolve only by a unique valid signed context.
-    candidates = list(target['o']['tickets']) if 'ws_seq' in line else ['workspace']
     pub = R.unb64u(bundle['cert']['o']['dk_sig_pub'])
-    logs = [log for log in candidates if S.verify(pub, R.unb64u(line['sig']), event_bytes(S, line, state['ws'], log)) and
-            S.verify(R.unb64u(state['wsk_pub']), R.unb64u(line['host_sig']), event_bytes(S, line, state['ws'], log, True))]
-    need(len(logs) == 1, 'restore_invalid', 409)
-    log = logs[0]
+    need(S.verify(pub, R.unb64u(line['sig']), event_bytes(S, line, state['ws'], log)) and
+         S.verify(R.unb64u(state['wsk_pub']), R.unb64u(line['host_sig']), event_bytes(S, line, state['ws'], log, True)),
+         'restore_invalid', 409)
     listed = revocation_evidence(S, state, line, log)
     cert = owner_policy(S, state, bundle, now, listed)
     revocation_coverage(state, listed, cert['device_id'], log)
@@ -401,7 +410,7 @@ def restore_check(S, state, body, target, held, stage, used, now):
         if d not in state['revocations'] or STRENGTH[rev['o']['reason']] > STRENGTH[state['revocations'][d]['o']['reason']]:
             state['revocations'][d] = rev
     state['ever_devices'] = sorted(set(state['ever_devices']) | set(listed) | {cert['device_id']})
-    state['transitions'].append({'restore_id': line['id'], 'log': log, 'source_hash': body['source_hash'],
+    state['transitions'].append({'restore_id': line['id'], 'source_hash': body['source_hash'],
                                  'target_hash': checkpoint_hash(target), 'target_n': target['o']['n'], **bundle})
     if held:
         state['checkpoints'][checkpoint_hash(held)]['permanent'] = True
@@ -511,11 +520,16 @@ def read(state, op, args, now):
     return {'heads': page, 'next': acc if len(page) < len(heads) else None}
 
 
-def baseline(state, body, now, delete=False):
+def baseline(state, body, now, delete=False, role='host'):
     h = body['hash']; hash_bytes(h)
     expire(state, now)
     if delete:
-        state['baselines'].pop(h, None)
+        # W(g) releases any pin. A D(m) member releases only the pin whose offer_id it names, so one
+        # member cannot push another device's pairing onto the 24 h fallback (review 10).
+        need(role in ('host', 'member') and set(body) <= {'hash', 'offer_id'})
+        pin = state['baselines'].get(h)
+        if pin and (role == 'host' or body.get('offer_id') == pin['offer_id']):
+            del state['baselines'][h]
         return {}
     need(set(body) == {'hash', 'offer_id'})
     R.unhex(body['offer_id'], 16)
@@ -527,7 +541,295 @@ def baseline(state, body, now, delete=False):
     return {'until_ms': now + 7 * DAY}
 
 
+# ---------------------------------------------------------------------------------------------
+# Device side (§19.8 "Device synchronisation"): the checkpoint-only receiver and its sync walk.
+# judge_offer ports orch-core f1094b3 store/checkpoints.judge_offer with the relay's primitives and
+# returns F1's codes, so F1's transition_cases/workspace_n_offers run against it unchanged.
+# ---------------------------------------------------------------------------------------------
+DIVERGED, INCOMPLETE = 'chain.diverged', 'sync.incomplete'
+WALK_CODES = {DIVERGED: 'chain_diverged', INCOMPLETE: 'sync_incomplete', 'trust.genesis_mismatch': 'genesis_mismatch',
+              'ignored': 'chain_diverged'}
+
+
+def fold(acc, heads):
+    for head in heads:
+        acc = log_acc(acc, head)
+    return acc
+
+
+def extension(old, new, heads):
+    """Exactly new.seq - old.seq heads, ending at new.head and folding old.acc to new.acc (P3-D19)."""
+    try:
+        return (isinstance(heads, list) and len(heads) == new['seq'] - old['seq'] and
+                (heads[-1] if heads else old['head']) == new['head'] and fold(old['acc'], heads) == new['acc'])
+    except (Refusal, KeyError, TypeError):
+        return False
+
+
+def judge_offer(S, held, offered, *, genesis, wsk_pub, restore=None, applied=(), proofs=None, known=(),
+                owner_pk=None, initial_proof=False):
+    """held/offered are checkpoint `o` objects. Returns (code, recorded restore id or None).
+
+    owner_pk pins the pairing owner key (P3-D24); initial_proof demands full proof from acc_0 and the
+    genesis root for a first checkpoint (P3's stricter rule; F1 accepts it without ancestry)."""
+    if offered['genesis'] != genesis:
+        return 'trust.genesis_mismatch', None
+    if held and offered['workspace_id'] != held['workspace_id']:
+        return DIVERGED, None
+    h = {'workspace': held['workspace_log'], **held['tickets']} if held else {}
+    o = {'workspace': offered['workspace_log'], **offered['tickets']}
+    proofs = {} if proofs is None else proofs
+    if held and offered['n'] == held['n']:
+        return ('ok' if offered == held else DIVERGED), None
+    if held and offered['n'] < held['n']:
+        bad = any(k not in h or v['seq'] > h[k]['seq'] or (v['seq'] == h[k]['seq'] and v != h[k]) for k, v in o.items())
+        return (DIVERGED if bad else 'ignored'), None
+    if held and (offered['at'] < held['at'] or h.keys() - o.keys()):
+        return DIVERGED, None
+    if not isinstance(proofs, dict):
+        return INCOMPLETE, None
+    restored = None
+    if restore is not None:
+        try:
+            ev, log, c, target = restore['event'], restore['log'], restore['C'], restore['T']
+            wsk = R.unb64u(wsk_pub)
+            if target['o'] != offered or R.verify_object(S, wsk, target, 'workspace_checkpoint') is None:
+                return DIVERGED, None
+            restore_shape(ev)
+            if (log == 'workspace') != ('ws_seq' not in ev):
+                return DIVERGED, None
+            # Source binding (R2-equivalent): the person-signed source is exactly the held checkpoint.
+            if ev['id'] in applied or ev['source'] != reference(c):
+                return DIVERGED, None
+            if (held is None) != (c is None) or (held is not None and c['o'] != held):
+                return DIVERGED, None
+            if c and R.verify_object(S, wsk, c, 'workspace_checkpoint') is None:
+                return DIVERGED, None
+            if owner_pk is not None and restore['pk_pub'] != owner_pk:
+                return DIVERGED, None
+            pk = R.unb64u(restore['pk_pub'])
+            at_ms = timestamp(ev['at'])
+            checked = R.verify_cert(S, restore['device_cert'], pk, at_ms)
+            delegation = R.verify_delegation(S, restore['delegation'], pk)
+            if 'ok' not in checked or 'ok' not in delegation:
+                return DIVERGED, None
+            cert, delegation = checked['ok'], delegation['ok']
+            if (delegation['workspace_id'] != offered['workspace_id'] or delegation['wsk_pub'] != wsk_pub or
+                    ev['actor']['id'] != 'p_' + cert['person_id'] or ev['actor']['device'] != 'd_' + cert['device_id'] or
+                    'operate' not in cert['scopes_max'] or any(x.startswith('drop:') for x in cert['scopes_max'])):
+                return DIVERGED, None
+            ws = offered['workspace_id']
+            if not (S.verify(R.unb64u(cert['dk_sig_pub']), R.unb64u(ev['sig']), event_bytes(S, ev, ws, log)) and
+                    S.verify(wsk, R.unb64u(ev['host_sig']), event_bytes(S, ev, ws, log, True))):
+                return DIVERGED, None
+            if len(R.cj(ev)) + 1 > LINE_CAP or (held and ev['at'] < held['at']):
+                return DIVERGED, None
+            listed = revocation_evidence(S, {'persons': {}}, ev, log)
+            if cert['device_id'] in listed:
+                return DIVERGED, None
+            for item in known:
+                rev = item['revocation']['o']
+                # Review 1: any revocation already known refuses its signer, whenever it arrived.
+                if (log == 'workspace' and (rev['device_id'] not in listed or (
+                        rev['reason'] == 'compromised' and listed[rev['device_id']]['o']['reason'] != 'compromised'))
+                        ) or ev['actor']['device'] == 'd_' + rev['device_id']:
+                    return DIVERGED, None
+            acc = restore.get('acc_from')
+            try:
+                hash_bytes(acc)
+            except Refusal:
+                return INCOMPLETE, None
+            retained = {'seq': ev['from_seq'], 'head': ev['head'], 'acc': acc}
+            base = h.get(log, EMPTY)
+            if log == 'workspace' and base['seq'] == 0:
+                forward = restore.get('forward_heads')
+                if not isinstance(forward, list) or not forward or forward[0] != genesis:
+                    return INCOMPLETE, None
+            if ev['from_seq'] >= base['seq']:
+                if not extension(base, retained, restore.get('forward_heads', [])):
+                    return INCOMPLETE, None
+            else:
+                try:
+                    if log_acc(restore.get('acc_before'), ev['head']) != acc:
+                        return INCOMPLETE, None
+                except Refusal:
+                    return INCOMPLETE, None
+                if not extension(retained, base, restore.get('abandoned_heads')):
+                    return INCOMPLETE, None
+                ab = ev['abandoned']
+                if not ab or ab['seq'] < base['seq'] or (ab['seq'] == base['seq'] and ab['head'] != base['head']):
+                    return DIVERGED, None
+            if log == 'workspace' and ev['from_seq'] == 1 and (ev['head'] != genesis or acc != log_acc(ZERO, genesis)):
+                return INCOMPLETE, None
+            tail = proofs.get(log)
+            if (not isinstance(tail, list) or not tail or tail[0] != event_head(ev) or log not in o or
+                    not extension(retained, o[log], tail)):
+                return INCOMPLETE, None
+            restored = (log, ev['id'])
+        except (KeyError, TypeError, ValueError, IndexError, AttributeError, Refusal):
+            return DIVERGED, None
+    if held is None and restore is None and not initial_proof:
+        return 'ok', None
+    for log, entry in o.items():
+        if restored and log == restored[0]:
+            continue
+        old = h.get(log, EMPTY)
+        if entry['seq'] < old['seq'] or (entry['seq'] == old['seq'] and entry != old):
+            return DIVERGED, None
+        heads = proofs.get(log, [])
+        if not extension(old, entry, heads):
+            return INCOMPLETE, None
+        if initial_proof and log == 'workspace' and old['seq'] == 0 and heads[0] != genesis:
+            return INCOMPLETE, None
+    return 'ok', restored[1] if restored else None
+
+
+def device_initial(ws, wsk_pub, owner_pk, genesis, held=None):
+    """A paired device: pairing-pinned owner PK, WSK and genesis; held is its verified baseline or None."""
+    return {'ws': ws, 'wsk_pub': wsk_pub, 'owner_pk': owner_pk, 'genesis': genesis, 'held': held,
+            'applied': [], 'revocations': {}, 'alarms': []}
+
+
+def stronger(revocations, rev):
+    d = rev['o']['device_id']
+    if d not in revocations or STRENGTH[rev['o']['reason']] > STRENGTH[revocations[d]['o']['reason']]:
+        revocations[d] = rev
+
+
+def sync_walk(S, dev, relay, now, endpoint=None):
+    """§19.8 device synchronisation against an immutable endpoint E. relay is read only through the
+    public GET routes. The device commits only after the whole walk verifies; any refusal leaves it as is."""
+    dev = copy.deepcopy(dev)
+    ws, genesis = dev['ws'], dev['genesis']
+
+    def get(op, **args):
+        try:
+            return read(relay, op, args, now)
+        except Refusal as exc:
+            if exc.result['error'] == 'checkpoint_gone':
+                raise  # restart with a new E; H unchanged
+            raise Refusal('sync_incomplete', 409) from exc  # missing evidence, never re-pairing
+
+    def fetch(h):
+        cp = get('get', hash=h)['checkpoint']
+        # Hash-addressed objects are bound to their hash, signature, workspace and pinned genesis.
+        need(checkpoint_hash(cp) == h, 'chain_diverged', 409)
+        need(R.verify_object(S, R.unb64u(dev['wsk_pub']), cp, 'workspace_checkpoint') is not None and
+             cp['o']['workspace_id'] == ws, 'chain_diverged', 409)
+        need(cp['o']['genesis'] == genesis, 'genesis_mismatch', 409)
+        return cp
+
+    def heads(log, start, to):
+        out = []
+        while True:
+            page = get('proof', log=log, to=to, **{'from': start})
+            need(page['heads'] or page['next'] is None, 'sync_incomplete', 409)
+            out += page['heads']
+            if page['next'] is None:
+                return out
+            start = page['next']
+
+    def growth(work, x, skip=None):
+        old = entries(work) if work else {}
+        return {log: heads(log, old.get(log, EMPTY)['acc'], checkpoint_hash(x))
+                for log, e in entries(x).items() if log != skip and e['seq'] > old.get(log, EMPTY)['seq']}
+
+    def judge(work, x, **kw):
+        code, recorded = judge_offer(S, work['o'] if work else None, x['o'], genesis=genesis, wsk_pub=dev['wsk_pub'],
+                                     owner_pk=dev['owner_pk'], applied=dev['applied'], initial_proof=True, **kw)
+        return code, recorded
+
+    top = get('get', **({'hash': endpoint} if endpoint else {}))
+    end = fetch(checkpoint_hash(top['checkpoint']))
+    if endpoint:
+        need(checkpoint_hash(end) == endpoint, 'chain_diverged', 409)
+    end_hash = checkpoint_hash(end)
+    work = dev['held']
+    learned, signers = dict(dev['revocations']), []
+    after = last = work['o']['n'] if work else 0
+    while work is None or end['o']['n'] > work['o']['n']:
+        page = get('transitions', to=end_hash, after_n=after)
+        for b in page['transitions']:
+            need(isinstance(b, dict) and set(b) == BUNDLE_FIELDS and b['restore_id'] == b['line']['id'],
+                 'chain_diverged', 409)
+            # Ascending target_n, bounded by E.
+            need(type(b['target_n']) is int and last < b['target_n'] <= end['o']['n'], 'chain_diverged', 409)
+            last = b['target_n']
+            if b['source_hash'] is not None and (work is None or b['source_hash'] != checkpoint_hash(work)):
+                # Prove the exact extension work -> B.source; a lower or equal source never qualifies.
+                c = fetch(b['source_hash'])
+                need(work is None or c['o']['n'] > work['o']['n'], 'chain_diverged', 409)
+                need(judge(work, c, proofs=growth(work, c))[0] == 'ok', 'chain_diverged', 409)
+                work = c
+            t = fetch(b['target_hash'])
+            need(t['o']['n'] == b['target_n'], 'chain_diverged', 409)
+            line, log = b['line'], b['log']
+            old = entries(work).get(log, EMPTY) if work else EMPTY
+            fs = line['from_seq']
+            restore = {'event': line, 'log': log, 'C': work, 'T': t, 'pk_pub': dev['owner_pk'],
+                       'device_cert': b['cert'], 'delegation': b['authz']['delegation']}
+            known = [{'revocation': r} for r in learned.values()]
+            # Signatures, source binding, owner policy and revocations first; only then fetch proofs.
+            code, _ = judge(work, t, restore=restore, known=known)
+            need(code == INCOMPLETE, WALK_CODES.get(code, 'chain_diverged'), 409)
+            if type(fs) is int and 1 <= fs < old['seq']:
+                full = heads(log, ZERO, b['target_hash'])
+                need(len(full) > fs, 'sync_incomplete', 409)
+                restore['acc_before'] = fold(ZERO, full[:fs - 1])
+                restore['acc_from'] = log_acc(restore['acc_before'], full[fs - 1])
+                restore['abandoned_heads'] = heads(log, restore['acc_from'], checkpoint_hash(work))
+                tail = full[fs:]
+            else:
+                seg = heads(log, old['acc'], b['target_hash'])
+                k = fs - old['seq'] if type(fs) is int else 0
+                restore['forward_heads'], tail = seg[:k], seg[k:]
+                restore['acc_from'] = fold(old['acc'], seg[:k])
+            proofs = {**growth(work, t, skip=log), log: tail}
+            code, recorded = judge(work, t, restore=restore, proofs=proofs, known=known)
+            need(code == 'ok' and recorded == line['id'], WALK_CODES.get(code, 'chain_diverged'), 409)
+            for item in line['revocations']:
+                stronger(learned, item['revocation'])
+            signers.append(b['cert']['o']['device_id'])
+            dev['applied'].append(line['id'])
+            work = t
+        if page['next'] is None:
+            break
+        after = int(page['next'])
+    result = 'ok'
+    if work is None or checkpoint_hash(work) != end_hash:
+        code, _ = judge(work, end, proofs=growth(work, end) if not work or end['o']['n'] > work['o']['n'] else {})
+        if code == 'ignored' and work is dev['held']:
+            result = 'ignored'  # a lagging relay: keep H, never downgrade
+        else:
+            need(code == 'ok', WALK_CODES.get(code, 'chain_diverged'), 409)
+            work = end
+    for d, rev in learned.items():
+        # A compromised revocation first learned after its device's transition was judged: history stays,
+        # the device raises an alarm (P3-D24).
+        if rev['o']['reason'] == 'compromised' and d in signers and d not in dev['alarms']:
+            dev['alarms'].append(d)
+    dev['held'], dev['revocations'] = work, learned
+    return {'result': result, 'device': dev}
+
+
+def contract(state):
+    """The state a refusal must leave unchanged; the failure budget alone is charged by refusals."""
+    return {k: v for k, v in state.items() if k != 'failures'}
+
+
 def dispatch(S, state, op, body=None, now_ms=0, **args):
+    if op == 'publish':
+        # Charged even on refusal, so an invalid final request cannot be repeated without limit (review 3).
+        state['failures'] = [t for t in state.get('failures', []) if t > now_ms - HOUR]
+        if len(state['failures']) >= FAILURE_BUDGET:
+            return {'status': 429, 'error': 'quota_exceeded'}
+    result = _dispatch(S, state, op, body, now_ms, **args)
+    if op == 'publish' and result['status'] >= 400:
+        state['failures'].append(now_ms)
+    return result
+
+
+def _dispatch(S, state, op, body, now_ms, **args):
     trial = copy.deepcopy(state)
     try:
         wire = None
@@ -549,7 +851,9 @@ def dispatch(S, state, op, body=None, now_ms=0, **args):
         elif op in ('get', 'proof', 'transitions'):
             result = read(trial, op, args, now_ms)
         elif op in ('baseline', 'baseline_delete'):
-            result = baseline(trial, body, now_ms, op == 'baseline_delete')
+            result = baseline(trial, body, now_ms, op == 'baseline_delete', args.get('role', 'host'))
+        elif op == 'device_sync':
+            result = sync_walk(S, body, trial, now_ms, args.get('endpoint'))
         else:
             raise ValueError('unknown operation')
     except Refusal as exc:

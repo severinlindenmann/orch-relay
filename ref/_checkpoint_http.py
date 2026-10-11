@@ -6,12 +6,12 @@ from ref import orch_protocol_ref as R
 
 PREFIX = '/v2/workspaces/{ws}'
 ROUTES = [
-    ('genesis', 'PUT', PREFIX+'/genesis', 'host', 'W(g)', '401:bad_signature 403:restore_not_owner 409:genesis_mismatch'),
+    ('genesis', 'PUT', PREFIX+'/genesis', 'host', 'W(g)', '401:bad_signature 409:genesis_mismatch,restore_not_owner'),
     ('staging_page', 'PUT', PREFIX+'/staging/{source_hash}/{target_hash}/pages/{i}', 'host', 'W(g)', '409:staging_conflict 429:quota_exceeded'),
     ('staging_manifest', 'PUT', PREFIX+'/staging/{source_hash}/{target_hash}/manifest', 'host', 'W(g)', '409:staging_conflict 429:quota_exceeded'),
     ('baseline_post', 'POST', PREFIX+'/baselines', 'host', 'W(g)', '404:not_found 410:checkpoint_gone 429:quota_exceeded'),
     ('baseline_delete', 'DELETE', PREFIX+'/baselines/{hash}', 'client', 'W(g)|D(m)', ''),
-    ('checkpoint_put', 'PUT', PREFIX+'/checkpoint', 'host', 'W(g)', '400:wrong_suite,too_large 401:bad_signature 409:no_genesis,genesis_mismatch,chain_diverged,checkpoint_time,staging_incomplete,restore_invalid,restore_not_owner,restore_source_mismatch,restore_reused,restore_missing_revocation'),
+    ('checkpoint_put', 'PUT', PREFIX+'/checkpoint', 'host', 'W(g)', '400:wrong_suite,too_large 401:bad_signature 409:no_genesis,genesis_mismatch,chain_diverged,checkpoint_time,staging_incomplete,restore_invalid,restore_not_owner,restore_source_mismatch,restore_reused,restore_missing_revocation 429:quota_exceeded'),
     ('checkpoint_get', 'GET', PREFIX+'/checkpoint', 'client', 'D(m)|W', '404:not_found 410:checkpoint_gone'),
     ('transitions', 'GET', PREFIX+'/transitions', 'client', 'D(m)|W', '404:not_found 410:checkpoint_gone'),
     ('proof', 'GET', PREFIX+'/proof', 'client', 'D(m)|W', '404:not_found 410:checkpoint_gone'),
@@ -87,12 +87,27 @@ def enrich(output, v):
             if op == 'baseline_delete':
                 req.pop('json', None)
                 req['path'] = f"/v2/workspaces/{ws}/baselines/{inp['body']['hash']}"
+                req['query'] = {}
+                if inp.get('role') == 'member':
+                    # D(m) names the pairing offer it releases (review 10); W(g) releases any pin.
+                    req['query'] = {'offer_id': inp['body']['offer_id']}
+                else:
+                    req['headers']['Authorization'] = 'Bearer FAKE-workspace'
             case['given']['now_ms'] = inp['now_ms']
             case['response']['json'] = {k: value for k, value in step['expect'].items() if k != 'status'}
         # Additional executable success/refusal transcripts exercise all publication branches.
         for vector in v['checkpoints']['cases']:
             for i, step in enumerate(vector['steps']):
                 if step['input']['op'] != op:
+                    continue
+                if name == 'baseline_delete' and vector['name'] == 'baseline_member_release_needs_offer_id' and i == 3:
+                    c = copy.deepcopy(fixture['cases'][0])
+                    c['name'] = 'member_release_by_offer_id'
+                    c['request']['query'] = {'offer_id': step['input']['body']['offer_id']}
+                    c['request']['headers']['Authorization'] = 'Bearer FAKE-device'
+                    c['given'].update(vector={'section': 'checkpoints', 'name': vector['name'], 'step': i},
+                                      now_ms=step['input']['now_ms'])
+                    fixture['cases'].append(c)
                     continue
                 if name != 'checkpoint_put' or vector['name'] not in {
                     'workspace_restore_and_exact_retry', 'ticket_restore', 'bootstrap_null_source',

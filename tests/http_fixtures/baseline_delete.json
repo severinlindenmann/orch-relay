@@ -24,7 +24,7 @@
         "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/baselines/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
         "query": {},
         "headers": {
-          "Authorization": "Bearer FAKE-device",
+          "Authorization": "Bearer FAKE-workspace",
           "Orch-Holder": "1"
         }
       },
@@ -191,6 +191,36 @@
         "json": {
           "error": "fenced"
         }
+      }
+    },
+    {
+      "name": "member_release_by_offer_id",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790172800000,
+        "vector": {
+          "section": "checkpoints",
+          "name": "baseline_member_release_needs_offer_id",
+          "step": 3
+        }
+      },
+      "request": {
+        "method": "DELETE",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/baselines/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+        "query": {
+          "offer_id": "abababababababababababababababab"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {}
       }
     }
   ]
