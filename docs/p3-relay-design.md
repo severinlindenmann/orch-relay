@@ -415,8 +415,14 @@ challenge is consumed.
 - **Global:** ≤ 256 MiB of queued bodies and ≤ 4 096 concurrent long polls (503 `overloaded`).
 - **Anonymous pair long polls (G3 review 2/3):** ≤ 4 concurrent per canonical client address, ≤ 32 per
   IPv4 /24, ≤ 32 per IPv6 /56 and ≤ 64 per IPv6 /48 (429 `quota_exceeded`), and ≤ 512 in total, a
-  separate share of the 4 096 (503 `overloaded`). At most 16 polls (device or pair) wait on one
-  `(ws, rid)` (429 `quota_exceeded`).
+  separate share of the 4 096 (503 `overloaded`). At most 16 pair polls wait on one
+  `(ws, offer, rid)` (429 `quota_exceeded`).
+- **Authorization first (G3 review 3):** every bridge, pair, holder and certificate request is
+  authenticated, authorized and fenced by a read-only check before it takes the directory lock, a
+  write transaction, a rate window, a poll slot or a wakeup; only anonymous pairing is admitted
+  without a session, and it is charged only to its own windows. Host pair answers use separate
+  pairing windows with the same caps, and host response chunks are rate-limited per (workspace,
+  target device), never against the device's own 20 posts/s.
 - **Waiting long polls** hold no lock, transaction or worker thread. Commits that insert or change
   rows wake only the affected polls (new requests → that workspace's host; responses → that rid;
   revocation, logout, certificate store → that device's polls and the hosts of its workspaces;

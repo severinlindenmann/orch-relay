@@ -249,11 +249,13 @@ def prepare_fixture(client, name, case):
                     ("signed" if scenario == "already_signed" else "rejected",),
                 )
         elif scenario == "rate_limited":
-            d.windows[("pair-" + case["request"]["method"], "testclient", 60000)] = (
+            pair = "pair-host-" if name == "pair_host_post" else "pair-"
+            d.windows[(pair + case["request"]["method"], "testclient", 60000)] = (
                 NOW + 60000,
                 12000,
             )
             d.windows[("bridge-post", DEVICE, 1000)] = (NOW + 1000, 20)
+            d.windows[("bridge-host-post", (WS, DEVICE), 1000)] = (NOW + 1000, 20)
         elif scenario in ("overloaded", "quota_exceeded"):
             if case["request"]["method"] == "GET":
                 key = ("device", PRIMARY if name == "cert_requests_poll" else DEVICE)

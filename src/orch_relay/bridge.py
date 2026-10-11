@@ -120,7 +120,7 @@ PAIR_POLLS_PER_ADDRESS = 4  # per canonical client address (IPv4 or IPv6 /64)
 # Per allocation, so one cheap prefix cannot fill the pair pool: IPv4 /24, IPv6 /56 and /48.
 PAIR_POLL_GROUPS = ((4, 24, 32), (6, 56, 32), (6, 48, 64))
 DEVICE_POLLS = 6
-RID_POLLS = 16  # waiting polls per (workspace, rid): bounds one response's wake fan-out
+RID_POLLS = 16  # pair polls per (ws, offer, rid): bounds one answer's wake fan-out
 # Waiting polls re-check authorization at their earliest known expiry (session or
 # certificate) and otherwise on a jittered slow tick; commits wake them by key.
 POLL_TICK = (5.0, 7.0)
@@ -280,8 +280,12 @@ class Bridge:
             # Charged only after replay/coalescing checks, so identical resends are free.
             # Pairing headers name an unproven device; transaction() charges
             # pairing address/workspace/global limits, never device quotas.
-            if offer is None:
+            # Host answers are keyed by (workspace, target device): a host never spends the
+            # device's own rate, which spans all its workspaces.
+            if offer is None and direction == 1:
                 self.d.rate("bridge-post", device, 1000, 20, now)
+            elif offer is None:
+                self.d.rate("bridge-host-post", (ws, device), 1000, 20, now)
 
         if direction == 1:
             if seen:
@@ -501,6 +505,9 @@ class Bridge:
                     ).fetchone():
                         refuse("unknown_workspace", 401)
                     if first:
+                        # Authenticated host answers get their own windows, so anonymous
+                        # pairing traffic cannot exhaust them (same caps, own namespace).
+                        purpose = "pair-host-" if session else "pair-"
                         address = canonical_address(
                             peer, headers.get("x-forwarded-for"), d.trusted_proxy
                         )
@@ -515,7 +522,7 @@ class Bridge:
                             limits.append((ws, 60))
                         for charge in (False, True):
                             for identity, cap in limits:
-                                d.rate("pair-" + method, identity, 60000, cap, now, charge)
+                                d.rate(purpose + method, identity, 60000, cap, now, charge)
                 if route == "hold":
                     return self.hold(con, ws, P.parse_json(raw), now), True
                 if method == "POST":
@@ -634,11 +641,48 @@ class Bridge:
         finally:
             con.rollback()
 
-    def admission_session(self, headers):
+    def preauthorize(self, route, method, params, headers, raw):
+        """Read-only authorization before any lock, write transaction, slot or waiter.
+
+        Mirrors the transaction's refusal order up to fencing, so codes are unchanged; the
+        transaction re-checks everything. Returns (session or None, expiry_ms or None).
+        """
+        d = self.d
         con = self.connection("read")
         con.execute("BEGIN")
         try:
-            return self.d.authenticate(con, headers, self.d.clock()), self.expiry(con, headers)
+            now = d.clock()
+            ws = params.get("ws")
+            if route == "pair":
+                if not con.execute(
+                    "SELECT 1 FROM workspaces WHERE workspace_id=?", (ws,)
+                ).fetchone():
+                    refuse("unknown_workspace", 401)
+                if not (method == "POST" and len(raw) >= 6 and raw[5] == 2):
+                    return None, None  # anonymous by design; charged in pairing windows
+            session = d.authenticate(con, headers, now)
+            if route == "cert_requests":
+                if method == "GET":
+                    if session["kind"] != "device" or session["person_id"] != params["person"]:
+                        fail("not_eligible")
+                else:
+                    if session["kind"] != "workspace":
+                        fail("not_eligible")
+                    d.fence(con, headers, session["subject_id"], now)
+            elif route in ("cert_challenge", "cert_rejection"):
+                if session["kind"] != "device":
+                    fail("not_eligible")
+            elif route != "cert_request":
+                d.workspace_access(con, session, ws, write=route in ("hold", "host_poll", "pair"))
+                if (
+                    session["kind"] == "workspace"
+                    and route != "hold"
+                    and (method == "POST" or route == "host_poll")
+                ):
+                    d.fence(con, headers, ws, now)
+                if route == "bridge" and method == "GET" and session["kind"] != "device":
+                    fail("not_eligible")
+            return session, self.expiry(con, headers)
         finally:
             con.rollback()
 
@@ -679,8 +723,14 @@ class Bridge:
         """
         ws, rid = params.get("ws"), params.get("rid")
         if route in ("bridge", "pair") and method == "POST":
-            if ready:  # identical resends and replays insert nothing and wake nothing
-                self.wake(("rid", ws, rid) if raw[5] == 2 else ("ws", ws))
+            if not ready:  # identical resends and replays insert nothing and wake nothing
+                pass
+            elif raw[5] == 1:
+                self.wake(("ws", ws))
+            elif route == "pair":
+                self.wake(("pair", ws, params["offer"], rid))
+            else:
+                self.wake(("rid", ws, rid, raw[24:40].hex()))  # the target device only
         elif route in ("hold", "host_poll"):
             self.wake(("ws", ws))  # new generation fences; a new poll replaces the old one
         elif route == "cert_requests" and method == "POST":
@@ -702,10 +752,14 @@ class Bridge:
             return [("ws", params["ws"])]
         if route == "cert_requests":
             return [("person", params["person"]), ("subject", subject)]
-        keys = [("rid", params["ws"], params["rid"])]
-        if route == "bridge":
-            keys += [("subject", subject), ("members", params["ws"])]
-        return keys
+        if route == "pair":
+            return [("pair", params["ws"], params["offer"], params["rid"])]
+        # Device polls read only their own chunks, so they wait on their own key.
+        return [
+            ("rid", params["ws"], params["rid"], subject),
+            ("subject", subject),
+            ("members", params["ws"]),
+        ]
 
     async def handle(self, request, route):
         binary = route in ("bridge", "pair") and request.method == "POST"
@@ -750,6 +804,11 @@ class Bridge:
                 fail("malformed")
             params, headers = dict(request.path_params), dict(request.headers)
             peer = request.client.host if request.client else "unknown"
+            for value in params.values():
+                P.unhex(value)
+            # Authorize first: a refused request takes no lock, write transaction, budget,
+            # slot or waiter (anonymous pairing is charged only to its own windows).
+            session, expiry = self.preauthorize(route, request.method, params, headers, raw)
             if wait:
                 subject = None
                 if route == "pair":
@@ -758,14 +817,10 @@ class Bridge:
                     )
                     candidate = ("pair", address)
                 else:
-                    session, expiry = self.admission_session(headers)
                     subject = session["subject_id"]
                     candidate = (session["kind"], subject)
                 keys = self.wait_keys(route, params, subject)
-                if len(self.waiters.get(keys[0], ())) >= RID_POLLS and route in (
-                    "bridge",
-                    "pair",
-                ):
+                if route == "pair" and len(self.waiters.get(keys[0], ())) >= RID_POLLS:
                     fail("quota_exceeded")
                 self.admit(candidate)
                 key = candidate

@@ -768,10 +768,12 @@ def test_identical_resends_do_not_spend_post_rate(client):
     assert post_raw(client, binary("bridge_device_post")).status_code == 202
     assert post_raw(client, binary("bridge_host_post"), True).status_code == 202
     windows[("bridge-post", DEVICE, 1000)] = (NOW + 1000, 20)
+    windows[("bridge-host-post", (WS, DEVICE), 1000)] = (NOW + 1000, 20)
     # A coalesced request resend and a stored chunk replay are free.
     assert post_raw(client, binary("bridge_device_post")).status_code == 202
     assert post_raw(client, binary("bridge_host_post"), True).status_code == 202
     assert windows[("bridge-post", DEVICE, 1000)] == (NOW + 1000, 20)
+    assert windows[("bridge-host-post", (WS, DEVICE), 1000)] == (NOW + 1000, 20)
     # New work is still charged.
     fresh = bytearray(binary("bridge_device_post"))
     fresh[40:56] = bytes.fromhex("ab" * 16)

@@ -469,23 +469,18 @@ def test_identical_resends_and_replays_wake_nobody(client, monkeypatch):
         assert post(client, binary("bridge_device_post")).status_code == 202
     for _ in range(3):
         assert post(client, binary("bridge_host_post"), True).status_code == 202
-    assert woken == [(("ws", WS),), (("rid", WS, RID),)]
+    assert woken == [(("ws", WS),), (("rid", WS, RID, DEVICE),)]
 
 
-@pytest.mark.parametrize(
-    "path,headers",
-    [
-        (PAIR, {"X-Forwarded-For": "198.51.100.7"}),
-        (DEVICE_POLL, {"Authorization": "Bearer FAKE-device"}),
-    ],
-)
-def test_waiting_polls_per_rid_are_capped(client, path, headers):
+def test_waiting_pair_polls_per_rid_are_capped(client):
+    # Device polls on a rid are bounded by the per-device cap (they wait on own keys).
     bridge = client.app.state.bridge
+    key = ("pair", WS, CRID, RID)
     crowd = {object() for _ in range(16)}
-    bridge.waiters[("rid", WS, RID)] = crowd
-    r = client.get(path, params={"wait": 1}, headers=headers)
+    bridge.waiters[key] = crowd
+    r = client.get(PAIR, params={"wait": 1}, headers={"X-Forwarded-For": "198.51.100.7"})
     assert r.status_code == 429 and r.json() == {"error": "quota_exceeded"}
-    assert bridge.polls == {} and bridge.waiters == {("rid", WS, RID): crowd}
+    assert bridge.polls == {} and bridge.waiters == {key: crowd}
     bridge.waiters.clear()
 
 
@@ -586,3 +581,146 @@ def test_deadline_rebuild_reauthorizes_without_a_prior_check(client, monkeypatch
     monkeypatch.setattr(bridge, "transaction", slow_first)
     r = client.get(DEVICE_POLL, params={"wait": 1}, headers={"Authorization": "Bearer FAKE-device"})
     assert r.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "path,headers,status",
+    [
+        # A member device of another workspace (no membership here).
+        (f"/v2/workspaces/{'ab' * 16}/bridge/{RID}", {"Authorization": "Bearer FAKE-device"}, 403),
+        # A host with a stale holder generation.
+        (f"/v2/workspaces/{WS}/host/poll", {**HOST, "Orch-Holder": "7"}, 409),
+        # Someone else's cert queue.
+        (f"/v2/persons/{'cd' * 16}/cert-requests", {"Authorization": "Bearer FAKE-device"}, 403),
+        # An anonymous pair poll on an unknown workspace.
+        (f"/v2/workspaces/{'ab' * 16}/pair/{CRID}/{RID}", {}, 401),
+    ],
+)
+def test_unauthorized_wait_takes_no_slot_or_waiter(client, monkeypatch, path, headers, status):
+    bridge = client.app.state.bridge
+    admitted = []
+    monkeypatch.setattr(bridge, "admit", lambda key: admitted.append(key))
+    r = client.get(path, params={"wait": 1}, headers=headers)
+    assert r.status_code == status
+    assert admitted == [] and bridge.polls == {} and bridge.waiters == {}
+
+
+def test_responses_wake_only_the_target_devices_polls(client, monkeypatch):
+    # A co-member polling the same rid reads none of these chunks, so it is not woken.
+    bridge = client.app.state.bridge
+    sql(client, "INSERT INTO members VALUES (?,?,?,?)", (WS, PRIMARY, PERSON, P.cj(["look"])))
+    sql(
+        client,
+        "INSERT INTO sessions VALUES (?,?,?,?)",
+        (token_hash("FAKE-primary"), "device", PRIMARY, NOW + 900000),
+    )
+    assert post(client, binary("bridge_device_post")).status_code == 202
+    probed = []
+    probe = bridge.probe
+    monkeypatch.setattr(bridge, "probe", lambda *args: probed.append(args[3]) or probe(*args))
+    with ThreadPoolExecutor() as pool:
+        other = pool.submit(
+            client.get,
+            DEVICE_POLL,
+            params={"wait": 2},
+            headers={"Authorization": "Bearer FAKE-primary"},
+        )
+        wait_admitted(client)
+        time.sleep(0.3)
+        assert post(client, binary("bridge_host_post"), True).status_code == 202
+        time.sleep(0.3)
+        assert probed == []
+        assert other.result(timeout=5).json() == {"chunks": []}
+
+
+def test_host_pair_answers_not_blocked_by_anonymous_pair_windows(client):
+    from bridge_support import request, seen
+
+    d = client.app.state.directory
+    with closing(db.connect(d.path)) as con, con:
+        seen(con, binary("pair_device_post"))
+    # Anonymous traffic has exhausted the workspace and global pair-post windows.
+    d.windows[("pair-POST", WS, 60000)] = (NOW + 60000, 60)
+    d.windows[("pair-POST", "global", 60000)] = (NOW + 60000, 6000)
+    fixture = request("pair_host_post")
+    r = client.post(
+        fixture["path"],
+        content=P.unb64u(fixture["body_b64u"]),
+        headers={**fixture["headers"], "X-Forwarded-For": "203.0.113.5"},
+    )
+    assert r.status_code == 202, r.text
+
+
+def test_host_chunks_do_not_spend_the_devices_post_rate(client):
+    windows = client.app.state.directory.windows
+    assert post(client, binary("bridge_device_post")).status_code == 202
+    windows[("bridge-post", DEVICE, 1000)] = (NOW + 1000, 20)
+    for i in range(3):
+        chunk = bytearray(binary("bridge_host_post"))
+        chunk[72:80] = i.to_bytes(8, "big")
+        assert post(client, bytes(chunk), True).status_code == 202
+    assert windows[("bridge-post", DEVICE, 1000)] == (NOW + 1000, 20)
+    assert windows[("bridge-host-post", (WS, DEVICE), 1000)][1] == 3
+
+
+@pytest.mark.parametrize(
+    "method,path,headers,body,status",
+    [
+        ("POST", DEVICE_POLL, {}, "bridge_device_post", 401),
+        ("POST", DEVICE_POLL, {**HOST, "Orch-Holder": "7"}, "bridge_host_post", 409),
+        (
+            "GET",
+            f"/v2/workspaces/{'ab' * 16}/bridge/{RID}",
+            {"Authorization": "Bearer FAKE-device"},
+            None,
+            403,
+        ),
+        ("GET", f"/v2/workspaces/{WS}/host/poll", {}, None, 401),
+        (
+            "POST",
+            f"/v2/workspaces/{WS}/host/hold",
+            {"Authorization": "Bearer FAKE-device"},
+            {},
+            403,
+        ),
+        ("POST", f"/v2/workspaces/{'ab' * 16}/pair/{CRID}/{RID}", {}, "pair_device_post", 401),
+        (
+            "POST",
+            f"/v2/workspaces/{WS}/pair/{CRID}/{RID}",
+            {**HOST, "Orch-Holder": "7"},
+            "pair_host_post",
+            409,
+        ),
+        (
+            "POST",
+            f"/v2/persons/{PERSON}/cert-requests",
+            {"Authorization": "Bearer FAKE-device"},
+            {},
+            403,
+        ),
+        ("POST", f"/v2/cert-requests/{CRID}/challenge", {}, {}, 401),
+    ],
+)
+def test_unauthorized_requests_take_no_lock_or_budget(
+    client, monkeypatch, method, path, headers, body, status
+):
+    # Refusals that need no data come from a read-only check: no Directory.lock, no
+    # BEGIN IMMEDIATE + collect(), no rate window, no wake.
+    bridge = client.app.state.bridge
+    d = client.app.state.directory
+    calls, woken = [], []
+    monkeypatch.setattr(bridge, "transaction", lambda *args: calls.append(args))
+    monkeypatch.setattr(bridge, "wake", lambda *keys: woken.append(keys))
+    windows = dict(d.windows)
+    if isinstance(body, str):
+        kwargs = {
+            "content": binary(body),
+            "headers": {**headers, "Content-Type": "application/octet-stream"},
+        }
+    elif body is not None:
+        kwargs = {"json": body, "headers": headers}
+    else:
+        kwargs = {"headers": headers}
+    r = client.request(method, path, **kwargs)
+    assert r.status_code == status, r.text
+    assert calls == [] and woken == [] and d.windows == windows
