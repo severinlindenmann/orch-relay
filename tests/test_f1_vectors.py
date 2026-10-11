@@ -1520,6 +1520,7 @@ def transition_ok(held, offered, restore, applied, known, card=CARD_DELEGATION):
         if (
             restore["T"] != offered
             or C != held
+            # Redundant while it holds: held only ever comes from an accepted (verified) offer, and C == held.
             or (C is not None and not workspace_checkpoint_ok(C))
             or e["source"] != (checkpoint_ref(C) if C else None)
             or e["id"] in applied
@@ -1529,7 +1530,9 @@ def transition_ok(held, offered, restore, applied, known, card=CARD_DELEGATION):
             or e["prev"] != e["head"]
             or not host_ok_event(e, CP["wsk_pub"], CP["workspace_id"], log)
             or not person_ok(e, cert, CP["workspace_id"], log)
-            or R.cj(delegation) != R.cj(card)
+            # §19.8 R0: the card's delegation content (`o` equal), verified under the owner PK below; an owner
+            # re-signing the same content is the same delegation.
+            or R.cj(delegation["o"]) != R.cj(card["o"])
             or "ok" not in R.verify_delegation(S, delegation, pk)
             or delegation["o"]["workspace_id"] != CP["workspace_id"]
             or delegation["o"]["wsk_pub"] != CP["wsk_pub"]
@@ -1545,13 +1548,17 @@ def transition_ok(held, offered, restore, applied, known, card=CARD_DELEGATION):
         ):
             return "chain.diverged", None
         carried = {x["revocation"]["o"]["device_id"]: x for x in e["revocations"]}
-        # Completeness (R4) applies to workspace restores only; a ticket restore carries [].
-        for x in known if log == "workspace" else ():
+        for x in known:
             r = x["revocation"]
             device = r["o"]["device_id"]
+            # §19.8 R1: the signer is unrevoked by every revocation the receiver holds, for every log.
+            if device == cert["o"]["device_id"]:
+                return "chain.diverged", None
+            # Completeness (R4) applies to workspace restores only; a ticket restore carries [].
+            if log != "workspace":
+                continue
             if (
-                device == cert["o"]["device_id"]
-                or device not in carried
+                device not in carried
                 or strength(carried[device]["revocation"]) < strength(r)
                 # F1 §5.10 / R4: evidence for a known device is from its known person (and stored key).
                 or carried[device]["revocation"]["o"]["person_id"] != r["o"]["person_id"]
@@ -1596,8 +1603,8 @@ def checkpoint_offer(
 ):
     """A receiver with held H (or None), relay clock `now`, and the workspace card's delegation.
 
-    `checkpoint_time` is the relay's refusal of an `o.at` beyond its clock + 300 s (P3-D25); the relay reports
-    it as 409 `checkpoint_time` for a plain publication and `restore_invalid` for a restore.
+    `checkpoint_time` is the relay's refusal of an `o.at` beyond its clock + 300 s (P3-D25, relay §19.8 R3a):
+    409 `checkpoint_time` for every publication, restores included; `o.at == clock + 300 s` is accepted.
     """
     if not workspace_checkpoint_ok(offered):
         return "chain.diverged", None
@@ -2708,15 +2715,42 @@ def test_restore_delegation_of_another_person():
     assert offer_local_transition(c, card=r["delegation"]) == accepted(c)
 
 
-def test_restore_delegation_must_be_byte_identical_to_the_card():
+def test_restore_delegation_must_carry_the_card_content():
     c = local_transition()
-    # Same owner, workspace and WSK, validly PK-signed, but not the card's delegation.
+    # Same owner, workspace and WSK, validly PK-signed, but other content than the card's delegation.
     other = reissue_delegation(issued_ms=CARD_DELEGATION["o"]["issued_ms"] + 1)
     assert "ok" in R.verify_delegation(S, other, R.unb64u(c["restore"]["pk_pub"]))
     c["restore"]["delegation"] = other
     resign_transition(c)
     assert offer_local_transition(c) == ("chain.diverged", None)
     assert offer_local_transition(c, card=other) == accepted(c)
+
+
+def randomized_signature(pk_name, signed):
+    """A fresh (non-RFC 6979) P-256 signature over the same object, as a real owner device would make."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+
+    kind = signed["o"]["kind"]
+    msg = R.LABELS[R.KIND_LABEL[kind]].encode() + R.cj(signed["o"])
+    r, s_ = decode_dss_signature(published_f1_key(pk_name).sign(msg, ec.ECDSA(hashes.SHA256())))
+    return {"o": signed["o"], "sig": R.b64u(r.to_bytes(32, "big") + s_.to_bytes(32, "big"))}
+
+
+def test_restore_delegation_owner_resignature_is_the_same_delegation():
+    """§19.8 R0: `o` equal to the card's and verified under the owner PK; the signature bytes may differ."""
+    c = local_transition()
+    resigned = randomized_signature("pk_sev", CARD_DELEGATION)
+    assert resigned["sig"] != CARD_DELEGATION["sig"]
+    assert "ok" in R.verify_delegation(S, resigned, R.unb64u(c["restore"]["pk_pub"]))
+    c["restore"]["delegation"] = resigned
+    resign_transition(c)
+    assert offer_local_transition(c) == accepted(c)
+    # The card's content signed by another key is refused (verify under the owner PK).
+    c["restore"]["delegation"] = randomized_signature("pk_lena", CARD_DELEGATION)
+    resign_transition(c)
+    assert offer_local_transition(c) == ("chain.diverged", None)
 
 
 def owner_policy_defect(c, defect):
@@ -3026,6 +3060,16 @@ def test_ticket_restore_ws_seq_is_committed_by_the_target(ws_seq, ok):
     assert offer_local_transition(c) == (accepted(c) if ok else ("chain.diverged", None))
 
 
+@pytest.mark.parametrize("reason", ["compromised", "lost", "retired"])
+def test_ticket_restore_signer_known_revoked(reason):
+    """§19.8 R1: the signer must be unrevoked by every held revocation, on the ticket path too (round 2, 1)."""
+    c = ticket_transition(3)
+    assert offer_local_transition(c) == accepted(c)
+    known = [local_revocation_evidence(c["restore"]["device_cert"], reason=reason)]
+    assert revocation_evidence_ok(known[0])
+    assert offer_local_transition(c, known=known) == ("chain.diverged", None)
+
+
 def test_ticket_restore_is_not_checked_for_revocation_completeness():
     """F1 §5.10 / R4: a ticket restore carries []; held revocations do not refuse it."""
     known = local_transition("relay_requires_every_held_revocation")["known_revocations"]
@@ -3109,3 +3153,11 @@ def test_restore_seq_true_is_not_seq_one():
     assert not restore_schema_ok(e, "workspace")
     e["seq"] = 1
     assert restore_schema_ok(e, "workspace")
+
+
+@pytest.mark.parametrize("note", [[], {}, 5])
+def test_restore_note_must_be_a_string(note):
+    """A non-string note is refused, not an uncaught AttributeError from `note.encode()`."""
+    e = local_transition()["restore"]["event"]
+    e["note"] = note
+    assert restore_schema_ok(e, "workspace") is False
