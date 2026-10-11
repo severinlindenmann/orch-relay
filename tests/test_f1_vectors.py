@@ -5,13 +5,15 @@ Nothing here imports orch-core. Every expected value is recomputed from the F1 t
 docs/architecture/orch-v2-ticket-format.md: section numbers are quoted in the tests) using the relay reference
 (`ref.orch_protocol_ref`: cj, strict parse, labels) and the helpers below.
 
-Not verifiable from the F1 text alone, or not in the shared files at all, is listed in the PR description.
+Verification follows the pinned F1 text; no orch-core code is imported.
 """
 
 import hashlib
 import json
 import os
 import re
+import subprocess
+import sys
 import unicodedata
 from pathlib import Path
 
@@ -147,6 +149,26 @@ def policy_canon(p: dict) -> dict:
 
 
 def policy_hash(gate: str, p: dict) -> str:
+    tokens = {"owner", "maintainer", "member", "ticket_owner", "assignees", "reviewers", "watchers"}
+    applies = p.get("applies")
+    if (
+        set(p) != {"approvers", "count", "not", "applies", "independent"}
+        or not p["approvers"]
+        or not set(p["approvers"]) <= tokens
+        or not set(p["not"]) <= tokens
+        or type(p["count"]) is not int
+        or p["count"] < 1
+        or type(p["independent"]) is not bool
+        or not (
+            applies in ("all", "off")
+            or isinstance(applies, list)
+            and applies
+            and set(applies) <= {"feature", "bug", "chore", "spike", "epic"}
+        )
+        or gate == "code"
+        and (not p["independent"] or "assignees" not in p["not"])
+    ):
+        raise ValueError("invalid policy")
     return hl(L["h_policy"], cjt({"gate": gate, "policy": policy_canon(p)}))
 
 
@@ -393,7 +415,8 @@ def test_gate_input_has_the_shape_of_the_f1_table(c):
     assert set(G) == G_KEYS
     assert (G["schema"], G["hash_v"]) == ("orch.ticket/2", 1)
     assert re.fullmatch(r"[0-9a-f]{32}", G["workspace_id"])
-    assert set(G["sections"]) <= G_SECTIONS[g]
+    assert {k for k in G["sections"] if "." not in k} <= G_SECTIONS[g]
+    assert all(k.split(".")[0] in G["addon_packages"] for k in G["sections"] if "." in k)
     assert all(HASH_RE.fullmatch(h) for h in G["sections"].values())
     assert set(G["fields"]) >= {"ticket_type", "size", "acceptance", "links", "addons"}
     assert (G["fields"]["links"] is None) == (g in ("requirements", "plan"))
@@ -607,15 +630,6 @@ def test_repo_identities_compare_ignoring_ascii_case(pair):
     assert a.lower() == b.lower()
 
 
-@pytest.mark.skip(
-    reason="the shared repo_identity.json holds only canonical-form acceptance and refusal; the raw "
-    "remote mapping cases of F1 §11.5 (ssh with/without port, scp-like, userinfo removal, "
-    "file:// to local:) have no vectors yet, so the mapping has nothing to verify against"
-)
-def test_repo_identity_mapping_from_raw_remote_urls():
-    raise AssertionError
-
-
 # --- byte identity, the reference's own question hash, deep input -----------------------------------------------
 
 
@@ -626,8 +640,10 @@ def test_vector_files_match_the_recorded_sha256():
         for line in (F1 / "SOURCE").read_text().splitlines()
         if line.startswith("sha256:")
     )
+    assert "Commit: 1c6b3ed34af8e840bb274d1d3591fe1876a21634" in (F1 / "SOURCE").read_text()
+    assert {p.name for p in F1.iterdir()} == {n + ".json" for n in FILE_KEYS} | {"SOURCE"}
     files = sorted(p.name for p in F1.glob("*.json"))
-    assert files == sorted(rec) and len(files) == 7
+    assert files == sorted(rec) and set(files) == {name + ".json" for name in FILE_KEYS}
     for name in files:
         assert "sha256:" + hashlib.sha256((F1 / name).read_bytes()).hexdigest() == rec[name]
 
@@ -655,3 +671,826 @@ def test_very_deep_input_is_a_value_error_not_a_recursion_error():
     deep = b"[" * 200000 + b"]" * 200000
     with pytest.raises(ValueError):
         R.parse_json(deep)
+
+
+# Exact upstream family and top-level field inventory.
+FILE_KEYS = {
+    "genesis": ["genesis", "note", "pins", "refused", "valid", "workspace_id"],
+    "canon": ["depth"],
+    "labels": ["labels"],
+    "restore": ["pins", "scenarios"],
+    "effective_policy": ["cases", "pins", "scenarios"],
+    "section_text": ["cases", "note", "pins"],
+    "checkpoint": [
+        "divergence",
+        "forged",
+        "genesis",
+        "note",
+        "pins",
+        "ticket_checkpoint",
+        "ticket_log",
+        "ticket_offers",
+        "workspace_checkpoint",
+        "workspace_id",
+        "workspace_log",
+        "workspace_n_held",
+        "workspace_n_offers",
+        "workspace_offers",
+        "wsk_pub",
+    ],
+    "gate_hash": ["gate_hash", "note", "pins"],
+    "artifact_refs": ["cases", "pins", "regex"],
+    "hashes": [
+        "artifact_digest",
+        "grant_secret_hash",
+        "grant_secret_hash_refused",
+        "people_hash",
+        "pins",
+        "policy_hash",
+        "policy_hash_refused",
+        "question_hash",
+        "question_hash_refused",
+        "question_id",
+        "section_hash",
+        "section_hash_refused",
+        "value_hash",
+        "value_hash_refused",
+    ],
+    "replay": ["genesis", "name", "now", "pins", "steps", "workspace_id"],
+    "refusal_order": ["pins", "scenarios"],
+    "questions": ["pins", "scenarios"],
+    "signatures": [
+        "host_refused",
+        "host_unsigned_ticket_event",
+        "keys",
+        "note",
+        "person_accepted_despite_change",
+        "person_refused",
+        "pins",
+        "ticket_event",
+        "workspace_id",
+        "ws_event",
+    ],
+    "chain": [
+        "events",
+        "heads",
+        "host_signing_hex",
+        "lines_hex",
+        "log",
+        "log_head",
+        "non_cj_lines",
+        "tampered_event_head",
+        "ticket_event_signing_hex",
+        "workspace_id",
+        "ws_event",
+        "ws_event_signing_hex",
+        "ws_log_host_signing_hex",
+    ],
+    "tamper": [
+        "cases",
+        "genesis",
+        "heads",
+        "now",
+        "pins",
+        "ticket_events",
+        "ticket_lines_hex",
+        "workspace_events",
+        "workspace_id",
+        "workspace_lines_hex",
+    ],
+    "generation": ["pins", "scenarios"],
+    "devices": ["pins", "scenarios"],
+    "repo_identity": ["mapping", "mapping_note", "ok", "pins", "refused", "same"],
+    "approvals": ["pins", "scenarios"],
+    "index": ["files", "note"],
+    "revocation": ["pins", "scenarios"],
+    "text": ["kept_invisible", "normalize", "refused", "refused_not_normalised", "unicode_version"],
+    "status": ["pins", "scenarios"],
+}
+
+
+@pytest.mark.parametrize("name", sorted(FILE_KEYS))
+def test_family_parse_and_shape(name):
+    assert sorted(load(name)) == FILE_KEYS[name]
+
+
+# --- Real P-256 signatures (§5.3, §5.5), independently built signed bytes ---
+
+S = R.SUITES[2]
+SIG = load("signatures")
+
+
+def signed_event_bytes(e, ws, log, host=False):
+    omit = ("host_sig",) if host else SIGNED_OUT
+    label = (
+        "sig_host_event" if host else "sig_ws_event" if log == "workspace" else "sig_ticket_event"
+    )
+    return L[label].encode() + cjt(
+        {
+            "contract": 1,
+            "suite": 2,
+            "workspace_id": ws,
+            "log": log,
+            "event": {k: v for k, v in e.items() if k not in omit},
+        }
+    )
+
+
+def signature_ok(pub, signature, data):
+    try:
+        return S.verify(R.unb64u(pub, 65), R.unb64u(signature, 64), data)
+    except (ValueError, TypeError):
+        return False
+
+
+def person_ok(e, cert, ws, log):
+    return cert is not None and signature_ok(
+        cert["o"]["dk_sig_pub"], e.get("sig"), signed_event_bytes(e, ws, log)
+    )
+
+
+def host_ok_event(e, wsk, ws, log):
+    return signature_ok(wsk, e.get("host_sig"), signed_event_bytes(e, ws, log, True))
+
+
+@pytest.mark.parametrize("kind", ["ticket_event", "ws_event"])
+def test_real_event_signatures(kind):
+    c = SIG[kind]
+    e, ws, log = c["event"], SIG["workspace_id"], c["log"]
+    assert signed_event_bytes(e, ws, log).hex() == c["person_signing_hex"]
+    assert signed_event_bytes(e, ws, log, True).hex() == c["host_signing_hex"]
+    assert person_ok(e, c["cert"], ws, log)
+    assert host_ok_event(e, SIG["keys"]["wsk"]["pub_b64u"], ws, log)
+    assert head(e) == c["head"]
+
+
+@by_name(SIG["person_refused"])
+def test_person_signature_refused(c):
+    assert not person_ok(c["event"], c["cert"], c["workspace_id"], c["log"])
+
+
+@by_name(SIG["person_accepted_despite_change"])
+def test_person_signature_unsigned_fields(c):
+    assert person_ok(c["event"], c["cert"], c["workspace_id"], c["log"])
+
+
+@by_name(SIG["host_refused"])
+def test_host_signature_refused(c):
+    assert not host_ok_event(c["event"], c["wsk_pub"], c["workspace_id"], c["log"])
+
+
+def test_host_signature_required():
+    assert not host_ok_event(
+        SIG["host_unsigned_ticket_event"],
+        SIG["keys"]["wsk"]["pub_b64u"],
+        SIG["workspace_id"],
+        SIG["ticket_event"]["log"],
+    )
+
+
+# §5.7: raw config values, no URL library normalization or insteadOf expansion.
+def map_remote(raw, name, additional=()):
+    local = "local:" + name
+    if not raw or additional:
+        return local
+    m = re.fullmatch(r"(https|ssh)://([^/]+)(/.*)", raw)
+    if m:
+        scheme, authority, path = m.groups()
+        authority = authority.rsplit("@", 1)[-1]
+        hp = authority.split(":")
+        host = hp[0].lower()
+        if len(hp) > 2:
+            return local
+        port = hp[1] if len(hp) == 2 else None
+        if port == ("443" if scheme == "https" else "22"):
+            port = None
+    else:
+        m = re.fullmatch(r"(?:[^/@]+@)?([^/:]+):([^/].*)", raw)
+        if not m:
+            return local
+        host, path = m.groups()
+        host, path, port = host.lower(), "/" + path, None
+    path = path.removesuffix("/").removesuffix(".git")
+    mapped = "https://" + host + (":" + port if port is not None else "") + path
+    return mapped if canonical_identity(mapped) else local
+
+
+@by_name(R_ID["mapping"])
+def test_repo_identity_mapping(c):
+    assert map_remote(c["raw"], c["repo_name"], c.get("local_git_add", ())) == c["canonical"]
+
+
+# §5.11 genesis, including the different append/replay signature precedence.
+def milliseconds(at):
+    from datetime import datetime
+
+    return int(datetime.fromisoformat(at).timestamp() * 1000)
+
+
+def genesis_result(e, ws, replay=False):
+    cert, owner, delegation = e["device_cert"], e["owner"], e["delegation"]
+    if not host_ok_event(e, e["wsk_pub"], ws, "workspace"):
+        return "chain.broken"
+    good_sig = person_ok(e, cert, ws, "workspace")
+    if replay and not good_sig:
+        return "chain.broken"
+    if e["roster_v"] != 0 or e["seq"] != 1:
+        return "genesis.invalid"
+    pk = R.unb64u(owner["pk_pub"])
+    pid = R.person_id(S, pk).hex()
+    if not (
+        pid == delegation["o"]["owner_person_id"] == cert["o"]["person_id"]
+        and owner["person"] == "p_" + pid
+    ):
+        return "genesis.invalid"
+    if "ok" not in R.verify_delegation(S, delegation, pk):
+        return "genesis.invalid"
+    if delegation["o"]["workspace_id"] != ws or delegation["o"]["wsk_pub"] != e["wsk_pub"]:
+        return "genesis.invalid"
+    if (
+        "ok" not in R.verify_cert(S, cert, pk, milliseconds(e["at"]))
+        or "operate" not in cert["o"]["scopes_max"]
+        or e["actor"]["device"] != "d_" + cert["o"]["device_id"]
+    ):
+        return "genesis.invalid"
+    return "ok" if good_sig else "sig.invalid"
+
+
+@by_name([load("genesis")["valid"]] + load("genesis")["refused"])
+def test_genesis_checks(c):
+    e, ws = c["event"], load("genesis")["workspace_id"]
+    assert head(e) == c["head"]
+    for replay in (False, True):
+        assert genesis_result(e, ws, replay) == c.get("replay" if replay else "append", "ok")
+
+
+# §5.5: never sort lines; report the physical position, not the supplied seq.
+def chain_break(events, log, ws, wsk, certs, ws_height):
+    certs = dict(certs)
+    prev, order = None, (0, "")
+    for pos, e in enumerate(events, 1):
+        if e["seq"] != pos or e["prev"] != prev or not host_ok_event(e, wsk, ws, log):
+            return pos
+        if log != "workspace":
+            current = (e["ws_seq"], e["at"])
+            if current < order or e["ws_seq"] > ws_height:
+                return pos
+            order = current
+        if e["actor"]["kind"] == "person":
+            cert = certs.get(e["actor"]["device"])
+            if e["type"] == "workspace.created":
+                cert = e["device_cert"]
+            if e["type"] == "device.added" and e["actor"]["device"] == e["device"]:
+                cert = e["cert"]
+            if not person_ok(e, cert, ws, log):
+                return pos
+        if "device_cert" in e:
+            certs["d_" + e["device_cert"]["o"]["device_id"]] = e["device_cert"]
+        if e["type"] == "device.added":
+            certs[e["device"]] = e["cert"]
+        prev = head(e)
+    return None
+
+
+TAMPER = load("tamper")
+
+
+@by_name(TAMPER["cases"])
+def test_signed_chain_tampering(c):
+    workspace = TAMPER["workspace_events"]
+    certs = {
+        "d_" + e["device_cert"]["o"]["device_id"]: e["device_cert"]
+        for e in workspace
+        if "device_cert" in e
+    }
+    broken = chain_break(
+        c["events"],
+        c["log"],
+        TAMPER["workspace_id"],
+        workspace[0]["wsk_pub"],
+        certs if c["log"] != "workspace" else {},
+        len(workspace),
+    )
+    assert broken == c["chain_broken_at"]
+    if c["log"] == "workspace":
+        stopped = {
+            uid: next((i for i, e in enumerate(events, 1) if e["ws_seq"] >= broken), None)
+            for uid, events in TAMPER["ticket_events"].items()
+        }
+        assert stopped == c["ticket_events_stopped_from"]
+        # The same stop, found by the reader itself: ticket logs checked against ws height broken - 1.
+        for uid, events in TAMPER["ticket_events"].items():
+            assert (
+                chain_break(
+                    events, uid, TAMPER["workspace_id"], workspace[0]["wsk_pub"], certs, broken - 1
+                )
+                == stopped[uid]
+            )
+
+
+def test_signed_chain_heads_and_lines():
+    for log, events in {"workspace": TAMPER["workspace_events"], **TAMPER["ticket_events"]}.items():
+        assert [head(e) for e in events] == TAMPER["heads"][log]
+        key = "workspace_lines_hex" if log == "workspace" else "ticket_lines_hex"
+        assert [(R.cj(e) + b"\n").hex() for e in events] == TAMPER[key]
+
+
+# --- Checkpoint receivers (§5.10). Restore authorization is tested separately. ---
+CP = load("checkpoint")
+
+
+def checkpoint_ok(signed):
+    o = signed["o"]
+    common = {"v", "suite", "kind", "workspace_id", "at"}
+    fields = (
+        {"uid", "seq", "head"}
+        if o["kind"] == "ticket_checkpoint"
+        else {"genesis", "n", "workspace_log", "tickets"}
+    )
+    return (
+        set(signed) == {"o", "sig"}
+        and set(o) == common | fields
+        and o["v"] == 2
+        and o["suite"] == 2
+        and o["workspace_id"] == CP["workspace_id"]
+        and (o["kind"] != "workspace_checkpoint" or o["genesis"] == CP["genesis"])
+        and signature_ok(CP["wsk_pub"], signed["sig"], L["sig_checkpoint"].encode() + cjt(o))
+    )
+
+
+@pytest.mark.parametrize("kind", ["ticket_checkpoint", "workspace_checkpoint"])
+def test_checkpoint_signed_objects(kind):
+    c = CP[kind]
+    assert checkpoint_ok(c["signed"])
+    assert (L["sig_checkpoint"].encode() + cjt(c["signed"]["o"])).hex() == c["signing_hex"]
+
+
+@by_name(CP["forged"])
+def test_forged_checkpoint(c):
+    assert not checkpoint_ok(c["checkpoint"])
+
+
+def height_conflict(held, offered):
+    return offered["seq"] < held["seq"] or (
+        offered["seq"] == held["seq"] and offered["head"] != held["head"]
+    )
+
+
+@by_name(CP["ticket_offers"])
+def test_ticket_checkpoint_offer(c):
+    assert (
+        "chain.diverged" if height_conflict(CP["ticket_checkpoint"]["signed"]["o"], c) else "ok"
+    ) == c["expect"]
+
+
+@by_name(CP["workspace_offers"])
+def test_workspace_checkpoint_log_offer(c):
+    offered = {"seq": c["log_seq"], "head": c["head"]}
+    assert (
+        "chain.diverged"
+        if height_conflict(CP["workspace_checkpoint"]["signed"]["o"]["workspace_log"], offered)
+        else "ok"
+    ) == c["expect"]
+
+
+@by_name(CP["divergence"])
+def test_checkpoint_against_local_log(c):
+    h = CP["ticket_checkpoint"]["signed"]["o"]
+    heads = c["ticket_heads"]
+    diverged = len(heads) < h["seq"] or heads[h["seq"] - 1] != h["head"]
+    assert (["chain.diverged"] if diverged else []) == c["expect"]
+
+
+def checkpoint_offer(held, offered, restore=None, applied=()):
+    """Height-only receiver; restore metadata is supplied after owner verification (§5.10)."""
+    if held is None:
+        return ("ok", None) if checkpoint_ok(offered) else ("chain.diverged", None)
+    h, o = held["o"], offered["o"]
+    if not checkpoint_ok(offered):
+        return "chain.diverged", None
+    if held == offered:
+        return "ok", None
+    old = {"workspace": h["workspace_log"], **h["tickets"]}
+    new = {"workspace": o["workspace_log"], **o["tickets"]}
+    # §5.10: a missing held uid is divergence only in an offer with a higher n; an older checkpoint
+    # naturally lacks tickets created after it (stale delivery comes first).
+    if o["n"] > h["n"] and not old.keys() <= new.keys():
+        return "chain.diverged", None
+    # A uid H lacks counts as seq 0 there, so a lower-n offer naming one has a higher seq: divergence.
+    if o["n"] < h["n"] and new.keys() - old.keys():
+        return "chain.diverged", None
+    shared = old.keys() & new.keys()
+    conflicts = {log for log in shared if height_conflict(old[log], new[log])}
+    if restore and o["n"] > h["n"] and restore["log"] in conflicts:
+        log = restore["log"]
+        abandoned, prior = restore["abandoned"], old[log]
+        valid = (
+            restore["id"] not in applied
+            and conflicts == {log}
+            and restore["from_seq"] < prior["seq"] <= abandoned["seq"]
+            and (prior["seq"] != abandoned["seq"] or prior["head"] == abandoned["head"])
+            and new[log]["seq"] >= restore["from_seq"] + 1
+        )
+        return ("ok", restore["id"]) if valid else ("chain.diverged", None)
+    same_height_fork = any(
+        new[k]["seq"] == old[k]["seq"] and new[k]["head"] != old[k]["head"] for k in shared
+    )
+    if same_height_fork:
+        return "chain.diverged", None
+    if o["n"] > h["n"] and not conflicts:
+        return "ok", None
+    if o["n"] < h["n"] and all(new[k]["seq"] <= old[k]["seq"] for k in shared):
+        return "ignored", None
+    return ("ok", None) if o == h else ("chain.diverged", None)
+
+
+@by_name(CP["workspace_n_offers"])
+def test_workspace_checkpoint_receiver(c):
+    result, recorded = checkpoint_offer(
+        CP["workspace_n_held"], c["checkpoint"], c.get("restore"), c.get("applied", ())
+    )
+    assert result == c["expect"]
+    assert recorded == c.get("recorded")
+
+
+# --- Stateful append verification for the shared protocol scenarios ---
+# This deliberately implements only the event types exercised below. Unknown types fail,
+# rather than silently receiving an 'ok'. No expected result is passed into the model.
+
+
+class F1State:
+    def __init__(self, ws):
+        self.ws = ws
+        self.wsk = None
+        self.logs = {}
+        self.seen = {}
+        self.members = {}
+        self.certs = {}
+        self.removed = set()
+        self.revoked = set()
+        self.revocations = []
+        self.roster = 0
+        self.questions = {}
+        self.answers = {}
+        self.owners = {}
+        self.grants = {}
+        self.restore_start = None
+        self.restore_end = None
+        self.restore_open = False
+        self.last_order = None
+
+    def cert_valid(self, cert, at):
+        o = cert["o"]
+        member = self.members.get("p_" + o["person_id"])
+        return (
+            member is not None
+            and "d_" + o["device_id"] not in self.removed | self.revoked
+            and "ok" in R.verify_cert(S, cert, R.unb64u(member["pk_pub"]), milliseconds(at))
+        )
+
+    def judge(self, e, log):
+        t, a = e["type"], e["actor"]
+        lines = self.logs.get(log, [])
+        # §5.11 steps 1–4, in order. At append, person signature is step 5.
+        if e["seq"] != len(lines) + 1 or e["prev"] != (head(lines[-1]) if lines else None):
+            return "chain.broken"
+        wsk = self.wsk if self.wsk is not None else e.get("wsk_pub")
+        if not host_ok_event(e, wsk, self.ws, log):
+            return "chain.broken"
+        if log != "workspace":
+            current = (e["ws_seq"], e["at"], log, e["seq"])
+            if (
+                e["ws_seq"] > len(self.logs.get("workspace", []))
+                or (self.last_order and current < self.last_order)
+                or (
+                    self.restore_start is not None
+                    and self.restore_start <= e["ws_seq"] < self.restore_end
+                )
+            ):
+                return "chain.bad_ws_seq"
+        if e["id"] in self.seen.get(log, set()):
+            return "event.duplicate_id"
+        if (not lines and e["based_on"] is not None) or (
+            lines and e["based_on"] not in {head(x) for x in lines}
+        ):
+            return "event.bad_base"
+        if log != "workspace":
+            if not lines and t != "ticket.created":
+                return "ticket.unknown"
+            if lines and t == "ticket.created":
+                return "ticket.exists"
+        workspace_types = {
+            "workspace.created",
+            "member.added",
+            "device.added",
+            "device.removed",
+            "device.revoked",
+            "settings.changed",
+            "grant.issued",
+            "restore",
+        }
+        ticket_types = {
+            "ticket.created",
+            "log.added",
+            "question.asked",
+            "question.answered",
+            "restore",
+        }
+        if t not in (workspace_types if log == "workspace" else ticket_types):
+            return "event.unknown_type"
+        if a["kind"] != "person" and not (
+            t == "device.revoked"
+            and a["kind"] == "host"
+            or t in {"question.asked", "log.added"}
+            and a["kind"] == "agent"
+        ):
+            return "event.bad_actor"
+        if t == "workspace.created":
+            if self.wsk is not None:
+                return "genesis.invalid"
+            return genesis_result(e, self.ws)
+        if self.wsk is None:
+            return "genesis.invalid"
+        if a["kind"] == "person":
+            member = self.members.get(a["id"])
+            if member is None:
+                return "member.unknown"
+            cert = self.certs.get(a["device"])
+            recovery = t == "device.added" and a["device"] == e["device"]
+            if cert is None and recovery:
+                active = any(
+                    c["o"]["person_id"] == a["id"][2:] and self.cert_valid(c, e["at"])
+                    for c in self.certs.values()
+                )
+                if active:
+                    return "device.unknown"
+                cert = e["cert"]
+                # Recovery cert checks have the device.added refusal codes.
+                result = self.added_cert_result(e)
+                if result != "ok":
+                    return result
+            if cert is None or "p_" + cert["o"]["person_id"] != a["id"]:
+                return "device.unknown"
+            if not self.cert_valid(cert, e["at"]):
+                return "device.invalid"
+            required = (
+                "operate"
+                if t in {"member.added", "settings.changed", "grant.issued", "restore"}
+                else "decide"
+            )
+            if required not in cert["o"]["scopes_max"]:
+                return "device.scope"
+            if member["role"] == "viewer" and t not in {
+                "question.answered",
+                "device.added",
+                "device.removed",
+                "device.revoked",
+            }:
+                return "role.denied"
+            if e["roster_v"] != self.roster:
+                return "members.stale"
+            if not person_ok(e, cert, self.ws, log):
+                return "sig.invalid"
+        elif a["kind"] == "agent":
+            grant = self.grants.get(a.get("grant"))
+            if (
+                grant is None
+                or grant["actor"]["id"] != a.get("for")
+                or not grant["issued_at"] <= e["at"] < grant["expires_at"]
+            ):
+                return "grant.invalid"
+            if grant["verbs"] != "agent" and t not in grant["verbs"]:
+                return "grant.verb"
+        # §5.11 step 7: rules of the event type.
+        role = self.members.get(a.get("id"), {}).get("role")
+        if t in {"settings.changed", "restore"} and role != "owner":
+            return "role.denied"
+        if t == "member.added":
+            if role != "owner" and not (role == "maintainer" and e["role"] in {"member", "viewer"}):
+                return "role.denied"
+            if R.person_id(S, R.unb64u(e["pk_pub"])).hex() != e["person"][
+                2:
+            ] or "ok" not in R.verify_cert(
+                S, e["device_cert"], R.unb64u(e["pk_pub"]), milliseconds(e["at"])
+            ):
+                return "device.cert"
+        if t == "device.added":
+            if e["device"] in self.revoked:
+                return "device.invalid"
+            if e["device"] in self.certs and e["device"] not in self.removed:
+                return "device.exists"
+            return self.added_cert_result(e)
+        if t == "device.revoked":
+            cert = self.certs.get(e["device"])
+            if cert is None:
+                return "device.unknown"
+            pk = self.members["p_" + cert["o"]["person_id"]]["pk_pub"]
+            result = R.verify_revocation(S, e["revocation"], R.unb64u(pk), cert["o"])
+            if "ok" not in result or e["reason"] != e["revocation"]["o"]["reason"]:
+                return "device.cert"
+        if t == "device.removed":
+            cert = self.certs.get(e["device"])
+            if cert is None:
+                return "device.unknown"
+            if role != "owner" and a["id"] != "p_" + cert["o"]["person_id"]:
+                return "role.denied"
+        if t == "restore" and (e["from_seq"] != len(lines) or e["head"] != head(lines[-1])):
+            return "restore.bad_head"
+        if t == "question.asked":
+            q = e["question"]
+            qid = question_id(self.ws, log, q["id"])
+            if e["qid"] != qid:
+                return "question.bad_id"
+            if e["hash"] != question_hash(qid, log, q["text"], q["options"]):
+                return "question.bad_hash"
+        if t == "question.answered":
+            key = log, e["question"]
+            if key in self.answers:
+                return "question.answered"
+            q = self.questions[key]
+            if role not in {"owner", "maintainer"} and not (
+                q["question"]["to"] == "ticket_owner" and a["id"] == self.owners[log]
+            ):
+                return "answer.not_allowed"
+            if e["hash"] != q["hash"]:
+                return "question.stale"
+            if "option" in e and e["option"] not in {x["key"] for x in q["question"]["options"]}:
+                return "answer.bad_option"
+        return "ok"
+
+    def added_cert_result(self, e):
+        cert, a = e["cert"], e["actor"]
+        o = cert["o"]
+        if e["device"] != "d_" + o["device_id"] or a["id"] != "p_" + o["person_id"]:
+            return "device.cert"
+        result = R.verify_cert(
+            S, cert, R.unb64u(self.members[a["id"]]["pk_pub"]), milliseconds(e["at"])
+        )
+        if result.get("refuse") == "cert_expired":
+            return "device.invalid"
+        if "ok" not in result:
+            return "device.cert"
+        if "decide" not in o["scopes_max"]:
+            return "device.scope"
+        return "ok"
+
+    def append(self, e, log):
+        result = self.judge(e, log)
+        if result != "ok":
+            return result
+        self.logs.setdefault(log, []).append(e)
+        self.seen.setdefault(log, set()).add(e["id"])
+        t = e["type"]
+        if t == "workspace.created":
+            self.wsk = e["wsk_pub"]
+            self.members[e["owner"]["person"]] = e["owner"] | {"role": "owner"}
+            self.roster += 1
+        if t == "member.added":
+            self.members[e["person"]] = {"pk_pub": e["pk_pub"], "role": e["role"]}
+            self.roster += 1
+        if "device_cert" in e:
+            c = e["device_cert"]
+            self.certs["d_" + c["o"]["device_id"]] = c
+        if t == "device.added":
+            self.certs[e["device"]] = e["cert"]
+            self.removed.discard(e["device"])
+        if t == "device.removed":
+            self.removed.add(e["device"])
+        if t == "device.revoked":
+            self.revoked.add(e["device"])
+            self.revocations.append(e["revocation"])
+            if log == "workspace" and self.restore_open and e["actor"]["kind"] == "host":
+                self.restore_end = e["seq"]
+        if t == "grant.issued":
+            self.grants[e["grant"]] = e
+        if t == "ticket.created":
+            self.owners[log] = e["owner"]
+        if t == "question.asked":
+            self.questions[log, e["question"]["id"]] = e
+        if t == "question.answered":
+            self.answers[log, e["question"]] = e["id"]
+        # The re-append window after a workspace restore holds only host device.revoked lines; any
+        # other workspace event closes it, so a much later host revocation can't widen it.
+        if (
+            log == "workspace"
+            and t != "restore"
+            and not (t == "device.revoked" and e["actor"]["kind"] == "host")
+        ):
+            self.restore_open = False
+        if t == "restore":
+            self.seen[log].update(e["abandoned_decisions"])
+            if log == "workspace":
+                self.restore_start = self.restore_end = e["seq"]
+                self.restore_open = True
+        if log != "workspace":
+            self.last_order = (e["ws_seq"], e["at"], log, e["seq"])
+        return result
+
+
+SCENARIOS = [
+    s
+    for family in ("devices", "revocation", "questions", "restore", "refusal_order")
+    for s in load(family)["scenarios"]
+] + [load("replay")]
+
+
+@by_name(SCENARIOS)
+def test_protocol_scenario(c):
+    state = F1State(c["workspace_id"])
+    for i, step in enumerate(c["steps"]):
+        assert state.append(step["event"], step["log"]) == step["expect"], (i, step.get("note"))
+    assert head(state.logs["workspace"][0]) == c["genesis"]
+    if "qid" in c:
+        asked = next(iter(state.questions.values()))
+        assert asked["qid"] == c["qid"] and asked["hash"] == c["hash"]
+    if "answer_id" in c:
+        assert list(state.answers.values()) == [c["answer_id"]]
+    if "host_knows_revocations" in c:
+        # §5.10: log-only reader cannot infer the missing host-persisted revocations.
+        missing = [r for r in c["host_knows_revocations"] if r not in state.revocations]
+        assert ("refused" if missing else "ok") == c["host_expect"]
+
+
+@pytest.mark.parametrize("c", H["policy_hash_refused"], ids=lambda c: c["why"])
+def test_policy_hash_refused(c):
+    with pytest.raises(ValueError):
+        policy_hash(c["gate"], c["policy"])
+
+
+@by_name([c for c in R_ID["mapping"] if "local_git_config" in c or "local_git_add" in c])
+def test_raw_origin_config_ignores_insteadof_and_preserves_multiple_values(c, tmp_path):
+    config = tmp_path / "config"
+
+    def git_config(*args):
+        return subprocess.check_output(["git", "config", "--file", str(config), *args], text=True)
+
+    git_config("--add", "remote.origin.url", c["raw"])
+    for key, value in c.get("local_git_config", {}).items():
+        git_config("--add", key, value)
+    for key, value in c.get("local_git_add", {}).items():
+        git_config("--add", key, value)
+    raw = git_config("--get-all", "remote.origin.url").splitlines()
+    assert raw[0] == c["raw"]
+    assert map_remote(raw[0], c["repo_name"], raw[1:]) == c["canonical"]
+
+
+def test_valid_signed_chains_and_missing_signer_certificate():
+    workspace = TAMPER["workspace_events"]
+    wsk, ws = workspace[0]["wsk_pub"], TAMPER["workspace_id"]
+    assert chain_break(workspace, "workspace", ws, wsk, {}, len(workspace)) is None
+    certs = {
+        "d_" + e["device_cert"]["o"]["device_id"]: e["device_cert"]
+        for e in workspace
+        if "device_cert" in e
+    }
+    for log, events in TAMPER["ticket_events"].items():
+        assert chain_break(events, log, ws, wsk, certs, len(workspace)) is None
+        assert chain_break(events, log, ws, wsk, {}, len(workspace)) == 1
+
+
+@by_name(load("revocation")["scenarios"])
+def test_revocation_identity_checks(c):
+    state = F1State(c["workspace_id"])
+    checks = {x["step"]: x["identity"] for x in c.get("identity_checks", [])}
+    for i, step in enumerate(c["steps"]):
+        e = step["event"]
+        if i in checks:
+            cert = state.certs[e["device"]]["o"]
+            pk = R.unb64u(state.members["p_" + cert["person_id"]]["pk_pub"])
+            r = R.verify_revocation(S, e["revocation"], pk, cert)
+            identity = r.get("refuse", "ok")
+            if identity == "ok" and e["reason"] != e["revocation"]["o"]["reason"]:
+                identity = "device.reason_mismatch"
+            assert identity == checks[i]
+        state.append(e, step["log"])
+
+
+def test_first_checkpoint_requires_signature_and_pinned_genesis():
+    from copy import deepcopy
+
+    first = CP["workspace_checkpoint"]["signed"]
+    assert checkpoint_offer(None, first) == ("ok", None)
+    changed = deepcopy(first)
+    changed["o"]["genesis"] = "sha256:" + "0" * 64
+    assert checkpoint_offer(None, changed) == ("chain.diverged", None)
+    changed = deepcopy(first)
+    changed["sig"] = R.b64u(bytes(64))
+    assert checkpoint_offer(None, changed) == ("chain.diverged", None)
+
+
+def test_checkpoint_lower_n_extra_uid_diverges(monkeypatch):
+    """§5.10: a lower-n offer naming a ticket H lacks has a higher seq for it (H's is 0): divergence.
+
+    No shared vector yet (asked the core for `lower_n_extra_uid`); signatures are out of scope here.
+    """
+    monkeypatch.setattr(sys.modules[__name__], "checkpoint_ok", lambda signed: True)
+    log = {"seq": 3, "head": "sha256:" + "a" * 64}
+    held = {"o": {"n": 5, "workspace_log": log, "tickets": {}}}
+    offered = {
+        "o": {
+            "n": 4,
+            "workspace_log": log,
+            "tickets": {"01EXTRA": {"seq": 1, "head": "sha256:" + "b" * 64}},
+        }
+    }
+    assert checkpoint_offer(held, offered) == ("chain.diverged", None)

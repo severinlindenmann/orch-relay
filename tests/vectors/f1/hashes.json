@@ -43,6 +43,7 @@
    "people": {}
   }
  ],
+ "pins": "[shared, CHANGED] known answers: artifact, section, value, policy, people, question id and hash, grant secret; refused non-NFC inputs (5.6); refused non-canonical policies (5.7)",
  "policy_hash": [
   {
    "gate": "requirements",
@@ -76,6 +77,77 @@
      "assignees"
     ]
    }
+  }
+ ],
+ "policy_hash_refused": [
+  {
+   "gate": "requirements",
+   "policy": {
+    "applies": [],
+    "approvers": [
+     "maintainer",
+     "owner"
+    ],
+    "count": 1,
+    "independent": false,
+    "not": []
+   },
+   "why": "applies is an empty list"
+  },
+  {
+   "gate": "requirements",
+   "policy": {
+    "applies": "all",
+    "approvers": [],
+    "count": 1,
+    "independent": false,
+    "not": []
+   },
+   "why": "no approver token"
+  },
+  {
+   "gate": "requirements",
+   "policy": {
+    "applies": "all",
+    "approvers": [
+     "maintainer",
+     "owner"
+    ],
+    "count": 0,
+    "independent": false,
+    "not": []
+   },
+   "why": "count below 1"
+  },
+  {
+   "gate": "requirements",
+   "policy": {
+    "applies": "all",
+    "approvers": [
+     "owner",
+     "admin"
+    ],
+    "count": 1,
+    "independent": false,
+    "not": []
+   },
+   "why": "unknown approver token"
+  },
+  {
+   "gate": "requirements",
+   "policy": {
+    "applies": "all",
+    "approvers": [
+     "maintainer",
+     "owner"
+    ],
+    "count": 1,
+    "independent": false,
+    "not": [
+     "viewer"
+    ]
+   },
+   "why": "unknown token in not"
   }
  ],
  "question_hash": [
