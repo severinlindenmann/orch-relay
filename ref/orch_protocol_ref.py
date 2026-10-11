@@ -223,6 +223,7 @@ LABELS = {
     "h_pin_workspace": "orch/v2/pin/workspace|",
     "h_sas": "orch/v2/sas|",
     "h_sas_cert": "orch/v2/sas-cert|",
+    "h_dk_hash": "orch/v2/dk-hash|",
     "h_dek_commit": "orch/v2/dek-commit|",
     "h_card_key_commit": "orch/v2/card-key-commit|",
     "h_wk_commit": "orch/v2/wk-commit|",
@@ -447,6 +448,11 @@ def pk_pin(suite: Suite, pk_pub: bytes) -> bytes:
 
 def wsk_pin(suite: Suite, wsk_pub: bytes) -> bytes:
     return H(L["h_pin_workspace"] + bytes([suite.id]) + wsk_pub)
+
+
+def dk_hash(suite: Suite, dk_sig_pub: bytes, dk_kx_pub: bytes) -> bytes:
+    """G3b (P3-D28): names both keys of one pairing attempt in the cert request and the rejection."""
+    return H(L["h_dk_hash"] + bytes([suite.id]) + lp16(dk_sig_pub) + lp16(dk_kx_pub))
 
 
 B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
@@ -919,7 +925,10 @@ def device_accept_member_list(suite: Suite, wsk_pub: bytes, card_ws: str, dstate
     Content (cj(o)), never signature bytes, decides identity. First contact takes any epoch and list_seq >= 1;
     forward jumps pass; a lower list_seq, a falling epoch and a removal without a higher epoch are refused;
     two verified lists at one epoch with different wk_commit raise wk_commit_conflict and block sealing at that
-    epoch until a verified list at a higher epoch arrives."""
+    epoch until a verified list at a higher epoch arrives.
+    G3b (Q6): a device that joined through pairing holds dstate["anchor"] (the approved answer's floor, persisted
+    across join retries) and dstate["device"] (its own id). Its first contact then needs epoch and list_seq at or
+    above the anchor (below_anchor) and its own entry with exactly the approved scopes (scopes_mismatch)."""
     o = verify_object(suite, wsk_pub, signed, "member_list")
     if o is None:
         return {"refuse": "bad_signature"}
@@ -933,6 +942,13 @@ def device_accept_member_list(suite: Suite, wsk_pub: bytes, card_ws: str, dstate
     blocked = dstate.setdefault("sealing_blocked", [])
     digest_ = b64u(H(cj(o)))
     ids = [m["device_id"] for m in o["members"]]
+    anchor = dstate.get("anchor")
+    if head is None and anchor is not None:
+        if o["epoch"] < anchor["epoch"] or o["list_seq"] < anchor["list_seq"]:
+            return {"refuse": "below_anchor"}
+        own = [m for m in o["members"] if m["device_id"] == dstate["device"]]
+        if not own or own[0]["scopes"] != anchor["scopes"]:
+            return {"refuse": "scopes_mismatch"}
     if head is not None:
         if o["list_seq"] == head["list_seq"]:
             return {"ok": "noop"} if digest_ == head["list_hash"] else {"alarm": "conflicting_snapshot"}
@@ -953,6 +969,13 @@ def device_accept_member_list(suite: Suite, wsk_pub: bytes, card_ws: str, dstate
     dstate["head"] = {"list_seq": o["list_seq"], "epoch": o["epoch"], "list_hash": digest_,
                       "wk_commit": o["wk_commit"], "members": ids}
     return {"ok": "advanced"}
+
+
+def device_join_card(anchor: dict | None, card_o: dict) -> dict:
+    """G3b (Q6): at join, a verified card below the approved answer's card_seq is a relay rollback."""
+    if anchor is not None and card_o["card_seq"] < anchor["card_seq"]:
+        return {"refuse": "below_anchor"}
+    return {"ok": card_o["card_seq"]}
 
 
 def _opened_grants(suite, wsk_pub, ws: bytes, dev: bytes, dk_kx_priv, grants, epoch: int):
@@ -1334,17 +1357,18 @@ def _pairing(state, suite, h, hb, body, sig, pt, now_ms):
     if op != "pair":
         return _unverified(state, now_ms, "malformed", **ob)
     try:
-        if set(meta) != {"op", "dk_sig_pub", "dk_kx_pub", "label", "cert"}:
+        if set(meta) != {"op", "dk_sig_pub", "dk_kx_pub", "label", "cert", "attempt"}:
             raise ValueError("fields")
         sig_pub = unb64u(meta["dk_sig_pub"], suite.sig_pub_len)
         kx_pub = unb64u(meta["dk_kx_pub"], suite.kx_pub_len)
+        unhex(meta["attempt"], 16)                         # G3b: the device's attempt nonce
         if not suite.sig_pub_ok(sig_pub) or not suite.kx_pub_ok(kx_pub) or not isinstance(meta["label"], str):
             raise ValueError("keys")
         label = clean_label(meta["label"])
     except (ValueError, TypeError):
         return _unverified(state, now_ms, "malformed", **ob)
     resend = held is not None and held["offer_id"] == h.stream.hex() and held["dk_sig_pub"] == b64u(sig_pub) \
-        and held["dk_kx_pub"] == b64u(kx_pub)
+        and held["dk_kx_pub"] == b64u(kx_pub) and held["attempt"] == meta["attempt"]
     if now_ms >= offer["expires_ms"] or (offer.get("used") and not resend):
         return _unverified(state, now_ms, "pairing_closed", **ob)
     if device_id(suite, sig_pub) != h.device or not suite.verify(sig_pub, sig, bridge_signed(hb, body)):
@@ -1366,7 +1390,8 @@ def _pairing(state, suite, h, hb, body, sig, pt, now_ms):
         cert_state = "present"
     offer["used"] = True
     held = {"offer_id": h.stream.hex(), "dk_sig_pub": b64u(sig_pub), "dk_kx_pub": b64u(kx_pub), "label": label,
-            "sas_nonce": offer["sas_nonce"], "state": "pending", "cert": meta["cert"], "cert_state": cert_state}
+            "attempt": meta["attempt"], "sas_nonce": offer["sas_nonce"], "state": "pending", "cert": meta["cert"],
+            "cert_state": cert_state}
     state["pending_pairs"][h.device.hex()] = held
     return {"result": "pair_pending", "label": label, "cert_state": cert_state,
             "sas": sas(suite, h.workspace, h.stream, sig_pub, kx_pub, unb64u(wsk_pub), unb64u(offer["sas_nonce"])),
@@ -1391,9 +1416,15 @@ def pair_status_answer(state, held, now_ms) -> dict:
         return {"state": "cert_pending", "primary_label": held["primary_label"], "pk_pub": state["owner_pk_pub"],
                 "challenge": held.get("challenge"), "wsk_pub": w}
     if s == "approved":
+        # G3b (P3-D28, Q6): the join anchor. list_seq is the list that added this device (§8.3 step 6.3), card_seq
+        # the current card, baseline G0b's exact checkpoint baseline (null only when none exists).
         return {"state": "approved", "scopes": held["scopes"], "cert": held["cert"], "pk_pub": state["owner_pk_pub"],
-                "epoch": state["epoch"], "wsk_pub": w}
-    return {"state": s, "wsk_pub": w}                     # rejected, expired
+                "epoch": state["epoch"], "list_seq": held["list_seq"], "card_seq": held["card_seq"],
+                "baseline": held.get("baseline"), "wsk_pub": w}
+    if s == "rejected" and held.get("rejection") is not None:
+        # G3b (Q8): rejected on the primary; the host relays the PK-signed rejection unchanged
+        return {"state": "rejected", "wsk_pub": w, "pk_pub": state["owner_pk_pub"], "rejection": held["rejection"]}
+    return {"state": s, "wsk_pub": w}                     # rejected on the host, or expired
 
 
 # --- the device side ---------------------------------------------------------------------------------
@@ -1530,20 +1561,66 @@ def open_pair_answer(env: bytes, c: dict, now_ms: int) -> dict:
                 v = check_cert_challenge(suite, meta["challenge"], pk_pub, c, now_ms + c.get("offset_ms", 0))
                 if "drop" in v:
                     return {**_drop(v["drop"]), **({"alarm": True} if v["drop"] == "not_my_key" else {})}
+                c["challenge_request_id"] = v["ok"]["request_id"]     # persisted with the attempt (G3b)
                 res["cert_code"] = v["cert_code"]
         else:
             v = verify_cert(suite, meta.get("cert"), pk_pub, now_ms + c.get("offset_ms", 0))
             if "refuse" in v or v["ok"]["dk_sig_pub"] != c["dk_sig_pub"] or v["ok"]["dk_kx_pub"] != c["dk_kx_pub"]:
                 return _drop("cert")
-            if not scopes_ok(meta.get("scopes")) or type(meta.get("epoch")) is not int:
+            anchor = _approved_anchor(meta)
+            if not scopes_ok(meta.get("scopes")) or anchor is None:
                 return _drop("not_a_pairing_answer")
-            res.update(state="approved", scopes=meta["scopes"], epoch=meta["epoch"], device_id=v["ok"]["device_id"])
-    elif st in ("rejected", "expired"):
+            c["anchor"] = _raise_floor(c.get("anchor"), anchor)
+            res.update(state="approved", scopes=meta["scopes"], epoch=meta["epoch"], device_id=v["ok"]["device_id"],
+                       anchor=c["anchor"])
+    elif st == "rejected":
+        # G3b (Q8): attributed to the pinned owner only when the long form verifies completely; anything else is
+        # an unattributed refusal (the host could have sent the short form anyway). A rejection naming another
+        # device of this workspace means the owner rejected someone else's attempt: the alarm (A7.3).
+        res["state"] = "rejected"
+        if "pk_pub" in meta or "rejection" in meta:
+            v = check_cert_rejection(suite, meta, c, now_ms + c.get("offset_ms", 0))
+            res["attributed"] = "ok" in v
+            if "why" in v:
+                res["why"] = v["why"]
+                if v["why"] == "not_my_key":
+                    res["alarm"] = True
+        else:
+            res["attributed"] = False
+    elif st == "expired":
         res["state"] = st
     else:
         return _drop("not_a_pairing_answer")
     pend["next"] += 1
     return res
+
+
+_BASELINE_HASH = re.compile(r"sha256:[0-9a-f]{64}")
+
+
+def _approved_anchor(meta: dict) -> dict | None:
+    """G3b (Q6): the join anchor of an `approved` answer: epoch, list_seq, card_seq and G0b's baseline."""
+    e, ls, cs, b = (meta.get(k) for k in ("epoch", "list_seq", "card_seq", "baseline"))
+    if type(e) is not int or not 1 <= e <= MAX_EPOCH:
+        return None
+    if any(type(x) is not int or not 1 <= x <= MAX_SAFE_INT for x in (ls, cs)):
+        return None
+    if "baseline" not in meta or b is not None and not (
+            isinstance(b, dict) and set(b) == {"n", "hash"} and type(b["n"]) is int and 0 <= b["n"] <= MAX_SAFE_INT
+            and isinstance(b["hash"], str) and _BASELINE_HASH.fullmatch(b["hash"])):
+        return None
+    return {"epoch": e, "list_seq": ls, "card_seq": cs, "scopes": meta.get("scopes"), "baseline": b}
+
+
+def _raise_floor(old: dict | None, new: dict) -> dict:
+    """The anchor is a floor persisted across join retries: it only ever rises; the baseline never downgrades."""
+    if old is None:
+        return new
+    newer = new["list_seq"] >= old["list_seq"]
+    ob, nb = old["baseline"], new["baseline"]
+    return {"epoch": max(old["epoch"], new["epoch"]), "list_seq": max(old["list_seq"], new["list_seq"]),
+            "card_seq": max(old["card_seq"], new["card_seq"]), "scopes": new["scopes"] if newer else old["scopes"],
+            "baseline": nb if ob is None or nb is not None and nb["n"] >= ob["n"] else ob}
 
 
 _FRAGMENT = re.compile(r"#?v2\.([0-9a-f]{32})\.([0-9a-f]{32})\.([A-Za-z0-9_-]{43})\.([A-Za-z0-9_-]{43})\.([A-Za-z0-9_-]{43})")
@@ -1561,13 +1638,27 @@ def parse_pair_fragment(fragment):
     return {"workspace": m.group(1), "offer": m.group(2), "secret": s.hex(), "wsk_pin": wp.hex(), "pk_pin": pp.hex()}
 
 
+REQUEST_FIELDS = {"v", "suite", "kind", "request_id", "workspace_id", "person_id", "primary_device_id", "offer_id",
+                  "attempt", "device_id", "dk_hash", "created_ms", "expires_ms", "sealed"}
+INNER_FIELDS = {"device_id", "dk_sig_pub", "dk_kx_pub", "label", "scopes_max", "offer_id", "attempt"}
+CHALLENGE_FIELDS = {"v", "suite", "kind", "request_id", "workspace_id", "person_id", "offer_id", "attempt",
+                    "device_id", "dk_sig_pub", "dk_kx_pub", "primary_nonce", "expires_ms"}
+REJECTION_FIELDS = {"v", "suite", "kind", "request_id", "workspace_id", "person_id", "offer_id", "attempt",
+                    "device_id", "dk_hash", "expires_ms"}
+
+
 def make_cert_request(suite: Suite, wsk, ws: bytes, person: bytes, primary: bytes, primary_kx_pub: bytes,
                       request_id: bytes, inner: dict, created_ms: int, eph_seed: bytes) -> dict:
-    """§8.4. inner = {device_id, dk_sig_pub, dk_kx_pub, label, scopes_max, offer_id}: no host nonce, so the
-    host has nothing to grind the code with (R1)."""
+    """§8.4. inner = {device_id, dk_sig_pub, dk_kx_pub, label, scopes_max, offer_id, attempt}: no host nonce, so
+    the host has nothing to grind the code with (R1). G3b: offer_id, attempt, device_id and dk_hash also travel in
+    clear in o, so the relay can bind the primary's challenge and rejection to them; the primary checks that they
+    equal the sealed inner."""
     sealed = seal_to(suite, primary_kx_pub, primary, "cert-request", request_id, 0, cj(inner), eph_seed)
     return sign_object(suite, wsk, {"v": 2, "suite": suite.id, "kind": "cert_request", "request_id": request_id.hex(),
                                     "workspace_id": ws.hex(), "person_id": person.hex(), "primary_device_id": primary.hex(),
+                                    "offer_id": inner["offer_id"], "attempt": inner["attempt"],
+                                    "device_id": inner["device_id"],
+                                    "dk_hash": b64u(dk_hash(suite, unb64u(inner["dk_sig_pub"]), unb64u(inner["dk_kx_pub"]))),
                                     "created_ms": created_ms, "expires_ms": created_ms + CERT_PENDING_MS,
                                     "sealed": b64u(sealed)})
 
@@ -1592,27 +1683,30 @@ def primary_open_cert_request(suite: Suite, signed, card: dict, my_person: bytes
     if primary_open_request(prim, o["workspace_id"], now_ms) is not None:
         return {"refuse": "request_open"}                # at most one open request per workspace
     try:
+        if set(o) != REQUEST_FIELDS:
+            raise ValueError("fields")
         inner = parse_json(open_sealed(suite, my_kx_priv, me, "cert-request", unhex(o["request_id"], 16), 0,
                                        unb64u(o["sealed"])))
-        if set(inner) != {"device_id", "dk_sig_pub", "dk_kx_pub", "label", "scopes_max", "offer_id"}:
+        if set(inner) != INNER_FIELDS:
             raise ValueError("fields")
         sig_pub = unb64u(inner["dk_sig_pub"], suite.sig_pub_len)
         kx_pub = unb64u(inner["dk_kx_pub"], suite.kx_pub_len)
         unhex(inner["offer_id"], 16)
+        unhex(inner["attempt"], 16)
     except (InvalidTag, ValueError, KeyError, TypeError):
         return {"refuse": "malformed"}
     if inner["device_id"] != device_id(suite, sig_pub).hex() or not suite.sig_pub_ok(sig_pub) \
             or not suite.kx_pub_ok(kx_pub) or not scopes_ok(inner["scopes_max"]):
+        return {"refuse": "malformed"}
+    # G3b: the clear binding the relay checks must be the sealed one the human sees
+    if (o["offer_id"], o["attempt"], o["device_id"]) != (inner["offer_id"], inner["attempt"], inner["device_id"]) \
+            or o["dk_hash"] != b64u(dk_hash(suite, sig_pub, kx_pub)):
         return {"refuse": "malformed"}
     if inner["scopes_max"][0].startswith("drop:"):
         return {"refuse": "scope_exceeded"}              # scoped agents enrol through §6.4 only
     prim["seen"].append(o["request_id"])
     prim["open"][o["workspace_id"]] = {"request_id": o["request_id"], "expires_ms": o["expires_ms"]}
     return {"ok": inner, "warning": "client_hosted" if deleg["client_hosted"] else None}
-
-
-CHALLENGE_FIELDS = {"v", "suite", "kind", "request_id", "workspace_id", "person_id", "device_id", "dk_sig_pub",
-                    "dk_kx_pub", "primary_nonce", "expires_ms"}
 
 
 def cert_sas(suite: Suite, challenge_o: dict) -> str:
@@ -1625,9 +1719,18 @@ def make_cert_challenge(suite: Suite, pk, request_o: dict, inner: dict, primary_
     assert len(primary_nonce) == 32
     return sign_object(suite, pk, {"v": 2, "suite": suite.id, "kind": "cert_challenge",
                                    "request_id": request_o["request_id"], "workspace_id": request_o["workspace_id"],
-                                   "person_id": request_o["person_id"], "device_id": inner["device_id"],
+                                   "person_id": request_o["person_id"], "offer_id": inner["offer_id"],
+                                   "attempt": inner["attempt"], "device_id": inner["device_id"],
                                    "dk_sig_pub": inner["dk_sig_pub"], "dk_kx_pub": inner["dk_kx_pub"],
                                    "primary_nonce": b64u(primary_nonce), "expires_ms": request_o["expires_ms"]})
+
+
+def make_cert_rejection(suite: Suite, pk, request_o: dict) -> dict:
+    """P3-D11 + G3b: the primary's rejection names the attempt (offer_id, attempt), the device (device_id, dk_hash)
+    and carries the request's expiry, all copied from the request the primary opened."""
+    return sign_object(suite, pk, {"v": 2, "suite": suite.id, "kind": "cert_rejection",
+                                   **{k: request_o[k] for k in ("request_id", "workspace_id", "person_id", "offer_id",
+                                                                "attempt", "device_id", "dk_hash", "expires_ms")}})
 
 
 def primary_issue_challenge(suite: Suite, pk, prim: dict, request_o: dict, inner: dict, primary_nonce: bytes) -> dict:
@@ -1638,19 +1741,73 @@ def primary_issue_challenge(suite: Suite, pk, prim: dict, request_o: dict, inner
     return ch
 
 
+def _own_device(o: dict, c: dict, current: bool) -> str | None:
+    """G3b step 4, before the attempt and the offer: current keys go on; a device of one of this phone's own
+    earlier attempts is a stale attempt (drop, no alarm); anything else is someone else's key (the alarm)."""
+    if current:
+        return None
+    if o["device_id"] in c.get("earlier_devices", []):
+        return "stale_attempt"
+    return "not_my_key"
+
+
+def _attempt_checks(o: dict, c: dict) -> str | None:
+    """G3b steps 5-6: the attempt nonce, then the link's offer, then the request seen in this attempt."""
+    if o["attempt"] != c.get("attempt") or o["offer_id"] != c.get("offer"):
+        return "not_for_this_pairing"
+    seen = c.get("challenge_request_id")
+    if seen is not None and o["request_id"] != seen:
+        return "not_for_this_pairing"
+    return None
+
+
 def check_cert_challenge(suite: Suite, signed, pk_pub: bytes, c: dict, now_ms: int) -> dict:
-    """§8.4, on the phone: the challenge the host relayed must be PK's, for this workspace, for this device's
-    own two keys (else the alarm: someone asked the primary to certify another key), and unexpired."""
+    """§8.4 step 5, on the phone (G3b order): PK's signature and exact fields; this workspace and person; this
+    device's own current keys (else a stale attempt or the alarm), checked BEFORE the attempt and the offer, so a
+    host-chosen offer_id cannot turn the alarm into a silent drop; then the attempt nonce, the link's offer, the
+    request seen earlier in this attempt; then the expiry."""
     o = verify_object(suite, pk_pub, signed, "cert_challenge")
     if o is None or set(o) != CHALLENGE_FIELDS:
         return {"drop": "challenge_signature"}
     if o["workspace_id"] != c["workspace"] or o["person_id"] != person_id(suite, pk_pub).hex():
         return {"drop": "not_for_this_workspace"}
-    if o["dk_sig_pub"] != c["dk_sig_pub"] or o["dk_kx_pub"] != c["dk_kx_pub"] or o["device_id"] != c["device"]:
-        return {"drop": "not_my_key"}
+    bad = _own_device(o, c, o["dk_sig_pub"] == c["dk_sig_pub"] and o["dk_kx_pub"] == c["dk_kx_pub"]
+                      and o["device_id"] == c["device"])
+    if bad:
+        return {"drop": bad}
+    bad = _attempt_checks(o, c)
+    if bad:
+        return {"drop": bad}
     if type(o["expires_ms"]) is not int or now_ms >= o["expires_ms"]:
         return {"drop": "challenge_expired"}
     return {"ok": o, "cert_code": cert_sas(suite, o)}
+
+
+def check_cert_rejection(suite: Suite, meta: dict, c: dict, now_ms: int) -> dict:
+    """§8.3 (G3b, Q8): the long `rejected` form. "Denied by the owner" only if every check passes: pk_pin;
+    PK's signature with the exact field set; workspace and person; this device's current id and dk_hash (an
+    earlier own device: stale_attempt; another device: the alarm); the attempt; the link's offer; the request of
+    a challenge seen in this attempt; unexpired. Returns {"ok": o} or {"why": code}."""
+    try:
+        pk_pub = unb64u(meta.get("pk_pub"), suite.sig_pub_len)
+    except ValueError:
+        return {"why": "pk_pin"}
+    if set(meta) != {"state", "wsk_pub", "pk_pub", "rejection"}:
+        return {"why": "not_a_pairing_answer"}
+    if not hmac.compare_digest(pk_pin(suite, pk_pub), bytes.fromhex(c["pk_pin"])):
+        return {"why": "pk_pin"}
+    o = verify_object(suite, pk_pub, meta["rejection"], "cert_rejection")
+    if o is None or set(o) != REJECTION_FIELDS:
+        return {"why": "rejection_signature"}
+    if o["workspace_id"] != c["workspace"] or o["person_id"] != person_id(suite, pk_pub).hex():
+        return {"why": "not_for_this_workspace"}
+    mine = b64u(dk_hash(suite, unb64u(c["dk_sig_pub"]), unb64u(c["dk_kx_pub"])))
+    bad = _own_device(o, c, o["device_id"] == c["device"] and o["dk_hash"] == mine) or _attempt_checks(o, c)
+    if bad:
+        return {"why": bad}
+    if type(o["expires_ms"]) is not int or now_ms >= o["expires_ms"]:
+        return {"why": "rejection_expired"}
+    return {"ok": o}
 
 
 def primary_open_request(prim: dict, ws_hex: str, now_ms: int):
@@ -2475,38 +2632,56 @@ def relay_membership(suite, wsk_pub, ws, state, directory, body, now_ms):
     return answer
 
 
+def _relay_binding(suite, o, req) -> dict | None:
+    """G3b: the relay binds a challenge or rejection to the stored request's clear attempt binding (offer, attempt,
+    device and both keys) before storing it."""
+    keys = o["dk_hash"] if "dk_hash" in o else b64u(dk_hash(suite, unb64u(o["dk_sig_pub"]), unb64u(o["dk_kx_pub"])))
+    if (o["offer_id"], o["attempt"], o["device_id"], keys) != (req["offer_id"], req["attempt"], req["device_id"],
+                                                                req["dk_hash"]):
+        return {"refuse": "not_for_this_device"}
+    return None
+
+
 def verify_cert_rejection(suite, signed, pk_pub, request):
-    """P3-D11: signature, exact shape, then request/person/workspace binding."""
+    """P3-D11 + G3b: signature, exact shape, then request/person/workspace binding, then the attempt binding."""
     o = verify_object(suite, pk_pub, signed, "cert_rejection")
     if o is None:
         return {"refuse": "bad_signature"}
     try:
-        if set(o) != {"v", "suite", "kind", "request_id", "workspace_id", "person_id"}:
+        if set(o) != REJECTION_FIELDS:
             return {"refuse": "malformed"}
-        for field in ("request_id", "workspace_id", "person_id"):
+        for field in ("request_id", "workspace_id", "person_id", "offer_id", "attempt", "device_id"):
             unhex(o[field], 16)
+        unb64u(o["dk_hash"], 32)
+        if type(o["expires_ms"]) is not int:
+            return {"refuse": "malformed"}
         if o["person_id"] != person_id(suite, pk_pub).hex() or o["person_id"] != request["person_id"]:
             return {"refuse": "other_person"}
         if o["workspace_id"] != request["workspace_id"]:
             return {"refuse": "other_workspace"}
         if o["request_id"] != request["request_id"]:
             return {"refuse": "not_for_this_device"}
+        if o["expires_ms"] != request["expires_ms"]:
+            return {"refuse": "malformed"}
+        bad = _relay_binding(suite, o, request)
+        if bad:
+            return bad
     except (ValueError, TypeError, KeyError):
         return {"refuse": "malformed"}
     return {"ok": o}
 
 
 def relay_cert_request(suite, signed, wsk_pub, ws, owner, primary, queue, now_ms):
-    """P3-D11: admission (the caller already authenticated W(g))."""
+    """P3-D11: admission (the caller already authenticated W(g)). G3b: the clear attempt binding has a shape."""
     o = verify_object(suite, wsk_pub, signed, "cert_request")
     if o is None:
         return {"refuse": "bad_signature"}
     try:
-        if set(o) != {"v", "suite", "kind", "request_id", "workspace_id", "person_id", "primary_device_id",
-                      "created_ms", "expires_ms", "sealed"}:
+        if set(o) != REQUEST_FIELDS:
             return {"refuse": "malformed"}
-        for k in ("request_id", "workspace_id", "person_id", "primary_device_id"):
+        for k in ("request_id", "workspace_id", "person_id", "primary_device_id", "offer_id", "attempt", "device_id"):
             unhex(o[k], 16)
+        unb64u(o["dk_hash"], 32)
         if o["workspace_id"] != ws:
             return {"refuse": "other_workspace"}
         if o["person_id"] != owner:
@@ -2557,8 +2732,7 @@ def relay_cert_queue(suite, entry, action, signed, pk_pub, now_ms):
         result = {"ok": o} if o else {"refuse": "bad_signature"}
         if o:
             try:
-                if set(o) != {"v", "suite", "kind", "request_id", "workspace_id", "person_id", "device_id",
-                              "dk_sig_pub", "dk_kx_pub", "primary_nonce", "expires_ms"}:
+                if set(o) != CHALLENGE_FIELDS:
                     return {"refuse": "malformed"}
                 for key, code in (("person_id", "other_person"), ("workspace_id", "other_workspace"),
                                   ("request_id", "not_for_this_device")):
@@ -2566,10 +2740,15 @@ def relay_cert_queue(suite, entry, action, signed, pk_pub, now_ms):
                         return {"refuse": code}
                 pub = unb64u(o["dk_sig_pub"])
                 unb64u(o["primary_nonce"], 32)
+                unhex(o["offer_id"], 16)
+                unhex(o["attempt"], 16)
                 if (not suite.sig_pub_ok(pub) or not suite.kx_pub_ok(unb64u(o["dk_kx_pub"]))
                         or device_id(suite, pub).hex() != o["device_id"] or o["expires_ms"] != req["expires_ms"]
                         or o["person_id"] != person_id(suite, pk_pub).hex()):
                     return {"refuse": "malformed"}
+                bad = _relay_binding(suite, o, req)
+                if bad:
+                    return bad
             except (ValueError, TypeError, KeyError):
                 return {"refuse": "malformed"}
     if "refuse" in result:

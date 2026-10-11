@@ -568,7 +568,8 @@ def test_round_trip_pairing_through_cert_pending(sid):
     ctx = {"suite": S.id, "workspace": ws.hex(), "device": w.id["device_phone"].hex(), "offer": offer.hex(),
            "secret": secret.hex(), "wsk_pin": R.wsk_pin(S, w.pub["wsk_a.sig"]).hex(),
            "pk_pin": R.pk_pin(S, w.pub["person_alice.sig"]).hex(), "dk_sig_pub": R.b64u(w.pub["phone.sig"]),
-           "dk_kx_pub": R.b64u(w.pub["phone.kx"]), "offset_ms": 0, "pending": {}}
+           "dk_kx_pub": R.b64u(w.pub["phone.kx"]), "attempt": R.fake("rt attempt")[:16].hex(), "offset_ms": 0,
+           "pending": {}}
 
     def ask(meta, seq, t):
         rid = R.fake(f"rt rid {seq}")[:16]
@@ -580,7 +581,7 @@ def test_round_trip_pairing_through_cert_pending(sid):
 
     # 1. pair: the host's code and the phone's code agree
     res, ans = ask({"op": "pair", "dk_sig_pub": ctx["dk_sig_pub"], "dk_kx_pub": ctx["dk_kx_pub"], "label": "rt",
-                    "cert": None}, 1, now)
+                    "cert": None, "attempt": ctx["attempt"]}, 1, now)
     assert res["result"] == "pair_pending" and ans["state"] == "pending" and ans["sas"] == res["sas"]
     # 2. pending while the human has not confirmed: the full five-field answer, which the phone accepts
     _, ans = ask({"op": "pair_status"}, 2, now + 10)
@@ -589,7 +590,8 @@ def test_round_trip_pairing_through_cert_pending(sid):
     held = st["pending_pairs"][w.id["device_phone"].hex()]
     held.update(state="cert_pending", cert_pending_since=now + 20, primary_label="Mac", challenge=None)
     inner = {"device_id": w.id["device_phone"].hex(), "dk_sig_pub": held["dk_sig_pub"], "dk_kx_pub": held["dk_kx_pub"],
-             "label": held["label"], "scopes_max": ["look", "decide", "operate"], "offer_id": offer.hex()}
+             "label": held["label"], "scopes_max": ["look", "decide", "operate"], "offer_id": offer.hex(),
+             "attempt": held["attempt"]}
     req_id = R.fake("rt request")[:16]
     creq = R.make_cert_request(S, w.sig["wsk_a"], ws, w.id["person_alice"], w.id["device_primary"],
                                w.pub["primary.kx"], req_id, inner, now + 20, R.fake("rt eph"))
@@ -605,9 +607,64 @@ def test_round_trip_pairing_through_cert_pending(sid):
     # 4. the human confirmed the code on the primary: it certifies its own challenge's keys, once
     cert = R.primary_sign_cert(S, w.sig["person_alice"], prim, req_id.hex(), R.b64u(b"\0" * 32), now + 50, None,
                                inner["scopes_max"])["ok"]
-    held.update(state="approved", scopes=["look", "decide"], cert=cert)
+    held.update(state="approved", scopes=["look", "decide"], cert=cert, list_seq=4, card_seq=2, baseline=None)
     _, ans = ask({"op": "pair_status"}, 4, now + 60)
     assert ans["state"] == "approved" and ans["device_id"] == w.id["device_phone"].hex()
+    # G3b (Q6): the join anchor reaches the phone and becomes its persisted floor
+    assert ans["anchor"] == ctx["anchor"] == {"epoch": st["epoch"], "list_seq": 4, "card_seq": 2,
+                                              "scopes": ["look", "decide"], "baseline": None}
+
+
+@pytest.mark.parametrize("sid", SUITES)
+def test_round_trip_rejection_on_the_primary_is_attributed(sid):
+    """G3b (Q8): primary rejects -> relay queue -> host relays the long form -> phone shows "denied by the owner";
+    the same rejection replayed into a later attempt on the same offer (fresh keys, new nonce) is unattributed."""
+    w = World(sid)
+    S, ws = w.S, w.ws
+    offer, secret = R.fake("rt offer")[:16], R.fake("rt secret")
+    st, now = _host_state(w, None, offer, secret)
+    attempt = R.fake("rt rejection attempt")[:16].hex()
+    ctx = {"suite": S.id, "workspace": ws.hex(), "device": w.id["device_phone"].hex(), "offer": offer.hex(),
+           "secret": secret.hex(), "wsk_pin": R.wsk_pin(S, w.pub["wsk_a.sig"]).hex(),
+           "pk_pin": R.pk_pin(S, w.pub["person_alice.sig"]).hex(), "dk_sig_pub": R.b64u(w.pub["phone.sig"]),
+           "dk_kx_pub": R.b64u(w.pub["phone.kx"]), "attempt": attempt, "offset_ms": 0, "pending": {}}
+
+    def ask(meta, seq, t):
+        rid = R.fake(f"rt rej rid {seq}")[:16]
+        ctx["pending"][rid.hex()] = {"next": 0}
+        req = _phone_req(w, ws, offer, secret, meta, seq, t, rid)
+        res = R.host_check(req, st, t, rid.hex())
+        return R.open_pair_answer(R.host_respond(S, w.sig["wsk_a"], st, req, res, t, R.fake(f"rt rej {seq}")[:16]),
+                                  ctx, t)
+
+    ask({"op": "pair", "dk_sig_pub": ctx["dk_sig_pub"], "dk_kx_pub": ctx["dk_kx_pub"], "label": "rt", "cert": None,
+         "attempt": attempt}, 1, now)
+    held = st["pending_pairs"][w.id["device_phone"].hex()]
+    inner = {"device_id": w.id["device_phone"].hex(), "dk_sig_pub": held["dk_sig_pub"], "dk_kx_pub": held["dk_kx_pub"],
+             "label": held["label"], "scopes_max": ["look"], "offer_id": offer.hex(), "attempt": held["attempt"]}
+    creq = R.make_cert_request(S, w.sig["wsk_a"], ws, w.id["person_alice"], w.id["device_primary"],
+                               w.pub["primary.kx"], R.fake("rt rej request")[:16], inner, now, R.fake("rt rej eph"))
+    queue = {}
+    assert "ok" in R.relay_cert_request(S, creq, w.pub["wsk_a.sig"], ws.hex(), w.id["person_alice"].hex(),
+                                        w.id["device_primary"].hex(), queue, now)
+    prim = {"seen": [], "open": {}}
+    assert R.primary_open_cert_request(S, creq, w.v["card"]["card"], w.id["person_alice"], w.id["device_primary"],
+                                       w.kx["primary"], prim, now)["ok"] == inner
+    rejection = R.make_cert_rejection(S, w.sig["person_alice"], creq["o"])
+    entry = queue[creq["o"]["request_id"]]
+    assert R.relay_cert_queue(S, entry, "rejection", rejection, w.pub["person_alice.sig"], now + 5) == {"ok": "rejected"}
+    held.update(state="rejected", rejection=entry["rejection"])
+    ans = ask({"op": "pair_status"}, 2, now + 10)
+    assert (ans["state"], ans["attributed"]) == ("rejected", True)
+    # the next attempt on a reused offer: fresh keys and a new nonce; the old rejection is not this attempt's
+    ctx.update(earlier_devices=[ctx["device"]], attempt=R.fake("rt rejection attempt 2")[:16].hex())
+    for k in ("device", "dk_sig_pub", "dk_kx_pub"):
+        ctx[k] = {"device": w.id["device_laptop"].hex(), "dk_sig_pub": R.b64u(w.pub["laptop.sig"]),
+                  "dk_kx_pub": R.b64u(w.pub["laptop.kx"])}[k]
+    meta = {"state": "rejected", "wsk_pub": R.b64u(w.pub["wsk_a.sig"]), "pk_pub": R.b64u(w.pub["person_alice.sig"]),
+            "rejection": rejection}
+    got = R.check_cert_rejection(S, meta, ctx, now + 20)
+    assert got == {"why": "stale_attempt"}
 
 
 @pytest.mark.parametrize("sid", SUITES)
@@ -618,7 +675,8 @@ def test_round_trip_r1_attack_fails(sid):
     S, ws = w.S, w.ws
     inner = {"device_id": w.id["device_intruder"].hex(), "dk_sig_pub": R.b64u(w.pub["intruder.sig"]),
              "dk_kx_pub": R.b64u(w.pub["intruder.kx"]), "label": "Severin's iPhone",
-             "scopes_max": ["look"], "offer_id": R.fake("offer id")[:16].hex()}
+             "scopes_max": ["look"], "offer_id": R.fake("offer id")[:16].hex(),
+             "attempt": R.fake("r1 attempt")[:16].hex()}
     creq = R.make_cert_request(S, w.sig["wsk_a"], ws, w.id["person_alice"], w.id["device_primary"],
                                w.pub["primary.kx"], R.fake("r1")[:16], inner, 1_790_000_000_000, R.fake("r1 eph"))
     prim = {"seen": [], "open": {}}
@@ -626,7 +684,7 @@ def test_round_trip_r1_attack_fails(sid):
                                          w.id["device_primary"], w.kx["primary"], prim, 1_790_000_000_000)
     chal = R.primary_issue_challenge(S, w.sig["person_alice"], prim, creq["o"], opened["ok"], R.fake("r1 nonce"))
     c = {"workspace": ws.hex(), "device": w.id["device_phone"].hex(), "dk_sig_pub": R.b64u(w.pub["phone.sig"]),
-         "dk_kx_pub": R.b64u(w.pub["phone.kx"])}
+         "dk_kx_pub": R.b64u(w.pub["phone.kx"]), "offer": R.fake("offer id")[:16].hex(), "attempt": inner["attempt"]}
     assert R.check_cert_challenge(S, chal, w.pub["person_alice.sig"], c, 1_790_000_000_000) == {"drop": "not_my_key"}
     # nor can the host make a challenge of its own for the phone's keys: it does not hold PK
     forged = {"o": {**chal["o"], "device_id": c["device"], "dk_sig_pub": c["dk_sig_pub"], "dk_kx_pub": c["dk_kx_pub"]},
@@ -831,3 +889,74 @@ def test_p3_membership_whole_body_size_before_parsing(sid):
 def test_checkpoint_contract_cases(S, c):
     from ref._checkpoint_vectors import replay
     assert replay(S, c) == c["expect"]
+
+
+# --- G3b (P3-D28): the pairing binding groups -----------------------------------------------------------
+
+def _answer_chain(c):
+    ctx = copy.deepcopy(c["ctx"])
+    for step in c["steps"]:
+        ctx["pending"][step["add_pending"]] = {"next": 0}
+        if step["restart"]:
+            ctx = json.loads(json.dumps(ctx))      # what the phone persisted is all it has after a restart
+        assert _strip(R.open_pair_answer(bytes.fromhex(step["envelope"]), ctx, step["now_ms"])) == step["expect"]
+        assert ctx == step["ctx_after"]
+
+
+@each_suite("cert_binding", "challenges")
+def test_cert_binding_challenges(S, c):
+    _answer_chain(c)
+
+
+@each_suite("rejected_forms", "answers")
+def test_rejected_forms(S, c):
+    _answer_chain(c)
+
+
+@each_suite("approved_anchor", "answers")
+def test_approved_anchor_answers(S, c):
+    _answer_chain(c)
+
+
+@each_suite("cert_binding", "primary")
+def test_cert_binding_primary(S, c):
+    test_cert_request(S, c)
+
+
+@each_suite("cert_binding", "host")
+def test_cert_binding_host(S, c):
+    test_host_cases(S, c)
+
+
+@each_suite("cert_binding", "relay")
+def test_cert_binding_relay(S, c):
+    from ref._p3_vectors import replay
+    assert replay(S, c) == c["expect"]
+
+
+@each_suite("approved_anchor", "join")
+def test_approved_anchor_join(S, c):
+    state = copy.deepcopy(c["state"])
+    for step in c["steps"]:
+        if step["op"] == "list":
+            got = R.device_accept_member_list(S, bytes.fromhex(c["wsk_pub"]), c["card_workspace_id"], state,
+                                              step["signed"])
+        else:
+            got = R.device_join_card(state["anchor"], step["card_o"])
+        assert got == step["expect"]
+        assert state == step["state"]
+
+
+@pytest.mark.parametrize("sid", SUITES)
+def test_g3b_objects_bind_the_attempt(sid):
+    """The rejection carries exactly the request's attempt binding and expiry; dk_hash is of both keys."""
+    S, v = R.SUITES[int(sid)], VEC["suites"][sid]
+    rej, req = v["rejected_forms"]["objects"]["rejection"]["o"], v["rejected_forms"]["objects"]["request"]["o"]
+    assert set(rej) == R.REJECTION_FIELDS and set(req) == R.REQUEST_FIELDS
+    for k in ("request_id", "workspace_id", "person_id", "offer_id", "attempt", "device_id", "dk_hash", "expires_ms"):
+        assert rej[k] == req[k]
+    inner = v["cert_request"]["inner"]
+    assert v["cert_request"]["signed"]["o"]["dk_hash"] == R.b64u(R.dk_hash(S, R.unb64u(inner["dk_sig_pub"]),
+                                                                            R.unb64u(inner["dk_kx_pub"])))
+    ch = v["cert_request"]["challenge"]["o"]
+    assert (ch["offer_id"], ch["attempt"]) == (inner["offer_id"], inner["attempt"])

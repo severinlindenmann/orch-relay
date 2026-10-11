@@ -184,7 +184,16 @@ def test_pair_completion_requires_both_keys_and_certificate_retry(client):
     challenge = signed(
         {**OBJECTS["challenge"]["o"], "dk_kx_pub": V["certs"]["signed"]["laptop"]["o"]["dk_kx_pub"]}
     )
-    setup_pair_queue(client, challenge)
+    setup_pair_queue(client)
+    # G3b (P3-D28): a challenge whose keys differ from the request's dk_hash is never stored.
+    r = client.post(
+        f"/v2/cert-requests/{CRID}/challenge",
+        json={"challenge": challenge},
+        headers={"Authorization": "Bearer FAKE-primary"},
+    )
+    assert r.status_code == 403 and r.json()["error"] == "not_for_this_device"
+    # Completion still checks both keys of the stored challenge (defence in depth).
+    sql(client, "UPDATE cert_requests SET challenge=?", (P.cj(challenge),))
     sql(client, "DELETE FROM devices WHERE device_id=?", (DEVICE,))
     cert = OBJECTS["cert"]
     assert client.put(f"/v2/devices/{DEVICE}", json={"cert": cert}).status_code == 200
