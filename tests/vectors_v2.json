@@ -45665,6 +45665,1915 @@
       "one_over": "too_large"
      }
     ],
+    "restore": [
+     {
+      "name": "restore_after_expiry_accepted",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000070000
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000130000,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "live_duplicate_ttl_unchanged",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000060000
+      },
+      "expect": {
+       "result": {
+        "ok": "replay"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "old_epoch_data_chunk_not_restored",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 2,
+       "now_ms": 1790000070000
+      },
+      "expect": {
+       "result": {
+        "ok": "replay"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "old_epoch_refusal_stored",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {}
+      },
+      "args": {
+       "raw": "4f52423202020501705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd9443429423080060138dd471d54124319069eac02d3ef1521ef7d4e2e9bbfcbc243d2802699472bb94cda3c70debc39990a574b6ce5b383abfb5515b67118bc57d5d76877c0ec2584caf6b426bbb12f4645b009e7b6cb21d577773ea50f0071bae14818c3237d14dbf7d7c00d8df37a969535f86e8ef7f78b57c2009",
+       "epoch": 2,
+       "now_ms": 1790000000001
+      },
+      "expect": {
+       "result": {
+        "ok": "stored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "0f32841f62298441f931170654f164b8a5439f80e80aa7ce9d5878f107a814ac",
+          "flags": 5,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "old_epoch_refusal_restored",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "0f32841f62298441f931170654f164b8a5439f80e80aa7ce9d5878f107a814ac",
+         "flags": 5,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020501705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd9443429423080060138dd471d54124319069eac02d3ef1521ef7d4e2e9bbfcbc243d2802699472bb94cda3c70debc39990a574b6ce5b383abfb5515b67118bc57d5d76877c0ec2584caf6b426bbb12f4645b009e7b6cb21d577773ea50f0071bae14818c3237d14dbf7d7c00d8df37a969535f86e8ef7f78b57c2009",
+       "epoch": 2,
+       "now_ms": 1790000070000
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "0f32841f62298441f931170654f164b8a5439f80e80aa7ce9d5878f107a814ac",
+          "flags": 5,
+          "expires_ms": 1790000130000,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_before_deadline_capped_at_record",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000899999
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000900000,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_before_deadline_late_record",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 1,
+       "last_requeue_ms": 1790000899999,
+       "keep_until_ms": 1790000959999,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        },
+        {
+         "n": 2,
+         "expires_ms": 1790000959999
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000899999
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 1,
+        "last_requeue_ms": 1790000899999,
+        "keep_until_ms": 1790000959999,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         },
+         {
+          "n": 2,
+          "expires_ms": 1790000959999
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000959999,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_at_deadline_refused",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 1,
+       "last_requeue_ms": 1790000899999,
+       "keep_until_ms": 1790000959999,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        },
+        {
+         "n": 2,
+         "expires_ms": 1790000959999
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000900000
+      },
+      "expect": {
+       "result": {
+        "refuse": "expired"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 1,
+        "last_requeue_ms": 1790000899999,
+        "keep_until_ms": 1790000959999,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         },
+         {
+          "n": 2,
+          "expires_ms": 1790000959999
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_after_deadline_refused",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 1,
+       "last_requeue_ms": 1790000899999,
+       "keep_until_ms": 1790000959999,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        },
+        {
+         "n": 2,
+         "expires_ms": 1790000959999
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000959998
+      },
+      "expect": {
+       "result": {
+        "refuse": "expired"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 1,
+        "last_requeue_ms": 1790000899999,
+        "keep_until_ms": 1790000959999,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         },
+         {
+          "n": 2,
+          "expires_ms": 1790000959999
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_1_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000060001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000120001,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restored_copy_duplicate_ttl_unchanged",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000120001,
+         "restores": 1
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000120000
+      },
+      "expect": {
+       "result": {
+        "ok": "replay"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000120001,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_2_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000120001,
+         "restores": 1
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000120001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000180001,
+          "restores": 2
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_3_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000180001,
+         "restores": 2
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000180001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000240001,
+          "restores": 3
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_4_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000240001,
+         "restores": 3
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000240001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000300001,
+          "restores": 4
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_5_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000300001,
+         "restores": 4
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000300001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000360001,
+          "restores": 5
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_6_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000360001,
+         "restores": 5
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000360001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000420001,
+          "restores": 6
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_7_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000420001,
+         "restores": 6
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000420001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000480001,
+          "restores": 7
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_8_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000480001,
+         "restores": 7
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000480001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000540001,
+          "restores": 8
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "ninth_restoration_refused",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000540001,
+         "restores": 8
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000540001
+      },
+      "expect": {
+       "result": {
+        "refuse": "retry_exhausted"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000540001,
+          "restores": 8
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restoration_count_survives_restart",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000540001,
+         "restores": 8
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000600001
+      },
+      "expect": {
+       "result": {
+        "refuse": "retry_exhausted"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000540001,
+          "restores": 8
+         }
+        }
+       }
+      },
+      "restart": true
+     },
+     {
+      "name": "alternating_store_chunk_0",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {}
+      },
+      "args": {
+       "raw": "4f52423202020001705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d3136dd4149d268254ee793a51e27d88fcf32325901bca0b992d05c6be863c2ff6efa852d27808d0d15d47ac6460922b11475c3f2b90a85caf3452d2484b063970bd5ca521511024aa9b632da8f1495db01",
+       "epoch": 1,
+       "now_ms": 1790000000001
+      },
+      "expect": {
+       "result": {
+        "ok": "stored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "5142dc4d2459a9b9ade3296b95f4e855e7b45ac00e99b89dcb880bc554dc916a",
+          "flags": 0,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "alternating_store_chunk_1",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "5142dc4d2459a9b9ade3296b95f4e855e7b45ac00e99b89dcb880bc554dc916a",
+         "flags": 0,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000001000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d3181e708cb604a3d9b8cd3b1ad1f3df256c6b18dfd30a22053f4204cc8ca31944670aad4d32401e1cb2906295d6f1301b40eea30f68ab4b1c110064055cb9e0fdd81d943170a2dc5349ca3d3b088aa9b06",
+       "epoch": 1,
+       "now_ms": 1790000000002
+      },
+      "expect": {
+       "result": {
+        "ok": "stored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "5142dc4d2459a9b9ade3296b95f4e855e7b45ac00e99b89dcb880bc554dc916a",
+          "flags": 0,
+          "expires_ms": 1790000060001
+         },
+         "1": {
+          "digest": "192b0e9150a91f48a73fe6f33957ff5533ef5ffa5249f439e4ba62c9cc8b0e5a",
+          "flags": 1,
+          "expires_ms": 1790000060002
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "alternating_restore_chunk_0",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "5142dc4d2459a9b9ade3296b95f4e855e7b45ac00e99b89dcb880bc554dc916a",
+         "flags": 0,
+         "expires_ms": 1790000060001
+        },
+        "1": {
+         "digest": "192b0e9150a91f48a73fe6f33957ff5533ef5ffa5249f439e4ba62c9cc8b0e5a",
+         "flags": 1,
+         "expires_ms": 1790000060002
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020001705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d3136dd4149d268254ee793a51e27d88fcf32325901bca0b992d05c6be863c2ff6efa852d27808d0d15d47ac6460922b11475c3f2b90a85caf3452d2484b063970bd5ca521511024aa9b632da8f1495db01",
+       "epoch": 1,
+       "now_ms": 1790000060002
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "5142dc4d2459a9b9ade3296b95f4e855e7b45ac00e99b89dcb880bc554dc916a",
+          "flags": 0,
+          "expires_ms": 1790000120002,
+          "restores": 1
+         },
+         "1": {
+          "digest": "192b0e9150a91f48a73fe6f33957ff5533ef5ffa5249f439e4ba62c9cc8b0e5a",
+          "flags": 1,
+          "expires_ms": 1790000060002
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "alternating_restore_chunk_1",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "5142dc4d2459a9b9ade3296b95f4e855e7b45ac00e99b89dcb880bc554dc916a",
+         "flags": 0,
+         "expires_ms": 1790000120002,
+         "restores": 1
+        },
+        "1": {
+         "digest": "192b0e9150a91f48a73fe6f33957ff5533ef5ffa5249f439e4ba62c9cc8b0e5a",
+         "flags": 1,
+         "expires_ms": 1790000060002
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000001000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d3181e708cb604a3d9b8cd3b1ad1f3df256c6b18dfd30a22053f4204cc8ca31944670aad4d32401e1cb2906295d6f1301b40eea30f68ab4b1c110064055cb9e0fdd81d943170a2dc5349ca3d3b088aa9b06",
+       "epoch": 1,
+       "now_ms": 1790000090002
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "5142dc4d2459a9b9ade3296b95f4e855e7b45ac00e99b89dcb880bc554dc916a",
+          "flags": 0,
+          "expires_ms": 1790000120002,
+          "restores": 1
+         },
+         "1": {
+          "digest": "192b0e9150a91f48a73fe6f33957ff5533ef5ffa5249f439e4ba62c9cc8b0e5a",
+          "flags": 1,
+          "expires_ms": 1790000150002,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "alternating_restore_chunk_0_late",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "5142dc4d2459a9b9ade3296b95f4e855e7b45ac00e99b89dcb880bc554dc916a",
+         "flags": 0,
+         "expires_ms": 1790000120002,
+         "restores": 1
+        },
+        "1": {
+         "digest": "192b0e9150a91f48a73fe6f33957ff5533ef5ffa5249f439e4ba62c9cc8b0e5a",
+         "flags": 1,
+         "expires_ms": 1790000150002,
+         "restores": 1
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020001705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d3136dd4149d268254ee793a51e27d88fcf32325901bca0b992d05c6be863c2ff6efa852d27808d0d15d47ac6460922b11475c3f2b90a85caf3452d2484b063970bd5ca521511024aa9b632da8f1495db01",
+       "epoch": 1,
+       "now_ms": 1790000850000
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "5142dc4d2459a9b9ade3296b95f4e855e7b45ac00e99b89dcb880bc554dc916a",
+          "flags": 0,
+          "expires_ms": 1790000900000,
+          "restores": 2
+         },
+         "1": {
+          "digest": "192b0e9150a91f48a73fe6f33957ff5533ef5ffa5249f439e4ba62c9cc8b0e5a",
+          "flags": 1,
+          "expires_ms": 1790000150002,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "alternating_restore_chunk_1_late",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "5142dc4d2459a9b9ade3296b95f4e855e7b45ac00e99b89dcb880bc554dc916a",
+         "flags": 0,
+         "expires_ms": 1790000900000,
+         "restores": 2
+        },
+        "1": {
+         "digest": "192b0e9150a91f48a73fe6f33957ff5533ef5ffa5249f439e4ba62c9cc8b0e5a",
+         "flags": 1,
+         "expires_ms": 1790000150002,
+         "restores": 1
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000001000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d3181e708cb604a3d9b8cd3b1ad1f3df256c6b18dfd30a22053f4204cc8ca31944670aad4d32401e1cb2906295d6f1301b40eea30f68ab4b1c110064055cb9e0fdd81d943170a2dc5349ca3d3b088aa9b06",
+       "epoch": 1,
+       "now_ms": 1790000880000
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "5142dc4d2459a9b9ade3296b95f4e855e7b45ac00e99b89dcb880bc554dc916a",
+          "flags": 0,
+          "expires_ms": 1790000900000,
+          "restores": 2
+         },
+         "1": {
+          "digest": "192b0e9150a91f48a73fe6f33957ff5533ef5ffa5249f439e4ba62c9cc8b0e5a",
+          "flags": 1,
+          "expires_ms": 1790000900000,
+          "restores": 2
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "alternating_restores_end_at_rid_expiry",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "5142dc4d2459a9b9ade3296b95f4e855e7b45ac00e99b89dcb880bc554dc916a",
+         "flags": 0,
+         "expires_ms": 1790000900000,
+         "restores": 2
+        },
+        "1": {
+         "digest": "192b0e9150a91f48a73fe6f33957ff5533ef5ffa5249f439e4ba62c9cc8b0e5a",
+         "flags": 1,
+         "expires_ms": 1790000900000,
+         "restores": 2
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020001705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d3136dd4149d268254ee793a51e27d88fcf32325901bca0b992d05c6be863c2ff6efa852d27808d0d15d47ac6460922b11475c3f2b90a85caf3452d2484b063970bd5ca521511024aa9b632da8f1495db01",
+       "epoch": 1,
+       "now_ms": 1790000900000
+      },
+      "expect": {
+       "result": {
+        "refuse": "expired"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "5142dc4d2459a9b9ade3296b95f4e855e7b45ac00e99b89dcb880bc554dc916a",
+          "flags": 0,
+          "expires_ms": 1790000900000,
+          "restores": 2
+         },
+         "1": {
+          "digest": "192b0e9150a91f48a73fe6f33957ff5533ef5ffa5249f439e4ba62c9cc8b0e5a",
+          "flags": 1,
+          "expires_ms": 1790000900000,
+          "restores": 2
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_fenced_holder_refused",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000070000,
+       "fenced": true
+      },
+      "expect": {
+       "result": {
+        "refuse": "fenced"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_revoked_target_refused",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000070000,
+       "revoked": true
+      },
+      "expect": {
+       "result": {
+        "refuse": "revoked"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_removed_target_refused",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000070000,
+       "member": false
+      },
+      "expect": {
+       "result": {
+        "refuse": "not_eligible"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_budget_boundary_accepted",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000070000,
+       "room": 205
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000130000,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_budget_exhausted_refused",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000070000,
+       "room": 204
+      },
+      "expect": {
+       "result": {
+        "refuse": "quota_exceeded"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     }
+    ],
     "objects": {
      "publication": {
       "member_list": {
@@ -242646,6 +244555,1915 @@
       "limit": 65536,
       "at_limit": true,
       "one_over": "too_large"
+     }
+    ],
+    "restore": [
+     {
+      "name": "restore_after_expiry_accepted",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000070000
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000130000,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "live_duplicate_ttl_unchanged",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000060000
+      },
+      "expect": {
+       "result": {
+        "ok": "replay"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "old_epoch_data_chunk_not_restored",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 2,
+       "now_ms": 1790000070000
+      },
+      "expect": {
+       "result": {
+        "ok": "replay"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "old_epoch_refusal_stored",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {}
+      },
+      "args": {
+       "raw": "4f52423202020502705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd9443429423080060138dd471d54124319069eac02d3ef1521ef7d4e2e9bbfcbc243d2802699472bb94cda3c7d7d3811be5c250124b4eb01f0a75dc6cca03d3a8d8227113f9ca01a88af58f8640c7674c7919dc2bb12a4bf91509ce5190a969eb5e9b2183184936056e47b6d433c7c8e392322c212b66787dadbf0198",
+       "epoch": 2,
+       "now_ms": 1790000000001
+      },
+      "expect": {
+       "result": {
+        "ok": "stored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "fb4df43d646f7cf752640d4b4b43b7ec8cc7e35c2f4d72728e29b75c3a5b2b43",
+          "flags": 5,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "old_epoch_refusal_restored",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "fb4df43d646f7cf752640d4b4b43b7ec8cc7e35c2f4d72728e29b75c3a5b2b43",
+         "flags": 5,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020502705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd9443429423080060138dd471d54124319069eac02d3ef1521ef7d4e2e9bbfcbc243d2802699472bb94cda3c7d7d3811be5c250124b4eb01f0a75dc6cca03d3a8d8227113f9ca01a88af58f8640c7674c7919dc2bb12a4bf91509ce5190a969eb5e9b2183184936056e47b6d433c7c8e392322c212b66787dadbf0198",
+       "epoch": 2,
+       "now_ms": 1790000070000
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "fb4df43d646f7cf752640d4b4b43b7ec8cc7e35c2f4d72728e29b75c3a5b2b43",
+          "flags": 5,
+          "expires_ms": 1790000130000,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_before_deadline_capped_at_record",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000899999
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000900000,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_before_deadline_late_record",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 1,
+       "last_requeue_ms": 1790000899999,
+       "keep_until_ms": 1790000959999,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        },
+        {
+         "n": 2,
+         "expires_ms": 1790000959999
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000899999
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 1,
+        "last_requeue_ms": 1790000899999,
+        "keep_until_ms": 1790000959999,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         },
+         {
+          "n": 2,
+          "expires_ms": 1790000959999
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000959999,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_at_deadline_refused",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 1,
+       "last_requeue_ms": 1790000899999,
+       "keep_until_ms": 1790000959999,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        },
+        {
+         "n": 2,
+         "expires_ms": 1790000959999
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000900000
+      },
+      "expect": {
+       "result": {
+        "refuse": "expired"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 1,
+        "last_requeue_ms": 1790000899999,
+        "keep_until_ms": 1790000959999,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         },
+         {
+          "n": 2,
+          "expires_ms": 1790000959999
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_after_deadline_refused",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 1,
+       "last_requeue_ms": 1790000899999,
+       "keep_until_ms": 1790000959999,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        },
+        {
+         "n": 2,
+         "expires_ms": 1790000959999
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000959998
+      },
+      "expect": {
+       "result": {
+        "refuse": "expired"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 1,
+        "last_requeue_ms": 1790000899999,
+        "keep_until_ms": 1790000959999,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         },
+         {
+          "n": 2,
+          "expires_ms": 1790000959999
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_1_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000060001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000120001,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restored_copy_duplicate_ttl_unchanged",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000120001,
+         "restores": 1
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000120000
+      },
+      "expect": {
+       "result": {
+        "ok": "replay"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000120001,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_2_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000120001,
+         "restores": 1
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000120001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000180001,
+          "restores": 2
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_3_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000180001,
+         "restores": 2
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000180001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000240001,
+          "restores": 3
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_4_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000240001,
+         "restores": 3
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000240001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000300001,
+          "restores": 4
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_5_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000300001,
+         "restores": 4
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000300001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000360001,
+          "restores": 5
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_6_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000360001,
+         "restores": 5
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000360001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000420001,
+          "restores": 6
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_7_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000420001,
+         "restores": 6
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000420001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000480001,
+          "restores": 7
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_8_of_8",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000480001,
+         "restores": 7
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000480001
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000540001,
+          "restores": 8
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "ninth_restoration_refused",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000540001,
+         "restores": 8
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000540001
+      },
+      "expect": {
+       "result": {
+        "refuse": "retry_exhausted"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000540001,
+          "restores": 8
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restoration_count_survives_restart",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000540001,
+         "restores": 8
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000600001
+      },
+      "expect": {
+       "result": {
+        "refuse": "retry_exhausted"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000540001,
+          "restores": 8
+         }
+        }
+       }
+      },
+      "restart": true
+     },
+     {
+      "name": "alternating_store_chunk_0",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {}
+      },
+      "args": {
+       "raw": "4f52423202020002705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d316292d011ed147bd920dd2e2b335e573dbc52dd6a3d6abfee6fcb63b8ad7ce0b1633fdd9ae609bd898e1ea8215bc84f73a7548ee391a2224afd512ec0ce71889d3173f8289189d52a8de9676b75fac0e0",
+       "epoch": 1,
+       "now_ms": 1790000000001
+      },
+      "expect": {
+       "result": {
+        "ok": "stored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "27df24f37b892c15c8dc29c541bc7cff3725ca23730380e84924cc220347a692",
+          "flags": 0,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "alternating_store_chunk_1",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "27df24f37b892c15c8dc29c541bc7cff3725ca23730380e84924cc220347a692",
+         "flags": 0,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000001000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31d5a899935f36630c4b9d3a980bbb2aa4b0e38ec8c72e5c38e9f2e52bd56aceba799a353017838270a33cccf855ce897663a37bc1ecd3f6c7fe30388e65ffd8faa3c36f22f7538382c31f6f1456d4d96a",
+       "epoch": 1,
+       "now_ms": 1790000000002
+      },
+      "expect": {
+       "result": {
+        "ok": "stored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "27df24f37b892c15c8dc29c541bc7cff3725ca23730380e84924cc220347a692",
+          "flags": 0,
+          "expires_ms": 1790000060001
+         },
+         "1": {
+          "digest": "128539160f547b834c37ff034e912797575ec8158d81dc73a3671cf993b67f81",
+          "flags": 1,
+          "expires_ms": 1790000060002
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "alternating_restore_chunk_0",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "27df24f37b892c15c8dc29c541bc7cff3725ca23730380e84924cc220347a692",
+         "flags": 0,
+         "expires_ms": 1790000060001
+        },
+        "1": {
+         "digest": "128539160f547b834c37ff034e912797575ec8158d81dc73a3671cf993b67f81",
+         "flags": 1,
+         "expires_ms": 1790000060002
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020002705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d316292d011ed147bd920dd2e2b335e573dbc52dd6a3d6abfee6fcb63b8ad7ce0b1633fdd9ae609bd898e1ea8215bc84f73a7548ee391a2224afd512ec0ce71889d3173f8289189d52a8de9676b75fac0e0",
+       "epoch": 1,
+       "now_ms": 1790000060002
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "27df24f37b892c15c8dc29c541bc7cff3725ca23730380e84924cc220347a692",
+          "flags": 0,
+          "expires_ms": 1790000120002,
+          "restores": 1
+         },
+         "1": {
+          "digest": "128539160f547b834c37ff034e912797575ec8158d81dc73a3671cf993b67f81",
+          "flags": 1,
+          "expires_ms": 1790000060002
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "alternating_restore_chunk_1",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "27df24f37b892c15c8dc29c541bc7cff3725ca23730380e84924cc220347a692",
+         "flags": 0,
+         "expires_ms": 1790000120002,
+         "restores": 1
+        },
+        "1": {
+         "digest": "128539160f547b834c37ff034e912797575ec8158d81dc73a3671cf993b67f81",
+         "flags": 1,
+         "expires_ms": 1790000060002
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000001000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31d5a899935f36630c4b9d3a980bbb2aa4b0e38ec8c72e5c38e9f2e52bd56aceba799a353017838270a33cccf855ce897663a37bc1ecd3f6c7fe30388e65ffd8faa3c36f22f7538382c31f6f1456d4d96a",
+       "epoch": 1,
+       "now_ms": 1790000090002
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "27df24f37b892c15c8dc29c541bc7cff3725ca23730380e84924cc220347a692",
+          "flags": 0,
+          "expires_ms": 1790000120002,
+          "restores": 1
+         },
+         "1": {
+          "digest": "128539160f547b834c37ff034e912797575ec8158d81dc73a3671cf993b67f81",
+          "flags": 1,
+          "expires_ms": 1790000150002,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "alternating_restore_chunk_0_late",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "27df24f37b892c15c8dc29c541bc7cff3725ca23730380e84924cc220347a692",
+         "flags": 0,
+         "expires_ms": 1790000120002,
+         "restores": 1
+        },
+        "1": {
+         "digest": "128539160f547b834c37ff034e912797575ec8158d81dc73a3671cf993b67f81",
+         "flags": 1,
+         "expires_ms": 1790000150002,
+         "restores": 1
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020002705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d316292d011ed147bd920dd2e2b335e573dbc52dd6a3d6abfee6fcb63b8ad7ce0b1633fdd9ae609bd898e1ea8215bc84f73a7548ee391a2224afd512ec0ce71889d3173f8289189d52a8de9676b75fac0e0",
+       "epoch": 1,
+       "now_ms": 1790000850000
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "27df24f37b892c15c8dc29c541bc7cff3725ca23730380e84924cc220347a692",
+          "flags": 0,
+          "expires_ms": 1790000900000,
+          "restores": 2
+         },
+         "1": {
+          "digest": "128539160f547b834c37ff034e912797575ec8158d81dc73a3671cf993b67f81",
+          "flags": 1,
+          "expires_ms": 1790000150002,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "alternating_restore_chunk_1_late",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "27df24f37b892c15c8dc29c541bc7cff3725ca23730380e84924cc220347a692",
+         "flags": 0,
+         "expires_ms": 1790000900000,
+         "restores": 2
+        },
+        "1": {
+         "digest": "128539160f547b834c37ff034e912797575ec8158d81dc73a3671cf993b67f81",
+         "flags": 1,
+         "expires_ms": 1790000150002,
+         "restores": 1
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000001000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31d5a899935f36630c4b9d3a980bbb2aa4b0e38ec8c72e5c38e9f2e52bd56aceba799a353017838270a33cccf855ce897663a37bc1ecd3f6c7fe30388e65ffd8faa3c36f22f7538382c31f6f1456d4d96a",
+       "epoch": 1,
+       "now_ms": 1790000880000
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "27df24f37b892c15c8dc29c541bc7cff3725ca23730380e84924cc220347a692",
+          "flags": 0,
+          "expires_ms": 1790000900000,
+          "restores": 2
+         },
+         "1": {
+          "digest": "128539160f547b834c37ff034e912797575ec8158d81dc73a3671cf993b67f81",
+          "flags": 1,
+          "expires_ms": 1790000900000,
+          "restores": 2
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "alternating_restores_end_at_rid_expiry",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "27df24f37b892c15c8dc29c541bc7cff3725ca23730380e84924cc220347a692",
+         "flags": 0,
+         "expires_ms": 1790000900000,
+         "restores": 2
+        },
+        "1": {
+         "digest": "128539160f547b834c37ff034e912797575ec8158d81dc73a3671cf993b67f81",
+         "flags": 1,
+         "expires_ms": 1790000900000,
+         "restores": 2
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020002705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d316292d011ed147bd920dd2e2b335e573dbc52dd6a3d6abfee6fcb63b8ad7ce0b1633fdd9ae609bd898e1ea8215bc84f73a7548ee391a2224afd512ec0ce71889d3173f8289189d52a8de9676b75fac0e0",
+       "epoch": 1,
+       "now_ms": 1790000900000
+      },
+      "expect": {
+       "result": {
+        "refuse": "expired"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "27df24f37b892c15c8dc29c541bc7cff3725ca23730380e84924cc220347a692",
+          "flags": 0,
+          "expires_ms": 1790000900000,
+          "restores": 2
+         },
+         "1": {
+          "digest": "128539160f547b834c37ff034e912797575ec8158d81dc73a3671cf993b67f81",
+          "flags": 1,
+          "expires_ms": 1790000900000,
+          "restores": 2
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_fenced_holder_refused",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000070000,
+       "fenced": true
+      },
+      "expect": {
+       "result": {
+        "refuse": "fenced"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_revoked_target_refused",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000070000,
+       "revoked": true
+      },
+      "expect": {
+       "result": {
+        "refuse": "revoked"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_removed_target_refused",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000070000,
+       "member": false
+      },
+      "expect": {
+       "result": {
+        "refuse": "not_eligible"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_budget_boundary_accepted",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000070000,
+       "room": 205
+      },
+      "expect": {
+       "result": {
+        "ok": "restored"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000130000,
+          "restores": 1
+         }
+        }
+       }
+      }
+     },
+     {
+      "name": "restore_budget_exhausted_refused",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000070000,
+       "room": 204
+      },
+      "expect": {
+       "result": {
+        "refuse": "quota_exceeded"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
      }
     ],
     "objects": {

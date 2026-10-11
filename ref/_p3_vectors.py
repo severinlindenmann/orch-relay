@@ -388,6 +388,7 @@ def add_p3(out):
         chunks = {**bs, "chunks": {str(i): {"digest": "other", "expires_ms": NOW + 60000, "flags": 0} for i in range(63)}}
         chunks64 = case("chunk_64_allowed", "chunk", chunks, {**ca, "raw": env(2, 1, idx=63).hex()}, "stored")
         case("chunk_65_refused", "chunk", chunks64, {**ca, "raw": env(2, 1, idx=64).hex()}, "quota_exceeded")
+        restore = restore_cases(S, case, cases, bs, stored, tail, ca, env, refusal)
         for count, want in ((32, "charged"), (63, "charged"), (64, "rate_limited")):
             case(f"certificate_quota_{count}", "quota", {**full_repeat, "total": count},
                  {**qu, "valid_signature": True, "revocation": False}, want)
@@ -412,6 +413,57 @@ def add_p3(out):
         case("valid_dummy_signature_still_401", "login", ls, {**la, "subject": None, "sig": dummy_sig.hex()}, "bad_signature")
         tokens = {str(i): {"kind": "device", "id": phone, "expires_ms": NOW + 1} for i in range(8)}
         case("device_token_cap_eight", "login", {**ls, "tokens": tokens}, la, "quota_exceeded")
-        v["p3"] = {"cases": cases, "envelope_sizes": sizes, "objects": {"publication": body, "cert_rejection": rejection,
+        v["p3"] = {"cases": cases, "envelope_sizes": sizes, "restore": restore, "objects": {"publication": body, "cert_rejection": rejection,
                     "request": cr, "challenge": ch, "cert": cert, "bridge_request": req.hex(), "bridge_response": resp.hex(),
                     "bridge_refusal": refusal.hex(), "login": {"challenge": R.b64u(challenge), "kind": "device", "id": phone, "sig": R.b64u(bytes.fromhex(la["sig"]))}}}
+
+
+def restore_cases(S, case, cases, bs, stored, tail, ca, env, refusal):
+    """P3-D27: bounded exact-bytes re-store of expired response chunks (group p3.restore).
+    stored: one current-epoch LAST chunk accepted at NOW + 1; tail: a record whose keep_until_ms a late
+    request copy extended to NOW + 959999. A case may set "restart": the relay restarts before the post.
+    """
+    start = len(cases)
+    late = {**tail, "chunks": copy.deepcopy(stored["chunks"])}
+    expired = {**ca, "now_ms": NOW + 70000}
+    case("restore_after_expiry_accepted", "chunk", stored, expired, "restored")
+    case("live_duplicate_ttl_unchanged", "chunk", stored, {**ca, "now_ms": NOW + 60000}, "replay")
+    case("old_epoch_data_chunk_not_restored", "chunk", stored, {**expired, "epoch": 2}, "replay")
+    refused = case("old_epoch_refusal_stored", "chunk", bs, {**ca, "epoch": 2, "raw": refusal.hex()}, "stored")
+    case("old_epoch_refusal_restored", "chunk", refused, {**expired, "epoch": 2, "raw": refusal.hex()}, "restored")
+    # The deadline is first_ms + 900 s, never the extended keep_until_ms; a copy never outlives the record.
+    case("restore_before_deadline_capped_at_record", "chunk", stored, {**ca, "now_ms": NOW + 899999}, "restored")
+    case("restore_before_deadline_late_record", "chunk", late, {**ca, "now_ms": NOW + 899999}, "restored")
+    case("restore_at_deadline_refused", "chunk", late, {**ca, "now_ms": NOW + 900000}, "expired")
+    case("restore_after_deadline_refused", "chunk", late, {**ca, "now_ms": NOW + 959998}, "expired")
+    # A durable cap of eight restorations per chunk.
+    state = stored
+    for i in range(1, 9):
+        state = case(f"restore_{i}_of_8", "chunk", state, {**ca, "now_ms": NOW + 1 + i * 60000}, "restored")
+        if i == 1:
+            case("restored_copy_duplicate_ttl_unchanged", "chunk", state, {**ca, "now_ms": NOW + 120000}, "replay")
+    case("ninth_restoration_refused", "chunk", state, {**ca, "now_ms": NOW + 540001}, "retry_exhausted")
+    case("restoration_count_survives_restart", "chunk", state, {**ca, "now_ms": NOW + 600001}, "retry_exhausted")
+    cases[-1]["restart"] = True
+    # Two chunks restored in turn cannot keep the rid alive: keep_until_ms never moves.
+    raw0, raw1 = env(2, 1, idx=0).hex(), env(2, 1, R.F_LAST, idx=1).hex()
+    pair = case("alternating_store_chunk_0", "chunk", bs, {**ca, "raw": raw0}, "stored")
+    pair = case("alternating_store_chunk_1", "chunk", pair, {**ca, "raw": raw1, "now_ms": NOW + 2}, "stored")
+    for name, raw, now in (("alternating_restore_chunk_0", raw0, NOW + 60002),
+                           ("alternating_restore_chunk_1", raw1, NOW + 90002),
+                           ("alternating_restore_chunk_0_late", raw0, NOW + 850000),
+                           ("alternating_restore_chunk_1_late", raw1, NOW + 880000)):
+        pair = case(name, "chunk", pair, {**ca, "raw": raw, "now_ms": now}, "restored")
+        assert pair["keep_until_ms"] == NOW + 900000
+    case("alternating_restores_end_at_rid_expiry", "chunk", pair, {**ca, "raw": raw0, "now_ms": NOW + 900000}, "expired")
+    # Holder, target eligibility and budgets still apply to a re-store.
+    case("restore_fenced_holder_refused", "chunk", stored, {**expired, "fenced": True}, "fenced")
+    case("restore_revoked_target_refused", "chunk", stored, {**expired, "revoked": True}, "revoked")
+    case("restore_removed_target_refused", "chunk", stored, {**expired, "member": False}, "not_eligible")
+    size = len(bytes.fromhex(ca["raw"]))
+    case("restore_budget_boundary_accepted", "chunk", stored, {**expired, "room": size}, "restored")
+    case("restore_budget_exhausted_refused", "chunk", stored, {**expired, "room": size - 1}, "quota_exceeded")
+    restore = cases[start:]
+    del cases[start:]
+    return restore
+

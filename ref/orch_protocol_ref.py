@@ -2652,18 +2652,46 @@ def relay_bridge_request(state, raw, epoch, now_ms, cursor):
     return {"ok": "queued", "n": n}
 
 
-def relay_bridge_chunk(state, raw, epoch, now_ms):
-    """P3-D22. Caller has checked shape, current membership and holder; one known rid."""
+RESTORE_WINDOW_MS = 900_000  # P3-D27, measured from rid_seen.first_ms
+MAX_RESTORES = 8              # P3-D27, per stored response chunk
+
+
+def relay_bridge_chunk(state, raw, epoch, now_ms, fenced=False, revoked=False, member=True, room=None):
+    """P3-D22/D27 on the bridge route (pairing answers are never restored). Caller has checked shape.
+    fenced/revoked/member model the holder and target-device gates, which run before replay handling;
+    room is the target's remaining response budget in bytes (None: not constraining).
+    """
+    if fenced:
+        return {"refuse": "fenced"}
+    if revoked:
+        return {"refuse": "revoked"}
+    if not member:
+        return {"refuse": "not_eligible"}
     h = Header.decode(raw)
     if not state or now_ms >= state["keep_until_ms"]:
         return {"refuse": "expired"}  # (G0a review 8)
     key, d = str(h.seq), H(raw).hex()
     old = state["chunks"].get(key)
     if old:
-        return {"ok": "replay"} if old["digest"] == d else {"refuse": "chunk_conflict"}
+        if old["digest"] != d:
+            return {"refuse": "chunk_conflict"}
+        # P3-D27: the exact bytes of an expired chunk may be stored again, bounded.
+        if now_ms < old["expires_ms"]:
+            return {"ok": "replay"}  # a live duplicate: TTL unchanged, nothing charged
+        if h.epoch != epoch and h.flags & (F_LAST | F_REFUSAL) != F_LAST | F_REFUSAL:
+            return {"ok": "replay"}  # old-epoch data is never restored (P3-D22)
+        if now_ms >= state["first_ms"] + RESTORE_WINDOW_MS:
+            return {"refuse": "expired"}  # immutable deadline, never keep_until_ms
+        if old.get("restores", 0) >= MAX_RESTORES:
+            return {"refuse": "retry_exhausted"}
+        if room is not None and len(raw) > room:
+            return {"refuse": "quota_exceeded"}
+        old["restores"] = old.get("restores", 0) + 1
+        old["expires_ms"] = min(now_ms + 60_000, state["keep_until_ms"])  # keep_until_ms unchanged
+        return {"ok": "restored"}
     if h.epoch != state["req_epoch"] or (h.epoch != epoch and h.flags & (F_LAST | F_REFUSAL) != F_LAST | F_REFUSAL):
         return {"refuse": "stale_epoch", "epoch": epoch}
-    if len(state["chunks"]) >= 64:
+    if len(state["chunks"]) >= 64 or room is not None and len(raw) > room:
         return {"refuse": "quota_exceeded"}
     state["chunks"][key] = {"digest": d, "flags": h.flags, "expires_ms": now_ms + 60_000}
     state["keep_until_ms"] = max(state["keep_until_ms"], now_ms + 60_000)
