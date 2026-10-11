@@ -87,8 +87,9 @@ def add_p3(out):
         ds = {"owner_pk_pub": pub("person_alice"), "persons": {ids["person_bob"]: pub("person_bob")},
               "certs": {c["o"]["device_id"]: c for c in certs.values()}, "revoked": []}
         member = lambda n: {"device_id": ids["device_" + n], "person_id": certs[n]["o"]["person_id"], "scopes": ["look"]}
+        commit = lambda e, key="P3 wk", w=ws: R.b64u(R.wk_commit(bytes.fromhex(w), e, R.fake(key)))
         lo = {"v": 2, "suite": S.id, "kind": "member_list", "workspace_id": ws, "epoch": 1,
-              "list_seq": 1, "issued_ms": NOW, "persons": [ids["person_bob"]],
+              "list_seq": 1, "issued_ms": NOW, "wk_commit": commit(1), "persons": [ids["person_bob"]],
               "members": sorted([member("phone"), member("bob_phone")], key=lambda m: m["device_id"])}
         grants = [R.make_wk_grant(S, priv("wsk_a"), bytes.fromhex(ws), bytes.fromhex(ids["device_" + n]),
                                  bytes.fromhex(keys[n + ".kx"]["pub"]), 1, R.fake("P3 wk"), R.fake("P3 eph " + n))
@@ -109,6 +110,7 @@ def add_p3(out):
             ("missing_person_field", {**lo, "members": [{k: x for k, x in m.items() if k != "person_id"} for m in lo["members"]]}, "malformed"),
             ("other_workspace", {**lo, "workspace_id": ids["workspace_b"]}, "other_workspace"),
             ("invalid_member_scope", {**lo, "members": [{**m, "scopes": ["operate"]} for m in lo["members"]]}, "scope_exceeded"),
+            ("wk_commit_missing", {k_: x for k_, x in lo.items() if k_ != "wk_commit"}, "malformed"),
         ]:
             case(name, "membership", st, {**args, "body": {**body, "member_list": sign(changed)}}, want)
         for name, b, want in [
@@ -131,7 +133,30 @@ def add_p3(out):
         due = copy.deepcopy(committed); due["rotation_due"] = {ids["device_laptop"]: {"epoch": 1, "revocation_cursor": 9}}
         retained = case("rotation_due_survives_same_epoch_and_restart", "membership", due,
                         {**args, "body": {**body, "member_list": sign({**lo, "list_seq": 2})}}, {"list_seq": 2, "epoch": 1})
-        rotated = {**body, "member_list": sign({**lo, "list_seq": 3, "epoch": 2}),
+        # G2b check 7b: the same epoch keeps its wk_commit (a second key for epoch 1 is refused).
+        case("wk_commit_changed_same_epoch", "membership", committed,
+             {**args, "body": {**body, "member_list": sign({**lo, "list_seq": 2, "wk_commit": commit(1, "P3 wk, second key")})}},
+             "wk_commit_changed")
+        # §19.7 order, pinned with two faults: the list rules (stale_list, then 7b) run before grant_conflict.
+        # A host that regenerated WK_1 and re-sealed the grants gets wk_commit_changed, not grant_conflict.
+        resealed = [R.make_wk_grant(S, priv("wsk_a"), bytes.fromhex(ws), bytes.fromhex(ids["device_" + n]),
+                                    bytes.fromhex(keys[n + ".kx"]["pub"]), 1, R.fake("P3 wk, second key"),
+                                    R.fake("P3 eph resealed " + n))
+                    for n in ("phone", "bob_phone")]
+        case("resealed_same_epoch_wk_commit_changed_before_grant_conflict", "membership", committed,
+             {**args, "body": {**body, "grants": resealed,
+                               "member_list": sign({**lo, "list_seq": 2, "wk_commit": commit(1, "P3 wk, second key")})}},
+             "wk_commit_changed")
+        case("resealed_same_list_seq_stale_list_before_grant_conflict", "membership", committed,
+             {**args, "body": {**body, "grants": resealed,
+                               "member_list": sign({**lo, "wk_commit": commit(1, "P3 wk, second key")})}},
+             "stale_list")
+        # G2b H3: a container-only refusal (stale_card) resends the same signed list and grants with new wraps.
+        moved = copy.deepcopy(st); moved["card_seq"] = 2
+        case("container_only_refusal_stale_card", "membership", moved, args, "stale_card")
+        case("container_only_retry_same_list_new_wraps_accepted", "membership", moved,
+             {**args, "body": {**body, "card_key_wraps": {**wraps, "card_seq": 2}}}, {"list_seq": 1, "epoch": 1})
+        rotated = {**body, "member_list": sign({**lo, "list_seq": 3, "epoch": 2, "wk_commit": commit(2)}),
                    "grants": [sign({**g["o"], "epoch": 2}) for g in grants]}
         case("rotation_due_clears_higher_excluding_list", "membership", retained, {**args, "body": rotated}, {"list_seq": 3, "epoch": 2})
 

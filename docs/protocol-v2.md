@@ -302,6 +302,7 @@ Every derivation, signature, AEAD associated data, hash and MAC has its own labe
 | `h_sas_cert` | `orch/v2/sas-cert\|` | hash | | the 6-character code of the primary's challenge |
 | `h_dek_commit` | `orch/v2/dek-commit\|` | hash | | key commitment for a DEK |
 | `h_card_key_commit` | `orch/v2/card-key-commit\|` | hash | | key commitment for a card key `CK` |
+| `h_wk_commit` | `orch/v2/wk-commit\|` | hash | | key commitment for `WK_e`, the member list's `wk_commit` (§7.2, G2b) |
 | `h_drop_parent` | `orch/v2/drop-parent\|` | hash | | a document version's parent link |
 | `h_ws_envelope` | `orch/v2/ws-envelope-hash\|` | hash | | what a co-signature covers |
 | `h_question` | `orch/v2/question\|` | hash | | a question's `content_hash` |
@@ -526,8 +527,9 @@ host checks, in this order:
 3. the record's field set and reason → `malformed`;
 4. `person_id` is the owner → `other_person`.
 
-It then records the device as revoked and removes it from its member list. If the device was a member, it
-**rotates** before it seals anything new.
+It then records the device as revoked and removes it from its member list. If the device was a member, or was
+sent a grant for the current epoch in any publication body the host exposed (§7.2 H5, G2b), it **rotates** before
+it seals anything new.
 
 **Hosts and devices.** A host that learns of a revocation (through this op, its directory poll, or at
 startup) MUST rotate its epoch (§7.2) before it seals anything new. There is no un-revoke: a device that
@@ -662,24 +664,40 @@ signed by another person, a delegation for another `WSK`, and a changed delegati
 
 ```
 {"v":2, "suite", "kind":"member_list", "workspace_id", "epoch", "list_seq", "issued_ms",
+ "wk_commit",                                                  b64u, 32 bytes (G2b)
  "persons": [person_id, ...],                                  sorted, unique hex ids
  "members": [{"device_id": hex, "person_id": hex, "scopes": [...]}, ...]}          sorted by device_id, no duplicates
+
+wk_commit = b64u(H("orch/v2/wk-commit|" || workspace_id || u32(epoch) || WK_epoch))
 ```
 
 `list_seq` counts every list, and `epoch` counts keys. Adding a device does not change the epoch; removing
 one does. **DECIDED HERE:** a separate `list_seq`, because the spec's `{epoch, members}` alone cannot
 order two lists of one epoch.
 
+**G2b (P3-D26): one `WK` per epoch, ever.** `wk_commit` has the form of `ck_commit` (§7.1) and is required.
+Every list at one epoch carries the same `wk_commit`; the host never creates a second key for an epoch
+number. A publication that is refused or abandoned after it left the host **burns** its `list_seq` and, if
+it introduced a new epoch, that epoch: the next attempt uses a fresh key at a **higher** epoch. So `list_seq`
+and epochs may have gaps. Epochs never fall. The epoch number stays the only key identifier (grants, the
+bridge header, Drop `key_version`, push keys). `epoch` is a u32, `1 … 2^32−1`, everywhere it is parsed.
+
 **What the relay checks before it accepts a list:**
 
 1. the signature with the card's `wsk_pub`;
-2. the shape: field set, sorted unique hex ids, `epoch ≥ 1`;
+2. the shape: field set (including `wk_commit`, canonical b64u of exactly 32 bytes), sorted unique hex ids,
+   `1 ≤ epoch ≤ 2^32−1`, `1 ≤ list_seq ≤ 2^53−1` (`malformed`);
 3. `workspace_id` is the card's, **including on the first list** (`other_workspace`);
-4. the first list has `epoch = 1` and `list_seq = 1` (`bad_epoch`); it must include a
+4. the first list has `1 ≤ epoch ≤ 2^16` and any valid `list_seq` (`bad_epoch`; G2b: a refused first
+   publication burns `(1, 1)`, and the retry at `(2, 2)` is a valid first list); it must include a
    certificate-bound member device of the delegation owner (`other_person`), keeping the owner in `ever_persons`;
-5. `list_seq` strictly increases (`stale_list`);
-6. `epoch` is the previous one or the previous one + 1 (`bad_epoch`; epochs never skip);
-7. if any previous member is missing, `epoch` MUST be the previous one + 1 (`rotation_required`);
+5. `list_seq` strictly increases (`stale_list`); gaps are allowed;
+6. `previous.epoch ≤ epoch ≤ previous.epoch + 2^16` (`bad_epoch`). **Epochs may skip; they never fall.** The
+   cap keeps a buggy host from exhausting the u32 space in one step;
+7. if any previous member is missing, `epoch > previous.epoch` (`rotation_required`); a skip satisfies it;
+7b. if `epoch == previous.epoch`, `wk_commit` equals the previous list's `wk_commit` (409 `wk_commit_changed`).
+   There is no legacy exception: a stored list without `wk_commit` refuses every same-epoch list, and the host
+   recovers by rotating to a higher epoch. Relay databases from before G2b are development data and MUST be wiped;
 8. for every member:
    - not revoked (`revoked`);
    - a stored, valid, unexpired certificate whose person equals the entry's `person_id`, and is
@@ -689,11 +707,22 @@ order two lists of one epoch.
 9. a WK grant is supplied for **every** member at this list's epoch in the same publication
    (`missing_grant`; P3-D7).
 
+**Order (normative).** Checks 1–7b run before any grant is looked at; then the grants (shape, `other_workspace`,
+`not_for_this_device`, `grant_conflict`); then checks 8 and 9 per member in list order (certificate, then that
+member's grant). So a host that regenerated a key at the held epoch and re-sealed its grants gets
+`wk_commit_changed`, not `grant_conflict`, and the same body at the held `list_seq` gets `stale_list` (vectors
+`p3.resealed_same_epoch_wk_commit_changed_before_grant_conflict`,
+`p3.resealed_same_list_seq_stale_list_before_grant_conflict`).
+
+**What the relay cannot check (G2b).** Grants are sealed, so the relay cannot compare a grant's `WK` with
+`wk_commit`. Its part is the field's presence and shape, the epoch ranges, and same-epoch consistency (7b).
+Devices check every grant they use against the list's `wk_commit` (§7.3 D3, D4).
+
 **P3-D6.** `persons` is a WSK-signed authorization statement, not proof of F1 roles. A WSK
 holder can add a foreign person (and can already leak WK). In P3 lists have one person in practice.
 Devices verify signed snapshots and persist increasing `list_seq` and non-decreasing epochs; they
-need not see every intermediate list, so may accept forward epoch jumps. The +1 rule above is
-for relay publication. Restricted tickets are deferred to P8 (P3-D14); P3 hosts refuse `not_visible`.
+need not see every intermediate list, so may accept forward epoch jumps of any size. The
+`2^16` window above is for relay publication. Restricted tickets are deferred to P8 (P3-D14); P3 hosts refuse `not_visible`.
 F1's existing signature context, `roster_v`, `grant.issued` and `auth` supersede #24's older
 `list_seq`, session-grant and `presence` event proposal (P3 design §7).
 
@@ -708,7 +737,8 @@ new people, and commits the list, grants and wraps together or changes nothing. 
 for an existing `(device, epoch)` grant are `grant_conflict`. An exact-body retry returns its
 committed result before freshness checks, after session and holder authorization. Hosts persist
 the key and sealed publication bytes before sending; they resend those bytes, never reseal.
-There is no rotation-abandon route or label. Lost keys after commit require the next rotation.
+There is no rotation-abandon route or label: a refused publication is abandoned by the host alone,
+which burns its epoch and `list_seq` (H4 below). Lost keys after commit require the next rotation.
 
 On acceptance, the relay deletes mailboxes, queued responses, grants and card-key wraps of departed
 devices (P3-D7; push subscriptions from P4).
@@ -722,13 +752,73 @@ Vectors: `member_lists`.
   - on a removal;
   - on `orch keys rotate`.
 - **How it rotates:**
-  1. generate and durably persist `WK_{e+1}` (P3-D7);
-  2. seal and persist a grant for every remaining device;
+  1. generate and durably persist `WK_E` at the next unused epoch `E = EHW + 1` (H1, H2; P3-D7). Epochs may
+     skip, never fall;
+  2. seal and persist a grant for every remaining device, and sign the list with `wk_commit` for `WK_E`;
   3. publish the list, grants and optional card-key wraps atomically;
-  4. seal everything new under `e+1`.
-- **What it keeps.** It keeps every old `WK` to read old content. It never seals new content under an old
-  epoch (§8.5).
+  4. seal everything new under `E` once the relay has accepted that list (2xx). After a revocation or removal
+     the rotation gate is up from the decision on, and nothing new is sealed under the old epoch in between.
+- **What it keeps.** It keeps every old `WK` to read old content, and every burned `WK` (H4). It never seals new
+  content under an old epoch (§8.5).
 - **New devices (spec D26).** A device that joins at epoch `e` is granted `WK_e` and later epochs only.
+
+**Publication host rules (G2b, P3-D26; orch-core host §11, orch-core #382).** A publication body is **exposed**
+from the moment its first send starts. After that the host never assumes it was not stored: a hostile relay can
+store and serve a body it reports as refused.
+
+- **H1, durable allocation.** In the same durable store as `WSK`, the host keeps `LHW` (the highest `list_seq`
+  ever signed, not the committed one), `EHW` (the highest epoch it ever generated a key for) and, per epoch, the
+  **holder set**: every device sent a grant for that epoch in any exposed body. Exactly one writer: the fenced
+  holder. `list_seq` is never derived from `roster_v` or the log.
+- **H2, write-ahead.** Before the first send it persists atomically the signed list, grants and body bytes,
+  `LHW := list_seq`, for a new epoch `WK_E` and `EHW := E`, and the holder-set additions. At most one body is
+  exposed at a time.
+- **H3, outcomes.**
+  - 2xx: install it; activate `WK_E`.
+  - **Transient** (lost response, connection error, timeout, 5xx, 429, 401 `unauthenticated`/`expired` then
+    re-login, `fenced` then an explicit re-hold): resend the **exact bytes**. After a re-login or a re-hold the
+    host first does `GET members`; if the verified list is above `LHW`/`EHW`, or is not a body it exposed, H7.
+  - **Container-only** (`stale_card`, `wrap_conflict`): resend the **same signed list and grants** with corrected
+    or omitted `card_key_wraps`. Nothing is burned; devices see an identical `cj(o)`.
+  - **Content** (`revoked`, `cert_expired`, `cert_invalid`, `other_person`, `scope_exceeded`, `malformed`,
+    `bad_signature`, `other_workspace`, `missing_grant`, `not_for_this_device`) or **divergence** (`stale_list`,
+    `bad_epoch`, `rotation_required`, `grant_conflict`, `wk_commit_changed`), or any decision to change the list
+    while a body is exposed: **abandon** the body (H4).
+- **H4, abandoning burns.** The abandoned `list_seq` is never signed again; the next list uses `LHW + 1`. If the
+  body introduced an epoch `E` above the committed one, `E` is **burned**: every later list has an epoch above
+  `E` (a list that needs no rotation still rotates to `EHW + 1`), and the next key is generated at `EHW + 1`.
+  The host stops sending the old body before it persists the burn, never resends a burned body, and does not
+  adopt a burned body the relay later shows as committed. **A burned `WK_E` is kept like an old epoch key**
+  and deleted under the same retention. It is never activated. Under it the host only opens requests to answer
+  the §8.5 `stale_epoch`. **It never seals anything else under it**: no data response, no `drop_rewrap` output,
+  no other content. **There is never a second key for an epoch, and the host never reseals at a refused epoch.**
+- **H5, holder rule.** A list at epoch `E` includes every device in `E`'s holder set; otherwise the next list
+  uses a new epoch. The rotation gate (no new sealing under `E`) goes up as soon as the host decides to drop
+  such a device. Example: a same-epoch addition of X refused `revoked` or `cert_*` means X may hold the
+  committed `WK_e` through the relay, so the host rotates as for a revoked member (§6.2).
+- **H6, one list per `list_seq`.** The host never signs two different `cj(o)` under one `list_seq`. It never
+  re-signs; it resends persisted bytes.
+- **H7, host-state loss** (backup restore, disk loss, a missing or torn store while the `WSK` exists, the
+  relay's verified list above `LHW`/`EHW` or with content the host never exposed, no local `WK` for the relay's
+  committed epoch, or a takeover by an instance without the latest store): `GET members` and verify it with the
+  `WSK`; set `LHW := max(local, relay list_seq) + 1024` and `EHW := max(local, relay epoch) + 1024`; rotate at
+  once to `EHW + 1`.
+- **The clamp (liveness limit).** The rotation target is `min(EHW + 1, committed + 2^16)`, and **the clamp wins**:
+  the relay refuses anything above `committed + 2^16` (check 6), and every epoch up to `EHW` is already allocated,
+  so a target below `EHW + 1` is never usable (it would be a second key for a burned epoch). When
+  `EHW + 1 > committed + 2^16` the host does not rotate: it alarms and keeps the rotation gate up, and the workspace
+  is frozen for new sealing until an operator intervenes (for example a fresh workspace). Reaching it takes about
+  65,000 burns, or about 63 H7 jumps of 1024 with no commit in between.
+- **H8, refusal alarms** (the orch-52 / #382 definition). The host counts the **content and divergence**
+  refusals of H3 only; transient outcomes neither count nor back off. The count resets on a 2xx. After **3
+  consecutive** counted refusals it raises an operator alarm (`host.status`) and backs off exponentially between
+  attempts, capped at 5 minutes; each attempt burns at most one epoch, so the u32 space lasts for centuries.
+  Separately it alarms when **a rotation stays uncommitted for 10 minutes** for any reason, transient errors
+  included (a hostile relay can answer 5xx forever). Backoff never lowers the rotation gate.
+
+**DECIDED HERE (G2b):** burned epochs instead of a second key per epoch or explicit key ids; the `2^16`
+first-list and skip window; `wk_commit` with the relay check `wk_commit_changed` as defence in depth.
+Vectors: `member_lists` (34 cases), `wk_commit`, the host-conformance list in orch-core host §11.
 
 ### 7.3 WK grants
 
@@ -753,6 +843,37 @@ Vectors: `wk_grants`.
 
 **P3-D8.** A current epoch is confirmed by a verified member list as well as its signed grant;
 an unsigned HTTP hint never raises a device's epoch.
+
+**Device rules (G2b, P3-D26).** Vectors: `member_list_snapshots`.
+
+- **D1, persisted head.** Per workspace, a device persists atomically the highest verified list's
+  `(list_seq, epoch, H(cj(o)), wk_commit)`, and the `wk_commit` of every epoch it has seen in a verified list.
+- **D2, snapshot acceptance.** First contact takes any `epoch ≥ 1` and `list_seq ≥ 1`. A lower `list_seq` is
+  refused and not adopted (`stale_list`). The same `list_seq` with the same `cj(o)` is a no-op: **the signature
+  bytes are never compared**, so a high-s twin is not a conflict. The same `list_seq` with another `cj(o)`
+  raises `conflicting_snapshot`. An epoch below the head's is refused (`bad_epoch`), and so is a removal without
+  a higher epoch (`rotation_required`). **New:** two verified lists at one epoch with different `wk_commit` raise
+  the local alarm `wk_commit_conflict`; the device stops sealing at that epoch until a verified list at a
+  **higher** epoch arrives. The alarm is checked **before** the `stale_list` refusal: a lower `list_seq` at a known
+  epoch with another `wk_commit` is WSK-signed proof of two keys at one epoch, so it raises `wk_commit_conflict`
+  (vector `lower_list_seq_other_wk_commit_alarm`). A list at the head's own `list_seq` with other content raises
+  `conflicting_snapshot` even if its `wk_commit` differs too, and that alarm does **not** block sealing: D3's
+  grant/commit match against the head still keeps the device off the other key (vector
+  `same_list_seq_other_wk_commit_conflicting_snapshot_no_block`).
+- **D3, sealing key.** The device seals and sends only under `head.epoch`, with a WSK-verified grant whose
+  unsealed `WK` matches `head.wk_commit`. A grant that does not match is discarded for sealing. If none matches,
+  **sending is blocked** (`no_key`): the device refetches grants and never falls back to an older epoch.
+- **D4, reading.** For the head epoch or an older one, any WSK-verified grant for that epoch opens content; if
+  the device holds a verified list for that epoch, the key must match its `wk_commit` (otherwise
+  `wk_commit_mismatch`). A device that jumped epochs keeps reading old content. An epoch above the head (or any
+  epoch before a first verified list) is refused locally (`future_epoch`): epochs move only per D5.
+- **D5, epoch moves** are unchanged: only on a verified list, or on a verified host `stale_epoch` naming a higher
+  epoch, after which the device demands a list at `≥` that epoch. If bounded refetches bring nothing, it shows
+  "relay is withholding the new key", not a timeout.
+- **D6, Drop repair (MAY, deferrable).** When the device moves off an epoch `E` and the relay has no grant at `E`
+  for it (404), `E` was probably burned. The device **re-wraps its own Drop objects** that it wrapped under `E`,
+  at the current epoch. The host does **not** serve `drop_rewrap` under a burned key (H4): under it, it answers
+  only `stale_epoch`. Wrong answers from a hostile relay only cost an extra re-wrap.
 
 ### 7.4 WXK rotation (spec D27)
 
@@ -1071,6 +1192,8 @@ Scopes are sealed: the host checks them. Terminal records remain until `expires_
     request's own (old) epoch, so the device can read it. It contains nothing else.
   - A request at a **higher** epoch, or at an epoch whose key the host deleted, is dropped: there is no key
     to open it with.
+  - (G2b) A **burned** epoch's key (§7.2 H4) counts as held. A phone pinned to a burned epoch by a withholding
+    relay gets the host-signed `stale_epoch` sealed under that key, and nothing else is ever sealed under it.
 - **The device** answers `stale_epoch` by fetching its grant and sending the request again as a new
   request (new rid, new seq). The refused seq is consumed (vector
   `stale_epoch_consumes_its_seq_then_a_new_request_runs`).
@@ -1654,7 +1777,7 @@ Every answer to an epoch-0 request, refusals included, also carries `wsk_pub`.
 | 401 | `bad_signature`, `stale_timestamp` (`server_ms`), `unknown_workspace`, `replay`, `unknown_challenge`, `expired`, `unauthenticated` (P3-D2) |
 | 403 | `revoked`, `other_person`, `scope_exceeded`, `not_eligible`, `not_for_this_device`, `cert_expired` (membership publication, P3-D7) |
 | 404 | `not_found` (P3-D1) |
-| 409 | `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version`, `stale_list`, `bad_epoch`, `rotation_required`, `missing_grant`, `already_claimed` (`claimed_by`), `version_conflict` (`current`), `account_exists`, `cert_conflict`, `grant_conflict`, `wrap_conflict` (G0a review 10), `rid_conflict`, `retry_exhausted`, `chunk_conflict`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed` (P3-D3/D5/D7–D11/D22), `no_genesis`, `genesis_mismatch` (P3-D18), `chain_diverged`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation` (`devices`: sorted device IDs; P3-D13/D24), `staging_conflict`, `staging_incomplete` (P3-D20), `checkpoint_time` (P3-D25) |
+| 409 | `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version`, `stale_list`, `bad_epoch`, `rotation_required`, `wk_commit_changed` (G2b), `missing_grant`, `already_claimed` (`claimed_by`), `version_conflict` (`current`), `account_exists`, `cert_conflict`, `grant_conflict`, `wrap_conflict` (G0a review 10), `rid_conflict`, `retry_exhausted`, `chunk_conflict`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed` (P3-D3/D5/D7–D11/D22), `no_genesis`, `genesis_mismatch` (P3-D18), `chain_diverged`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation` (`devices`: sorted device IDs; P3-D13/D24), `staging_conflict`, `staging_incomplete` (P3-D20), `checkpoint_time` (P3-D25) |
 | 413 | `too_large` for JSON routes (G0a review 2); before parsing |
 | 410 | `checkpoint_gone` (P3-D19/D20; a previously stored endpoint expired), `expired` (P3-D11; unknown/expired response rid, G0a review 8) |
 | 429 | `rate_limited`, `quota_exceeded` (P3-D5/D17; `Retry-After`) |
@@ -1720,7 +1843,9 @@ are FAKE (`SHA-256("FAKE orch v2 test vector: " || label)`), and so is every "ra
 | `certs` | 16 cases (§6.1) |
 | `revocations`, `revocation_op` | valid, another person, wrong key, bad reason; the bridge op (§6.2) |
 | `card` | delegation, sealed part, `ck_commit`, card-key wrap, 16 update cases |
-| `wk_grants`, `member_lists` | grants; 14 member-list cases (§7.2) |
+| `wk_grants`, `member_lists` | grants; 34 member-list cases (§7.2), including the G2b first-list, skip, fall, u32, removal and `wk_commit` rules |
+| `wk_commit` | the commitment for given `workspace_id`, epoch and `WK` (§7.2, G2b) |
+| `member_list_snapshots` | device steps (§7.3 D1–D4): high-s twin no-op, conflicting content (also with another `wk_commit`, no sealing block), `wk_commit_conflict` (also from a lower `list_seq`), grant/commit mismatch, no fallback, reading after a jump and `future_epoch`, first contact, lower `list_seq`, fall, removal |
 | `bridge.seal`, `bridge.host_cases`, `bridge.device_cases`, `bridge.pair_answers`, `bridge.links`, `bridge.sas` | §8, including the R1 attack |
 | `cert_request` | 10 primary cases, the challenge and its code, the certificate, a second signature refused, the attack challenge (§8.4) |
 | `enroll`, `webauthn`, `question_hash`, `decisions` | §6.4, §8.7, §13 |
@@ -1781,8 +1906,10 @@ Each is marked **DECIDED HERE** where it is used; the reviewer may reverse any o
     rotating card signed by `WSK` alone. The client-hosted marker is decided by the delegation flag, and
     the sealed name only names. Also `sealed_hash`, `ck_commit`, `card_seq`, the relay URL form and the
     update rules (§7.1).
-18. `list_seq` beside `epoch`; epochs never skip; the relay requires grants before the list, and checks the
-    first list's workspace against the card (§7.2).
+18. `list_seq` beside `epoch`; one `WK` per epoch, ever, committed by `wk_commit`; a refused publication burns
+    its epoch and `list_seq`, so epochs may skip (at most `2^16` per list) and never fall, and the first list
+    takes any epoch `1 … 2^16` (G2b, P3-D26); the relay requires grants before the list, and checks the first
+    list's workspace against the card (§7.2).
 19. WK grants are signed by `WSK`; a device's current epoch never moves backwards (§7.3).
 20. The bridge header: magic `"ORB2"`, `suite` in place of `key_version`, a `u32` epoch, and the offer id in
     `stream` at epoch 0 (§8.1).
@@ -1961,7 +2088,7 @@ on.
 
 | Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
 |---|---|---|---|---|---|
-| `PUT /v2/workspaces/{ws}/membership` | W(g) | `{member_list, grants: [wk_grant], card_key_wraps?: {card_seq, wraps}}` → `{list_seq, epoch}` | one transaction; the exact same body → 200; ≤ 1024 members, ≤ 2 MiB; JSON cap 2 MiB (G0a review 2) | 401 `bad_signature`; 403 `revoked`, `other_person`, `scope_exceeded`, `cert_expired`; 409 `other_workspace`, `stale_list`, `bad_epoch`, `rotation_required`, `missing_grant`, `grant_conflict`, `stale_card`, `wrap_conflict` (G0a review 10), `fenced` | §7.2, §7.3 (P3-D7) |
+| `PUT /v2/workspaces/{ws}/membership` | W(g) | `{member_list, grants: [wk_grant], card_key_wraps?: {card_seq, wraps}}` → `{list_seq, epoch}` | one transaction; the exact same body → 200; ≤ 1024 members, ≤ 2 MiB; JSON cap 2 MiB (G0a review 2) | 401 `bad_signature`; 403 `revoked`, `other_person`, `scope_exceeded`, `cert_expired`; 409 `other_workspace`, `stale_list`, `bad_epoch`, `rotation_required`, `wk_commit_changed`, `missing_grant`, `grant_conflict`, `stale_card`, `wrap_conflict` (G0a review 10), `fenced` | §7.2, §7.3 (P3-D7, P3-D26) |
 | `PUT /v2/workspaces/{ws}/card-keys` | W(g) | `{card_seq, wraps: [{device_id, sealed}]}` → `{stored}` | only devices of the current list; same → no-op; JSON cap 64 KiB (G0a review 2) | 403; 409 `stale_card`, `wrap_conflict` (G0a review 10), `fenced` | §5.3 |
 | `GET /v2/workspaces/{ws}/grants[?epoch=e]` | D(m) | → `{grants}` (own device, ascending, from `first_epoch` on) | | 403; 404 | §7.3 |
 | `GET /v2/workspaces/{ws}/members` | D(m) or W | → `{member_list}` | | 403; 404 | §7.2 |
@@ -1979,12 +2106,15 @@ epoch and optionally the card-key wraps for new devices are published in **one r
 Consequences:
 
 - **No staging deadlock for a new person (C8).** That person's grants are judged against the list that adds them.
-- **No partial rotation state at the relay (C9).** A host that loses `WK_{e+1}` before the commit generates a new one;
-  nothing was published.
-- **The host persists `WK_{e+1}` durably before sending.** If the response is lost, it resends the exact body
+- **No partial rotation state at the relay (C9).** A refused publication leaves nothing at an honest relay. The host
+  still treats the body as possibly stored (G2b): it burns the epoch and `list_seq` and generates the next key at the
+  next unused epoch (`EHW + 1`). **It never reseals a refused epoch**, and a burned key never seals anything (§7.2 H4).
+- **The host persists `WK_E` durably before sending** (§7.2 H2). If the response is lost, it resends the exact body
   (idempotent).
-- **If a committed key is lost anyway** (disk loss), the host rotates again to `e+2` at once. Committed grants are
-  never deleted until a later list replaces them.
+- **If a committed key is lost anyway** (disk loss), the host treats it as host-state loss (§7.2 H7): it jumps its
+  high-water marks by 1024 and rotates at once. Committed grants are never deleted until a later list replaces them.
+- **`wk_commit_changed` (G2b).** A list at the held epoch with another `wk_commit` is refused: one `WK` per epoch.
+  The relay cannot open grants; devices check them against `wk_commit` (§7.3 D3, D4).
 - **The rotation-abandon route and label of orch-mobile's FakeRelay amendment are dropped.** Phones already accept
   forward epoch jumps.
 - **`grant_conflict`.** Other bytes for an already-committed `(device, epoch)` are refused.
@@ -2303,6 +2433,27 @@ devices. Boundary limits remain 64 certificates/day, 64 open requests/person, 64
   202/429 and never automatically reissue under a new rid (G0a review 4).
 - Enforce JSON caps/413, state-change-only quotas, auth-class refusals, unknown-rid 410,
   wrap conflicts, token and response budgets, and hierarchical IPv6 caps as specified above.
+
+**orch-mobile changes (G2b, P3-D26).** FakeRelay's `checkSequence` (the relay publication rules) becomes, given
+the previous accepted list `p` (or none):
+
+| Input | Result |
+|---|---|
+| shape: `wk_commit` missing, not a string, not canonical b64u, or not 32 bytes; `epoch` outside `1 … 2^32−1` | 400 `malformed` |
+| no previous list, `1 ≤ epoch ≤ 2^16`, any `list_seq ≥ 1` | accept (a refused first publication retries at `(2, 2)`) |
+| no previous list, `epoch > 2^16` | 409 `bad_epoch` |
+| `list_seq ≤ p.list_seq` | 409 `stale_list` (gaps above are fine) |
+| `epoch < p.epoch` or `epoch > p.epoch + 2^16` | 409 `bad_epoch` |
+| a member of `p` missing and `epoch ≤ p.epoch` | 409 `rotation_required` |
+| `epoch == p.epoch` and `wk_commit ≠ p.wk_commit` | 409 `wk_commit_changed` (new code) |
+| otherwise | continue with checks 8 and 9, unchanged |
+
+The order is the relay's: shape, `other_workspace`, `stale_list`, `bad_epoch`, `rotation_required`,
+`wk_commit_changed`, then grants and certificates. `MemberList` parses `wk_commit` (field set), FakeHost
+`discardRefused` keeps `wks[p.epoch]` as a retained, never-activated key and raises its `listSeq` and epoch
+floors to the refused body's, rotating next at `floor + 1`; on `stale_card`/`wrap_conflict` it resends the same
+signed list and grants. Devices implement §7.3 D1–D4 and the `wk_commit_conflict` alarm. Vectors:
+`member_lists`, `member_list_snapshots`, `wk_commit`; fixture `membership.json` (`refusal_409_wk_commit_changed`).
 
 
 ### 19.8 Checkpoints, genesis and restore transport (P3-D12/D13/D18–D25)

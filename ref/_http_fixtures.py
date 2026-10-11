@@ -24,7 +24,7 @@ ROUTES = [
     ("revocation_feed", "GET", "/v2/persons/{person}/revocations", "client", "D(p)|W", "403:not_eligible"),
     ("card_put", "PUT", "/v2/workspaces/{ws}/card", "host", "first|W(g)", "400:wrong_suite,delegation_mismatch 401:bad_signature 403:other_person 409:other_workspace,wsk_changed,delegation_changed,stale_card,wxk_changed_without_version,bad_wxk_version 429:rate_limited"),
     ("card_get", "GET", "/v2/workspaces/{ws}/card", "client", "D(m)|W", "403:not_eligible 404:not_found"),
-    ("membership", "PUT", "/v2/workspaces/{ws}/membership", "host", "W(g)", "400:cert_invalid 401:bad_signature 403:revoked,other_person,scope_exceeded,cert_expired,not_for_this_device 409:other_workspace,stale_list,bad_epoch,rotation_required,missing_grant,grant_conflict,stale_card,wrap_conflict,fenced"),
+    ("membership", "PUT", "/v2/workspaces/{ws}/membership", "host", "W(g)", "400:cert_invalid 401:bad_signature 403:revoked,other_person,scope_exceeded,cert_expired,not_for_this_device 409:other_workspace,stale_list,bad_epoch,rotation_required,wk_commit_changed,missing_grant,grant_conflict,stale_card,wrap_conflict,fenced"),
     ("card_keys", "PUT", "/v2/workspaces/{ws}/card-keys", "host", "W(g)", "403:not_eligible,not_for_this_device 409:stale_card,wrap_conflict,fenced"),
     ("grants", "GET", "/v2/workspaces/{ws}/grants", "device", "D(m)", "403:not_eligible 404:not_found"),
     ("members", "GET", "/v2/workspaces/{ws}/members", "client", "D(m)|W", "403:not_eligible 404:not_found"),
@@ -70,8 +70,9 @@ CONDITIONS = {
     "bad_wxk_version": "Held card's WXK version does not allow the submitted version/key transition.",
     "scope_exceeded": "Member scopes exceed its certificate's prefix or certificate is a scoped agent.",
     "stale_list": "Held member-list sequence is at least this sequence, and bytes differ from any committed publication retry.",
-    "bad_epoch": "Proposed epoch violates first-list or adjacent publication rules.",
-    "rotation_required": "A device is removed but the submitted epoch equals the held epoch.",
+    "bad_epoch": "Proposed epoch is outside 1..2^16 for a first list, or below the held epoch, or above it by more than 2^16.",
+    "rotation_required": "A device is removed but the submitted epoch is not above the held epoch.",
+    "wk_commit_changed": "Held list has the same epoch and another wk_commit; one WK per epoch, ever (G2b).",
     "missing_grant": "Publication omits a proposed member's grant at its epoch.",
     "wrap_conflict": "A different wrap is committed for the same device and card sequence.",
     "grant_conflict": "Another sealed grant is committed for this device and epoch; this is not an exact publication retry.",
@@ -142,6 +143,10 @@ def condition_for(name, code):
                 "session_login": "The single-use login challenge has expired."}.get(name, f"The certificate request for {name} has expired.")
     if code == "not_for_this_device":
         return f"Target device/request binding required by {name} fails."
+    if name == "membership" and code == "bad_epoch":
+        return "Held list is (list_seq 1, epoch 2); this list's epoch 1 falls below it. Epochs may skip, never fall."
+    if name == "membership" and code == "wk_commit_changed":
+        return "Held list (list_seq 1, epoch 1) carries wk_commit A; this list (list_seq 2) keeps epoch 1 with wk_commit B."
     if code == "rate_limited" and name == "bridge_device_post":
         return "Acknowledged rid has no live copy; 1001 ms remain before another requeue (Retry-After: 2)."
     return f"{name}: {CONDITIONS[code]}"
@@ -274,10 +279,12 @@ def build(vectors=None):
             elif name == "card_put" and code == "delegation_mismatch":
                 refused_request["json"]["card"] = copy.deepcopy(next(
                     c["card"] for c in v["card"]["cases"] if c["name"] == "delegation_for_another_wsk"))
-            elif name == "membership" and code in {"not_for_this_device", "other_workspace", "bad_epoch", "rotation_required"}:
+            elif name == "membership" and code in {"not_for_this_device", "other_workspace", "bad_epoch", "rotation_required",
+                                                   "wk_commit_changed"}:
                 vector_name = {"not_for_this_device": "grant_wrong_epoch", "other_workspace": "other_workspace",
                                "bad_epoch": "rotation_due_survives_same_epoch_and_restart",
-                               "rotation_required": "rotation_due_survives_same_epoch_and_restart"}[code]
+                               "rotation_required": "rotation_due_survives_same_epoch_and_restart",
+                               "wk_commit_changed": "wk_commit_changed_same_epoch"}[code]
                 refused_request["json"] = copy.deepcopy(next(
                     c["args"]["body"] for c in v["p3"]["cases"] if c["name"] == vector_name))
             elif code == "missing_grant":

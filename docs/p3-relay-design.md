@@ -212,7 +212,7 @@ on.
 
 | Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
 |---|---|---|---|---|---|
-| `PUT /v2/workspaces/{ws}/membership` | W(g) | `{member_list, grants: [wk_grant], card_key_wraps?: {card_seq, wraps}}` → `{list_seq, epoch}` | one transaction; the exact same body → 200; ≤ 1024 members, ≤ 2 MiB | 401 `bad_signature`; 403 `revoked`, `other_person`, `scope_exceeded`, `cert_expired`; 409 `other_workspace`, `stale_list`, `bad_epoch`, `rotation_required`, `missing_grant`, `grant_conflict`, `stale_card`, `fenced` | §7.2, §7.3 (P3-D7) |
+| `PUT /v2/workspaces/{ws}/membership` | W(g) | `{member_list, grants: [wk_grant], card_key_wraps?: {card_seq, wraps}}` → `{list_seq, epoch}` | one transaction; the exact same body → 200; ≤ 1024 members, ≤ 2 MiB | 401 `bad_signature`; 403 `revoked`, `other_person`, `scope_exceeded`, `cert_expired`; 409 `other_workspace`, `stale_list`, `bad_epoch`, `rotation_required`, `wk_commit_changed`, `missing_grant`, `grant_conflict`, `stale_card`, `wrap_conflict`, `fenced` | §7.2, §7.3 (P3-D7, P3-D26) |
 | `PUT /v2/workspaces/{ws}/card-keys` | W(g) | `{card_seq, wraps: [{device_id, sealed}]}` → `{stored}` | only devices of the current list; same → no-op | 403; 409 `stale_card`, `fenced` | §5.3 |
 | `GET /v2/workspaces/{ws}/grants[?epoch=e]` | D(m) | → `{grants}` (own device, ascending, from `first_epoch` on) | | 403; 404 | §7.3 |
 | `GET /v2/workspaces/{ws}/members` | D(m) or W | → `{member_list}` | | 403; 404 | §7.2 |
@@ -229,18 +229,50 @@ epoch and optionally the card-key wraps for new devices are published in **one r
 Consequences:
 
 - **No staging deadlock for a new person (C8).** That person's grants are judged against the list that adds them.
-- **No partial rotation state at the relay (C9).** A host that loses `WK_{e+1}` before the commit generates a new one;
-  nothing was published.
-- **The host persists `WK_{e+1}` durably before sending.** If the response is lost, it resends the exact body
-  (idempotent).
-- **If a committed key is lost anyway** (disk loss), the host rotates again to `e+2` at once. Committed grants are
-  never deleted until a later list replaces them.
+- **No partial rotation state at the relay (C9).** A refused publication leaves nothing at an honest relay, but the
+  host never relies on that (P3-D26): the body was exposed, so its `list_seq` and any new epoch are **burned**, and
+  the next key is generated at the next unused epoch. **The host never reseals a refused epoch**, and never creates a
+  second key for an epoch number.
+- **The host persists `WK_E` durably before sending.** If the response is lost, it resends the exact body
+  (idempotent). A container-only refusal (`stale_card`, `wrap_conflict`) resends the same signed list and grants
+  with corrected wraps; nothing is burned.
+- **If a committed key is lost anyway** (disk loss), it is host-state loss (proto §7.2 H7): the host jumps `LHW` and
+  `EHW` by 1024 above the relay's verified list and rotates at once. Committed grants are never deleted until a later
+  list replaces them.
 - **The rotation-abandon route and label of orch-mobile's FakeRelay amendment are dropped.** Phones already accept
   forward epoch jumps.
 - **`grant_conflict`.** Other bytes for an already-committed `(device, epoch)` are refused.
 - **Retries (challenge 2, finding 11).** An exact-body retry of a committed publication returns its result before any
   freshness check. The host persists the sealed grants it sent and resends the same bytes, never reseals, so a retry
   never hits `grant_conflict`.
+
+**P3-D26 (one `WK` per epoch, ever; burned epochs; `wk_commit`; G2b, F1 Q10).** The signed list carries the required
+`wk_commit = b64u(H("orch/v2/wk-commit|" || workspace_id || u32(epoch) || WK_epoch))`. Relay rules (proto §7.2):
+
+- `epoch` is a u32 (`1 … 2^32−1`); a missing or ill-formed `wk_commit` is 400 `malformed`;
+- the first list takes any epoch `1 … 2^16` and any `list_seq ≥ 1` (this replaces the `(1, 1)` pin, which would
+  deadlock a workspace whose first publication was refused);
+- a later list takes `prev ≤ epoch ≤ prev + 2^16` (`bad_epoch`): **epochs may skip, never fall**;
+- a removal needs `epoch > prev` (`rotation_required`);
+- the same epoch needs the same `wk_commit` (409 `wk_commit_changed`, new);
+- `grant_conflict` and every other rule are unchanged.
+
+The relay cannot open grants, so it checks only presence, ranges and same-epoch consistency. Devices check each grant
+against `wk_commit` before sealing (no fallback to an older epoch) and, where they hold a list for that epoch, before
+reading (proto §7.3 D1–D6).
+
+Host rules H1–H8 are in proto §7.2 and orch-core host §11 (#382). In short: durable high-water marks `LHW`/`EHW` and
+holder sets, write-ahead before the first send, exact-bytes resends for transient outcomes, burning on every content or
+divergence refusal, the holder rule, one list per `list_seq`, a 1024 jump after host-state loss, and alarms.
+**Liveness limit:** the rotation target is `min(EHW + 1, committed + 2^16)` and the clamp wins; when `EHW + 1`
+exceeds `committed + 2^16` the host cannot rotate without a second key for a burned epoch, so it alarms, keeps the
+gate up and the workspace is frozen until an operator intervenes (about 65,000 burns, or about 63 H7 jumps with no
+commit in between). The relay checks list rules before grants, so a re-sealed same-epoch key gets
+`wk_commit_changed`; there is no legacy-row exception (wipe pre-G2b dev databases). The
+alarm definition is orch-52's wider one: **content and divergence refusals** count, **the count resets on a 2xx**,
+3 consecutive ones raise the alarm with exponential backoff up to 5 minutes, and **a rotation uncommitted for 10
+minutes** alarms whatever the cause. A **burned key never seals anything**: under it the host only answers the §8.5
+`stale_epoch`, and it serves no `drop_rewrap` (a device re-wraps its own Drop objects at the current epoch instead).
 
 **P3-D6 (persons, D39; C8).** Each member entry is `{device_id, person_id, scopes}`, and the list carries
 `persons: [person_id]` (sorted, unique). Check 8: the certificate's person is the card owner **or** in `persons`
@@ -371,7 +403,7 @@ Checkpoints are addressed by `hash` = `h_checkpoint(o)` (lowercase), with `n` al
 | 401 | `unauthenticated` |
 | 403 | `not_eligible`, `not_for_this_device` (also for the routes here) |
 | 404 | `not_found` |
-| 409 | `account_exists`, `cert_conflict`, `grant_conflict`, `rid_conflict`, `retry_exhausted`, `chunk_conflict`, `checkpoint_time`, `staging_incomplete`, `staging_conflict`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed`, `no_genesis`, `genesis_mismatch`, `chain_diverged`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation` (`devices`) |
+| 409 | `account_exists`, `cert_conflict`, `grant_conflict`, `wk_commit_changed` (P3-D26), `rid_conflict`, `retry_exhausted`, `chunk_conflict`, `checkpoint_time`, `staging_incomplete`, `staging_conflict`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed`, `no_genesis`, `genesis_mismatch`, `chain_diverged`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation` (`devices`) |
 | 410 | `expired`, `checkpoint_gone` |
 | 429 | `rate_limited`, `quota_exceeded` (both with `Retry-After`) |
 | 503 | `overloaded` (global budget, with `Retry-After`) |
@@ -463,8 +495,10 @@ challenge is consumed.
    - on a revocation it learns of (a host-poll notice, the revocation feed, or the bridge op `revocation`);
    - on `member_remove` and on `orch keys rotate`;
    - and immediately when it holds no key for the current list epoch (P3-D7).
-2. **How it rotates.** It generates and durably stores `WK_{e+1}`, then sends one `PUT membership` with the list and
-   every grant.
+2. **How it rotates.** It generates and durably stores `WK_E` at the next unused epoch (`EHW + 1`; epochs may skip),
+   then sends one `PUT membership` with the list (carrying `wk_commit` for `WK_E`) and every grant. A content or
+   divergence refusal burns that epoch and `list_seq`; the next attempt uses a fresh key at a higher epoch
+   (P3-D26).
 3. **The rotation gate is the host's and is durable** (gaps Slice 2a). From the moment the host learns of a revocation
    or removal, it seals nothing new until the new list is committed.
 4. **On commit,** the relay deletes the departed devices' mailboxes, queued responses, grants and card-key wraps (and
@@ -897,7 +931,10 @@ Spec §4 treats the relay as honest-but-curious for confidentiality and untruste
 - see transitions: abandoned decision ids, revocation entries, the closed `reason`, the optional `note` (the host UI
   says the note is visible to the relay);
 - drop, delay, replay or withhold anything, and serve stale objects;
-- **with the old `WK` of a revoked device, decrypt traffic sealed under that epoch until the host rotates.**
+- **with the old `WK` of a revoked device, decrypt traffic sealed under that epoch until the sending device learns of
+  the rotation.** The host's gate stops its own sealing under the old epoch at once, but the relay can delay a
+  phone's view of the new list (withholding), and the phone keeps sealing under the epoch it knows until then. A
+  burned epoch (P3-D26) gives the same exposure, no more: the excluded device was a member at the previous epoch.
 
 **It cannot:**
 
@@ -954,7 +991,8 @@ Inflation is caught by the honest host holding the logs (§6.2).
 **It can:** read its own record.
 
 **It cannot:** log in, poll, post, or fetch grants and epochs **through the relay**. Its old keys still open what was
-sealed before the rotation.
+sealed before the rotation, and what a device that has not yet learned of the rotation seals under the old epoch
+(withholding, above).
 
 ### Network attacker (TLS assumed)
 
@@ -997,7 +1035,7 @@ The bridge client lives in orch-core (`orch serve`, stream A). Agents never see 
 |---|---|---|
 | Start | `session/login` (kind `workspace`); `host/hold`; first run: `PUT card`, `PUT genesis` (an owner device signs the pin, one human step at relay link) | reauthenticate single-flight; carry `Orch-Holder` on every write; on `fenced` stop writing and re-hold only by explicit takeover |
 | Learn revocations | `GET persons/{p}/revocations?after=` at startup and on a notice; bridge op `revocation` | raise the rotation gate at once (durable) |
-| Rotate | `PUT membership` (list + grants + new devices' card-key wraps) | persist `WK_{e+1}` before sending; resend the exact body on a lost response; rotate again if the committed key is lost |
+| Rotate | `PUT membership` (list with `wk_commit` + grants + new devices' card-key wraps) | persist `WK_E` (at `EHW + 1`) before sending; resend the exact body on a lost response; on a content or divergence refusal burn the epoch and `list_seq`, never reseal it, and never seal anything under the burned key; rotate again (H7) if the committed key is lost; alarm per P3-D26 |
 | Card change (WXK every 90 days) | `PUT card`, `PUT card-keys` | `card_seq` strictly rising |
 | Serve devices | `GET host/poll?after=` loop; `POST bridge/{rid}` per chunk | advance `after` only to `n`s recorded in its rid store; seq window and rid store committed atomically; nothing sealed under an old epoch after the gate is up |
 | Pair | poll items `route: "pair"`; `POST pair/…`; cert requests and their state; `PUT devices`; `POST baselines` with `approved` | proto §8.3–8.4; no grant before a valid certificate; the `approved` answer carries the baseline `{n, hash}` (§6.2) |
@@ -1162,3 +1200,4 @@ No new decisions.
 | P3-D23 | Restores from owner devices only (a restriction of D62) | §11 Q3 |
 | P3-D24 | P3 owner-device policy for checkpoint-only receivers (tie-break) | §6.3 |
 | P3-D25 | Position time: documented limit, anchors, non-decreasing checkpoint `at` (tie-break) | §6.1, §6.3 |
+| P3-D26 | One `WK` per epoch, ever; refused publications burn their epoch and `list_seq`; `wk_commit` and `wk_commit_changed` (G2b) | §3.2 |

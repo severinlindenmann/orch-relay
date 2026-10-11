@@ -404,22 +404,39 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
                                                                             wk1, fake("x")), pub["wsk_a.sig"], "phone"),
                             ("grant_for_another_device", grants[("laptop", 1)], pub["wsk_a.sig"], "phone"))]}
 
-    def mlist(epoch, seq, members, signer=wsk_a, ws=ws_a):
-        return R.sign_object(S, signer, {"v": 2, "suite": S.id, "kind": "member_list", "workspace_id": ws.hex(),
-                                         "epoch": epoch, "list_seq": seq, "issued_ms": NOW,
-                                         "persons": [],
-                                         "members": sorted(({"device_id": dev[n].hex(),
-                                                            "person_id": certs[n]["o"]["person_id"], "scopes": sc}
-                                                            for n, sc in members), key=lambda m: m["device_id"])})
+    # G2b: one WK per epoch, ever; every list at an epoch commits to it (wk_commit).
+    def wk_of(epoch):
+        return {1: wk1, 2: wk2}.get(epoch) or fake(f"suite{S.id}/WK a epoch {epoch}")
+
+    o["wk_commit"] = [{"name": n, "workspace_id": ws_.hex(), "epoch": e, "wk": wk_.hex(),
+                       "wk_commit": b64u(R.wk_commit(ws_, e, wk_))}
+                      for n, ws_, e, wk_ in (("epoch_1", ws_a, 1, wk1), ("epoch_2", ws_a, 2, wk2),
+                                             ("other_workspace_same_key", ws_b, 1, wk1),
+                                             ("epoch_u32_max", ws_a, R.MAX_EPOCH, wk1))]
+
+    def mlist(epoch, seq, members, signer=wsk_a, ws=ws_a, **patch):
+        in_range = min(max(epoch, 1), R.MAX_EPOCH)  # out-of-range cases still carry a well-formed commitment
+        body = {"v": 2, "suite": S.id, "kind": "member_list", "workspace_id": ws.hex(),
+                "epoch": epoch, "list_seq": seq, "issued_ms": NOW,
+                "wk_commit": b64u(R.wk_commit(ws, in_range, wk_of(in_range))),
+                "persons": [],
+                "members": sorted(({"device_id": dev[n].hex(),
+                                    "person_id": certs[n]["o"]["person_id"], "scopes": sc}
+                                   for n, sc in members), key=lambda m: m["device_id"])}
+        body.update(patch)
+        return R.sign_object(S, signer, {k: v for k, v in body.items() if v is not None})
 
     full = ["look", "decide", "operate", "type"]
     l1 = mlist(1, 1, [("primary", full), ("phone", ["look", "decide"])])
+    big = R.EPOCH_STEP
     dstate = {"owner_pk_pub": pub["person_alice.sig"], "certs": {dev[n].hex(): certs[n] for n in certs},
               "revoked": set(), "grants": {(dev[d].hex(), e) for d, e in grants}}
     ml_cases = []
 
     def ml(name, prev, signed, mutate=None, signer_pub=pub["wsk_a.sig"]):
         ds = copy.deepcopy(dstate)
+        if signed["o"].get("epoch") not in (1, 2):  # grants are available at the proposed epoch too
+            ds["grants"] |= {(dev[d].hex(), signed["o"]["epoch"]) for d in ("primary", "phone", "laptop")}
         if mutate:
             mutate(ds)
         ml_cases.append({"name": name, "prev": prev, "signed": signed, "card_workspace_id": ws_a.hex(),
@@ -428,13 +445,41 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
                          "wsk_pub": signer_pub.hex(), "now_ms": NOW,
                          "expect": R.relay_accept_member_list(S, signer_pub, ws_a.hex(), prev, signed, ds, NOW)})
 
+    two = [("primary", full), ("phone", ["look", "decide"])]
     ml("first_list", None, l1)
     ml("first_list_for_another_workspace", None, mlist(1, 1, [("primary", full)], ws=ws_b))
-    ml("first_list_not_epoch_1", None, mlist(2, 1, [("primary", full)]))
+    # G2b check 4: a refused first publication burns (1, 1); the retry at (2, 2) is a valid first list.
+    ml("refused_first_publication_retries_at_2_2", None, mlist(2, 2, [("primary", full)]))
+    ml("first_list_epoch_2_16_accepted", None, mlist(big, 7, [("primary", full)]))
+    ml("first_list_epoch_above_2_16_refused", None, mlist(big + 1, 1, [("primary", full)]))
     ml("add_device_same_epoch", l1["o"], mlist(1, 2, [("primary", full), ("phone", ["look", "decide"]), ("laptop", full)]))
     ml("remove_device_with_rotation", l1["o"], mlist(2, 2, [("primary", full)]))
     ml("remove_device_without_rotation", l1["o"], mlist(1, 2, [("primary", full)]))
-    ml("epoch_skips", l1["o"], mlist(3, 2, [("primary", full)]))
+    # G2b check 6: epochs may skip (burned epochs), up to prev + 2^16, and never fall.
+    ml("epoch_skip_accepted", l1["o"], mlist(3, 2, two))
+    ml("burned_epoch_gap_accepted", l1["o"], mlist(3, 3, two))
+    ml("burned_list_seq_accepted", l1["o"], mlist(1, 3, two))
+    ml("removal_with_skip_accepted", l1["o"], mlist(3, 2, [("primary", full)]))
+    ml("epoch_jump_2_16_accepted", l1["o"], mlist(1 + big, 2, two))
+    ml("epoch_jump_above_2_16_refused", l1["o"], mlist(2 + big, 2, two))
+    l3 = mlist(3, 3, two)
+    ml("epoch_falls_refused", l3["o"], mlist(2, 4, two))
+    ml("removal_at_same_skipped_epoch_refused", l3["o"], mlist(3, 4, [("primary", full)]))
+    ml("epoch_u32_max_accepted", mlist(R.MAX_EPOCH - 1, 5, two)["o"], mlist(R.MAX_EPOCH, 6, two))
+    ml("epoch_above_u32_malformed", mlist(R.MAX_EPOCH, 6, two)["o"], mlist(R.MAX_EPOCH + 1, 7, two))
+    ml("epoch_zero_malformed", None, mlist(0, 1, two))
+    # G2b check 2 and 7b: wk_commit is required, 32 canonical bytes, and fixed within an epoch.
+    other = b64u(R.wk_commit(ws_a, 1, fake(f"suite{S.id}/WK a epoch 1, second key")))
+    ml("wk_commit_missing_malformed", None, mlist(1, 1, two, wk_commit=None))
+    ml("wk_commit_bad_length_malformed", None, mlist(1, 1, two, wk_commit=b64u(bytes(31))))
+    ml("wk_commit_not_canonical_malformed", None, mlist(1, 1, two, wk_commit=b64u(bytes(32))[:-1] + "B"))
+    ml("wk_commit_not_string_malformed", None, mlist(1, 1, two, wk_commit=0))
+    ml("wk_commit_changed_same_epoch", l1["o"], mlist(1, 2, two, wk_commit=other))
+    ml("wk_commit_same_epoch_same_commit_accepted", l1["o"], mlist(1, 2, two + [("laptop", full)]))
+    ml("wk_commit_new_epoch_free", l1["o"], mlist(2, 2, two))
+    # No legacy skip: a previous list without wk_commit (a pre-G2b dev row) fails closed at the same epoch.
+    ml("wk_commit_prev_missing_same_epoch_refused", {k: v for k, v in l1["o"].items() if k != "wk_commit"},
+       mlist(1, 2, two))
     ml("list_seq_not_increasing", l1["o"], mlist(1, 1, [("primary", full), ("phone", ["look"])]))
     ml("revoked_member", l1["o"], mlist(2, 2, [("primary", full), ("phone", ["look"])]),
        lambda d: d["revoked"].add(dev["phone"].hex()))
@@ -445,6 +490,9 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
        lambda d: d["grants"].discard((dev["primary"].hex(), 2)))
     ml("signed_by_another_workspace_key", l1["o"], mlist(1, 2, [("primary", full)], signer=wsk_x))
     o["member_lists"] = ml_cases
+
+    # --- device snapshots and key choice (§7.3 D1-D4, G2b) -------------------------------------------
+    o["member_list_snapshots"] = _snapshots(S, k, pub, dev, ws_a, wsk_a, mlist, l1, two, full, wk_of, other, fake)
 
     # --- cert request to the primary, its challenge (§8.4) ----------------------------------------------
     inner = {"device_id": dev["phone"].hex(), "dk_sig_pub": b64u(pub["phone.sig"]), "dk_kx_pub": b64u(pub["phone.kx"]),
@@ -708,6 +756,73 @@ def _suite(S: R.Suite) -> dict:  # noqa: C901 (a builder: long by nature)
     ra("signed_by_another_key", [("device", S.sign(k.priv["laptop.sig"], rab), "device", NOW)])
     ra("unknown_kind", [("agent", good, "device", NOW)])
     return o
+
+
+def _snapshots(S, k, pub, dev, ws, wsk, mlist, l1, two, full, wk_of, other, fake):
+    """§7.3 D1-D4 (G2b) device cases: snapshot acceptance by content, the wk_commit alarm, and key choice.
+    Each case: the device's persisted state, then steps replayed in order against that state."""
+    me = "phone"
+    priv = k.priv[me + ".kx"]
+    second_wk = fake(f"suite{S.id}/WK a epoch 1, second key")
+
+    def grant(epoch, wk=None):
+        return R.make_wk_grant(S, wsk, ws, dev[me], pub[me + ".kx"], epoch, wk or wk_of(epoch),
+                               fake(f"suite{S.id}/eph snapshot grant {epoch} {(wk or wk_of(epoch)).hex()[:8]}"))
+
+    if S.id == 2:  # a high-s twin of l1: other signature bytes, the same verified content
+        raw = R.unb64u(l1["sig"])
+        twin = {"o": l1["o"], "sig": R.b64u(raw[:32] + (R.P256_N - int.from_bytes(raw[32:], "big")).to_bytes(32, "big"))}
+        assert twin["sig"] != l1["sig"]
+    else:          # Ed25519 signatures are unique: the twin is a re-delivery of the same bytes
+        twin = copy.deepcopy(l1)
+    l2 = mlist(2, 2, two)
+    cases = []
+
+    def case(name, steps, start=()):
+        state = {"head": None, "wk_commits": {}, "sealing_blocked": []}
+        for signed in start:
+            assert R.device_accept_member_list(S, pub["wsk_a.sig"], ws.hex(), state, signed) == {"ok": "advanced"}
+        before = copy.deepcopy(state)
+        out = []
+        for op, arg in steps:
+            if op == "list":
+                step = {"op": op, "signed": arg,
+                        "expect": R.device_accept_member_list(S, pub["wsk_a.sig"], ws.hex(), state, arg)}
+            elif op == "seal":
+                step = {"op": op, "grants": arg,
+                        "expect": R.device_sealing_key(S, pub["wsk_a.sig"], ws, dev[me], priv, state, arg)}
+            else:
+                epoch, grants_ = arg
+                step = {"op": op, "epoch": epoch, "grants": grants_,
+                        "expect": R.device_reading_key(S, pub["wsk_a.sig"], ws, dev[me], priv, state, grants_, epoch)}
+            step["state"] = copy.deepcopy(state)
+            out.append(step)
+        cases.append({"name": name, "device": me, "card_workspace_id": ws.hex(), "wsk_pub": pub["wsk_a.sig"].hex(),
+                      "state": before, "steps": out})
+
+    case("same_list_seq_high_s_twin_no_alarm", [("list", twin)], [l1])
+    case("same_list_seq_other_content_alarm", [("list", mlist(1, 1, [("primary", full)]))], [l1])
+    case("same_epoch_other_wk_commit_alarm",
+         [("list", mlist(1, 2, two, wk_commit=other)), ("seal", [grant(1)]), ("list", mlist(2, 3, two)),
+          ("seal", [grant(2)])], [l1])
+    case("grant_wk_commit_mismatch_not_used_for_sealing",
+         [("seal", [grant(1, second_wk)]), ("seal", [grant(1, second_wk), grant(1)])], [l1])
+    case("missing_grant_blocks_sending_no_fallback", [("seal", [grant(1)]), ("seal", [])], [l1, l2])
+    case("jumped_epoch_old_grant_readable_without_list", [("read", (1, [grant(1)])), ("seal", [grant(3)]),
+                                                          ("read", (4, [grant(4)]))], [mlist(3, 3, two)])
+    case("old_epoch_grant_mismatch_with_known_list_refused",
+         [("read", (1, [grant(1, second_wk)])), ("read", (1, [grant(1)])), ("read", (2, []))], [l1, l2])
+    case("first_snapshot_any_epoch_any_list_seq", [("list", mlist(R.EPOCH_STEP, 9, two)), ("seal", [grant(R.EPOCH_STEP)])])
+    case("lower_list_seq_ignored", [("list", l1)], [l1, mlist(1, 2, two)])
+    # Alarm before stale: a lower list_seq at a known epoch with another wk_commit is WSK-signed proof of two keys.
+    case("lower_list_seq_other_wk_commit_alarm", [("list", mlist(1, 1, two, wk_commit=other)), ("seal", [grant(1)])],
+         [mlist(1, 2, two)])
+    # Same list_seq, other content (here another wk_commit): conflicting_snapshot, which does not block sealing.
+    case("same_list_seq_other_wk_commit_conflicting_snapshot_no_block",
+         [("list", mlist(1, 1, two, wk_commit=other)), ("seal", [grant(1)])], [l1])
+    case("epoch_falls_refused", [("list", mlist(1, 4, two))], [l1, l2])
+    case("removal_without_higher_epoch_refused", [("list", mlist(1, 2, [("primary", full)]))], [l1])
+    return cases
 
 
 def _bridge(S, k, certs, ws, wk1, wk2, dev, offer, secret, pid, grants, challenges):

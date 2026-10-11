@@ -33,6 +33,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -53,7 +54,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -129,6 +130,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -149,7 +151,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -226,6 +228,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -246,7 +249,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -321,6 +324,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "c0a4315f5bdca8c5fd7a699d95dee2b0"
               ],
@@ -341,7 +345,7 @@
                 }
               ]
             },
-            "sig": "xBJA25l_O2taZKMcKpyV4HvtAquG5BabRS4B9Uhs4VHvdKvBAqWC4qubGbrYDW-Zk1BYjnE-RwaPpXHJT4sXDA"
+            "sig": "aNwl9ta1BTmBzOB7HbB5CnMiQIAyz-5_s_qaiK69BTgoc3XZKnyIpLeJ7IFOowyFjwM6JmAf6w17ONSJsNpgBg"
           },
           "grants": [
             {
@@ -416,6 +420,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -436,7 +441,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -510,6 +515,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -530,7 +536,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -605,6 +611,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -625,7 +632,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -700,6 +707,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -720,7 +728,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -795,6 +803,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -815,7 +824,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -878,6 +887,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -898,7 +908,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -973,6 +983,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -993,7 +1004,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -1068,6 +1079,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -1088,7 +1100,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -1142,7 +1154,7 @@
       "given": {
         "scenario": "bad_epoch",
         "now_ms": 1790000000000,
-        "condition": "membership: Proposed epoch violates first-list or adjacent publication rules."
+        "condition": "Held list is (list_seq 1, epoch 2); this list's epoch 1 falls below it. Epochs may skip, never fall."
       },
       "request": {
         "method": "PUT",
@@ -1163,6 +1175,7 @@
               "epoch": 1,
               "list_seq": 2,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -1183,7 +1196,7 @@
                 }
               ]
             },
-            "sig": "CSb_Xt4G6cU7jWSneEZjV0GFdB08ckd7_bapnPBs4wozy9P2rVQCbZdfIT0C5Lb_Y720CXH789QyO_G-PLXDfA"
+            "sig": "2tF0cO1FYBR0ZCI5XvTsFR0bFZuTcypnZ_wauFW4bqRYFUQwkb7WBVzxMj6sEw3AqP3vDRtphj6GGb3ZU6f0vg"
           },
           "grants": [
             {
@@ -1258,6 +1271,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -1278,7 +1292,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -1353,6 +1367,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -1373,7 +1388,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -1448,6 +1463,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -1468,7 +1484,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -1531,6 +1547,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -1551,7 +1568,7 @@
                 }
               ]
             },
-            "sig": "kFAn1JhO1tL5_4nuloyjBA0MXogvfinoEp5XQhIge-oF3ISLO101OM0wu0tZ1UzMZbZRtTgDDRMYSRuJCb2uOQ"
+            "sig": "JC--GvnN87fB8ZjBQ6r6yV8U9hQwULgELXVL65epCk1zgVaKP585kZ2KkDPWncwzTAKoSk0uNr7tQt7zlcvPqg"
           },
           "grants": [
             {
@@ -1605,7 +1622,7 @@
       "given": {
         "scenario": "rotation_required",
         "now_ms": 1790000000000,
-        "condition": "membership: A device is removed but the submitted epoch equals the held epoch."
+        "condition": "membership: A device is removed but the submitted epoch is not above the held epoch."
       },
       "request": {
         "method": "PUT",
@@ -1626,6 +1643,7 @@
               "epoch": 1,
               "list_seq": 2,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -1646,7 +1664,7 @@
                 }
               ]
             },
-            "sig": "CSb_Xt4G6cU7jWSneEZjV0GFdB08ckd7_bapnPBs4wozy9P2rVQCbZdfIT0C5Lb_Y720CXH789QyO_G-PLXDfA"
+            "sig": "2tF0cO1FYBR0ZCI5XvTsFR0bFZuTcypnZ_wauFW4bqRYFUQwkb7WBVzxMj6sEw3AqP3vDRtphj6GGb3ZU6f0vg"
           },
           "grants": [
             {
@@ -1721,6 +1739,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -1741,7 +1760,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -1816,6 +1835,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -1836,7 +1856,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -1886,6 +1906,102 @@
       }
     },
     {
+      "name": "refusal_409_wk_commit_changed",
+      "given": {
+        "scenario": "wk_commit_changed",
+        "now_ms": 1790000000000,
+        "condition": "Held list (list_seq 1, epoch 1) carries wk_commit A; this list (list_seq 2) keeps epoch 1 with wk_commit B."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/membership",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "member_list": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "member_list",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "epoch": 1,
+              "list_seq": 2,
+              "issued_ms": 1790000000000,
+              "wk_commit": "HWMqX9aZ0JAiOGq376PEWsX1Qkv_Ec7EwxfZ5pwdhAg",
+              "persons": [
+                "42f83168aabd846982483297b14e7301"
+              ],
+              "members": [
+                {
+                  "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                  "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                  "scopes": [
+                    "look"
+                  ]
+                },
+                {
+                  "device_id": "443532523e2513433ce3e2a6d35b0654",
+                  "person_id": "42f83168aabd846982483297b14e7301",
+                  "scopes": [
+                    "look"
+                  ]
+                }
+              ]
+            },
+            "sig": "ffDUs4WercCm9Ge9POT58C4crVf6X4pSQkO16FnAy9gHUHqXZbpND5_hvYXX8KaPTBqmYc-CKIWqhomNhoDNig"
+          },
+          "grants": [
+            {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "wk_grant",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                "epoch": 1,
+                "sealed": "BFOD_F0Wv0lLCiUj1w--BzcHI3acUUD8gx6pUF98AdlWHsQV-_4-_JtxYrMi_oLz2mER1SnDFSOBRnPvHSVVGCN0_urrUHSuD6ZOTF7XjqXoTsaNwG2OrseShIX21GEJFgqyzrhXDKLM8S8ThBpMRiw"
+              },
+              "sig": "4pgxPG_bcF9_nV9ktmaGP4PXKe9SFsdAnFubIFOx9TcX8n9sGg5mfYLdBaZM2tbSdMZA6UvXHw_3Ph2qhi8aqA"
+            },
+            {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "wk_grant",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "device_id": "443532523e2513433ce3e2a6d35b0654",
+                "epoch": 1,
+                "sealed": "BNO4twdkGEYWOJpoDceiYC3P5Iw0ucQoxiKlvh3hEUuz463yogL_slVw89LK6R41wclh1usIyG7F9on1S8UJU7x6g99d2yACILBZjZbV03e8aZ5S7ISTt7IraTbYV1hY9Fc_SvqChdl4h1oB8rM2u3w"
+              },
+              "sig": "0qMi1uVCM0eIidXPFOZk7wOMhn2UyeGCLtTbWoAcZdFMCPNL7m4e1QCJOtjlwpildohtBjS90-vS6gWqN5_Fqw"
+            }
+          ],
+          "card_key_wraps": {
+            "card_seq": 1,
+            "wraps": [
+              {
+                "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                "sealed": "BNrQ2gBalpG5bEAub0h4PFxgTBkv0Le8HYin3WTY4-Pg7ZpopXx62spXTkPPBHM6NgoGYUySsTu02_0o3DdmFhLpCvSNTEbjPhuLAnmHXMlxWfl7A8QKnqJ0e_82-pjsujxnAIHRYuCoDOADsnuZnW4"
+              }
+            ]
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "wk_commit_changed"
+        }
+      }
+    },
+    {
       "name": "refusal_409_wrap_conflict",
       "given": {
         "scenario": "wrap_conflict",
@@ -1911,6 +2027,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -1931,7 +2048,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {
@@ -2037,6 +2154,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301",
                 "d62ddaafae9b0f46af981646edddf348"
@@ -2058,7 +2176,7 @@
                 }
               ]
             },
-            "sig": "6rV0BitQyKRg3xyAExiE-SEcQ_csXYdas9PP8Z5f1ZqJyWXB2nQcUHCLnZ_ZsNRDv3zSIUJM0iQkFoww-eS8aA"
+            "sig": "EkQMbknSw8hSm5Ocnq5tvxtEkno-4RR7zYX_0dZ4Ep-P4Z2yi8TzYd8eNZ6WbhZlFZbidbiGqwFKvc1GxZLuHQ"
           },
           "grants": [
             {
@@ -2132,6 +2250,7 @@
               "epoch": 1,
               "list_seq": 1,
               "issued_ms": 1790000000000,
+              "wk_commit": "0VJTPq9q-mdT1s2GCT2y_kwN9fQkdn8YCx2r0MpHuiw",
               "persons": [
                 "42f83168aabd846982483297b14e7301"
               ],
@@ -2152,7 +2271,7 @@
                 }
               ]
             },
-            "sig": "Pii3NNVof8g-k4rGmmeaz_U8J-x_PKVjJPvvoYBjubrA8JopfeVi4KMSzfqne4tsR6VzylGTkFaFX7WKW-EcrQ"
+            "sig": "M_b4dO42FE6xLjbSiDvdtDL5dvVnIhDqoZmMLGZL6VBqZpxWPPkaRSOQhHqKw74uXdXfYJOSSf0g1copOUYJ7Q"
           },
           "grants": [
             {

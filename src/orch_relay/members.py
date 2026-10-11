@@ -4,11 +4,21 @@ from . import proto as P
 from .directory import DAY, Refusal, check_suite, checked, digest, fail, fields, integer
 
 ROUTES = {"membership", "members", "grants", "card_keys", "card_key"}
+MAX_EPOCH = 2**32 - 1  # §7.2 check 2: epochs are u32 (bridge header, commitments)
+EPOCH_STEP = 2**16  # §7.2 checks 4 and 6: the largest first epoch and forward skip
 
 
-def positive(value):
-    if type(value) is not int or not 1 <= value <= P.MAX_SAFE_INT:
+def positive(value, maximum=P.MAX_SAFE_INT):
+    if type(value) is not int or not 1 <= value <= maximum:
         fail("malformed")
+
+
+def stored_wk_commit(raw):
+    """wk_commit of a stored list. A pre-G2b dev row has none, so 7b refuses a same-epoch list over it
+    (the host recovers by rotating to a higher epoch; wipe such dev databases)."""
+    signed = P.parse_json(raw)
+    o = signed.get("o") if isinstance(signed, dict) else None
+    return o.get("wk_commit") if isinstance(o, dict) else None
 
 
 def sealed(value):
@@ -110,9 +120,10 @@ def publish(con, ws, body, raw, workspace, now):
         fail("malformed")
     pub = P.unb64u(workspace["wsk_pub"])
     o = verify(body["member_list"], pub, "member_list")
-    fields(o, "v suite kind workspace_id epoch list_seq issued_ms persons members")
-    positive(o["epoch"])
+    fields(o, "v suite kind workspace_id epoch list_seq issued_ms wk_commit persons members")
+    positive(o["epoch"], MAX_EPOCH)
     positive(o["list_seq"])
+    P.unb64u(o["wk_commit"], 32)
     if (
         type(o["issued_ms"]) is not int
         or not isinstance(o["members"], list)
@@ -138,25 +149,26 @@ def publish(con, ws, body, raw, workspace, now):
     previous = con.execute(
         "SELECT * FROM member_lists WHERE workspace_id=? ORDER BY list_seq DESC LIMIT 1", (ws,)
     ).fetchone()
+    # Checks 4-7b: epochs may skip (a refused publication burns its epoch), never fall.
     epoch = previous["epoch"] if previous else 0
     if previous and o["list_seq"] <= previous["list_seq"]:
         fail("stale_list")
-    if o["epoch"] not in ((epoch, epoch + 1) if previous else (1,)):
-        fail("bad_epoch")
-    if not previous and o["list_seq"] != 1:
+    if not (epoch if previous else 1) <= o["epoch"] <= epoch + EPOCH_STEP:
         fail("bad_epoch")
     old_ids = {
         r[0] for r in con.execute("SELECT device_id FROM members WHERE workspace_id=?", (ws,))
     }
-    if old_ids - members.keys() and o["epoch"] != epoch + 1:
+    if old_ids - members.keys() and o["epoch"] <= epoch:
         fail("rotation_required")
+    if previous and o["epoch"] == epoch and stored_wk_commit(previous["list"]) != o["wk_commit"]:
+        fail("wk_commit_changed")
     if not isinstance(body["grants"], list):
         fail("malformed")
     grants = {}
     for grant in body["grants"]:
         g = verify(grant, pub, "wk_grant")
         fields(g, "v suite kind workspace_id device_id epoch sealed")
-        positive(g["epoch"])
+        positive(g["epoch"], MAX_EPOCH)
         P.unhex(g["device_id"])
         if g["workspace_id"] != ws:
             fail("other_workspace")
@@ -278,7 +290,7 @@ def dispatch(directory, con, route, ws, body, raw, query, headers, now):
         if row is None:
             fail("not_found")
         return {"workspace_id": ws, "device_id": did, "card_seq": seq, "sealed": row[0]}
-    epoch = integer(query["epoch"]) if "epoch" in query else None
+    epoch = integer(query["epoch"], MAX_EPOCH) if "epoch" in query else None
     if epoch == 0:
         fail("malformed")
     rows = con.execute(

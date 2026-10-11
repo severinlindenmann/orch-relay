@@ -43,6 +43,7 @@ STATUS = {
             "stale_epoch",
             "bad_epoch",
             "rotation_required",
+            "wk_commit_changed",
             "missing_grant",
             "grant_conflict",
             "wrap_conflict",

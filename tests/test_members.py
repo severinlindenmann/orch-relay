@@ -12,6 +12,7 @@ from orch_relay import db
 from orch_relay import proto as P
 from orch_relay.app import create_app
 from orch_relay.directory import DAY
+from ref import orch_protocol_ref as R
 
 
 def test_members_route(tmp_path):
@@ -29,9 +30,20 @@ def put(client, body):
     return client.put(f"/v2/workspaces/{WS}/membership", content=P.cj(body), headers=HEADERS)
 
 
+def commit(epoch, key="relay test WK"):
+    """A G2b wk_commit for a test key at this epoch (the relay cannot open grants, so any key serves)."""
+    epoch = min(epoch, R.MAX_EPOCH)  # an out-of-range list still carries a well-formed commitment
+    return P.b64u(R.wk_commit(bytes.fromhex(WS), epoch, R.fake(f"{key} {epoch}")))
+
+
 def changed(body=BODY, **updates):
     out = copy.deepcopy(body)
-    out["member_list"] = signed({**out["member_list"]["o"], **updates}, "wsk_a.sig")
+    if "epoch" in updates and "wk_commit" not in updates:
+        updates["wk_commit"] = commit(updates["epoch"])
+    out["member_list"] = signed(
+        {k: v for k, v in {**out["member_list"]["o"], **updates}.items() if v is not None},
+        "wsk_a.sig",
+    )
     if "epoch" in updates:
         out["grants"] = [
             signed({**g["o"], "epoch": updates["epoch"]}, "wsk_a.sig") for g in out["grants"]
@@ -113,13 +125,28 @@ def test_retry_retention_restart_and_fence(tmp_path):
         }
 
 
-@pytest.mark.parametrize("epoch", [2, 9])
-def test_first_epoch_adjacency(tmp_path, epoch):
+@pytest.mark.parametrize(
+    "epoch,list_seq,status,error",
+    [
+        (2, 2, 200, None),  # a refused first publication burned (1, 1)
+        (2**16, 9, 200, None),
+        (1, 5, 200, None),
+        (2**16 + 1, 1, 409, "bad_epoch"),
+        (2**32, 1, 400, "malformed"),
+    ],
+)
+def test_first_list_epoch_range(tmp_path, epoch, list_seq, status, error):
+    """G2b check 4 (replaces the old epoch=1/list_seq=1 pin): 1 <= epoch <= 2^16, any list_seq."""
     with TestClient(create_app(tmp_path)) as c:
         load_state(c.app.state.directory)
-        r = put(c, changed(epoch=epoch))
-        assert r.status_code == 409
-        assert r.json() == {"error": "bad_epoch"}
+        before = snapshot(c.app.state.directory)
+        r = put(c, changed(epoch=epoch, list_seq=list_seq))
+        assert r.status_code == status, r.text
+        if error:
+            assert r.json() == {"error": error}
+            assert snapshot(c.app.state.directory) == before
+        else:
+            assert r.json() == {"list_seq": list_seq, "epoch": epoch}
 
 
 def test_revocation_rotation_and_mailbox_cleanup(tmp_path):
@@ -209,18 +236,111 @@ def test_device_reads_only_own_grants_from_first_epoch(tmp_path):
         assert c.get(f"/v2/workspaces/{WS}/card-key?card_seq=1", headers=HEADERS).status_code == 403
 
 
-@pytest.mark.parametrize("patch", [{"epoch": 4}, {"epoch": 1, "list_seq": 3}])
-def test_publication_epoch_adjacency(tmp_path, patch):
+@pytest.mark.parametrize(
+    "patch,error",
+    [
+        ({"epoch": 4, "list_seq": 4}, None),  # epochs 3 and list_seq 3 burned
+        ({"epoch": 2 + 2**16, "list_seq": 3}, None),
+        ({"epoch": 3 + 2**16, "list_seq": 3}, "bad_epoch"),
+        ({"epoch": 1, "list_seq": 3}, "bad_epoch"),  # epochs never fall
+        ({"epoch": 2**32, "list_seq": 3}, "malformed"),
+    ],
+)
+def test_publication_epoch_rules(tmp_path, patch, error):
+    """G2b check 6 (replaces adjacency): prev <= epoch <= prev + 2^16."""
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        load_state(d)
+        assert put(c, BODY).status_code == 200
+        assert put(c, changed(list_seq=2, epoch=2)).status_code == 200
+        before = snapshot(d)
+        r = put(c, changed(**patch))
+        if error:
+            assert r.json() == {"error": error}
+            assert r.status_code == (400 if error == "malformed" else 409)
+            assert snapshot(d) == before
+        else:
+            assert r.status_code == 200, r.text
+
+
+def test_wk_commit_fixed_within_epoch(tmp_path):
+    """G2b check 7b: the same epoch keeps its wk_commit; a new epoch is free; 409 wk_commit_changed."""
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        load_state(d)
+        assert put(c, BODY).status_code == 200
+        before = snapshot(d)
+        r = put(c, changed(list_seq=2, wk_commit=commit(1, "second key")))
+        assert r.status_code == 409 and r.json() == {"error": "wk_commit_changed"}
+        assert snapshot(d) == before
+        assert put(c, changed(list_seq=3)).status_code == 200
+        assert put(c, changed(list_seq=4, epoch=2, wk_commit=commit(2, "second key"))).json() == {
+            "list_seq": 4,
+            "epoch": 2,
+        }
+        r = put(c, changed(list_seq=5, epoch=2, wk_commit=commit(2)))
+        assert r.status_code == 409 and r.json() == {"error": "wk_commit_changed"}
+
+
+def test_wk_commit_legacy_previous_row_fails_closed(tmp_path):
+    """No legacy skip: a stored pre-G2b list without wk_commit refuses a same-epoch list
+    (wk_commit_changed); the host recovers by rotating to a higher epoch."""
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        load_state(d)
+        assert put(c, BODY).status_code == 200
+        legacy = {k: v for k, v in BODY["member_list"]["o"].items() if k != "wk_commit"}
+        with closing(db.connect(d.path)) as con, con:
+            con.execute("UPDATE member_lists SET list=?", (P.cj(signed(legacy, "wsk_a.sig")),))
+        before = snapshot(d)
+        r = put(c, changed(list_seq=2))
+        assert r.status_code == 409 and r.json() == {"error": "wk_commit_changed"}
+        assert snapshot(d) == before
+        assert put(c, changed(list_seq=3, epoch=2)).json() == {"list_seq": 3, "epoch": 2}
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, P.b64u(bytes(31)), P.b64u(bytes(33)), P.b64u(bytes(32))[:-1] + "B", 7],
+    ids=["missing", "short", "long", "not_canonical", "not_string"],
+)
+def test_wk_commit_shape(tmp_path, value):
+    """G2b check 2: wk_commit is required and canonical b64u of exactly 32 bytes."""
+    with TestClient(create_app(tmp_path)) as c:
+        load_state(c.app.state.directory)
+        r = put(c, changed(wk_commit=value))
+        assert r.status_code == 400 and r.json() == {"error": "malformed"}
+
+
+def test_removal_needs_higher_epoch_and_may_skip(tmp_path):
+    """G2b check 7: a removal needs epoch > previous; a skip satisfies it."""
     with TestClient(create_app(tmp_path)) as c:
         load_state(c.app.state.directory)
         assert put(c, BODY).status_code == 200
-        assert put(c, changed(list_seq=2, epoch=2)).status_code == 200
-        r = (
-            put(c, changed(list_seq=4, **patch))
-            if "list_seq" not in patch
-            else put(c, changed(**patch))
+        body = changed(
+            list_seq=2,
+            members=[m for m in BODY["member_list"]["o"]["members"] if m["device_id"] != DEVICE],
         )
-        assert r.status_code == 409 and r.json() == {"error": "bad_epoch"}
+        body["grants"] = [g for g in body["grants"] if g["o"]["device_id"] != DEVICE]
+        del body["card_key_wraps"]
+        assert put(c, body).json() == {"error": "rotation_required"}
+        assert put(c, changed(body, epoch=3)).json() == {"list_seq": 2, "epoch": 3}
+
+
+def test_grant_epoch_is_u32(tmp_path):
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        load_state(d)
+        body = copy.deepcopy(BODY)
+        body["grants"][0] = signed({**body["grants"][0]["o"], "epoch": 2**32}, "wsk_a.sig")
+        r = put(c, body)
+        assert r.status_code == 400 and r.json() == {"error": "malformed"}
+        assert put(c, BODY).status_code == 200
+        route = f"/v2/workspaces/{WS}/grants"
+        headers = {"Authorization": "Bearer FAKE-device"}
+        assert c.get(route + f"?epoch={2**32 - 1}", headers=headers).status_code == 404
+        r = c.get(route + f"?epoch={2**32}", headers=headers)
+        assert r.status_code == 400 and r.json() == {"error": "malformed"}
 
 
 def test_expired_holder_and_session_gate_exact_retry(tmp_path):
