@@ -13,6 +13,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import unicodedata
 from pathlib import Path
 
@@ -977,6 +978,14 @@ def test_signed_chain_tampering(c):
             for uid, events in TAMPER["ticket_events"].items()
         }
         assert stopped == c["ticket_events_stopped_from"]
+        # The same stop, found by the reader itself: ticket logs checked against ws height broken - 1.
+        for uid, events in TAMPER["ticket_events"].items():
+            assert (
+                chain_break(
+                    events, uid, TAMPER["workspace_id"], workspace[0]["wsk_pub"], certs, broken - 1
+                )
+                == stopped[uid]
+            )
 
 
 def test_signed_chain_heads_and_lines():
@@ -1067,6 +1076,9 @@ def checkpoint_offer(held, offered, restore=None, applied=()):
     # naturally lacks tickets created after it (stale delivery comes first).
     if o["n"] > h["n"] and not old.keys() <= new.keys():
         return "chain.diverged", None
+    # A uid H lacks counts as seq 0 there, so a lower-n offer naming one has a higher seq: divergence.
+    if o["n"] < h["n"] and new.keys() - old.keys():
+        return "chain.diverged", None
     shared = old.keys() & new.keys()
     conflicts = {log for log in shared if height_conflict(old[log], new[log])}
     if restore and o["n"] > h["n"] and restore["log"] in conflicts:
@@ -1124,6 +1136,7 @@ class F1State:
         self.grants = {}
         self.restore_start = None
         self.restore_end = None
+        self.restore_open = False
         self.last_order = None
 
     def cert_valid(self, cert, at):
@@ -1346,11 +1359,7 @@ class F1State:
         if t == "device.revoked":
             self.revoked.add(e["device"])
             self.revocations.append(e["revocation"])
-            if (
-                log == "workspace"
-                and self.restore_start is not None
-                and e["actor"]["kind"] == "host"
-            ):
+            if log == "workspace" and self.restore_open and e["actor"]["kind"] == "host":
                 self.restore_end = e["seq"]
         if t == "grant.issued":
             self.grants[e["grant"]] = e
@@ -1360,10 +1369,19 @@ class F1State:
             self.questions[log, e["question"]["id"]] = e
         if t == "question.answered":
             self.answers[log, e["question"]] = e["id"]
+        # The re-append window after a workspace restore holds only host device.revoked lines; any
+        # other workspace event closes it, so a much later host revocation can't widen it.
+        if (
+            log == "workspace"
+            and t != "restore"
+            and not (t == "device.revoked" and e["actor"]["kind"] == "host")
+        ):
+            self.restore_open = False
         if t == "restore":
             self.seen[log].update(e["abandoned_decisions"])
             if log == "workspace":
                 self.restore_start = self.restore_end = e["seq"]
+                self.restore_open = True
         if log != "workspace":
             self.last_order = (e["ws_seq"], e["at"], log, e["seq"])
         return result
@@ -1458,3 +1476,21 @@ def test_first_checkpoint_requires_signature_and_pinned_genesis():
     changed = deepcopy(first)
     changed["sig"] = R.b64u(bytes(64))
     assert checkpoint_offer(None, changed) == ("chain.diverged", None)
+
+
+def test_checkpoint_lower_n_extra_uid_diverges(monkeypatch):
+    """§5.10: a lower-n offer naming a ticket H lacks has a higher seq for it (H's is 0): divergence.
+
+    No shared vector yet (asked the core for `lower_n_extra_uid`); signatures are out of scope here.
+    """
+    monkeypatch.setattr(sys.modules[__name__], "checkpoint_ok", lambda signed: True)
+    log = {"seq": 3, "head": "sha256:" + "a" * 64}
+    held = {"o": {"n": 5, "workspace_log": log, "tickets": {}}}
+    offered = {
+        "o": {
+            "n": 4,
+            "workspace_log": log,
+            "tickets": {"01EXTRA": {"seq": 1, "head": "sha256:" + "b" * 64}},
+        }
+    }
+    assert checkpoint_offer(held, offered) == ("chain.diverged", None)
