@@ -342,3 +342,54 @@ def test_global_staging_ceiling_over_http_is_503_with_retry_after(tmp_path):
         assert int(r.headers["retry-after"]) >= 1
         with closing(db.connect(path)) as con:
             assert not con.execute("SELECT 1 FROM checkpoint_staging").fetchone()
+
+
+# --- G4 precondition (b): cross-workspace isolation side effects -------------------------------
+
+
+def test_workspace_b_cannot_touch_workspace_a_objects(tmp_path):
+    from checkpoint_support import WS_B, find, http, replay, seed, step
+    from fastapi.testclient import TestClient
+
+    from orch_relay.app import create_app
+
+    a = find({"section": "checkpoints_g4", "name": "isolation_workspace_a"})
+    b = find({"section": "checkpoints_g4", "name": "isolation_workspace_b"})
+    with TestClient(create_app(tmp_path)) as client:
+        path = tmp_path / db.DB_NAME
+        replay(client, path, a)
+        seed(path, b["state"], b, ws=WS_B)
+
+        def rows(con):
+            return {
+                t: sorted(con.execute(f"SELECT * FROM {t} WHERE workspace_id=?", (WS,)))
+                for t in (
+                    "checkpoint_baselines",
+                    "checkpoint_staging",
+                    "checkpoint_staging_pages",
+                    "checkpoints",
+                    "log_nodes",
+                )
+            }
+
+        with closing(db.connect(path)) as con:
+            before = rows(con)
+        for s in b["steps"]:
+            assert step(client, path, s["input"], b, ws=WS_B) == s["expect"]
+        with closing(db.connect(path)) as con:
+            assert rows(con) == before  # B's no-op DELETE and its own staging set left A as it was
+            assert (
+                con.execute(
+                    "SELECT count(*) FROM checkpoint_staging WHERE workspace_id=?", (WS_B,)
+                ).fetchone()[0]
+                == 1
+            )
+        # B's W token is not eligible for A even with A's current holder generation.
+        h = a["steps"][0]["input"]["body"]["hash"]
+        r = http(
+            client,
+            "DELETE",
+            f"/v2/workspaces/{WS}/baselines/{h}",
+            {"Authorization": "Bearer FAKE-workspace-b", "Orch-Holder": "1"},
+        )
+        assert r == {"status": 403, "error": "not_eligible"}

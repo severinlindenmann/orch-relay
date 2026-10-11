@@ -28,8 +28,21 @@ DEVICE = V["ids"]["device_phone"]
 CARD = V["card"]["card"]
 LEASE = 1 << 52
 SECTIONS = ("checkpoints", "checkpoints_g4")
+BOB_PHONE = V["ids"]["device_bob_phone"]
+# Per workspace: its W token, a member device token and that device (§19.8 detail 6 (b)).
+TOKENS = {
+    WS: ("FAKE-workspace", "FAKE-device", DEVICE),
+    WS_B: ("FAKE-workspace-b", "FAKE-device-b", BOB_PHONE),
+}
 W = {"Authorization": "Bearer FAKE-workspace"}
 D = {"Authorization": "Bearer FAKE-device"}
+
+
+def principals(ws):
+    w, d, _ = TOKENS[ws]
+    return {"Authorization": "Bearer " + w}, {"Authorization": "Bearer " + d}
+
+
 STRENGTH = C.STRENGTH
 
 
@@ -234,10 +247,8 @@ def seed(path, state, case, now=None, ws=WS):
         con.execute(
             "INSERT INTO holders VALUES (?,?,?,?,?)", (ws, state["generation"], LEASE, 0, None)
         )
-        for token, kind, subject in (
-            ("FAKE-workspace", "workspace", ws),
-            ("FAKE-device", "device", DEVICE),
-        ):
+        w_token, d_token, member = TOKENS[ws]
+        for token, kind, subject in ((w_token, "workspace", ws), (d_token, "device", member)):
             con.execute(
                 "INSERT OR IGNORE INTO sessions VALUES (?,?,?,?)",
                 (token_hash(token), kind, subject, LEASE),
@@ -273,6 +284,7 @@ def step(client, path, inp, case, ws=WS):
     op, now = inp["op"], inp["now_ms"]
     d.clock = lambda: now
     prefix = f"/v2/workspaces/{ws}"
+    W, D = principals(ws)
     host = {**W, "Orch-Holder": str(holder_gen(path, ws))}
     body = inp.get("body")
     if op == "publish":
@@ -533,3 +545,50 @@ def replay(client, path, case, upto=None):
             before.pop("failures"), after.pop("failures")
             assert after == before, (case["name"], index, "a refusal changed state")
     return results
+
+
+# --- HTTP fixture preconditions (tests/test_directory_fixtures.py) ----------------------------------
+
+RECORD = V["revocations"][0]["signed"]
+
+
+def prepare_fixture(client, path, case, success):
+    """The state a checkpoint fixture runs in: its bound vector replayed through production up to
+    the bound step, or (for transport/auth refusals) the success case's state plus the scenario."""
+    given = case["given"]
+    if "isolation" in given:
+        replay(client, path, find(given["isolation"]["a"]))
+        b = find(given["isolation"]["b"])
+        seed(path, b["state"], b, ws=WS_B)
+        for s in b["steps"][: given.get("vector", {}).get("step", 0)]:
+            assert step(client, path, s["input"], b, ws=WS_B) == s["expect"]
+    else:
+        binding = given.get("vector") or success["given"]["vector"]
+        replay(client, path, find(binding), upto=binding["step"])
+        scenario = given.get("scenario")
+        with closing(db.connect(path)) as con, con:
+            if scenario == "not_eligible":
+                if case["request"]["headers"].get("Authorization") == "Bearer FAKE-workspace":
+                    con.execute(
+                        "INSERT OR IGNORE INTO workspaces SELECT ?,owner_person_id,wsk_pub,"
+                        "delegation,card,card_seq,wxk_version,client_hosted FROM workspaces "
+                        "WHERE workspace_id=?",
+                        (WS_B, WS),
+                    )
+                    con.execute(
+                        "UPDATE sessions SET subject_id=? WHERE token_hash=?",
+                        (WS_B, token_hash("FAKE-workspace")),
+                    )
+                else:
+                    con.execute("DELETE FROM members WHERE device_id=?", (DEVICE,))
+            elif scenario == "cert_expired":
+                con.execute(
+                    "UPDATE devices SET expires_ms=? WHERE device_id=?", (given["now_ms"], DEVICE)
+                )
+            elif scenario == "revoked":
+                con.execute(
+                    "INSERT OR IGNORE INTO revocations VALUES (?,?,?,?,?,"
+                    "(SELECT coalesce(max(cursor),0)+1 FROM revocations))",
+                    (DEVICE, RECORD["o"]["person_id"], P.cj(RECORD), RECORD["o"]["reason"], 0),
+                )
+    client.app.state.directory.clock = lambda: given["now_ms"]

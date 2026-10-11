@@ -308,7 +308,7 @@ def test_checkpoint_fixture_state_machine_bindings():
             binding = case["given"].get("vector")
             if binding is None:
                 continue
-            vector = next(c for c in V["checkpoints"]["cases"] if c["name"] == binding["name"])
+            vector = next(c for c in V[binding["section"]]["cases"] if c["name"] == binding["name"])
             import copy
             state = copy.deepcopy(vector["state"])
             for step in vector["steps"][:binding["step"] + 1]:

@@ -142,7 +142,12 @@
       "given": {
         "scenario": "not_found",
         "now_ms": 1790000000000,
-        "condition": "baseline_post: Authorized resource is absent, or certificate request retention has ended."
+        "condition": "baseline_post: Authorized resource is absent, or certificate request retention has ended.",
+        "vector": {
+          "section": "checkpoints_g4",
+          "name": "baseline_unknown_hash_not_found",
+          "step": 0
+        }
       },
       "request": {
         "method": "POST",
@@ -154,7 +159,7 @@
           "Content-Type": "application/json"
         },
         "json": {
-          "hash": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+          "hash": "sha256:1907dc2568101809f32fd4a5005bf90a83b9d3cde54a39bb05bcd61d5bf08016",
           "offer_id": "abababababababababababababababab"
         }
       },
@@ -203,8 +208,13 @@
       "name": "refusal_410_checkpoint_gone",
       "given": {
         "scenario": "checkpoint_gone",
-        "now_ms": 1790000000000,
-        "condition": "baseline_post: The requested immutable checkpoint endpoint expired after supersession."
+        "now_ms": 1790086400000,
+        "condition": "baseline_post: The requested immutable checkpoint endpoint expired after supersession.",
+        "vector": {
+          "section": "checkpoints_g4",
+          "name": "baseline_gone_hash",
+          "step": 2
+        }
       },
       "request": {
         "method": "POST",
@@ -297,6 +307,93 @@
         },
         "json": {
           "error": "quota_exceeded"
+        }
+      }
+    },
+    {
+      "name": "cross_workspace_host_b_on_a",
+      "given": {
+        "scenario": "cross_workspace",
+        "now_ms": 1790000000000,
+        "isolation": {
+          "a": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_a"
+          },
+          "b": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_b"
+          }
+        },
+        "condition": "A principal of workspace B on workspace A's route."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/baselines",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace-b",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "hash": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+          "offer_id": "abababababababababababababababab"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "workspace_b_names_a_hash",
+      "given": {
+        "scenario": "cross_workspace",
+        "now_ms": 1790000000000,
+        "isolation": {
+          "a": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_a"
+          },
+          "b": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_b"
+          }
+        },
+        "vector": {
+          "section": "checkpoints_g4",
+          "name": "isolation_workspace_b",
+          "step": 3
+        },
+        "condition": "Workspace B's host names workspace A's checkpoint, baseline or staging key."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/282193f85af5b8d07610fbb3a8448857/baselines",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace-b",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "hash": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+          "offer_id": "abababababababababababababababab"
+        }
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_found"
         }
       }
     }

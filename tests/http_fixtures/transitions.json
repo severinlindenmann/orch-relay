@@ -193,15 +193,19 @@
       "given": {
         "scenario": "not_found",
         "now_ms": 1790000000000,
-        "condition": "transitions: Authorized resource is absent, or certificate request retention has ended."
+        "condition": "transitions: Authorized resource is absent, or certificate request retention has ended.",
+        "vector": {
+          "section": "checkpoints_g4",
+          "name": "transitions_unknown_endpoint_not_found",
+          "step": 0
+        }
       },
       "request": {
         "method": "GET",
         "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/transitions",
         "query": {
-          "after_n": "0",
-          "to": "sha256:981e1c8ef339396512fef1cba3abad1d0ac976defb5b47d3012869b855f823b1",
-          "limit": "16"
+          "to": "sha256:1907dc2568101809f32fd4a5005bf90a83b9d3cde54a39bb05bcd61d5bf08016",
+          "after_n": "0"
         },
         "headers": {
           "Authorization": "Bearer FAKE-device"
@@ -247,6 +251,125 @@
         },
         "json": {
           "error": "checkpoint_gone"
+        }
+      }
+    },
+    {
+      "name": "cross_workspace_host_b_on_a",
+      "given": {
+        "scenario": "cross_workspace",
+        "now_ms": 1790000000000,
+        "isolation": {
+          "a": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_a"
+          },
+          "b": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_b"
+          }
+        },
+        "condition": "A principal of workspace B on workspace A's route."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/transitions",
+        "query": {
+          "to": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+          "after_n": "0"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace-b"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "cross_workspace_member_b_on_a",
+      "given": {
+        "scenario": "cross_workspace",
+        "now_ms": 1790000000000,
+        "isolation": {
+          "a": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_a"
+          },
+          "b": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_b"
+          }
+        },
+        "condition": "A principal of workspace B on workspace A's route."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/transitions",
+        "query": {
+          "to": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+          "after_n": "0"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device-b"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "workspace_b_names_a_hash",
+      "given": {
+        "scenario": "cross_workspace",
+        "now_ms": 1790000000000,
+        "isolation": {
+          "a": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_a"
+          },
+          "b": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_b"
+          }
+        },
+        "vector": {
+          "section": "checkpoints_g4",
+          "name": "isolation_workspace_b",
+          "step": 2
+        },
+        "condition": "Workspace B's host names workspace A's checkpoint, baseline or staging key."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/282193f85af5b8d07610fbb3a8448857/transitions",
+        "query": {
+          "to": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+          "after_n": "0"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace-b"
+        }
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_found"
         }
       }
     }

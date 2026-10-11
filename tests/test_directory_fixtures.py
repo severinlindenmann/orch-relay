@@ -25,14 +25,14 @@ G1 = {
     "card_put",
     "card_get",
 }
-# Checkpoint/restore routes are specified by reference fixtures only (G0b); the relay has no
-# implementation to replay yet. tests/test_http_fixtures.py validates them against the reference.
+# G4: checkpoint/restore fixtures replay against the production relay too, from their bound
+# vector state (tests/checkpoint_support.py); tests/test_http_fixtures.py checks the reference.
 CHECKPOINT_FIXTURES = {row[0] for row in CHECKPOINT_ROUTES}
 G2 = {"membership", "members", "grants", "card_keys", "card_key"}
 CASES = [
     (p.stem, c)
     for p in sorted(Path("tests/http_fixtures").glob("*.json"))
-    if p.name != "MANIFEST.json" and p.stem not in CHECKPOINT_FIXTURES
+    if p.name != "MANIFEST.json"
     for c in json.loads(p.read_text())["cases"]
 ]
 
@@ -40,7 +40,12 @@ CASES = [
 @pytest.mark.parametrize("name,case", CASES, ids=[f"{n}-{c['name']}" for n, c in CASES])
 def test_http_example(tmp_path, name, case):
     with TestClient(create_app(tmp_path)) as client:
-        if name not in G1 | G2:
+        if name in CHECKPOINT_FIXTURES:
+            from checkpoint_support import prepare_fixture as prepare_checkpoint
+
+            fixture = json.loads(Path(f"tests/http_fixtures/{name}.json").read_text())
+            prepare_checkpoint(client, tmp_path / "relay.sqlite3", case, fixture["cases"][0])
+        elif name not in G1 | G2:
             from bridge_support import prepare_fixture as prepare_bridge
 
             prepare_bridge(client, name, case)
