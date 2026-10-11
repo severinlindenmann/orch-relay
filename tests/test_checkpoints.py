@@ -728,3 +728,31 @@ def test_large_stateless_refusals_do_not_hold_the_lock(tmp_path, kind):
         if kind == "checkpoint_bad_signature":  # still charged, inside the transaction
             with closing(db.connect(path)) as con:
                 assert con.execute("SELECT count(*) FROM checkpoint_failures").fetchone()[0] == 1
+
+
+def test_owner_check_fails_closed_when_the_revocation_lookup_errors(tmp_path, monkeypatch):
+    # Review L2: a database error must not turn into "not revoked".
+    import sqlite3
+
+    from checkpoint_support import CORPUS, seed
+
+    from orch_relay.checkpoints import Relay
+
+    case = next(
+        c
+        for c in CORPUS["suites"]["2"]["checkpoints"]["cases"]
+        if c["name"] == "workspace_restore_and_exact_retry"
+    )
+    path = tmp_path / db.DB_NAME
+    db.migrate(path)
+    seed(path, case["state"], case)
+    bundle = case["steps"][2]["input"]["body"]["restore"]
+
+    def broken(self, device):
+        raise sqlite3.OperationalError("FAKE disk I/O error")
+
+    monkeypatch.setattr(Relay, "revoked", broken)
+    with closing(db.connect(path)) as con:
+        relay = Relay(None, con, WS, 1790000000000)
+        with pytest.raises(sqlite3.OperationalError):
+            relay.owner(relay.workspace(), bundle["cert"], 1790000000000)
