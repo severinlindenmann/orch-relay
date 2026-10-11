@@ -34,12 +34,19 @@ CASES = [
 
 @pytest.mark.parametrize("name,case", CASES, ids=[f"{n}-{c['name']}" for n, c in CASES])
 def test_http_example(tmp_path, name, case):
-    if name not in G1 | G2:
-        pytest.skip("G3 bridge/pairing")
     with TestClient(create_app(tmp_path)) as client:
-        (prepare_fixture if name in G2 else prepare_case)(client.app.state.directory, name, case)
+        if name not in G1 | G2:
+            from bridge_support import prepare_fixture as prepare_bridge
+
+            prepare_bridge(client, name, case)
+        else:
+            (prepare_fixture if name in G2 else prepare_case)(
+                client.app.state.directory, name, case
+            )
         request = case["request"]
         kwargs = {"headers": request["headers"], "params": request["query"]}
+        if "body_b64u" in request:
+            kwargs["content"] = P.unb64u(request["body_b64u"])
         if "json" in request:
             kwargs["content"] = P.cj(request["json"])
         if "body_recipe" in request:

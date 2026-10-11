@@ -20,7 +20,7 @@ dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = [".", "src"]
+pythonpath = [".", "src", "tests"]
 markers = ["slow: tests taking more than 2 s"]
 
 [tool.ruff]

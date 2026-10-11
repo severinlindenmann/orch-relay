@@ -93,8 +93,10 @@ def test_revoke_cleanup_upgrade_and_recovery_after_restart(tmp_path):
         with closing(db.connect(d.path)) as con, con:
             con.execute("INSERT INTO wk_grants VALUES (?,?,?,?)", (WS, DEVICE, 1, b"{}"))
             con.execute("INSERT INTO card_key_wraps VALUES (?,?,?,?)", (WS, DEVICE, 1, "opaque"))
-            con.execute("CREATE TABLE bridge_msgs(device_id TEXT, envelope BLOB)")
-            con.execute("INSERT INTO bridge_msgs VALUES (?,?)", (DEVICE, b"opaque"))
+            con.execute(
+                "INSERT INTO bridge_msgs(workspace_id,device_id,rid,direction,idx,flags,stream,body,expires_ms) VALUES (?,?,'rid',1,0,0,'',?,?)",
+                (WS, DEVICE, b"opaque", NOW + 60000),
+            )
         assert c.post("/v2/revocations", json={"record": RECORD}).status_code == 200
         assert (
             c.get("/v2/devices/" + DEVICE, headers={"Authorization": "Bearer " + token}).status_code
