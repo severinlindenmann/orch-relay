@@ -3046,3 +3046,17 @@ rules and must be confirmed before G4 ships:
    revocation of an ever-device that a restore omits or carries weaker is accepted and reported as
    `revocation.unpublished` (a field of the accepted result, or a host-visible notice; to be fixed with the fixtures
    in G4), while R1 keeps refusing a signer revoked in any revocation the relay holds.
+   **Status (G4):** (a) `log_nodes` stores a deterministic skip pointer per node (the ancestor at
+   `skip_height(seq)`, as Bitcoin's block index), so a page finds its endpoint node and checks that `from` is
+   on E's branch in O(log N) and then reads `limit` nodes: O(limit + log N) per page and O(N) for a full walk
+   from `acc_0`, measured on a 20,000-node history (`tests/test_checkpoints.py`). (b) Route fixtures carry
+   `cross_workspace_*_b_on_a` and `workspace_b_names_a_*` cases (tokens `FAKE-workspace-b`, `FAKE-device-b`)
+   bound to the `checkpoints_g4` vector group, which also binds the listed refusals. The global ceiling (beyond (a) to (c)) is
+   enforced (default 4 GiB, `ORCH_RELAY_GLOBAL_STAGE_BYTES`), after the per-workspace 429.
+7. **Production notes (G4).** A transport refusal of `PUT checkpoint` (body over the cap, unknown query
+   parameter, wrong content type) is charged like any other refusal once the request passes W(g) and the
+   holder check, as in the reference; an unauthenticated or fenced one is never charged. Retention is evaluated
+   at read time, so reads take no lock and never write; expired rows are purged by writes and a periodic sweep.
+   **P3-D29:** self-certified evidence for a person the relay has no account for creates an evidence-only
+   account row (needed to store the device and its revocation); it registers no device, owns no card and
+   joins no list until the person redeems an invite, which turns it into the account.

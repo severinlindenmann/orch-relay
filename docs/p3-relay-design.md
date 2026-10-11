@@ -1140,6 +1140,40 @@ Order: G0 → G1 → G2 → (G3 ∥ G4) → G5. In every task the first commit i
   the revocations accepted in this workspace's own restores, kept with provenance and never removed; a global
   (§19.5) revocation a restore omits or carries weaker is accepted with `revocation.unpublished`; R1 unchanged.
 
+**G4 as built** (`src/orch_relay/checkpoints.py`, migration `0009_checkpoints.sql`; 0008 is reserved for the
+pairing binding). Same check order as `ref/checkpoints.py`; `tests/test_checkpoint_vectors.py` replays every
+`checkpoints` and `checkpoints_g4` vector against the production app (device walks run the reference
+`sync_walk` against the production GET routes), and `tests/test_directory_fixtures.py` replays every checkpoint
+HTTP fixture.
+
+- *Authorization first.* Writes authorize (session, workspace, `Orch-Holder` fence) read-only before the
+  directory lock and again inside the transaction; reads authorize and read in one read-only snapshot, without
+  the lock. Retention (`checkpoint_gone`) is evaluated at read time.
+- *Atomicity and the budget.* The publication runs in a savepoint; any refusal rolls it back, then records one
+  `checkpoint_failures` row (except 429) in the same transaction. Exact retries are served from
+  `checkpoint_receipts` before the budget check.
+- *Proof index* (precondition a): skip pointers in `log_nodes`, hashes stored as raw 32 bytes.
+- *Staging.* Manifest descriptors are rows (`checkpoint_staging_slots`), so a page PUT touches one page and one
+  slot; the security review found that re-reading the set made n small pages cost O(n²).
+- **P3-D29 (evidence-only persons).** Self-certified R4 evidence for a person without an account stores an
+  account row marked in `evidence_persons`, because the device and its revocation must be stored (§19.8 R4)
+  and both reference `accounts`. Such a person registers no device, owns no card and joins no list
+  (`other_person`) until it redeems an invite, which turns the row into its account; revocation intake for it
+  still works. Found by the G4 security review: without the mark, the row was a full account without an invite.
+- *Measured* (`uv run python tests/bench_checkpoint_capacity.py`, `docs/p3-checkpoint-capacity.md`).
+
+Open after G4 (for orch-52/orch-f1):
+
+- *Lock hold is O(heads).* A publication verifies and inserts every staged head inside the global directory
+  write transaction: 200,000 heads hold it for about 4 s, so a full 64 MiB staging set (~900,000 heads) holds it
+  for about 20 s, and the failure budget (48 an hour) bounds refused publications by count, not by work. This
+  blocks other workspaces' writes. Options: verify on a read snapshot outside the lock and insert verified
+  nodes in short transactions (nodes are immutable and hash-addressed), or a smaller per-publication head cap.
+- *Unthrottled work.* Reads (up to 56,680 heads per proof page) and staging/genesis refusals are not rate
+  limited or charged; they are authenticated (D(m) or W(g)). Same pre-public-deploy gate as G3 review D4.
+- *O(history) storage.* `log_nodes`, `checkpoint_receipts` and `checkpoint_gone` grow with accepted history
+  (the design accepts O(history) for nodes); only a WSK holder can grow them.
+
 ## 11. Open questions
 
 | # | Question | Recommendation |
@@ -1276,3 +1310,4 @@ No new decisions.
 | P3-D26 | One `WK` per epoch, ever; refused publications burn their epoch and `list_seq`; `wk_commit` and `wk_commit_changed` (G2b) | §3.2 |
 | P3-D27 | Bounded exact-bytes re-store of expired response chunks (current epoch or refusal, immutable deadline, ≤ 8 per chunk, budgets) | §3.3 |
 | P3-D28 | Pairing attempt binding: device `attempt` nonce, fresh keys per attempt, bound challenge and rejection, two `rejected` forms, `approved` join anchor (G3b) | §3.3 |
+| P3-D29 | Evidence-only person rows for self-certified restore evidence; no account powers until an invite (G4) | §10 |
