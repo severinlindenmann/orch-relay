@@ -243,7 +243,10 @@ class Directory:
         return state
 
     def issue(self, address, now):
-        while self.challenge_expiry and self.challenge_expiry[0][0] <= now:
+        # Bound cleanup after clock jumps; stale counts conservatively retain capacity.
+        for _ in range(64):
+            if not self.challenge_expiry or self.challenge_expiry[0][0] > now:
+                break
             expires, challenge = heapq.heappop(self.challenge_expiry)
             if self.challenges.get(challenge, (None,))[0] == expires:
                 self.remove_challenge(challenge)

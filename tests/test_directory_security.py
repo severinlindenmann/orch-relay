@@ -4,6 +4,7 @@ import asyncio
 import copy
 import statistics
 import time
+from collections import Counter
 from contextlib import closing
 
 import pytest
@@ -72,6 +73,27 @@ def test_challenge_counters_consumption_and_expiry(tmp_path):
     assert address not in d.challenge_addresses and parent not in d.challenge_parents
 
 
+def test_challenge_expiry_clock_jump_bounds_pops_and_converges(tmp_path):
+    d = Directory(tmp_path / "unused", "https://relay.example")
+    for i in range(200):
+        token = d.issue(f"2001:db8:0:{i:x}::/64", NOW + i)["challenge"]
+        if i < 10:
+            d.consume(token, NOW + i)
+    d.clock = lambda: NOW + 2 * MINUTE
+    for expected_pops in (64, 64, 64, 8):
+        before = len(d.challenge_expiry)
+        token = d.issue("192.0.2.1", d.clock())["challenge"]
+        assert before + 1 - len(d.challenge_expiry) == expected_pops
+        assert d.challenge_addresses == Counter(state[1] for state in d.challenges.values())
+        assert d.challenge_parents == Counter(
+            state[2] for state in d.challenges.values() if state[2] is not None
+        )
+        d.consume(token, d.clock())
+    assert not d.challenges
+    assert not d.challenge_addresses
+    assert not d.challenge_parents
+
+
 @pytest.mark.parametrize("revocation,cap", [(False, 30), (True, 10)])
 @pytest.mark.parametrize("junk", [b"{", b"{}", None])
 def test_recovery_address_gate_counts_invalid_attempts(tmp_path, revocation, cap, junk):
@@ -122,6 +144,11 @@ def test_exact_accepted_recovery_retry_free_at_full_address_budget(
         before = dict(d.windows)
         assert method(path, json=body).status_code == 200
         assert d.windows == before
+        if not revocation:
+            other_device = V["ids"]["device_laptop"]
+            assert other_device != DEVICE
+            r = c.put("/v2/devices/" + other_device, json=body)
+            assert r.status_code == 429 and r.json() == {"error": "rate_limited"}
         # A different byte representation must pass the address gate.
         assert (
             method(
