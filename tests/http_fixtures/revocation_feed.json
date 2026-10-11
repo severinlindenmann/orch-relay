@@ -1,0 +1,195 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "GET",
+    "path": "/v2/persons/{person}/revocations",
+    "role": "client",
+    "auth": "D(p)|W"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/revocations",
+        "query": {
+          "after": "0",
+          "limit": "256"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "revocations": [
+            {
+              "cursor": 1,
+              "record": {
+                "o": {
+                  "v": 2,
+                  "suite": 2,
+                  "kind": "revocation",
+                  "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                  "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                  "revoked_ms": 1790000000000,
+                  "reason": "lost"
+                },
+                "sig": "5f5fIS1e8IWcHR3xFb8yPc3J6P5Kskox6EbXdnqZOMWP1Hd7rysykdtEsNaUGA0ZuWAmI_fLtEeLjN9nKwLZjQ"
+              }
+            }
+          ],
+          "next": null
+        }
+      }
+    },
+    {
+      "name": "refusal_400_cert_expired",
+      "given": {
+        "scenario": "cert_expired",
+        "now_ms": 1790000000000,
+        "condition": "Device certificate expires at the request-time clock; session admission or publication recheck fails."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/revocations",
+        "query": {
+          "after": "0",
+          "limit": "256"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "cert_expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/revocations",
+        "query": {
+          "after": "0",
+          "limit": "256",
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/revocations",
+        "query": {
+          "after": "0",
+          "limit": "256"
+        },
+        "headers": {}
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal fails current membership/person/workspace gate; for account creation, invite is unknown, used or expired."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/revocations",
+        "query": {
+          "after": "0",
+          "limit": "256"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_revoked",
+      "given": {
+        "scenario": "revoked",
+        "now_ms": 1790000000000,
+        "condition": "The authenticated or publication-target device has a verified permanent revocation in the directory."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/revocations",
+        "query": {
+          "after": "0",
+          "limit": "256"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "revoked"
+        }
+      }
+    }
+  ]
+}

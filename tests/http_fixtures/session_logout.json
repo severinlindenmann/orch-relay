@@ -1,0 +1,89 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "POST",
+    "path": "/v2/session/logout",
+    "role": "client",
+    "auth": "logout"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/session/logout",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {}
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/session/logout",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {}
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "expired_token_retry",
+      "given": {
+        "scenario": "token_expired_or_already_logged_out",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/session/logout",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {}
+      }
+    }
+  ]
+}
