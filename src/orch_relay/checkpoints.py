@@ -209,6 +209,15 @@ def skip_height(height):
     return height & (height - 1)
 
 
+def raw(h):
+    """log_nodes stores hashes as their 32 raw bytes (a third of the text row size)."""
+    return bytes.fromhex(h[7:])
+
+
+def text(b):
+    return "sha256:" + b.hex()
+
+
 class Nodes:
     """log_nodes of one workspace log, with a per-request cache of the nodes it touched."""
 
@@ -222,11 +231,12 @@ class Nodes:
             return self.cache[acc]
         row = self.con.execute(
             "SELECT seq,head,prev_acc,skip_acc FROM log_nodes WHERE workspace_id=? AND log=? AND acc=?",
-            (self.ws, self.log, acc),
+            (self.ws, self.log, raw(acc)),
         ).fetchone()
         if row is None:
             return None
-        found = {"seq": row[0], "head": row[1], "acc": acc, "prev_acc": row[2], "skip_acc": row[3]}
+        found = {"seq": row[0], "head": text(row[1]), "acc": acc}
+        found |= {"prev_acc": text(row[2]), "skip_acc": text(row[3])}
         self.cache[acc] = found
         return found
 
@@ -249,38 +259,53 @@ class Nodes:
         return {k: found[k] for k in ("seq", "head", "acc")}
 
     def extend(self, old, heads):
-        """Insert every verified head (never cut back); the result entry, or chain_diverged."""
+        """Insert every verified head (never cut back); the result entry, or chain_diverged.
+
+        Folds in memory, checks which nodes exist in batches and inserts the rest with one
+        executemany: the directory lock is held for O(heads) work with few SQL round trips."""
         previous = self.get(old["acc"])
         need(previous is not None and previous["seq"] == old["seq"], "chain_diverged", 409)
-        current = {k: old[k] for k in ("seq", "head", "acc")}
+        accs, acc = [], old["acc"]
         for head in heads:
-            acc = log_acc(current["acc"], head)
-            seq = current["seq"] + 1
-            found = self.get(acc)
+            acc = log_acc(acc, head)
+            accs.append(acc)
+        stored = {}
+        for k in range(0, len(accs), 500):
+            batch = accs[k : k + 500]
+            for row in self.con.execute(
+                "SELECT acc,seq,head,prev_acc,skip_acc FROM log_nodes WHERE workspace_id=? AND log=? "
+                f"AND acc IN ({','.join('?' * len(batch))})",
+                (self.ws, self.log, *map(raw, batch)),
+            ):
+                found = {"acc": text(row[0]), "seq": row[1], "head": text(row[2])}
+                found |= {"prev_acc": text(row[3]), "skip_acc": text(row[4])}
+                stored[found["acc"]] = found
+        rows, prev_acc, seq = [], old["acc"], old["seq"]
+        for head, acc in zip(heads, accs):
+            seq += 1
+            found = self.cache.get(acc) or stored.get(acc)
             if found is not None:
                 need(
-                    (found["seq"], found["head"], found["prev_acc"]) == (seq, head, current["acc"]),
+                    (found["seq"], found["head"], found["prev_acc"]) == (seq, head, prev_acc),
                     "chain_diverged",
                     409,
                 )
             else:
                 skip = self.ancestor(previous, skip_height(seq))
                 need(skip is not None, "chain_diverged", 409)
-                found = {
-                    "seq": seq,
-                    "head": head,
-                    "acc": acc,
-                    "prev_acc": current["acc"],
-                    "skip_acc": skip["acc"],
-                }
-                self.con.execute(
-                    "INSERT INTO log_nodes VALUES (?,?,?,?,?,?,?)",
-                    (self.ws, self.log, acc, seq, head, current["acc"], skip["acc"]),
+                found = {"seq": seq, "head": head, "acc": acc, "prev_acc": prev_acc}
+                found["skip_acc"] = skip["acc"]
+                rows.append(
+                    (self.ws, self.log, raw(acc), seq, raw(head), raw(prev_acc), raw(skip["acc"]))
                 )
-                self.cache[acc] = found
-            previous = found
-            current = {"seq": seq, "head": head, "acc": acc}
-        return current
+            self.cache[acc] = found
+            previous, prev_acc = found, acc
+        self.con.executemany("INSERT INTO log_nodes VALUES (?,?,?,?,?,?,?)", rows)
+        return (
+            {"seq": seq, "head": heads[-1], "acc": prev_acc}
+            if heads
+            else {k: old[k] for k in ("seq", "head", "acc")}
+        )
 
     def page(self, start_acc, endpoint_acc, limit):
         """Heads after start_acc on the endpoint's branch: O(limit + log N), never O(history)."""
@@ -302,16 +327,16 @@ class Nodes:
                 SELECT n.acc, n.prev_acc, n.head, n.seq, w.k + 1 FROM w JOIN log_nodes n
                 ON n.workspace_id=?1 AND n.log=?2 AND n.acc=w.prev WHERE w.k < ?4)
             SELECT head, seq, prev FROM w""",
-            (self.ws, self.log, last["acc"], size),
+            (self.ws, self.log, raw(last["acc"]), size),
         ).fetchall()
         need(
             len(rows) == size
             and all(r[1] == last["seq"] - k for k, r in enumerate(rows))
-            and rows[-1][2] == start_acc,
+            and rows[-1][2] == raw(start_acc),
             "not_found",
             404,
         )
-        return [r[0] for r in reversed(rows)], last["acc"] if size < total else None
+        return [text(r[0]) for r in reversed(rows)], last["acc"] if size < total else None
 
 
 # --- relay state -----------------------------------------------------------------------------------

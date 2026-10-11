@@ -19,10 +19,11 @@ CREATE TABLE checkpoint_gone (
     workspace_id TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(workspace_id, hash)
 );
 -- P3-D19: immutable, branch-agnostic, hash-addressed. skip_acc is the ancestor at
--- skip_height(seq) on the node's own branch, so a proof page costs O(limit + log N).
+-- skip_height(seq) on the node's own branch, so a proof page costs O(limit + log N). Hashes are
+-- their 32 raw bytes (acc_0 is 32 zero bytes).
 CREATE TABLE log_nodes (
-    workspace_id TEXT NOT NULL, log TEXT NOT NULL, acc TEXT NOT NULL, seq INTEGER NOT NULL,
-    head TEXT NOT NULL, prev_acc TEXT NOT NULL, skip_acc TEXT NOT NULL,
+    workspace_id TEXT NOT NULL, log TEXT NOT NULL, acc BLOB NOT NULL, seq INTEGER NOT NULL,
+    head BLOB NOT NULL, prev_acc BLOB NOT NULL, skip_acc BLOB NOT NULL,
     PRIMARY KEY(workspace_id, log, acc)
 ) WITHOUT ROWID;
 -- P3-D20 staging sets: source is 'null' or a checkpoint hash; bytes counts pages and manifest.

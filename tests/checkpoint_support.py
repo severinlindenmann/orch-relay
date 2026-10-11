@@ -14,7 +14,7 @@ from pathlib import Path
 
 from orch_relay import db
 from orch_relay import proto as P
-from orch_relay.checkpoints import DAY, HOUR, Nodes, Relay, skip_height
+from orch_relay.checkpoints import DAY, HOUR, Nodes, Relay, raw, skip_height, text
 from orch_relay.directory import Refusal, token_hash
 from ref import checkpoints as C
 from ref import orch_protocol_ref as R
@@ -114,7 +114,7 @@ def insert_node(con, ws, log, n, nodes):
     skip = nodes.ancestor(prev, skip_height(n["seq"]))
     con.execute(
         "INSERT INTO log_nodes VALUES (?,?,?,?,?,?,?)",
-        (ws, log, n["acc"], n["seq"], n["head"], n["prev_acc"], skip["acc"]),
+        (ws, log, raw(n["acc"]), n["seq"], raw(n["head"]), raw(n["prev_acc"]), raw(skip["acc"])),
     )
     nodes.cache[n["acc"]] = {**n, "skip_acc": skip["acc"]}
 
@@ -471,7 +471,7 @@ def project_db(path, now, ws=WS):
                 for r in con.execute("SELECT hash FROM checkpoint_gone WHERE workspace_id=?", (ws,))
             },
             "nodes": {
-                (log, acc): (seq, head, prev)
+                (log, text(acc)): (seq, text(head), text(prev))
                 for log, acc, seq, head, prev in con.execute(
                     "SELECT log,acc,seq,head,prev_acc FROM log_nodes WHERE workspace_id=?", (ws,)
                 )
