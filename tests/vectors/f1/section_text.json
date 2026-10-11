@@ -1,0 +1,281 @@
+{
+ "cases": [
+  {
+   "body": "## Context\n\nctx\n\n## Requirements\n\nreq\n",
+   "hashes": {
+    "context": "sha256:7f630ee4bb12f9b20f2e7e63eedd90ed9d46805ab06c2e73b66d6d44df71b602",
+    "requirements": "sha256:2d08482a2b04c20ae6614658b1e12e5cfea8323793f634b8f083bb5f14ebea70"
+   },
+   "name": "two_sections",
+   "sections": {
+    "context": "ctx",
+    "requirements": "req"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "\n\n## Context\n\n\n\nline 1  \n\n\tline 3\n\n\n## Plan\n\nx",
+   "hashes": {
+    "context": "sha256:586799fe563e239ef407e9355e884a2f9fb69604caf4a16c78c7acd8299b2a3a",
+    "plan": "sha256:11c02cf7015fae836f0fa61b724bbfe29320232f63648a6ce6f8249efa589e76"
+   },
+   "name": "lf_trimmed_inner_kept",
+   "sections": {
+    "context": "line 1  \n\n\tline 3",
+    "plan": "x"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\n## Requirements\n\nr",
+   "hashes": {
+    "context": "sha256:513b24f990af0ba5f96cae1a0d7f0956a1c3e505c83d8ad833c41472a7a0369a",
+    "requirements": "sha256:3dc7e0a0d1fa882a7533853dcc69c5318f46ab4271d0a4fd20d1d6a01fbd3b59"
+   },
+   "name": "empty_section",
+   "sections": {
+    "context": "",
+    "requirements": "r"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\nctx",
+   "hashes": {
+    "context": "sha256:7f630ee4bb12f9b20f2e7e63eedd90ed9d46805ab06c2e73b66d6d44df71b602"
+   },
+   "name": "no_final_newline",
+   "sections": {
+    "context": "ctx"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\nbefore\n```\n## Plan\n```\nafter",
+   "hashes": {
+    "context": "sha256:a89b14512a28f91c4f307fd2b26530c0bbdace4e0f22b9b50ef1acb4fda04110"
+   },
+   "name": "heading_in_backtick_fence",
+   "sections": {
+    "context": "before\n```\n## Plan\n```\nafter"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\n~~~\n## Plan\n~~~\nafter",
+   "hashes": {
+    "context": "sha256:c7bd310ec3e2d81508361a3908ab09d81c40fa1e37ade5dd55cd2201452d8bb2"
+   },
+   "name": "heading_in_tilde_fence",
+   "sections": {
+    "context": "~~~\n## Plan\n~~~\nafter"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\n````\n```\n## Plan\n````\nz",
+   "hashes": {
+    "context": "sha256:b38218dd3c0f91d09acae63620a178a08e2ac8cc8a003157eb7c5d1e50079d11"
+   },
+   "name": "fence_closes_only_when_long_enough",
+   "sections": {
+    "context": "````\n```\n## Plan\n````\nz"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\n```\n## Plan\n```   \n## Plan\n\nreal",
+   "hashes": {
+    "context": "sha256:9dba9e40d435eb00a95040c1f506e9b53ba8278516810e18f6900d9503c63da6",
+    "plan": "sha256:4f810c3b5e4d86844a63c420bc92acb900769f30754b0f87f09175287f7d61a1"
+   },
+   "name": "fence_closing_with_trailing_spaces",
+   "sections": {
+    "context": "```\n## Plan\n```   ",
+    "plan": "real"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\n```\n~~~\n## Plan\n```\n## Plan\n\nreal",
+   "hashes": {
+    "context": "sha256:1e9b6a803e22c8ab0951d1767679a92097db31545fe20aa533ca753adcac3a6c",
+    "plan": "sha256:4f810c3b5e4d86844a63c420bc92acb900769f30754b0f87f09175287f7d61a1"
+   },
+   "name": "tilde_does_not_close_backtick_fence",
+   "sections": {
+    "context": "```\n~~~\n## Plan\n```",
+    "plan": "real"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\n```python\n## Plan\n```",
+   "hashes": {
+    "context": "sha256:deb47753b6232252ef1b3bd9d083e037ba911d12e97fb1fcadba2d94ced4aa9b"
+   },
+   "name": "fence_with_info_string_opens",
+   "sections": {
+    "context": "```python\n## Plan\n```"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\n```\n``` not a closer\n## Plan\n```\n",
+   "hashes": {
+    "context": "sha256:63b5ae7a0aa1da98cf66d9f8e29fad20a6e73fc10902efb8c32e5f8a3ab5eca8"
+   },
+   "name": "fence_closer_with_text_stays_open",
+   "sections": {
+    "context": "```\n``` not a closer\n## Plan\n```"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\n ```\n## Plan\n\np",
+   "hashes": {
+    "context": "sha256:4b958b6541447904444a68debe6a1a316007fb7db0bf895896beff1e11028d3a",
+    "plan": "sha256:94ed869b925dfe0ec9b7b3815f2a8d87aa71b47f76fa2a04db0e0ad54f6a390c"
+   },
+   "name": "indented_fence_is_text",
+   "sections": {
+    "context": " ```",
+    "plan": "p"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\n``\n## Plan\n\np",
+   "hashes": {
+    "context": "sha256:e6d1d0387713d7d9f3fbfd4f079164aca6f6402976e73a41b644720eb2855d13",
+    "plan": "sha256:94ed869b925dfe0ec9b7b3815f2a8d87aa71b47f76fa2a04db0e0ad54f6a390c"
+   },
+   "name": "two_backticks_are_text",
+   "sections": {
+    "context": "``",
+    "plan": "p"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\n ## Plan\n### Plan\n##Plan\n#### x",
+   "hashes": {
+    "context": "sha256:31f3c48f1b539f9e0fdcf6838b123bafe6c079241d53230f5eab130ac4547a3a"
+   },
+   "name": "indented_heading_is_text",
+   "sections": {
+    "context": " ## Plan\n### Plan\n##Plan\n#### x"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\n##\n###\n##x",
+   "hashes": {
+    "context": "sha256:0479004f3683b77053ae8446475fc5d838f42dfa47ce85ce878e024af5ed1b52"
+   },
+   "name": "hash_marks_without_space_are_text",
+   "sections": {
+    "context": "##\n###\n##x"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\n## \n",
+   "name": "empty_heading_refused",
+   "refused": "body.unknown_section",
+   "type": "feature"
+  },
+  {
+   "body": "## Requirements\n\nr\n\n## Current state\n\nhandoff",
+   "hashes": {
+    "current_state": "sha256:20e04be8675e1738e29bd88a746d1f36201e724b76bb4b82dc91a2b727a96b06",
+    "requirements": "sha256:3dc7e0a0d1fa882a7533853dcc69c5318f46ab4271d0a4fd20d1d6a01fbd3b59"
+   },
+   "name": "current_state_section",
+   "sections": {
+    "current_state": "handoff",
+    "requirements": "r"
+   },
+   "type": "chore"
+  },
+  {
+   "body": "## Findings\n\nf",
+   "hashes": {
+    "findings": "sha256:153c63d14b01956cc05c042728b69668db0e53a2e036a86a7a50698bd82729c3"
+   },
+   "name": "findings_of_a_spike",
+   "sections": {
+    "findings": "f"
+   },
+   "type": "spike"
+  },
+  {
+   "body": "## Notes\n\nn",
+   "name": "unknown_heading",
+   "refused": "body.unknown_section",
+   "type": "feature"
+  },
+  {
+   "body": "## context\n\nc",
+   "name": "heading_case_matters",
+   "refused": "body.unknown_section",
+   "type": "feature"
+  },
+  {
+   "body": "## Findings\n\nf",
+   "name": "section_of_another_type",
+   "refused": "body.unknown_section",
+   "type": "feature"
+  },
+  {
+   "body": "## Out of scope\n\nnothing",
+   "name": "dash_section_for_the_type",
+   "refused": "body.unknown_section",
+   "type": "chore"
+  },
+  {
+   "body": "## Context\n\na\n\n## Context\n\nb",
+   "name": "duplicate_heading",
+   "refused": "body.duplicate_section",
+   "type": "feature"
+  },
+  {
+   "body": "intro\n## Context\n\nc",
+   "name": "text_before_first_heading",
+   "refused": "body.text_before_heading",
+   "type": "feature"
+  },
+  {
+   "body": "\n\n\n## Context\n\nc",
+   "hashes": {
+    "context": "sha256:2ebbf300966a66679aef371d3623b5ee27ddca8b0cc273278bb1ba751e0817ae"
+   },
+   "name": "blank_lines_before_first_heading",
+   "sections": {
+    "context": "c"
+   },
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\n```\ncode",
+   "name": "open_fence_at_the_end",
+   "refused": "body.open_fence",
+   "type": "feature"
+  },
+  {
+   "body": "## Context\n\n~~~~\n~~~\n",
+   "name": "open_tilde_fence_at_the_end",
+   "refused": "body.open_fence",
+   "type": "feature"
+  },
+  {
+   "body": "",
+   "hashes": {},
+   "name": "empty_file",
+   "sections": {},
+   "type": "feature"
+  }
+ ],
+ "note": "section text = what lies between a heading and the next one, leading and trailing LF removed; a heading is '## ' at column 0 outside a fence; the hash is of that text only (ticket-format 4, 5.6)",
+ "pins": "body.md heading and fence rules, LF trimming, what is hashed (4, 5.6)"
+}

@@ -1,0 +1,105 @@
+{
+ "cases": [
+  {
+   "name": "one",
+   "refs": [
+    "after.png"
+   ],
+   "text": "see (artifact:after.png)"
+  },
+  {
+   "name": "markdown_image",
+   "refs": [
+    "after.png"
+   ],
+   "text": "![alt](artifact:after.png)"
+  },
+  {
+   "name": "sorted_unique",
+   "refs": [
+    "a.png",
+    "b.png"
+   ],
+   "text": "(artifact:b.png) (artifact:a.png) (artifact:b.png)"
+  },
+  {
+   "name": "inside_code_fence",
+   "refs": [
+    "fenced.log"
+   ],
+   "text": "```\n(artifact:fenced.log)\n```"
+  },
+  {
+   "name": "inside_inline_code",
+   "refs": [
+    "inline.log"
+   ],
+   "text": "`(artifact:inline.log)`"
+  },
+  {
+   "name": "none",
+   "refs": [],
+   "text": "no refs (artifact) (artifact:) artifact:x"
+  },
+  {
+   "name": "must_start_alnum",
+   "refs": [
+    "ok"
+   ],
+   "text": "(artifact:.hidden) (artifact:-x) (artifact:_y) (artifact:ok)"
+  },
+  {
+   "name": "name_chars",
+   "refs": [
+    "A-b_c.d9"
+   ],
+   "text": "(artifact:A-b_c.d9)"
+  },
+  {
+   "name": "name_128_ok",
+   "refs": [
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   ],
+   "text": "(artifact:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)"
+  },
+  {
+   "name": "name_129_no_match",
+   "refs": [],
+   "text": "(artifact:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa)"
+  },
+  {
+   "name": "spaces_inside_no_match",
+   "refs": [],
+   "text": "(artifact: a.png) (artifact:a b.png) ( artifact:c.png)"
+  },
+  {
+   "name": "unicode_name_no_match",
+   "refs": [],
+   "text": "(artifact:caf\u00e9.png)"
+  },
+  {
+   "name": "adjacent",
+   "refs": [
+    "a",
+    "b"
+   ],
+   "text": "(artifact:a)(artifact:b)"
+  },
+  {
+   "name": "case_matters",
+   "refs": [
+    "A.png"
+   ],
+   "text": "(Artifact:a.png) (artifact:A.png)"
+  },
+  {
+   "name": "nested_parens",
+   "refs": [
+    "a.png"
+   ],
+   "text": "((artifact:a.png))"
+  }
+ ],
+ "pins": "the artifact reference regex (5.8)",
+ "regex": "\\(artifact:([A-Za-z0-9][A-Za-z0-9._-]{0,127})\\)"
+}

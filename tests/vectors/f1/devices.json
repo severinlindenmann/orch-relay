@@ -1,0 +1,1217 @@
+{
+ "pins": "device.added and device roster rules",
+ "scenarios": [
+  {
+   "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+   "name": "device_added",
+   "now": "2026-10-10T10:03:50Z",
+   "pins": "device.added: who may sign it, which certificates are refused",
+   "steps": [
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:00:10Z",
+      "auth": "passphrase",
+      "based_on": null,
+      "delegation": {
+       "o": {
+        "client_hosted": false,
+        "issued_ms": 1790000000000,
+        "kind": "ws_delegation",
+        "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+        "suite": 2,
+        "v": 2,
+        "workspace_id": "0123456789abcdef0123456789abcdef",
+        "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+       },
+       "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+      },
+      "device_cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "c65032f21d43401cc223b05723c1e5b4",
+        "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+        "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgc2V2MQ",
+        "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+      },
+      "hash_v": 1,
+      "host_id": "h_01J9ZK00000000000000000H01",
+      "host_sig": "gmxYcJawrdR5RQtoujxISFmEW9vXbA_mpXUlFxD1oZi3kdmCMxSGUfLG541ft451incilUCTzJILGo1V056HSA",
+      "id": "01J9ZK00000000000000000001",
+      "owner": {
+       "name": "Sev",
+       "person": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+      },
+      "prefix": "DEMO",
+      "prev": null,
+      "roster_v": 0,
+      "seq": 1,
+      "sig": "r5ahD9lncKkFZNVB021B3asYYRDKE8cRMWC2GJofmqLsev3YOf3LT2ZEx4QRhYGGwrcwPRee4pMy8GfA8GctHA",
+      "type": "workspace.created",
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "expect": "ok",
+     "log": "workspace"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:00:20Z",
+      "auth": "passphrase",
+      "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "device_cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "7efc1ba896b95f9151978a1dad982e3a",
+        "dk_kx_pub": "BN7s8d4XzDSnOKNlCU8mCWaY3E3S7C3L9iZYzKbWeF222lVSoJyTrFmDFYC_Rk6rKWHos9s8Cf_UE2usnfHJS58",
+        "dk_sig_pub": "BHdTNrzFC_Z_T_TgrLfcnUV66UtadIC1wF-BvBSaejtOtFzCvjiMp43vyt7x9weta7ZyJcxyT4B5ggKsTfdEie8",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgbWFyYTE",
+        "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "Ic4FvQ_KyDG9vUYVTp0f2zaZwBZ6HQk304uS9gtGVifSivw9sm187vDcmH5z9ZLnZojl6xeS6jAqBc6iwEF-8g"
+      },
+      "hash_v": 1,
+      "host_sig": "ORQ1vySOd6Anc5kH-dFm6hbdY7fOHLN-Z_Pj3gvy72Zk5SV2vHj2B-77tRXUfkbhSD2gFVRUAsal68yxy6Go1A",
+      "id": "01J9ZK00000000000000000002",
+      "name": "Mara",
+      "person": "p_6aae5cce832160e6f8cd9dadfbb4c5cd",
+      "pk_pub": "BI14lIzDuy3ZvsMm9bkLZdzvYh9pT6NacDmef4dgenr0c78HIZjtcHf2lvbVlmMxv6lX0LXFgD8rCZLcoL_KJig",
+      "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "role": "maintainer",
+      "roster_v": 1,
+      "seq": 2,
+      "sig": "IZhtFLpjND8rsczvMJrLcn6BZ00jO52rdr4y4Czl0_zyf8KMIzHNswq4qcHwl5bchyiui63b_zu-BZQYBXvPMg",
+      "type": "member.added",
+      "v": 2
+     },
+     "expect": "ok",
+     "log": "workspace"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:00:30Z",
+      "auth": "passphrase",
+      "based_on": "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+      "device_cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+        "dk_kx_pub": "BIlUSKpH5g9UpFflsUrYfy8c7ncIRHcJp2ORIDBUDb8S4SQtpy-EAPsSOgwT5nGhQApdzXloHjknkHiRsRkpcgc",
+        "dk_sig_pub": "BAAqPda-S695x08QBckUQMV2AglUMT8Y5yq57pu8wyCZnyHo1QrmNAzup8JXqewAFFKQ6VnP5Kq8GMNfZeWI0sY",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgbGVuYTE",
+        "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "3LAHSi-Droiur4llCSuUzsq6jxSWmpqmsak7L9vbNi82dp2nTr1rQXwE_-hRJ0ntDsrf8ER3KDThWYolZaabwQ"
+      },
+      "hash_v": 1,
+      "host_sig": "EA-9Usrmdg0-x9yGzKQ9fUrLFHcWQ7OojlVX0T5Y16oVCLalXAx1etcAeucJGcDE79aUcfj0SJ18EbEp412hlQ",
+      "id": "01J9ZK00000000000000000003",
+      "name": "Lena",
+      "person": "p_6ce6085b169e8ee5111456b91dc4ae3c",
+      "pk_pub": "BAoPza8kl-gXxaP7-Qc17lCTIw6H7vxUpVcgi6ai9wZ3jDRClQu1bQ9VmPrAqbVtoqkhi3VMVyu7SwpHydtPWGA",
+      "prev": "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+      "role": "member",
+      "roster_v": 2,
+      "seq": 3,
+      "sig": "owHOjIygxUy0YeMbo0Ue0SUblTWeECYfviuJYl_mi2RY016IdrzPWU1GFOMrpqgqV0F1sEj2yh_5bydj-WPfWw",
+      "type": "member.added",
+      "v": 2
+     },
+     "expect": "ok",
+     "log": "workspace"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:00:40Z",
+      "auth": "passphrase",
+      "based_on": null,
+      "hash_v": 1,
+      "host_sig": "s0poqc_6VJw8Tdg0CAcYmQKy6UHwtywB1MtWu3jqPrs4YYCjrBM7caCwrHiIgH0SmPFA25T6o6w5nMMqz64yCg",
+      "id": "01J9ZK00000000000000000004",
+      "key": "DEMO-0001",
+      "owner": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "prev": null,
+      "roster_v": 3,
+      "seq": 1,
+      "sig": "nJkkJQ7f_9NFgpCTnjjb-4odfh5_zh60gDZLp2GC1uklrBibTx6Pq-6bO9ynzzaKTSM22mXYpgn9TGc7IWcNdw",
+      "ticket_type": "feature",
+      "title": "A ticket",
+      "type": "ticket.created",
+      "v": 2,
+      "ws_seq": 3
+     },
+     "expect": "ok",
+     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:00:50Z",
+      "auth": "passphrase",
+      "based_on": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "e83091e11f534e9980bc4fce6fcb00d7",
+        "dk_kx_pub": "BC2jqkBcpx2iRJB2cI_hCVDMEUfc44lAFUocz-b0X0TA5LG38i-oEQ4cfdatj2dsdh0PKH4xY_zKn_jhlwLqz7k",
+        "dk_sig_pub": "BLf4w_nEnr2J4fYYv-1yJ9MrS94uEQ4rU3nmCV3hx8syx4L6QvjFsYbKP_oflzeRuICPxuaEYHyO4QOg_0mnYOE",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgc2V2Mg",
+        "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "2UbG5A3YqBAicVfOmChNYfgXt1bDFgvry0QaGcWE3r6-Hevx33nr-xvN7pWZcPY9rAjE0d1Ay4nlFHU0oge9YA"
+      },
+      "device": "d_e83091e11f534e9980bc4fce6fcb00d7",
+      "hash_v": 1,
+      "host_sig": "zVdMaNPdgV4rYcpU-Oow1dAO17H6VXfEQm3aRlfCYFIpGFEojNQ841HDzPOcfj2r7fdlo3s46a64W20KQH3soA",
+      "id": "01J9ZK00000000000000000005",
+      "prev": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "roster_v": 3,
+      "seq": 4,
+      "sig": "94Dr2FFODMenyJLSAD1ehAnu69bFuKiBbBF7TfrZgZ62McGVGeK33aGMPPA_RejBGps9mO_d9EbLLwYMNLSzjw",
+      "type": "device.added",
+      "v": 2
+     },
+     "expect": "ok",
+     "log": "workspace",
+     "note": "an existing device adds the second"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:01:00Z",
+      "auth": "passphrase",
+      "based_on": "sha256:c06487c5aa5d2a4da0028943160b93525a73c1f35afe8aad7cf726b2cdc20cab",
+      "cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "c65032f21d43401cc223b05723c1e5b4",
+        "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+        "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgc2V2MQ",
+        "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+      },
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "hash_v": 1,
+      "host_sig": "ENS2C4GcisdfEDx8hWVdGuXUD7JjTbvwpt_ch68eHPp2FBogq5RAWdUeCTwi3bXkZGUplNshhW6s8o0NZBlY3g",
+      "id": "01J9ZK00000000000000000006",
+      "prev": "sha256:c06487c5aa5d2a4da0028943160b93525a73c1f35afe8aad7cf726b2cdc20cab",
+      "roster_v": 3,
+      "seq": 5,
+      "sig": "pIMhq7UpTb98Ucjw1PR8wPxOx8N09SXijHLJfx8U3uC3QxcMoR50zriuBVM9dRd1G4EBGjjNUjbnlxGndUFOOw",
+      "type": "device.added",
+      "v": 2
+     },
+     "expect": "device.exists",
+     "log": "workspace",
+     "note": "already known"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:01:10Z",
+      "auth": "passphrase",
+      "based_on": "sha256:c06487c5aa5d2a4da0028943160b93525a73c1f35afe8aad7cf726b2cdc20cab",
+      "cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "df3075c5cbeb8f6d652d8c80de654d3a",
+        "dk_kx_pub": "BFqAlPxaXRRW5uyFtB_WexgF3xtqvfdp_0d64-IeyJN-tIHENtFFpiYV5jBQb4WLIiwAK6lxQ7TI6_NNTGxbCsc",
+        "dk_sig_pub": "BOYLRy_237JisaXh1yidy6Rb0CtIurWKKQOXVtv2MkGLCheKZfTK9HrgHXPQFHAgW7ZCRtDdvp8AJNsftXsCPa8",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgc2V2Mw",
+        "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+        "scopes_max": [
+         "look",
+         "decide"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "hbs4LkIWFAaiJIzcN6DxaCNompgpiq4Zae5iPat7Ij0CaAhD-FMEMWJ7oUQwtvh0e638fIKzHjVAjUIwahwQ7g"
+      },
+      "device": "d_df3075c5cbeb8f6d652d8c80de654d3a",
+      "hash_v": 1,
+      "host_sig": "pAI8Qxy0eRhlsy3DiiRABzfDKcpx2H8p1T5KNgF3L8yUA-Kih0B8njw40AJfVE0Xpxw7sNSDbuYIUbw80YuzrQ",
+      "id": "01J9ZK00000000000000000007",
+      "prev": "sha256:c06487c5aa5d2a4da0028943160b93525a73c1f35afe8aad7cf726b2cdc20cab",
+      "roster_v": 3,
+      "seq": 5,
+      "sig": "2BPaEGdRY7lJ9Onhybq5a9Lsb41biR0X0yoA7XIcu4_G0G68IwzGVJIUhzZNNz4OLAx17RvrS0heQVdvrF9d-w",
+      "type": "device.added",
+      "v": 2
+     },
+     "expect": "ok",
+     "log": "workspace",
+     "note": "a device without operate is allowed"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_df3075c5cbeb8f6d652d8c80de654d3a",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:01:20Z",
+      "auth": "passphrase",
+      "based_on": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "hash_v": 1,
+      "host_sig": "JDaUArYy1JoY3LtEHIXOnfeWCdQR5Rg08odLYliDo05LlsZyFC4ER9Nmt5JiUvc9Nkhs9IzDsndBeTSSByOquw",
+      "id": "01J9ZK00000000000000000008",
+      "prev": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "roster_v": 3,
+      "seq": 6,
+      "set": {
+       "grant_hours": 4
+      },
+      "sig": "VQ8jM6TnMv8kdMsDf4EFFRmfW2ZN1fZBiETcrRQ6izrlPeEG2OvUTanG2boKSGcVEShKLc1yY4P5CN5W95xeFw",
+      "type": "settings.changed",
+      "v": 2
+     },
+     "expect": "device.scope",
+     "log": "workspace",
+     "note": "...but it cannot sign a settings change (needs operate)"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_df3075c5cbeb8f6d652d8c80de654d3a",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:01:30Z",
+      "auth": "passphrase",
+      "based_on": "sha256:215b81b6c40231c64eafa55fa4ff7ccd3cd933fca0bd849078aa4df36b548449",
+      "hash_v": 1,
+      "host_sig": "SYLQpacrwA-Ah05wvta1Emq8lSgeT9hyACdfd0yOGy-F7uEjWPiddRoKOBGmo3BIgF53ucXFU7EGdZiqMyY8EA",
+      "id": "01J9ZK00000000000000000009",
+      "prev": "sha256:215b81b6c40231c64eafa55fa4ff7ccd3cd933fca0bd849078aa4df36b548449",
+      "roster_v": 3,
+      "seq": 2,
+      "sig": "dCpIXICskSXObTjTmeq-kn_3UCKVvz_7bkwMwPdJGPyIDV-49BEYuS0aIDrBC78i0vFouxP9fNp8XsTkuFbi5Q",
+      "text": "decide is enough",
+      "type": "log.added",
+      "v": 2,
+      "ws_seq": 5
+     },
+     "expect": "ok",
+     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
+     "note": "a person event needs decide"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:01:40Z",
+      "auth": "passphrase",
+      "based_on": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "c2ebc2a7379648bd452789a9ee49db5d",
+        "dk_kx_pub": "BN9wwGJ6Xcbv1NCZvBzUq54Yf1gkx9-z-QmdEbHevx_QONWIisgPFPOHP2OVlpK5XiKR0D9idAVJ5klrgLWWq28",
+        "dk_sig_pub": "BNStZOYShrfY5HzA4gNBN_uCY8DT9BpcSmQkh_itThdT-xzRTAuL0AyxcO6l2-QtzGUdqNqWtY-T9QlGtJ_ODs4",
+        "expires_ms": 1800000000000,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgZXZpbA",
+        "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+        "scopes_max": [
+         "drop:abababababababababababababababab"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "rxs0vds5NvRJIJwfJkZGQQFyY2y8FenlVzLztBAAVqvjrfyMydCKs4ToGVxX0OljQjec75iBQUpy5ucG1ay8Gw"
+      },
+      "device": "d_c2ebc2a7379648bd452789a9ee49db5d",
+      "hash_v": 1,
+      "host_sig": "zS1AoG3pmpJ2qv_OOnKQmr8YW2sGxtUGaGNtCl-fxDXTtOaQ1KOAHe51S_-dZvxdZaSNXnVZBsDLsRfc7hZXwA",
+      "id": "01J9ZK0000000000000000000A",
+      "prev": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "roster_v": 3,
+      "seq": 6,
+      "sig": "aizhwncQ_MTSDc71ApwgaBwVywOvKXjHtBsoIMgPZjFI99RpVXCryF2GCVoypES7haFKZWGll3dqu04TlPsazw",
+      "type": "device.added",
+      "v": 2
+     },
+     "expect": "device.scope",
+     "log": "workspace",
+     "note": "a drop: certificate is refused in device.added",
+     "schema_refused": true
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:01:50Z",
+      "auth": "passphrase",
+      "based_on": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "c2ebc2a7379648bd452789a9ee49db5d",
+        "dk_kx_pub": "BN9wwGJ6Xcbv1NCZvBzUq54Yf1gkx9-z-QmdEbHevx_QONWIisgPFPOHP2OVlpK5XiKR0D9idAVJ5klrgLWWq28",
+        "dk_sig_pub": "BNStZOYShrfY5HzA4gNBN_uCY8DT9BpcSmQkh_itThdT-xzRTAuL0AyxcO6l2-QtzGUdqNqWtY-T9QlGtJ_ODs4",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgZXZpbA",
+        "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+        "scopes_max": [
+         "look"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "SBs36y1SmKEEmHUXlPGpDQYLUP5rXVPv1a21QzvfGwGQ1Hj-ZB2_TeXaOW3P_MP5sk6eKdP9xZthNTNMe7gHng"
+      },
+      "device": "d_c2ebc2a7379648bd452789a9ee49db5d",
+      "hash_v": 1,
+      "host_sig": "HwTKNf0hFu1yKOQm9yqmaOZSmOh3MS956sasc2vagMmDE6UrPxRPR6_I4rdKDIPrtTXGiiHmijefulwee2jFnQ",
+      "id": "01J9ZK0000000000000000000B",
+      "prev": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "roster_v": 3,
+      "seq": 6,
+      "sig": "j8avlrApL0QvXQen9PZOPgjBuKHz3IffN_CYSsIj82CEslzSvuqrPY7OiupN6tr1F4GnJ3kAYpnkyyvb5NrJbw",
+      "type": "device.added",
+      "v": 2
+     },
+     "expect": "device.scope",
+     "log": "workspace",
+     "note": "no decide scope",
+     "schema_refused": true
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:02:00Z",
+      "auth": "passphrase",
+      "based_on": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "c2ebc2a7379648bd452789a9ee49db5d",
+        "dk_kx_pub": "BN9wwGJ6Xcbv1NCZvBzUq54Yf1gkx9-z-QmdEbHevx_QONWIisgPFPOHP2OVlpK5XiKR0D9idAVJ5klrgLWWq28",
+        "dk_sig_pub": "BNStZOYShrfY5HzA4gNBN_uCY8DT9BpcSmQkh_itThdT-xzRTAuL0AyxcO6l2-QtzGUdqNqWtY-T9QlGtJ_ODs4",
+        "expires_ms": 1790000001000,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgZXZpbA",
+        "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "6w_LjVoc5OJNkn9kvUZ-SAiUboHY0YhKb0DYIuU52OTfAscsJSbDsBvADAd9OmNrlYp6th9wTeOuq3PK-wLeaw"
+      },
+      "device": "d_c2ebc2a7379648bd452789a9ee49db5d",
+      "hash_v": 1,
+      "host_sig": "KX-1UTFaBiqDrpUXYb2ylyJLZSEnXf9mLG0k8uFWAqDmQtkhdZ8m_MxtUuw_J7wpdmA8Su1TVtWdnaHocaZqGQ",
+      "id": "01J9ZK0000000000000000000C",
+      "prev": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "roster_v": 3,
+      "seq": 6,
+      "sig": "tVbuJbhVaK3Z-Hcz9YM3Pv5ekhCyiQj9qaycjlFpQiMVlHWOM-XciokAYk2jtg2osZncpk_sUSmoLzOsPkJ-ZA",
+      "type": "device.added",
+      "v": 2
+     },
+     "expect": "device.invalid",
+     "log": "workspace",
+     "note": "a certificate that expired before the event"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:02:10Z",
+      "auth": "passphrase",
+      "based_on": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "c2ebc2a7379648bd452789a9ee49db5d",
+        "dk_kx_pub": "BN9wwGJ6Xcbv1NCZvBzUq54Yf1gkx9-z-QmdEbHevx_QONWIisgPFPOHP2OVlpK5XiKR0D9idAVJ5klrgLWWq28",
+        "dk_sig_pub": "BNStZOYShrfY5HzA4gNBN_uCY8DT9BpcSmQkh_itThdT-xzRTAuL0AyxcO6l2-QtzGUdqNqWtY-T9QlGtJ_ODs4",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgZXZpbA",
+        "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "3G733VTo39Z8NLbgmimSQBI0j9UyXP_2_wuKccMVJKk66Dt8JIKbflFL46C_DCTmXjEEwE-Qlsmz5Dh7p-TZbQ"
+      },
+      "device": "d_dab52d8a46400ebc725bc16e30794db6",
+      "hash_v": 1,
+      "host_sig": "4GWChCOAqbITDyHMRsQiW65Fl6RyBDVlSJC3K-n_WQu74mDIO9K2-cp9tOFPQMe6THjuc8QX4YRhBUSA-I5Bxg",
+      "id": "01J9ZK0000000000000000000D",
+      "prev": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "roster_v": 3,
+      "seq": 6,
+      "sig": "AfNY8YFDwfaim_0j_yH0igKbLmfrBnqFZhn4WazE6eOnLyToi0YImGFPWlOn5XBF0JAd_QoKioptyozmoeAeVA",
+      "type": "device.added",
+      "v": 2
+     },
+     "expect": "device.cert",
+     "log": "workspace",
+     "note": "event.device is not the certificate's device id",
+     "schema_refused": true
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:02:20Z",
+      "auth": "passphrase",
+      "based_on": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "c2ebc2a7379648bd452789a9ee49db5d",
+        "dk_kx_pub": "BN9wwGJ6Xcbv1NCZvBzUq54Yf1gkx9-z-QmdEbHevx_QONWIisgPFPOHP2OVlpK5XiKR0D9idAVJ5klrgLWWq28",
+        "dk_sig_pub": "BNStZOYShrfY5HzA4gNBN_uCY8DT9BpcSmQkh_itThdT-xzRTAuL0AyxcO6l2-QtzGUdqNqWtY-T9QlGtJ_ODs4",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgZXZpbA",
+        "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "IWpeoFCwfD-n56rUEKulAr_FYsaJbfh2kLLjNm0Sj0jiVC_bq3tujwUmjJvrOJ9wzGDztBEhGb6iAmkT9LxQ3A"
+      },
+      "device": "d_c2ebc2a7379648bd452789a9ee49db5d",
+      "hash_v": 1,
+      "host_sig": "rmVxduRIvEUUFcO8CrH7qXNr3hHImkWsqViCJp5hQhkCz_54qfWYevmT6q0repzwp0aTM5xPWu3yOkCcYexYNg",
+      "id": "01J9ZK0000000000000000000E",
+      "prev": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "roster_v": 3,
+      "seq": 6,
+      "sig": "RIREGEtOOckcNX5wqJEckwJmnc3I82dwBchvWm09MCL8dRqSphldISrC2IvISIp9sLULy453u9ZUSuSXgu50FQ",
+      "type": "device.added",
+      "v": 2
+     },
+     "expect": "device.cert",
+     "log": "workspace",
+     "note": "certificate not signed by the person's key"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_7efc1ba896b95f9151978a1dad982e3a",
+       "id": "p_6aae5cce832160e6f8cd9dadfbb4c5cd",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:02:30Z",
+      "auth": "passphrase",
+      "based_on": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "c2ebc2a7379648bd452789a9ee49db5d",
+        "dk_kx_pub": "BN9wwGJ6Xcbv1NCZvBzUq54Yf1gkx9-z-QmdEbHevx_QONWIisgPFPOHP2OVlpK5XiKR0D9idAVJ5klrgLWWq28",
+        "dk_sig_pub": "BNStZOYShrfY5HzA4gNBN_uCY8DT9BpcSmQkh_itThdT-xzRTAuL0AyxcO6l2-QtzGUdqNqWtY-T9QlGtJ_ODs4",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgZXZpbA",
+        "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "3G733VTo39Z8NLbgmimSQBI0j9UyXP_2_wuKccMVJKk66Dt8JIKbflFL46C_DCTmXjEEwE-Qlsmz5Dh7p-TZbQ"
+      },
+      "device": "d_c2ebc2a7379648bd452789a9ee49db5d",
+      "hash_v": 1,
+      "host_sig": "dI2Wa6yHR2zb40Ggeyv98JBTDK8I8zj0sjK-q6pjpldk6c_8UFCvT-huJkCoKfpNhnStGt1Zirup5YENpXD8eA",
+      "id": "01J9ZK0000000000000000000F",
+      "prev": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "roster_v": 3,
+      "seq": 6,
+      "sig": "I1hD5uZh1mzk7Za2z9wuCAEQI3OU2AE8el4_38S2EmrurBjDEyPz9M7ef43ReUu4hS55ZXIR0dBNWTMvkZx9zA",
+      "type": "device.added",
+      "v": 2
+     },
+     "expect": "device.cert",
+     "log": "workspace",
+     "note": "mara's device adds a device certified by sev's key: only the person's own key vouches",
+     "schema_refused": true
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:02:40Z",
+      "auth": "passphrase",
+      "based_on": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "c2ebc2a7379648bd452789a9ee49db5d",
+        "dk_kx_pub": "BN9wwGJ6Xcbv1NCZvBzUq54Yf1gkx9-z-QmdEbHevx_QONWIisgPFPOHP2OVlpK5XiKR0D9idAVJ5klrgLWWq28",
+        "dk_sig_pub": "BNStZOYShrfY5HzA4gNBN_uCY8DT9BpcSmQkh_itThdT-xzRTAuL0AyxcO6l2-QtzGUdqNqWtY-T9QlGtJ_ODs4",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgZXZpbA",
+        "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "3G733VTo39Z8NLbgmimSQBI0j9UyXP_2_wuKccMVJKk66Dt8JIKbflFL46C_DCTmXjEEwE-Qlsmz5Dh7p-TZbQ"
+      },
+      "device": "d_c2ebc2a7379648bd452789a9ee49db5d",
+      "hash_v": 1,
+      "host_sig": "MBFRhkpkYdWslcthXcYZqamvagKpb9anWD_tykVmaLFHlWy1dxmMfct1UbtIbiVHxFMdwklMePlaB_KRnP5w2g",
+      "id": "01J9ZK0000000000000000000G",
+      "prev": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "roster_v": 2,
+      "seq": 6,
+      "sig": "KUAT5QOk4sTKeA58ynHL4HlOz792aHsEdptNySGFGFSAnuu71mDL-ZscvkEb2Pw813SlEi3wuhT1RgspFDZVOg",
+      "type": "device.added",
+      "v": 2
+     },
+     "expect": "members.stale",
+     "log": "workspace",
+     "note": "stale roster_v"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c2ebc2a7379648bd452789a9ee49db5d",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:02:50Z",
+      "auth": "passphrase",
+      "based_on": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "c2ebc2a7379648bd452789a9ee49db5d",
+        "dk_kx_pub": "BN9wwGJ6Xcbv1NCZvBzUq54Yf1gkx9-z-QmdEbHevx_QONWIisgPFPOHP2OVlpK5XiKR0D9idAVJ5klrgLWWq28",
+        "dk_sig_pub": "BNStZOYShrfY5HzA4gNBN_uCY8DT9BpcSmQkh_itThdT-xzRTAuL0AyxcO6l2-QtzGUdqNqWtY-T9QlGtJ_ODs4",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgZXZpbA",
+        "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "3G733VTo39Z8NLbgmimSQBI0j9UyXP_2_wuKccMVJKk66Dt8JIKbflFL46C_DCTmXjEEwE-Qlsmz5Dh7p-TZbQ"
+      },
+      "device": "d_c2ebc2a7379648bd452789a9ee49db5d",
+      "hash_v": 1,
+      "host_sig": "7-U5KMoo-A8evbdqVi9vce42WIzLkiANby7lgHOZIsEEBhMZ0YQXP2oHkNV1tHCbEr68MEA09BUGH6ACv04Ozw",
+      "id": "01J9ZK0000000000000000000H",
+      "prev": "sha256:80bf9c2f4d8cf8caa3ca9a1475544e910aeaad6d2bc1126c4a41f3b5d61d4894",
+      "roster_v": 3,
+      "seq": 6,
+      "sig": "F0oCLewapOAT0OoqeOjtQ_g-ZS3-EWmhHe48PGCVOym7wZa87bJe135AjvpnMaHcvbUb6qSBAKWGndgupROz7w",
+      "type": "device.added",
+      "v": 2
+     },
+     "expect": "device.unknown",
+     "log": "workspace",
+     "note": "self-signed by the new device while sev has valid devices"
+    }
+   ],
+   "workspace_id": "0123456789abcdef0123456789abcdef"
+  },
+  {
+   "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+   "name": "device_recovery",
+   "now": "2026-10-10T10:02:50Z",
+   "pins": "recovery: a new device signs its own device.added only when none is left",
+   "steps": [
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:00:10Z",
+      "auth": "passphrase",
+      "based_on": null,
+      "delegation": {
+       "o": {
+        "client_hosted": false,
+        "issued_ms": 1790000000000,
+        "kind": "ws_delegation",
+        "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+        "suite": 2,
+        "v": 2,
+        "workspace_id": "0123456789abcdef0123456789abcdef",
+        "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+       },
+       "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+      },
+      "device_cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "c65032f21d43401cc223b05723c1e5b4",
+        "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+        "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgc2V2MQ",
+        "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+      },
+      "hash_v": 1,
+      "host_id": "h_01J9ZK00000000000000000H01",
+      "host_sig": "gmxYcJawrdR5RQtoujxISFmEW9vXbA_mpXUlFxD1oZi3kdmCMxSGUfLG541ft451incilUCTzJILGo1V056HSA",
+      "id": "01J9ZK00000000000000000001",
+      "owner": {
+       "name": "Sev",
+       "person": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+      },
+      "prefix": "DEMO",
+      "prev": null,
+      "roster_v": 0,
+      "seq": 1,
+      "sig": "r5ahD9lncKkFZNVB021B3asYYRDKE8cRMWC2GJofmqLsev3YOf3LT2ZEx4QRhYGGwrcwPRee4pMy8GfA8GctHA",
+      "type": "workspace.created",
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "expect": "ok",
+     "log": "workspace"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:00:20Z",
+      "auth": "passphrase",
+      "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "device_cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "7efc1ba896b95f9151978a1dad982e3a",
+        "dk_kx_pub": "BN7s8d4XzDSnOKNlCU8mCWaY3E3S7C3L9iZYzKbWeF222lVSoJyTrFmDFYC_Rk6rKWHos9s8Cf_UE2usnfHJS58",
+        "dk_sig_pub": "BHdTNrzFC_Z_T_TgrLfcnUV66UtadIC1wF-BvBSaejtOtFzCvjiMp43vyt7x9weta7ZyJcxyT4B5ggKsTfdEie8",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgbWFyYTE",
+        "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "Ic4FvQ_KyDG9vUYVTp0f2zaZwBZ6HQk304uS9gtGVifSivw9sm187vDcmH5z9ZLnZojl6xeS6jAqBc6iwEF-8g"
+      },
+      "hash_v": 1,
+      "host_sig": "ORQ1vySOd6Anc5kH-dFm6hbdY7fOHLN-Z_Pj3gvy72Zk5SV2vHj2B-77tRXUfkbhSD2gFVRUAsal68yxy6Go1A",
+      "id": "01J9ZK00000000000000000002",
+      "name": "Mara",
+      "person": "p_6aae5cce832160e6f8cd9dadfbb4c5cd",
+      "pk_pub": "BI14lIzDuy3ZvsMm9bkLZdzvYh9pT6NacDmef4dgenr0c78HIZjtcHf2lvbVlmMxv6lX0LXFgD8rCZLcoL_KJig",
+      "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "role": "maintainer",
+      "roster_v": 1,
+      "seq": 2,
+      "sig": "IZhtFLpjND8rsczvMJrLcn6BZ00jO52rdr4y4Czl0_zyf8KMIzHNswq4qcHwl5bchyiui63b_zu-BZQYBXvPMg",
+      "type": "member.added",
+      "v": 2
+     },
+     "expect": "ok",
+     "log": "workspace"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:00:30Z",
+      "auth": "passphrase",
+      "based_on": "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+      "device_cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+        "dk_kx_pub": "BIlUSKpH5g9UpFflsUrYfy8c7ncIRHcJp2ORIDBUDb8S4SQtpy-EAPsSOgwT5nGhQApdzXloHjknkHiRsRkpcgc",
+        "dk_sig_pub": "BAAqPda-S695x08QBckUQMV2AglUMT8Y5yq57pu8wyCZnyHo1QrmNAzup8JXqewAFFKQ6VnP5Kq8GMNfZeWI0sY",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgbGVuYTE",
+        "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "3LAHSi-Droiur4llCSuUzsq6jxSWmpqmsak7L9vbNi82dp2nTr1rQXwE_-hRJ0ntDsrf8ER3KDThWYolZaabwQ"
+      },
+      "hash_v": 1,
+      "host_sig": "EA-9Usrmdg0-x9yGzKQ9fUrLFHcWQ7OojlVX0T5Y16oVCLalXAx1etcAeucJGcDE79aUcfj0SJ18EbEp412hlQ",
+      "id": "01J9ZK00000000000000000003",
+      "name": "Lena",
+      "person": "p_6ce6085b169e8ee5111456b91dc4ae3c",
+      "pk_pub": "BAoPza8kl-gXxaP7-Qc17lCTIw6H7vxUpVcgi6ai9wZ3jDRClQu1bQ9VmPrAqbVtoqkhi3VMVyu7SwpHydtPWGA",
+      "prev": "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+      "role": "member",
+      "roster_v": 2,
+      "seq": 3,
+      "sig": "owHOjIygxUy0YeMbo0Ue0SUblTWeECYfviuJYl_mi2RY016IdrzPWU1GFOMrpqgqV0F1sEj2yh_5bydj-WPfWw",
+      "type": "member.added",
+      "v": 2
+     },
+     "expect": "ok",
+     "log": "workspace"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_c65032f21d43401cc223b05723c1e5b4",
+       "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:00:40Z",
+      "auth": "passphrase",
+      "based_on": null,
+      "hash_v": 1,
+      "host_sig": "s0poqc_6VJw8Tdg0CAcYmQKy6UHwtywB1MtWu3jqPrs4YYCjrBM7caCwrHiIgH0SmPFA25T6o6w5nMMqz64yCg",
+      "id": "01J9ZK00000000000000000004",
+      "key": "DEMO-0001",
+      "owner": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "prev": null,
+      "roster_v": 3,
+      "seq": 1,
+      "sig": "nJkkJQ7f_9NFgpCTnjjb-4odfh5_zh60gDZLp2GC1uklrBibTx6Pq-6bO9ynzzaKTSM22mXYpgn9TGc7IWcNdw",
+      "ticket_type": "feature",
+      "title": "A ticket",
+      "type": "ticket.created",
+      "v": 2,
+      "ws_seq": 3
+     },
+     "expect": "ok",
+     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_dab52d8a46400ebc725bc16e30794db6",
+       "id": "p_6ce6085b169e8ee5111456b91dc4ae3c",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:00:50Z",
+      "auth": "passphrase",
+      "based_on": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "dab52d8a46400ebc725bc16e30794db6",
+        "dk_kx_pub": "BEk1z7gcT5zDbeCBItb_q59IZTh2Ka7ZpgBQMKyT-2Mbf1Pnmn-RDiuO9RttnVOcdfXPd7cNpypj9DcyNN2oEmo",
+        "dk_sig_pub": "BGN57hkycwK1FG4FnbYARIxiBgwM2_4kSezPRtoh7GD8SbfiQTcNf-AvUDEm6r58zR6lTOTJIA2lzy7_F_0YeS0",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgbGVuYTI",
+        "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "emCTSE0TjRuI6hVPdhTzofZ2Uwp2CAszdoZ0Ma0SdhzZJEfUIZB8hFrNwq-qONn4IgStTZsrh3pvCkLr71F0Ag"
+      },
+      "device": "d_dab52d8a46400ebc725bc16e30794db6",
+      "hash_v": 1,
+      "host_sig": "-fiIObyRo1rq9JAwFLmGX5nebhhBUoVv7xvLD7HLdufeu2Yr8BRIGVaZyswQYTquPCPKARygiksZTc6L8zqtnA",
+      "id": "01J9ZK00000000000000000005",
+      "prev": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "roster_v": 3,
+      "seq": 4,
+      "sig": "ivf_aAIfBESxjTv3iX0SSVIRwoc4R7zr-bG29iMMBMGvzHC20unMDVGyJ6Wc29baKXstvO-ILyjML_2m5Dg4cQ",
+      "type": "device.added",
+      "v": 2
+     },
+     "expect": "device.unknown",
+     "log": "workspace",
+     "note": "self-signed while lena1 is valid"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_a6dc67f56b74e07ca65b035348e03bc0",
+       "id": "p_6ce6085b169e8ee5111456b91dc4ae3c",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:01:00Z",
+      "auth": "passphrase",
+      "based_on": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "device": "d_a6dc67f56b74e07ca65b035348e03bc0",
+      "hash_v": 1,
+      "host_sig": "cOUrKH1j0ifeYwXtWgS3bKMt7QJ1RyBa_t3spkYGKlvjoyKJPljHYslrhtXCWAdIe-SzdyIU3Zd30WDwoKQ7pg",
+      "id": "01J9ZK00000000000000000006",
+      "prev": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "reason": "lost phone",
+      "roster_v": 3,
+      "seq": 4,
+      "sig": "hvkla7MoXea6Il-9e9CLtDpzMRdcrnyxfOl_4Aq1g81Hsl3gEtrsMnhpdt_jqBSLN1BNliChUFl5EHw-XkT-cg",
+      "type": "device.removed",
+      "v": 2
+     },
+     "expect": "ok",
+     "log": "workspace"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_a6dc67f56b74e07ca65b035348e03bc0",
+       "id": "p_6ce6085b169e8ee5111456b91dc4ae3c",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:01:10Z",
+      "auth": "passphrase",
+      "based_on": "sha256:215b81b6c40231c64eafa55fa4ff7ccd3cd933fca0bd849078aa4df36b548449",
+      "hash_v": 1,
+      "host_sig": "2wc5mRcgr7LL4heBoNVeRUgc3iFNUI0TbHasGft9h4YkXNVdXKK6ONvAQit17m39771bsVZ1lJ4pUT00TVMbYQ",
+      "id": "01J9ZK00000000000000000007",
+      "prev": "sha256:215b81b6c40231c64eafa55fa4ff7ccd3cd933fca0bd849078aa4df36b548449",
+      "roster_v": 3,
+      "seq": 2,
+      "sig": "rP5tknLIKWNf0qQJjEk8ArLpZ6LV6R2EHWbqXpoIdHd1O7m82LvFr8-HCnE3eXw7iEYJqrqvKXZ97IeDN2tE9w",
+      "text": "after removal",
+      "type": "log.added",
+      "v": 2,
+      "ws_seq": 4
+     },
+     "expect": "device.invalid",
+     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
+     "note": "a removed device signs nothing"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_dab52d8a46400ebc725bc16e30794db6",
+       "id": "p_6ce6085b169e8ee5111456b91dc4ae3c",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:01:20Z",
+      "auth": "passphrase",
+      "based_on": "sha256:4d2459be2b4a0a46161b83f052e57455f3e95bd4990c175858a9d85f5ffcc068",
+      "cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "dab52d8a46400ebc725bc16e30794db6",
+        "dk_kx_pub": "BEk1z7gcT5zDbeCBItb_q59IZTh2Ka7ZpgBQMKyT-2Mbf1Pnmn-RDiuO9RttnVOcdfXPd7cNpypj9DcyNN2oEmo",
+        "dk_sig_pub": "BGN57hkycwK1FG4FnbYARIxiBgwM2_4kSezPRtoh7GD8SbfiQTcNf-AvUDEm6r58zR6lTOTJIA2lzy7_F_0YeS0",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgbGVuYTI",
+        "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "78RS8ZCjkILbkFKlnFKWawIGGaYE3QpbgGpE5Dys6al9lZLzTKZq9MFVZ3xDlvaTtRt6sFxkX0cRwhAW1u5FTg"
+      },
+      "device": "d_dab52d8a46400ebc725bc16e30794db6",
+      "hash_v": 1,
+      "host_sig": "Zh3vcbkgMT9Ruzrt1WnYggpwGUWR6lUpDdtI3bXb7MbJoN2ne5K0K0000JAR4XbXO3grtqprJ662AUSmuYZFlw",
+      "id": "01J9ZK00000000000000000008",
+      "prev": "sha256:4d2459be2b4a0a46161b83f052e57455f3e95bd4990c175858a9d85f5ffcc068",
+      "roster_v": 3,
+      "seq": 5,
+      "sig": "R7soBsrcRJHYZyWPLAyubAyhjG4L1KEFXHTIV0IMk8yY6Hl_SVocotVhpgswYOKxT3Ka7gzEibD5riQS6CchkA",
+      "type": "device.added",
+      "v": 2
+     },
+     "expect": "device.cert",
+     "log": "workspace",
+     "note": "recovery needs a certificate signed by the person key"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_dab52d8a46400ebc725bc16e30794db6",
+       "id": "p_6ce6085b169e8ee5111456b91dc4ae3c",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:01:30Z",
+      "auth": "passphrase",
+      "based_on": "sha256:4d2459be2b4a0a46161b83f052e57455f3e95bd4990c175858a9d85f5ffcc068",
+      "cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "dab52d8a46400ebc725bc16e30794db6",
+        "dk_kx_pub": "BEk1z7gcT5zDbeCBItb_q59IZTh2Ka7ZpgBQMKyT-2Mbf1Pnmn-RDiuO9RttnVOcdfXPd7cNpypj9DcyNN2oEmo",
+        "dk_sig_pub": "BGN57hkycwK1FG4FnbYARIxiBgwM2_4kSezPRtoh7GD8SbfiQTcNf-AvUDEm6r58zR6lTOTJIA2lzy7_F_0YeS0",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgbGVuYTI",
+        "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+        "scopes_max": [
+         "look"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "axlrM39-GlGlAgraFuJr_rs2drz6a6AMnoiT40fev8CGoaKTlcq63yM3PD04NNpHMSoJkKcT79ZKmk1EQgNDiw"
+      },
+      "device": "d_dab52d8a46400ebc725bc16e30794db6",
+      "hash_v": 1,
+      "host_sig": "ShS7PGX13MT145gvYIR4CrD6txKvfYlBtrfoHx0OCSSWlpQEXOP2wfIDdeVsqC8W3SAr2fUIlwamRueX5XvfOA",
+      "id": "01J9ZK00000000000000000009",
+      "prev": "sha256:4d2459be2b4a0a46161b83f052e57455f3e95bd4990c175858a9d85f5ffcc068",
+      "roster_v": 3,
+      "seq": 5,
+      "sig": "dqBdAtIbBoUrDy8k_gOMsQv0hvOcW1u-5IeWVQ9BJIzzf_71SOqPFgZzKs0uBur3H30uiH9RzhSE0rUnUjg1wA",
+      "type": "device.added",
+      "v": 2
+     },
+     "expect": "device.scope",
+     "log": "workspace",
+     "note": "recovery certificate must have decide",
+     "schema_refused": true
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_dab52d8a46400ebc725bc16e30794db6",
+       "id": "p_6ce6085b169e8ee5111456b91dc4ae3c",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:01:40Z",
+      "auth": "passphrase",
+      "based_on": "sha256:4d2459be2b4a0a46161b83f052e57455f3e95bd4990c175858a9d85f5ffcc068",
+      "cert": {
+       "o": {
+        "created_ms": 1790000000000,
+        "device_id": "dab52d8a46400ebc725bc16e30794db6",
+        "dk_kx_pub": "BEk1z7gcT5zDbeCBItb_q59IZTh2Ka7ZpgBQMKyT-2Mbf1Pnmn-RDiuO9RttnVOcdfXPd7cNpypj9DcyNN2oEmo",
+        "dk_sig_pub": "BGN57hkycwK1FG4FnbYARIxiBgwM2_4kSezPRtoh7GD8SbfiQTcNf-AvUDEm6r58zR6lTOTJIA2lzy7_F_0YeS0",
+        "expires_ms": null,
+        "kind": "device_cert",
+        "label_sealed": "bGFiZWwgbGVuYTI",
+        "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+        "scopes_max": [
+         "look",
+         "decide",
+         "operate",
+         "type"
+        ],
+        "suite": 2,
+        "v": 2
+       },
+       "sig": "emCTSE0TjRuI6hVPdhTzofZ2Uwp2CAszdoZ0Ma0SdhzZJEfUIZB8hFrNwq-qONn4IgStTZsrh3pvCkLr71F0Ag"
+      },
+      "device": "d_dab52d8a46400ebc725bc16e30794db6",
+      "hash_v": 1,
+      "host_sig": "2cifN7HOWSTaTnJUJ7Y_cCaJtTyc60so0Re_gOWmFtiJIdppa5AC5inhOXOSEhZ7cs0OB1aXJf4MmIBZhA2jMw",
+      "id": "01J9ZK0000000000000000000A",
+      "prev": "sha256:4d2459be2b4a0a46161b83f052e57455f3e95bd4990c175858a9d85f5ffcc068",
+      "roster_v": 3,
+      "seq": 5,
+      "sig": "WaXENeGj87XvIdHUFMVeOFi1POT08jYl__srIXiUjImxi87I92P0kr6pTuxb9B4BfAy1yRTULl5NXDTUv9fbcg",
+      "type": "device.added",
+      "v": 2
+     },
+     "expect": "ok",
+     "log": "workspace",
+     "note": "recovery: signed by the new device"
+    },
+    {
+     "event": {
+      "actor": {
+       "device": "d_dab52d8a46400ebc725bc16e30794db6",
+       "id": "p_6ce6085b169e8ee5111456b91dc4ae3c",
+       "kind": "person"
+      },
+      "at": "2026-10-10T10:01:50Z",
+      "auth": "passphrase",
+      "based_on": "sha256:215b81b6c40231c64eafa55fa4ff7ccd3cd933fca0bd849078aa4df36b548449",
+      "hash_v": 1,
+      "host_sig": "c7rvnxr1ekjcOssJfHGO0ptoF0HsT4m28F7HAcYpyTO4V1TfdfkfHvK7_f2VMF6mUNks-l8dP1mIIG97RV-xXQ",
+      "id": "01J9ZK0000000000000000000B",
+      "prev": "sha256:215b81b6c40231c64eafa55fa4ff7ccd3cd933fca0bd849078aa4df36b548449",
+      "roster_v": 3,
+      "seq": 2,
+      "sig": "_dwu9wd6dxIerDv7BHzbxyo8hxgVxsaLURLiv5VLV8a3nZJ2kNw5wLuH9WJwMW-8dXQzntj6dihaAbh1kOTktA",
+      "text": "back",
+      "type": "log.added",
+      "v": 2,
+      "ws_seq": 5
+     },
+     "expect": "ok",
+     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
+     "note": "the new device signs person events"
+    }
+   ],
+   "workspace_id": "0123456789abcdef0123456789abcdef"
+  }
+ ]
+}

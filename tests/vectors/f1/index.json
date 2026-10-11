@@ -1,0 +1,29 @@
+{
+ "files": {
+  "approvals.json": "model scenarios: who may approve (5.7), host events (5.2, 5.12), gate.incomplete, gate.not_applicable, a stale source_sha",
+  "artifact_refs.json": "the artifact reference regex (5.8)",
+  "canon.json": "[shared, unchanged] strict parse depth 16/17 and -0 -> 0 (ticket-format 11.2)",
+  "chain.json": "[shared, unchanged] three chained events: heads, prev, canonical lines, signing bytes; the sig and host_sig values in it are PLACEHOLDERS, real signatures are pinned in signatures.json, tamper.json and the scenarios",
+  "checkpoint.json": "checkpoint objects, signed bytes, refusals, divergence (5.10)",
+  "devices.json": "device.added rules: drop: and scope refusals, self-signed, stale roster_v, recovery (5.3, 5.11)",
+  "effective_policy.json": "the 5.7 intersection, a later workspace change, gate.no_eligible",
+  "gate_hash.json": "[shared, CHANGED] gate hash known answers; every inner hash is derived from the `ticket` each case ships (5.6, 5.7), with real policy names, people roles and `prior`",
+  "generation.json": "the 5.7 raise table row by row, delayed approval, reverted edit, voided approvals",
+  "genesis.json": "the six genesis checks in order (5.11)",
+  "hashes.json": "[shared, CHANGED] known answers: artifact, section, value, policy, people, question id and hash, grant secret; refused non-NFC inputs (5.6); refused non-canonical policies (5.7)",
+  "index.json": "this list",
+  "labels.json": "[shared, unchanged] the F1 domain labels (5.6), prefix-free with the protocol's",
+  "questions.json": "question id and hash, answers, a decision for the same qid after a restore",
+  "refusal_order.json": "model scenarios: an event breaking two rules gets the code of the earlier step of the refusal order (5.11)",
+  "replay.json": "model scenario: replayed or re-contexted signed events are refused with the real verifier (5.3, 5.11)",
+  "repo_identity.json": "[shared, extended] canonical identities, refused forms, and `mapping`: raw remote -> canonical (5.7)",
+  "restore.json": "workspace restore re-appends every PK-signed revocation (5.10)",
+  "revocation.json": "device.revoked: embedded revocation as authority, reason mismatch, recovery (5.3)",
+  "section_text.json": "body.md heading and fence rules, LF trimming, what is hashed (4, 5.6)",
+  "signatures.json": "real P-256 signatures of events and host_sig, what they cover, replay refusals (5.3, 5.5)",
+  "status.json": "the 5.9 status table, done is sticky, reopen",
+  "tamper.json": "tampered chain lines of the ticket and workspace log, the seq where the chain breaks (5.5)",
+  "text.json": "[shared, unchanged] CRLF/CR -> LF, NFC (Unicode 16.0), refused controls, bidi and unassigned (11.3)"
+ },
+ "note": "files tagged [shared] are copied verbatim into orch-relay; the others are core-only"
+}
