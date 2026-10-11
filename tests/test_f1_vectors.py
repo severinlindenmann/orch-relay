@@ -1475,6 +1475,8 @@ def transition_ok(held, offered, restore, applied, known):
                 return "chain.diverged", None
         if not all(revocation_evidence_ok(x) for x in e["revocations"]):
             return "chain.diverged", None
+        if cert["o"]["device_id"] in carried:
+            return "chain.diverged", None
     except (KeyError, TypeError, ValueError, IndexError):
         return "chain.diverged", None
     try:
@@ -2351,3 +2353,35 @@ def test_restore_position_lower_bound(offset):
     resign_transition(c)
     expected = ("chain.diverged", None) if offset < 0 else ("ok", c["restore"]["event"]["id"])
     assert offer_local_transition(c) == expected
+
+
+def local_revocation_evidence(cert, pk_name="pk_sev", reason="compromised"):
+    from copy import deepcopy
+
+    o = cert["o"]
+    rev = {
+        "v": 2,
+        "suite": 2,
+        "kind": "revocation",
+        "person_id": o["person_id"],
+        "device_id": o["device_id"],
+        "revoked_ms": o["created_ms"] + 1000,
+        "reason": reason,
+    }
+    return {
+        "device_cert": deepcopy(cert),
+        "pk_pub": SIG["keys"][pk_name]["pub_b64u"],
+        "revocation": R.sign_object(S, published_f1_key(pk_name), rev),
+    }
+
+
+@pytest.mark.parametrize("reason", ["lost", "retired", "compromised"])
+def test_restore_bundle_revokes_its_signer(reason):
+    c = local_transition()
+    assert offer_local_transition(c) == ("ok", c["restore"]["event"]["id"])
+    evidence = local_revocation_evidence(c["restore"]["device_cert"], reason=reason)
+    assert revocation_evidence_ok(evidence)
+    c["restore"]["event"]["revocations"] = [evidence]
+    resign_transition(c)
+    # Empty local knowledge: historical bundle validity itself must reject the signer.
+    assert offer_local_transition(c) == ("chain.diverged", None)
