@@ -238,3 +238,76 @@ def test_idle_long_polls_do_not_starve_other_routes(client):
     )
     assert statuses == [200] * polls
     assert loaded >= baseline / 2
+
+
+def test_directory_receipt_replays_do_not_wake_polls(client, monkeypatch):
+    # Exact receipt replays are unthrottled 200s; they must not fan out to every waiter.
+    from directory_support import CERT
+
+    calls = []
+    monkeypatch.setattr(client.app.state.directory, "changed", lambda: calls.append(True))
+    for _ in range(3):
+        assert client.put(f"/v2/devices/{DEVICE}", json={"cert": CERT}).status_code == 200
+    assert len(calls) == 1  # only the first PUT stored a receipt
+    for _ in range(3):
+        assert client.post("/v2/revocations", json={"record": RECORD}).status_code == 200
+    assert len(calls) == 2  # only the first revocation changed state
+
+
+def test_wake_all_fan_outs_are_coalesced(client):
+    import asyncio
+
+    from orch_relay.bridge import Bridge
+
+    class Counter:
+        sets = 0
+
+        def set(self):
+            Counter.sets += 1
+
+    async def burst():
+        bridge = Bridge(client.app.state.directory)
+        bridge.waiters[("ws", WS)] = {Counter()}
+        for _ in range(200):
+            bridge.wake_all()
+            await asyncio.sleep(0.001)
+        await asyncio.sleep(0.3)
+
+    started = time.monotonic()
+    asyncio.run(burst())
+    elapsed = time.monotonic() - started
+    assert 1 <= Counter.sets <= elapsed / 0.25 + 2
+
+
+def test_pair_poll_ipv6_parent_cap(client):
+    bridge = client.app.state.bridge
+    bridge.pair_parents["2001:db8:0:100::/56"] = 32
+    r = client.get(PAIR, params={"wait": 1}, headers={"X-Forwarded-For": "2001:db8:0:1ab::1"})
+    assert r.status_code == 429 and r.json() == {"error": "quota_exceeded"}
+    assert bridge.polls == {} and bridge.pair_parents == {"2001:db8:0:100::/56": 32}
+    del bridge.pair_parents["2001:db8:0:100::/56"]
+    with ThreadPoolExecutor() as pool:
+        pending = pool.submit(
+            client.get, PAIR, params={"wait": 1}, headers={"X-Forwarded-For": "2001:db8:0:1ab::1"}
+        )
+        wait_admitted(client)
+        assert bridge.pair_parents == {"2001:db8:0:100::/56": 1}
+        assert pending.result(timeout=5).status_code == 200
+    assert bridge.polls == {} and bridge.pair_parents == {}
+
+
+def test_anonymous_pair_request_wakes_only_host_polls(client, monkeypatch):
+    from bridge_support import request
+
+    woken = []
+    monkeypatch.setattr(client.app.state.bridge, "wake", lambda *keys: woken.extend(keys))
+    fixture = request("pair_device_post")
+    from orch_relay import proto as P
+
+    r = client.post(
+        fixture["path"],
+        content=P.unb64u(fixture["body_b64u"]),
+        headers={**fixture["headers"], "X-Forwarded-For": "198.51.100.7"},
+    )
+    assert r.status_code == 202, r.text
+    assert woken == [("ws", WS)]

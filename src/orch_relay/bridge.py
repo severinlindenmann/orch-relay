@@ -101,7 +101,9 @@ def notices(con, ws):
 
 POLL_CEILING = 4096  # all concurrent long polls (protocol §19, P3-D17)
 PAIR_POLL_CEILING = 512  # anonymous pair polls, a separate share of POLL_CEILING
-PAIR_POLLS_PER_ADDRESS = 4  # per canonical client address
+PAIR_POLLS_PER_ADDRESS = 4  # per canonical client address (IPv6 /64)
+PAIR_POLLS_PER_PARENT = 32  # per IPv6 /56, so one allocation cannot fill the pair pool
+WAKE_ALL_INTERVAL = 0.25  # directory-wide wakeups are coalesced to at most 4/s
 DEVICE_POLLS = 6
 POLL_TICK = 1.0  # slow re-authorization tick for waiting polls, in seconds
 
@@ -120,6 +122,9 @@ class Bridge:
         self.d = directory
         self.polls = {}
         self.waiters = {}  # wake key -> set of asyncio.Event; touched on the event loop only
+        self.pair_parents = {}  # IPv6 /56 -> admitted pair polls
+        self.wake_all_pending = False
+        self.wake_all_last = -math.inf
         self.local = threading.local()
         self.connections = []
         self.connections_lock = threading.Lock()
@@ -153,7 +158,24 @@ class Bridge:
                 event.set()
 
     def wake_all(self):
-        """Revocations, membership and other directory commits may end any poll."""
+        """Revocations, membership and other directory commits may end any poll.
+
+        A fan-out costs one probe per waiter, so fan-outs are coalesced: however many
+        commits notify, every waiter is woken at most 1/WAKE_ALL_INTERVAL times a second.
+        """
+        if self.wake_all_pending:
+            return
+        loop = asyncio.get_running_loop()
+        delay = self.wake_all_last + WAKE_ALL_INTERVAL - loop.time()
+        if delay <= 0:
+            self.fan_out()
+        else:
+            self.wake_all_pending = True
+            loop.call_later(delay, self.fan_out)
+
+    def fan_out(self):
+        self.wake_all_pending = False
+        self.wake_all_last = asyncio.get_running_loop().time()
         for events in self.waiters.values():
             for event in events:
                 event.set()
@@ -592,20 +614,30 @@ class Bridge:
         """Concurrency caps; callers run on the event loop, so no lock is needed."""
         if sum(self.polls.values()) >= POLL_CEILING:
             refuse("overloaded", 503, 1)
+        parent = ipv6_parent(key[1]) if key[0] == "pair" else None
         if key[0] == "pair":
             if sum(v for k, v in self.polls.items() if k[0] == "pair") >= PAIR_POLL_CEILING:
                 refuse("overloaded", 503, 1)
-            if self.polls.get(key, 0) >= PAIR_POLLS_PER_ADDRESS:
+            if self.polls.get(key, 0) >= PAIR_POLLS_PER_ADDRESS or (
+                parent and self.pair_parents.get(parent, 0) >= PAIR_POLLS_PER_PARENT
+            ):
                 fail("quota_exceeded")
+            if parent:
+                self.pair_parents[parent] = self.pair_parents.get(parent, 0) + 1
         if key[0] == "device" and self.polls.get(key, 0) >= DEVICE_POLLS:
             fail("quota_exceeded")
         self.polls[key] = self.polls.get(key, 0) + 1
 
-    def committed(self, route, params, method):
-        """Wake waiting polls a successful transaction may have made ready."""
+    def committed(self, route, params, method, raw):
+        """Wake waiting polls a successful transaction may have made ready.
+
+        Each key wakes only polls the commit can ready: requests (direction 1, possibly
+        anonymous pairing) wake the workspace's host polls; responses (direction 2, from
+        the fenced holder only) wake device and pair polls on that rid.
+        """
         ws, rid = params.get("ws"), params.get("rid")
         if route in ("bridge", "pair") and method == "POST":
-            self.wake(("ws", ws), ("rid", ws, rid))
+            self.wake(("rid", ws, rid) if raw[5] == 2 else ("ws", ws))
         elif route in ("hold", "host_poll"):
             self.wake(("ws", ws))  # new generation fences; a new poll replaces the old one
         elif route == "cert_requests" and method == "POST":
@@ -677,7 +709,7 @@ class Bridge:
             token, deadline = secrets.token_hex(16), time.monotonic() + wait
             step = (route, params, request.method, bytes(raw), query, headers, peer, token)
             result, ready = await run_in_threadpool(self.transaction, *step, True)
-            self.committed(route, params, request.method)
+            self.committed(route, params, request.method, raw)
             while wait and not ready:
                 remaining = deadline - time.monotonic()
                 if remaining > 0:
@@ -709,9 +741,17 @@ class Bridge:
                 if not events:
                     del self.waiters[wake_key]
             if key is not None:
-                self.polls[key] -= 1
-                if not self.polls[key]:
-                    del self.polls[key]
+                self.release(key)
+
+    def release(self, key):
+        self.polls[key] -= 1
+        if not self.polls[key]:
+            del self.polls[key]
+        parent = ipv6_parent(key[1]) if key[0] == "pair" else None
+        if parent:
+            self.pair_parents[parent] -= 1
+            if not self.pair_parents[parent]:
+                del self.pair_parents[parent]
 
 
 def install(app):

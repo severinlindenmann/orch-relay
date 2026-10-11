@@ -728,7 +728,12 @@ class Directory:
                     result = self.dispatch(
                         con, route, ident, method, body, raw, query, headers, address, now
                     )
-            return JSONResponse(result)
+                # Fresh connection: any row change (incl. triggers) came from this commit.
+                # Unthrottled receipt replays change nothing and so wake nothing.
+                changed = con.total_changes > 0
+            response = JSONResponse(result)
+            response.changed = changed
+            return response
         except Refusal as e:
             return JSONResponse(
                 {"error": e.code, **getattr(e, "details", {})},
@@ -771,9 +776,10 @@ def install(app, data):
                 request.client.host if request.client else "unknown",
             )
             # Revocations, membership, sessions and certificates can end or ready a long poll.
+            # Only commits that changed rows notify (bridge.wake_all also coalesces).
             if (
                 directory.changed
-                and response.status_code == 200
+                and getattr(response, "changed", False)
                 and request.method != "GET"
                 and route not in ("challenge", "login", "accounts")
             ):
