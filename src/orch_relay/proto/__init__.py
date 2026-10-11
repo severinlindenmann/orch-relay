@@ -86,7 +86,7 @@ def unb64u(value, length=None):
 
 
 def unhex(value, length=16):
-    if not isinstance(value, str) or not re.fullmatch("[0-9a-f]{%d}" % (2 * length), value):
+    if not isinstance(value, str) or not re.fullmatch(rf"[0-9a-f]{{{2 * length}}}", value):
         raise ValueError("hex")
     return bytes.fromhex(value)
 

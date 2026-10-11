@@ -9,7 +9,12 @@ def test_serve_args_and_instance(tmp_path, monkeypatch):
     with mock.patch("uvicorn.run") as run:
         assert cli.main(["serve", "--host", "127.0.0.1", "--port", "8102"]) == 0
     app = run.call_args.args[0]
-    assert run.call_args.kwargs == {"host": "127.0.0.1", "port": 8102}
+    assert run.call_args.kwargs == {
+        "host": "127.0.0.1",
+        "port": 8102,
+        "workers": 1,
+        "proxy_headers": False,
+    }
     assert app.state.instance == "int"
 
 

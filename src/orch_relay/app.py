@@ -3,8 +3,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from starlette.concurrency import run_in_threadpool
 
 from . import __version__, db
+from .directory import install
 
 DEFAULT_DATA = "./data"
 
@@ -19,12 +21,13 @@ def create_app(data_dir: Path | str | None = None, instance: str | None = None) 
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        db.migrate(data / db.DB_NAME)
+        await run_in_threadpool(db.migrate, data / db.DB_NAME)
         yield
 
     app = FastAPI(title="orch-relay", version=__version__, lifespan=lifespan)
     app.state.data_dir = data
     app.state.instance = name
+    install(app, data)
 
     @app.get("/healthz")
     def healthz() -> dict:
