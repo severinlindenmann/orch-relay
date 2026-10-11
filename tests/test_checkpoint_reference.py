@@ -53,7 +53,7 @@ def test_f1_event_signing_context_matches_portable_f1_vectors():
 def test_strict_parse_precedes_any_mutation(raw):
     state = copy.deepcopy(CASES["first_checkpoint_full_proof"]["state"])
     before = copy.deepcopy(state)
-    assert C.dispatch(S, state, "publish", raw, now_ms=1790000000000) == {
+    assert C.dispatch(S, state, "publish", raw, now_ms=1790000000000, generation=1) == {
         "status": 400,
         "error": "malformed",
     }
@@ -67,7 +67,8 @@ def test_strict_parse_precedes_any_mutation(raw):
 def test_actual_transport_byte_caps_before_parsing(op, cap, status):
     state = copy.deepcopy(CASES["first_checkpoint_full_proof"]["state"])
     before = copy.deepcopy(state)
-    assert C.dispatch(S, state, op, b" " * (cap + 1)) == {"status": status, "error": "too_large"}
+    extra = {"generation": 1} if op == "publish" else {}
+    assert C.dispatch(S, state, op, b" " * (cap + 1), **extra) == {"status": status, "error": "too_large"}
     assert C.contract(state) == C.contract(before)
 
 
@@ -172,7 +173,7 @@ def test_restore_covers_revoked_device_first_introduced_by_payload():
 def test_historical_owner_rejects_bundle_revocation(invalid_evidence):
     case = CASES["B1_signer_self_revoked_in_payload"]
     state = copy.deepcopy(case["state"])
-    bundle = copy.deepcopy(case["steps"][-1]["input"]["body"]["restore"])
+    bundle = copy.deepcopy(case["steps"][-1]["input"]["body"])
     if invalid_evidence:
         bundle["line"]["revocations"][0]["revocation"]["sig"] = R.b64u(bytes(64))
     before = copy.deepcopy(state)

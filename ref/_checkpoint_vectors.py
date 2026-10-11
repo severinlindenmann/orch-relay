@@ -37,7 +37,10 @@ def add_checkpoints(out):
         device = cert['o']['device_id']
         root = C.digest(b'FAKE genesis')
         heads = [root] + [C.digest(f'FAKE original {i}'.encode()) for i in range(2, 5)]
-        blank = C.initial(ws, wsk, pk, delegation, {device: ['look', 'decide', 'operate']})
+        bob_pk = R.b64u(bytes.fromhex(v['keys']['person_bob.sig']['pub']))
+        registry = {device: cert['o']['person_id']}
+        person_keys = {cert['o']['person_id']: pk, v['ids']['person_bob']: bob_pk}
+        blank = C.initial(ws, wsk, pk, delegation, {device: ['look', 'decide', 'operate']}, registry, person_keys)
         pin = R.sign_object(S, keys['phone.sig'], {'v': 2, 'suite': S.id, 'kind': 'genesis_pin',
                                                    'workspace_id': ws, 'wsk_pub': wsk, 'genesis': root})
         pin_body = {'pin': pin, 'cert': cert}
@@ -49,6 +52,8 @@ def add_checkpoints(out):
             return c, copy.deepcopy(state)
 
         def run(c, state, op, body=None, error=None, now=NOW, **args):
+            if op == 'publish':
+                args.setdefault('generation', 1)  # the Orch-Holder generation is required
             inp = {'op': op, 'now_ms': now, **args}
             if body is not None:
                 inp['body'] = body
@@ -283,9 +288,17 @@ def add_checkpoints(out):
         c, state = new('ticket_restore', pinned)
         ticket_base = cp(1, tickets={UID: entry(heads)})
         run(c, state, 'publish', staged(c, state, ticket_base, [page('appended', 'workspace', C.EMPTY, heads), page('appended', UID, C.EMPTY, heads)]))
+        ticket_base_state = copy.deepcopy(state)
         target, b = restore(source=ticket_base, log=UID)
         offer_restore(c, state, target, b)
         ticket_state = copy.deepcopy(state)
+        # Review F4: a ticket restore has no coverage check; owner policy alone refuses a relay-revoked signer.
+        revoked_signer = copy.deepcopy(ticket_base_state)
+        revoked_signer['revocations'][device] = R.sign_object(S, keys['person_alice.sig'], {'v': 2, 'suite': S.id,
+            'kind': 'revocation', 'person_id': cert['o']['person_id'], 'device_id': device, 'revoked_ms': NOW - 1000,
+            'reason': 'lost'})
+        c, state = new('ticket_restore_by_relay_revoked_signer_refused', revoked_signer)
+        offer_restore(c, state, target, b, 'restore_not_owner')
         c, state = new('ticket_entry_cannot_disappear', ticket_state)
         run(c, state, 'publish', staged(c, state, cp(3)), error='chain_diverged')
 
@@ -360,6 +373,7 @@ def add_checkpoints(out):
             'person_id': v['ids']['person_alice'], 'device_id': device, 'revoked_ms': NOW, 'reason': 'lost'})
         target, b = restore(revocations=[{'revocation': self_rev, 'device_cert': cert, 'pk_pub': pk}])
         offer_restore(c, state, target, b, 'restore_not_owner')
+        run(c, state, 'owner_policy', b, historical=True, error='restore_not_owner')
         c, state = new('retained_page_from_stored_branch_node', accepted)
         offer_restore(c, state, t, bundle, pages=[page('retained', 'workspace', entry(heads[:1]), heads[1:2]),
             page('abandoned', 'workspace', entry(heads[:2]), heads[2:])])
@@ -431,12 +445,12 @@ def add_checkpoints(out):
         run(c, state, 'publish', {'checkpoint': bad, 'source_hash': None}, error='wrong_suite')
         # Review 5: a revoked device of a non-owner person, evidenced by its self-certifying pk_pub.
         bob_cert = v['certs']['signed']['bob_phone']
-        bob_pk = R.b64u(bytes.fromhex(v['keys']['person_bob.sig']['pub']))
         bob_rev = R.sign_object(S, keys['person_bob.sig'], {'v': 2, 'suite': S.id, 'kind': 'revocation',
             'person_id': v['ids']['person_bob'], 'device_id': bob_cert['o']['device_id'], 'revoked_ms': NOW - 1000, 'reason': 'lost'})
         foreign = copy.deepcopy(accepted)
         foreign['ever_devices'] = sorted(foreign['ever_devices'] + [bob_cert['o']['device_id']])
         foreign['revocations'][bob_cert['o']['device_id']] = bob_rev
+        foreign['registry'][bob_cert['o']['device_id']] = v['ids']['person_bob']
         for name, pk_pub, error in [('B1_foreign_person_self_certifying', bob_pk, None),
                                     ('B1_foreign_person_wrong_key', pk, 'restore_invalid')]:
             c, state = new(name, foreign)
@@ -449,7 +463,7 @@ def add_checkpoints(out):
         laptop_id = other['o']['device_id']
         with_laptop = copy.deepcopy(accepted)
         with_laptop['members'][laptop_id] = ['look', 'decide']
-        with_laptop['device_persons'][laptop_id] = v['ids']['person_alice']
+        with_laptop['registry'][laptop_id] = v['ids']['person_alice']  # registered after initial: read live
         with_laptop['ever_devices'] = sorted(with_laptop['ever_devices'] + [laptop_id])
         forged_cert = R.sign_object(S, keys['person_bob.sig'], {**other['o'], 'person_id': v['ids']['person_bob']})
         forged_rev = R.sign_object(S, keys['person_bob.sig'], {'v': 2, 'suite': S.id, 'kind': 'revocation',
@@ -479,15 +493,20 @@ def add_checkpoints(out):
         wrong_root = [C.digest(b'FAKE wrong root'), heads[1]]
         target, b = restore(1, source=None, prefix=wrong_root)
         offer_restore(c, state, target, b, 'restore_invalid', pages=[page('retained', 'workspace', C.EMPTY, wrong_root)])
-        # Card binding: the bundle's delegation is the card's, byte for byte.
+        # Card binding: the bundle's delegation has the card's content (orch-52 24305776), not other content.
+        c, state = new('restore_delegation_other_content_than_the_card', accepted)
+        b = copy.deepcopy(bundle)
+        b['authz']['delegation'] = R.sign_object(S, keys['person_alice.sig'], {**delegation['o'], 'issued_ms': delegation['o']['issued_ms'] + 1})
+        offer_restore(c, state, t, b, 'restore_not_owner')
         if S.id == 2:
+            # A re-signed (here: malleated ECDSA) delegation with the same content is the same delegation.
             raw = R.unb64u(delegation['sig'])
             n = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
             twin = {**delegation, 'sig': R.b64u(raw[:32] + (n - int.from_bytes(raw[32:], 'big')).to_bytes(32, 'big'))}
             assert R.verify_delegation(S, twin, R.unb64u(pk)).get('ok') == delegation['o']
-            c, state = new('restore_delegation_not_the_card_bytes', accepted)
+            c, state = new('restore_delegation_resigned_bytes_accepted', accepted)
             b = copy.deepcopy(bundle); b['authz']['delegation'] = twin
-            offer_restore(c, state, t, b, 'restore_not_owner')
+            offer_restore(c, state, t, b)
 
         # Review 3: the final request names its log; only that signed context is verified.
         c, state = new('restore_log_missing', accepted)
@@ -526,8 +545,21 @@ def add_checkpoints(out):
         for i in range(C.FAILURE_BUDGET):
             run(c, state, 'publish', body, error='restore_invalid', now=NOW + i)
         run(c, state, 'publish', good, error='quota_exceeded', now=NOW + 20)
-        run(c, state, 'publish', good, error='fenced', generation=-1, now=NOW + 21)
-        run(c, state, 'publish', good, generation=1, now=NOW + 22)
+        run(c, state, 'publish', good, error='fenced', generation=0, now=NOW + 21)
+        run(c, state, 'publish', good, generation=2, now=NOW + 22)
+        # Review F1: takeovers stay unlimited (P3-D10), but refusals are bounded per workspace-hour.
+        c, state = new('publish_budget_workspace_ceiling_across_takeovers', accepted)
+        body = staged(c, state, t, ab_pages)
+        body['restore'] = bad
+        per = C.WORKSPACE_FAILURE_CEILING // C.FAILURE_BUDGET
+        for g in range(per):
+            for i in range(C.FAILURE_BUDGET):
+                run(c, state, 'publish', body, error='restore_invalid', generation=2 + g, now=NOW + 100 * g + i)
+        run(c, state, 'publish', good, error='quota_exceeded', generation=2 + per, now=NOW + 1000)
+        staged(c, state, t, ab_pages, now=NOW + C.HOUR + 1000)
+        run(c, state, 'publish', good, generation=2 + per, now=NOW + C.HOUR + 1000)
+        c, state = new('publish_generation_required', accepted)
+        run(c, state, 'publish', good, error='malformed', generation=None)
 
         # Review 10: a member releases only the pin whose offer_id it names; the host releases any.
         c, state = new('baseline_member_release_needs_offer_id', baseline_state)
@@ -562,13 +594,16 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     laptop_id = laptop['o']['device_id']
     device = x['cert']['o']['device_id']
 
-    def dev(held=None, revocations=None, local=None):
-        d = C.device_initial(x['ws'], x['wsk'], x['pk'], x['root'], x['delegation'], held)
+    def dev(held=None, revocations=None, local=None, devices=None):
+        known = {device: {'person_id': x['cert']['o']['person_id'], 'pk_pub': x['pk']}, **(devices or {})}
+        d = C.device_initial(x['ws'], x['wsk'], x['pk'], x['root'], x['delegation'], known, held)
         d['revocations'] = revocations or {}
         d['local'] = local or {}
         return d
 
     def apply(state, op, body=None, now=NOW, **args):
+        if op == 'publish':
+            args.setdefault('generation', 1)
         result = C.dispatch(S, state, op, body, now_ms=now, **args)
         assert result['status'] == 200, result
         return result
@@ -724,7 +759,7 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     t1, b1 = restore(2, source=ticket_base, log=UID, ident='01KKKKKKKKKKKKKKKKKKKKKKKK', cert_=laptop, key='laptop.sig')
     publish(late, t1, [page('abandoned', UID, entry(heads[:2]), heads[2:])], b1)
     after_t1 = copy.deepcopy(late)
-    assert laptop_id not in pinned['device_persons'] and after_t1['device_persons'][laptop_id] == x['cert']['o']['person_id']
+    assert laptop_id not in pinned['registry'] and after_t1['bound'][laptop_id] == x['cert']['o']['person_id']
     laptop_bad = {'revocation': x['rev']('compromised'), 'device_cert': laptop, 'pk_pub': x['pk']}
     t2, b2 = restore(3, source=t1, ident='01MMMMMMMMMMMMMMMMMMMMMMMM', revocations=[laptop_bad])
     publish(late, t2, ab, b2)
@@ -743,6 +778,40 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     told['local'] = {laptop_id: laptop_bad['revocation']}
     again = run(c, st, 'device_sync', told, endpoint=C.checkpoint_hash(t1))
     assert again['device']['alarms'] == [laptop_id]
+    # Review F6: learning it out of band alarms at once, without any walk.
+    c, st = new('device_learn_compromised_alarms_at_once', late)
+    first = run(c, st, 'device_sync', dev(ticket_base), endpoint=C.checkpoint_hash(t1))
+    learned = run(c, st, 'device_learn', {'device': first['device'], 'revocation': laptop_bad['revocation']})
+    assert learned['device']['alarms'] == [laptop_id]
+    # Review F2: the device applied t1 signed by the laptop; a forged bundle then carries another person's
+    # compromised revocation of the laptop.
+    forged_late = copy.deepcopy(after_t1)
+    bob_cert_l = R.sign_object(S, keys['person_bob.sig'], {**laptop['o'], 'person_id': x['bob_id']})
+    bob_rev_l = R.sign_object(S, keys['person_bob.sig'], {'v': 2, 'suite': S.id, 'kind': 'revocation',
+        'person_id': x['bob_id'], 'device_id': laptop_id, 'revoked_ms': NOW - 1000, 'reason': 'compromised'})
+    tf, bf = restore(3, source=t1, ident='01SSSSSSSSSSSSSSSSSSSSSSSS',
+                     revocations=[{'revocation': bob_rev_l, 'device_cert': bob_cert_l, 'pk_pub': x['bob_pk']}])
+    forge(forged_late, tf, 'workspace', entry(heads[:2]), [C.event_head(bf['line'])], bf, t1)
+    sync('walk_evidence_for_applied_signer_from_another_person', forged_late, dev(ticket_base),
+         error='chain_diverged')
+    # Review F3: self-certified evidence for a device the registry later binds to another person is discarded.
+    q_pub = R.b64u(bytes.fromhex(v['keys']['intruder.sig']['pub']))
+    q_id = R.person_id(S, R.unb64u(q_pub)).hex()
+    q_cert = R.sign_object(S, keys['intruder.sig'], {**laptop['o'], 'person_id': q_id})
+    q_rev = R.sign_object(S, keys['intruder.sig'], {'v': 2, 'suite': S.id, 'kind': 'revocation', 'person_id': q_id,
+        'device_id': laptop_id, 'revoked_ms': NOW - 1000, 'reason': 'compromised'})
+    selfcert = copy.deepcopy(accepted)
+    r1, rb1 = restore(2, ident='01TTTTTTTTTTTTTTTTTTTTTTTT',
+                      revocations=[{'revocation': q_rev, 'device_cert': q_cert, 'pk_pub': q_pub}])
+    publish(selfcert, r1, ab, rb1)
+    assert selfcert['self_certified'][laptop_id]['person_id'] == q_id
+    selfcert['registry'][laptop_id] = x['cert']['o']['person_id']  # the laptop registers as the owner's
+    c, st = new('B1_self_certified_then_registered_is_discarded', selfcert)
+    r2, rb2 = restore(3, source=r1, prefix=heads[:2] + [C.event_head(rb1['line'])], ident='01VVVVVVVVVVVVVVVVVVVVVVVV',
+                      revocations=[{'revocation': x['rev']('lost'), 'device_cert': laptop, 'pk_pub': x['pk']}])
+    offer_restore(c, st, r2, rb2, pages=[])
+    assert st['revocations'][laptop_id]['o']['person_id'] == x['cert']['o']['person_id']
+    assert st['discarded'] == [{'device_id': laptop_id, 'person_id': q_id}]
     # Review N1 at the relay: a device the relay learned as a restore signer is bound to its person.
     signer_known = copy.deepcopy(ticket_held)
     signer_known['members'] = members
@@ -756,12 +825,12 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     offer_restore(c, st, tx, bx, 'restore_invalid')
 
     # Review N2: device-only checks, each against a forged relay state where an honest relay would refuse.
-    def forged_restore(name, error='chain_diverged', source=base, start=accepted, **kw):
+    def forged_restore(name, error='chain_diverged', source=base, start=accepted, device_=None, **kw):
         state = copy.deepcopy(start)
         tf, bf = restore(ident='01PPPPPPPPPPPPPPPPPPPPPPPP', **kw)
         tip = kw.get('tip') or C.event_head(bf['line'])
         forge(state, tf, 'workspace', entry(heads[:2]), [tip], bf, source)
-        sync(name, state, dev(base), error=error)
+        sync(name, state, device_ or dev(base), error=error)
     junk = R.b64u(S.sign(keys['laptop.sig'], b'FAKE not the event'))
     forged_restore('walk_person_signature_required', person_sig=junk)
     forged_restore('walk_target_over_another_head', tip=C.digest(b'FAKE another event'))
@@ -773,6 +842,46 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     forged_restore('walk_restore_shape_required', modifications={'type': 'member.added'})
     other_card = R.sign_object(S, keys['person_alice.sig'], {**x['delegation']['o'], 'issued_ms': x['delegation']['o']['issued_ms'] + 1})
     forged_restore('walk_delegation_is_the_pinned_card', delegation_=other_card)
+    # Review J26 as a vector: a line over the 524,288-byte cap (many abandoned decision ids).
+    many = [f'01{i:024d}' for i in range(C.LINE_CAP // 29 + 200)]
+    forged_restore('walk_line_over_cap_refused', modifications={'abandoned_decisions': many})
+    # Review F2 / orch-52 #377: evidence for a device known only as active (pairing member list) must come
+    # from its person.
+    bob_cert_laptop = R.sign_object(S, keys['person_bob.sig'], {**laptop['o'], 'person_id': x['bob_id']})
+    bob_rev_laptop = R.sign_object(S, keys['person_bob.sig'], {'v': 2, 'suite': S.id, 'kind': 'revocation',
+        'person_id': x['bob_id'], 'device_id': laptop_id, 'revoked_ms': NOW - 1000, 'reason': 'compromised'})
+    bob_laptop = {'revocation': bob_rev_laptop, 'device_cert': bob_cert_laptop, 'pk_pub': x['bob_pk']}
+    paired = dev(base, devices={laptop_id: {'person_id': x['cert']['o']['person_id'], 'pk_pub': x['pk']}})
+    forged_restore('walk_evidence_for_known_active_device_from_another_person', revocations=[bob_laptop],
+                   device_=paired)
+    forged_restore('walk_evidence_for_unknown_device_self_certifying', error=None, revocations=[bob_laptop])
+    forged_restore('walk_evidence_for_locally_revoked_device_from_another_person', revocations=[bob_laptop],
+                   device_=dev(base, local={laptop_id: x['rev']('lost')}))
+    # Review F5/J35: chain-held evidence binds to the stored key, not only the person.
+    covered = copy.deepcopy(accepted)
+    covered['ever_devices'] = sorted(covered['ever_devices'] + [laptop_id])
+    covered['revocations'][laptop_id] = x['rev']('lost')
+    tcov, bcov = restore(2, ident='01WWWWWWWWWWWWWWWWWWWWWWWW',
+                         revocations=[{'revocation': x['rev']('lost'), 'device_cert': laptop, 'pk_pub': x['pk']}])
+    publish(covered, tcov, ab, bcov)
+    for name, key, error in [('walk_chain_evidence_stored_key_matches', x['pk'], None),
+                             ('walk_chain_evidence_under_another_stored_key', x['bob_pk'], 'chain_diverged')]:
+        sync(name, covered, dev(base, {laptop_id: {'revocation': x['rev']('lost'), 'pk_pub': key}}), error=error)
+    # Review W06 as a vector: a resumed endpoint must be exactly the requested hash.
+    resumed = copy.deepcopy(grown)
+    resumed['checkpoints'][C.checkpoint_hash(base)] = {'checkpoint': grown['held'], 'superseded_ms': None,
+                                                      'permanent': True}
+    sync('walk_resumed_endpoint_is_the_requested_hash', resumed, dev(base), error='chain_diverged',
+         endpoint=C.checkpoint_hash(base))
+    # Scripted relay pages (review F5): the device's own guards against a relay that pages badly.
+    two_bundles = two['transitions']
+    sync('walk_ignored_never_after_walking_beyond_endpoint', two, dev(base), error='chain_diverged',
+         endpoint=C.checkpoint_hash(t), script={'transitions': [{'transitions': two_bundles, 'next': None}]})
+    sync('walk_proof_empty_page_with_next_refused', grown, dev(base), error='sync_incomplete',
+         script={'proof': [{'heads': [], 'next': entry(heads)['acc']}]})
+    sync('walk_transitions_cursor_must_advance', two, dev(base), error='sync_incomplete',
+         script={'transitions': [{'transitions': [], 'next': '1'}]})
+    sync('walk_device_head_ceiling', grown, dev(base), error='sync_incomplete', max_heads=1)
     no_ws_seq = copy.deepcopy(ticket_held)
     tw, bw = restore(2, source=ticket_base, log=UID, ident='01RRRRRRRRRRRRRRRRRRRRRRRR', omit=('ws_seq',))
     forge(no_ws_seq, tw, UID, entry(heads[:2]), [C.event_head(bw['line'])], bw, ticket_base)

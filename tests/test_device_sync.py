@@ -37,7 +37,7 @@ def test_extract_matches_the_f1_snapshot_once_resynced():
     assert all(full[k] == F1[k] for k in src["keys"])
 
 
-F52 = json.loads((HERE / "vectors/f1_receiver_56f2b8a6.json").read_text())
+F52 = json.loads((HERE / "vectors/f1_receiver_orch52.json").read_text())
 
 
 def judge(f1, held, offered, now, **kw):
@@ -87,7 +87,7 @@ def test_f1_workspace_n_offers_against_reference_judge(c):
 
 @by_name(F52["transition_cases"])
 def test_orch52_transition_cases_against_reference_judge(c):
-    """orch-52's receiver cases (fix/restore-receiver-vectors 56f2b8a6, not yet merged): one defect each."""
+    """orch-52's receiver cases (fix/restore-receiver-vectors head, not yet merged): one defect each."""
     kw = {
         "restore": c["restore"],
         "applied": c["applied"],
@@ -260,7 +260,17 @@ def test_budget_not_charged_to_a_fenced_holder_and_reset_per_generation():
     state = copy.deepcopy(case["state"])
     results = [C.dispatch(S, state, **s["input"]) for s in case["steps"]]
     assert [r.get("error") for r in results[-3:]] == ["quota_exceeded", "fenced", None]
-    assert state["generation"] == 1 and state["failures"] == []
+    # A newer generation gets its own slice; the old generation's refusals still count toward the ceiling.
+    assert state["generation"] == 2 and len(state["failures"]) == C.FAILURE_BUDGET
+
+
+def test_takeovers_cannot_exceed_the_workspace_ceiling():
+    case = CASES["publish_budget_workspace_ceiling_across_takeovers"]
+    state = copy.deepcopy(case["state"])
+    results = [C.dispatch(S, state, **s["input"]) for s in case["steps"]]
+    errors = [r.get("error") for r in results]
+    assert errors.count("restore_invalid") == C.WORKSPACE_FAILURE_CEILING
+    assert "quota_exceeded" in errors and results[-1]["status"] == 200
 
 
 def test_device_refuses_a_restore_line_over_the_line_cap(monkeypatch):
@@ -294,13 +304,51 @@ def test_known_evidence_must_match_the_receivers_stored_key():
     )
 
 
-def test_initial_binds_member_devices_to_their_person():
-    state = CASES["first_checkpoint_full_proof"]["state"]
-    owner = state["delegation"]["o"]["owner_person_id"]
-    fresh = C.initial(state["ws"], state["wsk_pub"], state["owner_pk"], state["delegation"], {"d1": [], "d2": []})
-    assert fresh["device_persons"] == {"d1": owner, "d2": owner}
-    named = C.initial(state["ws"], state["wsk_pub"], state["owner_pk"], state["delegation"], {"d1": []}, {"d1": "p"})
-    assert named["device_persons"] == {"d1": "p"}
+def test_initial_requires_registered_members_and_the_owner_key():
+    st = CASES["first_checkpoint_full_proof"]["state"]
+    owner = st["delegation"]["o"]["owner_person_id"]
+    args = (st["ws"], st["wsk_pub"], st["owner_pk"], st["delegation"])
+    fresh = C.initial(*args, {"d1": []}, {"d1": owner}, {owner: st["owner_pk"]})
+    assert (
+        fresh["registry"] == {"d1": owner}
+        and fresh["bound"] == {}
+        and fresh["self_certified"] == {}
+    )
+    with pytest.raises(C.Refusal):
+        C.initial(
+            *args, {"d1": []}, {}, {owner: st["owner_pk"]}
+        )  # an unregistered member never defaults
+    with pytest.raises(C.Refusal):
+        C.initial(*args, {"d1": []}, {"d1": owner}, {})
+
+
+def test_known_holder_is_strict_about_its_state():
+    st = copy.deepcopy(CASES["first_checkpoint_full_proof"]["state"])
+    del st["registry"]
+    with pytest.raises(KeyError):
+        C.known_holder(st, "d1")
+
+
+def test_device_binds_evidence_for_a_known_active_device():
+    """orch-52 #377 / re-review F2: the PoC, as a test. The receiver knows the device only as active."""
+    c = next(
+        x
+        for x in F52["transition_cases"]
+        if x["name"] == "foreign_evidence_for_a_known_revoked_device"
+    )
+    kw = {
+        "restore": c["restore"],
+        "applied": c["applied"],
+        "proofs": c["proofs"],
+        "card": c["pinned_delegation"],
+    }
+    rev = c["known_revocations"][0]["revocation"]["o"]
+    assert (
+        judge(F52, c["held"], c["offered"], c["now"], known=[], **kw)[0] == "ok"
+    )  # nothing known: accepted
+    active = {rev["device_id"]: {"person_id": rev["person_id"]}}
+    got = judge(F52, c["held"], c["offered"], c["now"], known=[], known_devices=active, **kw)
+    assert got == ("chain.diverged", None)
 
 
 def test_resumed_endpoint_must_be_the_requested_hash(monkeypatch):
@@ -316,3 +364,39 @@ def test_resumed_endpoint_must_be_the_requested_hash(monkeypatch):
 
     monkeypatch.setattr(C, "read", read)
     assert C.dispatch(S, state, **step) == {"status": 409, "error": "chain_diverged"}
+
+
+def test_device_binds_evidence_for_a_known_device_to_its_stored_key():
+    c = next(x for x in F52["transition_cases"] if x["name"] == "receiver_retired_to_lost")
+    kw = {
+        "restore": c["restore"],
+        "applied": c["applied"],
+        "proofs": c["proofs"],
+        "card": c["pinned_delegation"],
+    }
+    item = c["restore"]["event"]["revocations"][0]
+    d, person = item["revocation"]["o"]["device_id"], item["revocation"]["o"]["person_id"]
+    ok = {d: {"person_id": person, "pk_pub": item["pk_pub"]}}
+    assert (
+        judge(
+            F52,
+            c["held"],
+            c["offered"],
+            c["now"],
+            known=c["known_revocations"],
+            known_devices=ok,
+            **kw,
+        )[0]
+        == "ok"
+    )
+    bad = {d: {"person_id": person, "pk_pub": c["restore"]["pk_pub"]}}
+    got = judge(
+        F52,
+        c["held"],
+        c["offered"],
+        c["now"],
+        known=c["known_revocations"],
+        known_devices=bad,
+        **kw,
+    )
+    assert got == ("chain.diverged", None)

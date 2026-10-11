@@ -2,9 +2,9 @@
  "source": {
   "repo": "orch-core",
   "path": "plugins/orch-core/tests/vectors/f1/checkpoint.json",
-  "branch": "fix/restore-receiver-vectors (orch-52, unmerged)",
-  "commit": "56f2b8a67b7a1b1fcb0dd25b4ab06671516c25f2",
-  "sha256": "27a21464638e81c0383d9e323ca345ba8599d530d31bfb5191b378b6a2a05932",
+  "branch": "fix/restore-receiver-vectors (orch-52, unmerged; head when vendored)",
+  "commit": "24305776d9074730ab33883ae2b6c2ac62482fb2",
+  "sha256": "9b8ea3cb2f1d57d658c95cd04724370f28a62cbef323ce1457e1d848f4d58693",
   "keys": [
    "workspace_id",
    "wsk_pub",
@@ -629,6 +629,242 @@
   {
    "checkpoint": {
     "o": {
+     "at": "2026-10-10T10:03:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": true,
+     "suite": 2,
+     "tickets": {
+      "01J9ZK4Q7M3R8T2V6X0B5N1C9D": {
+       "acc": "sha256:c1eead5cce3ce81e75bec0f13ade24aa2da04cdf73a20421cffa09b382ddc578",
+       "head": "sha256:08d494b703090846a430d99f8753f7e56621c0341517a5aeab9ad21deacc2e42",
+       "seq": 4
+      }
+     },
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:399058d6a11ca75f109a8eec93ba2d58a309f3b0b781252ac917bf6ec59a6de4",
+      "head": "sha256:c5bff55dc4158717ece7433499b52f79b344c00af79a071210a79625d94dbf2f",
+      "seq": 4
+     }
+    },
+    "sig": "SlkcQXmz4wevOg7ABqKnEhn1Is970CQSs36FHCbMLXzHpE3WjtesVQpEgNP3O8riAyll-qEBJMCfLkmcuapieA"
+   },
+   "expect": "chain.diverged",
+   "name": "signed_offer_n_true",
+   "now": "2026-10-10T12:00:00Z"
+  },
+  {
+   "checkpoint": {
+    "o": {
+     "at": "2026-10-10T10:03:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": "1",
+     "suite": 2,
+     "tickets": {
+      "01J9ZK4Q7M3R8T2V6X0B5N1C9D": {
+       "acc": "sha256:c1eead5cce3ce81e75bec0f13ade24aa2da04cdf73a20421cffa09b382ddc578",
+       "head": "sha256:08d494b703090846a430d99f8753f7e56621c0341517a5aeab9ad21deacc2e42",
+       "seq": 4
+      }
+     },
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:399058d6a11ca75f109a8eec93ba2d58a309f3b0b781252ac917bf6ec59a6de4",
+      "head": "sha256:c5bff55dc4158717ece7433499b52f79b344c00af79a071210a79625d94dbf2f",
+      "seq": 4
+     }
+    },
+    "sig": "DNHvcRthUibDBLhat_cnesKcdV0SuDZ5v-eRoDSS5fCqfcbcVcQxu-iyXzdS0egWtePEhps8sIFHlfG4iOw8AA"
+   },
+   "expect": "chain.diverged",
+   "name": "signed_offer_n_string",
+   "now": "2026-10-10T12:00:00Z"
+  },
+  {
+   "checkpoint": {
+    "o": {
+     "at": "2026-10-10T10:03:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {
+      "01J9ZK4Q7M3R8T2V6X0B5N1C9D": {
+       "acc": "sha256:c1eead5cce3ce81e75bec0f13ade24aa2da04cdf73a20421cffa09b382ddc578",
+       "head": "sha256:08d494b703090846a430d99f8753f7e56621c0341517a5aeab9ad21deacc2e42",
+       "seq": 4
+      }
+     },
+     "v": 3,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:399058d6a11ca75f109a8eec93ba2d58a309f3b0b781252ac917bf6ec59a6de4",
+      "head": "sha256:c5bff55dc4158717ece7433499b52f79b344c00af79a071210a79625d94dbf2f",
+      "seq": 4
+     }
+    },
+    "sig": "heA5yj4fmYAY0r4BwA4zhLIf0MVaJv-gS-7oRVoHbmsTQXYdDSV5xh4JsQj0MJEj4tzFiQTDSkmFFqvw1egRRQ"
+   },
+   "expect": "chain.diverged",
+   "name": "signed_offer_version_3",
+   "now": "2026-10-10T12:00:00Z"
+  },
+  {
+   "checkpoint": {
+    "o": {
+     "at": "2026-10-10T10:03:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "note": "x",
+     "suite": 2,
+     "tickets": {
+      "01J9ZK4Q7M3R8T2V6X0B5N1C9D": {
+       "acc": "sha256:c1eead5cce3ce81e75bec0f13ade24aa2da04cdf73a20421cffa09b382ddc578",
+       "head": "sha256:08d494b703090846a430d99f8753f7e56621c0341517a5aeab9ad21deacc2e42",
+       "seq": 4
+      }
+     },
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:399058d6a11ca75f109a8eec93ba2d58a309f3b0b781252ac917bf6ec59a6de4",
+      "head": "sha256:c5bff55dc4158717ece7433499b52f79b344c00af79a071210a79625d94dbf2f",
+      "seq": 4
+     }
+    },
+    "sig": "9obZl9rmfyF8WV-4l-SH_AsDo5GrKmilwwHYYTLWCfONNmT2USoYO8LeDxx_z1FvMgwpd3mUzuEof7q1mSK1Dw"
+   },
+   "expect": "chain.diverged",
+   "name": "signed_offer_extra_key",
+   "now": "2026-10-10T12:00:00Z"
+  },
+  {
+   "checkpoint": {
+    "o": {
+     "at": "2026-10-10T10:03:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:399058d6a11ca75f109a8eec93ba2d58a309f3b0b781252ac917bf6ec59a6de4",
+      "head": "sha256:c5bff55dc4158717ece7433499b52f79b344c00af79a071210a79625d94dbf2f",
+      "seq": 4
+     }
+    },
+    "sig": "OJ9DkphQFKHU9qU13LvPya3BrG6ld8InXnOHIHu19Gj_oDuq0huWfX3UbQ6BxncaCkzssGsqvEDvyLFGqVZIeA"
+   },
+   "expect": "chain.diverged",
+   "name": "signed_offer_missing_tickets",
+   "now": "2026-10-10T12:00:00Z"
+  },
+  {
+   "checkpoint": {
+    "o": {
+     "at": "2026-10-10T10:03:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {
+      "01J9ZK4Q7M3R8T2V6X0B5N1C9D": {
+       "acc": "sha256:eb7c5548b55ff5ec722bae237431af9369a4cd92bcdbe589ce27d378a371408d",
+       "head": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+       "seq": 6
+      }
+     },
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:399058d6a11ca75f109a8eec93ba2d58a309f3b0b781252ac917bf6ec59a6de4",
+      "head": "sha256:c5bff55dc4158717ece7433499b52f79b344c00af79a071210a79625d94dbf2f",
+      "seq": 4
+     }
+    },
+    "sig": "RkkecmCluxSWyaFMuyU7XG22F7GHkF7kHbOw479cSJ4ASpMVeWh1MFeIFCxWyNo--Qtqdh6Yxvcbf2bGx48dBg"
+   },
+   "expect": "sync.incomplete",
+   "name": "growth_seq_skip_is_incomplete",
+   "now": "2026-10-10T12:00:00Z",
+   "proofs": {
+    "01J9ZK4Q7M3R8T2V6X0B5N1C9D": [
+     "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+    ]
+   }
+  },
+  {
+   "checkpoint": {
+    "o": {
+     "at": "2026-10-10T10:03:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {
+      "01J9ZK4Q7M3R8T2V6X0B5N1C9D": {
+       "acc": "sha256:eb7c5548b55ff5ec722bae237431af9369a4cd92bcdbe589ce27d378a371408d",
+       "head": "sha256:6767676767676767676767676767676767676767676767676767676767676767",
+       "seq": 5
+      }
+     },
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:399058d6a11ca75f109a8eec93ba2d58a309f3b0b781252ac917bf6ec59a6de4",
+      "head": "sha256:c5bff55dc4158717ece7433499b52f79b344c00af79a071210a79625d94dbf2f",
+      "seq": 4
+     }
+    },
+    "sig": "J61MsjeKEodVY6ATO3iJUTveGNi7qvXSfdnZ2aKKG5bwK-1f_fElyFkRmS62KKRyUb1VQEQDETwFzFcfHEjN6A"
+   },
+   "expect": "sync.incomplete",
+   "name": "growth_wrong_last_head_is_incomplete",
+   "now": "2026-10-10T12:00:00Z",
+   "proofs": {
+    "01J9ZK4Q7M3R8T2V6X0B5N1C9D": [
+     "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+    ]
+   }
+  },
+  {
+   "checkpoint": {
+    "o": {
+     "at": "2026-10-10T10:10:00Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {
+      "01J9ZK4Q7M3R8T2V6X0B5N1C9D": {
+       "acc": "sha256:c1eead5cce3ce81e75bec0f13ade24aa2da04cdf73a20421cffa09b382ddc578",
+       "head": "sha256:08d494b703090846a430d99f8753f7e56621c0341517a5aeab9ad21deacc2e42",
+       "seq": 4
+      }
+     },
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:399058d6a11ca75f109a8eec93ba2d58a309f3b0b781252ac917bf6ec59a6de4",
+      "head": "sha256:c5bff55dc4158717ece7433499b52f79b344c00af79a071210a79625d94dbf2f",
+      "seq": 4
+     }
+    },
+    "sig": "265oLpZs8bChbL5o58cUZBHEIV9bi3dD6qT7k26zr5_JYftv2L3hFxMsN-0QZ6Bgb96w-CXoiYtsSz39MUnV0g"
+   },
+   "expect": "ok",
+   "name": "offer_at_clock_ceiling_minus_one",
+   "now": "2026-10-10T10:05:01Z"
+  },
+  {
+   "checkpoint": {
+    "o": {
      "at": "2026-10-10T10:10:00Z",
      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
      "kind": "workspace_checkpoint",
@@ -901,199 +1137,6 @@
     }
    ],
    "name": "relay_requires_every_held_revocation",
-   "now": "2026-10-10T12:00:00Z",
-   "offered": {
-    "o": {
-     "at": "2026-10-10T10:00:40Z",
-     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
-     "kind": "workspace_checkpoint",
-     "n": 4,
-     "suite": 2,
-     "tickets": {},
-     "v": 2,
-     "workspace_id": "0123456789abcdef0123456789abcdef",
-     "workspace_log": {
-      "acc": "sha256:5296da7b44a255d898cbef6666ea2c93dca7faad5fe9f0efa4ee20c12f14a997",
-      "head": "sha256:2eb22dc269e4421d6b547435c8895c6d954604dd2c17728efa93c1bf3619a27e",
-      "seq": 2
-     }
-    },
-    "sig": "2cAZbLGvTv0InQ53CxcvTZXz0lRFCfVI7eDwnBC4uyfN3l8C30Y1zvGZQUGZTUpaWPmI-Oz4wsYSuhznATdUTg"
-   },
-   "pinned_delegation": {
-    "o": {
-     "client_hosted": false,
-     "issued_ms": 1790000000000,
-     "kind": "ws_delegation",
-     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
-     "suite": 2,
-     "v": 2,
-     "workspace_id": "0123456789abcdef0123456789abcdef",
-     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
-    },
-    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
-   },
-   "proofs": {
-    "workspace": [
-     "sha256:2eb22dc269e4421d6b547435c8895c6d954604dd2c17728efa93c1bf3619a27e"
-    ]
-   },
-   "recorded": null,
-   "restore": {
-    "C": {
-     "o": {
-      "at": "2026-10-10T10:00:30Z",
-      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
-      "kind": "workspace_checkpoint",
-      "n": 3,
-      "suite": 2,
-      "tickets": {},
-      "v": 2,
-      "workspace_id": "0123456789abcdef0123456789abcdef",
-      "workspace_log": {
-       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
-       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
-       "seq": 3
-      }
-     },
-     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
-    },
-    "T": {
-     "o": {
-      "at": "2026-10-10T10:00:40Z",
-      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
-      "kind": "workspace_checkpoint",
-      "n": 4,
-      "suite": 2,
-      "tickets": {},
-      "v": 2,
-      "workspace_id": "0123456789abcdef0123456789abcdef",
-      "workspace_log": {
-       "acc": "sha256:5296da7b44a255d898cbef6666ea2c93dca7faad5fe9f0efa4ee20c12f14a997",
-       "head": "sha256:2eb22dc269e4421d6b547435c8895c6d954604dd2c17728efa93c1bf3619a27e",
-       "seq": 2
-      }
-     },
-     "sig": "2cAZbLGvTv0InQ53CxcvTZXz0lRFCfVI7eDwnBC4uyfN3l8C30Y1zvGZQUGZTUpaWPmI-Oz4wsYSuhznATdUTg"
-    },
-    "abandoned_heads": [
-     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
-     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
-    ],
-    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
-    "delegation": {
-     "o": {
-      "client_hosted": false,
-      "issued_ms": 1790000000000,
-      "kind": "ws_delegation",
-      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
-      "suite": 2,
-      "v": 2,
-      "workspace_id": "0123456789abcdef0123456789abcdef",
-      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
-     },
-     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
-    },
-    "device_cert": {
-     "o": {
-      "created_ms": 1790000000000,
-      "device_id": "c65032f21d43401cc223b05723c1e5b4",
-      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
-      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
-      "expires_ms": null,
-      "kind": "device_cert",
-      "label_sealed": "bGFiZWwgc2V2MQ",
-      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
-      "scopes_max": [
-       "look",
-       "decide",
-       "operate",
-       "type"
-      ],
-      "suite": 2,
-      "v": 2
-     },
-     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
-    },
-    "event": {
-     "abandoned": {
-      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
-      "seq": 3
-     },
-     "abandoned_decisions": [
-      "01J9ZK00000000000000000002",
-      "01J9ZK00000000000000000003"
-     ],
-     "actor": {
-      "device": "d_c65032f21d43401cc223b05723c1e5b4",
-      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
-      "kind": "person"
-     },
-     "at": "2026-10-10T10:00:40Z",
-     "auth": "passphrase",
-     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
-     "from_seq": 1,
-     "hash_v": 1,
-     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
-     "host_sig": "09gJ8vlCm1wmT6BBkVnOgwVJoiReSh09m9bmVdNdmpnWJv-532bp9FJcXh67BadajagE1haLRl2OdtJe87UnHQ",
-     "id": "01J9ZK00000000000000000004",
-     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
-     "reason": "rollback",
-     "revocations": [],
-     "roster_v": 1,
-     "seq": 2,
-     "sig": "Q0dW4Yx0DecKUnk9V6E5OBFsmL6ED1B0h7FQl_LuMDWw3YJTlQxLWhQ8og3HmMhZkWnWaJp17aA_qYS_KcQ1mg",
-     "source": {
-      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
-      "n": 3
-     },
-     "type": "restore",
-     "v": 2
-    },
-    "forward_heads": [],
-    "log": "workspace",
-    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
-   }
-  },
-  {
-   "applied": [],
-   "expect": "chain.diverged",
-   "held": {
-    "o": {
-     "at": "2026-10-10T10:00:30Z",
-     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
-     "kind": "workspace_checkpoint",
-     "n": 3,
-     "suite": 2,
-     "tickets": {},
-     "v": 2,
-     "workspace_id": "0123456789abcdef0123456789abcdef",
-     "workspace_log": {
-      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
-      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
-      "seq": 3
-     }
-    },
-    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
-   },
-   "known_revocations": [
-    {
-     "revocation": {
-      "o": {
-       "device_id": "c65032f21d43401cc223b05723c1e5b4",
-       "kind": "revocation",
-       "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
-       "reason": "compromised",
-       "revoked_ms": 1790000100000,
-       "suite": 2,
-       "v": 2
-      },
-      "sig": "m6Hn5CDdhaR2wa5eHoLyggWQLvGC6XCCeDA43UvLO7_0IssTDgZXz-sYW03mDMYXL4i1n-zsYMdLyCBqhaBxyw"
-     }
-    }
-   ],
-   "name": "relay_refuses_a_known_revoked_owner_device",
    "now": "2026-10-10T12:00:00Z",
    "offered": {
     "o": {
@@ -13188,6 +13231,1175 @@
   },
   {
    "applied": [],
+   "expect": "chain.diverged",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "name": "delegation_other_content_than_the_card",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:08:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:9da1a477a96469a31af2aa669b94c243e45f396e367de7e164003e47ff4a87fc",
+      "head": "sha256:44ce4967adb9a6971e1b1e02a6f4a3d7f9dfe3e3ae90b65367ce1afdb6e682f3",
+      "seq": 2
+     }
+    },
+    "sig": "L2GrxBYJUQWWM9U9-n3iHEaAk8aNDkoVYpj5NyXW51ND8euiILGlRxRN01pNjkt-yS8q1yX9XSmZnvfz6VSFtQ"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:44ce4967adb9a6971e1b1e02a6f4a3d7f9dfe3e3ae90b65367ce1afdb6e682f3"
+    ]
+   },
+   "recorded": null,
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:08:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:9da1a477a96469a31af2aa669b94c243e45f396e367de7e164003e47ff4a87fc",
+       "head": "sha256:44ce4967adb9a6971e1b1e02a6f4a3d7f9dfe3e3ae90b65367ce1afdb6e682f3",
+       "seq": 2
+      }
+     },
+     "sig": "L2GrxBYJUQWWM9U9-n3iHEaAk8aNDkoVYpj5NyXW51ND8euiILGlRxRN01pNjkt-yS8q1yX9XSmZnvfz6VSFtQ"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000001,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "wmVhJzc3Qoca1rtnLYNy_8jERGTzTXenriLY1HsX--PIPpQnH0RNLXYQwjQE4e0o-qDZE7fWT1zhttgl5RpIgw"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:08:30Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "zlUAGN1gBzD9gNx4B57c8fu22iiizJNqWqRszf4oypkdwYOLFUWr_f5AUj11y0auB4zw1yEW4bCM9CS1wkQ1SA",
+     "id": "01J9ZK0000000000000000001S",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "IowzV-AK_SNI8mmEvTfvT4elg1scFdCI0YTJj76CL176BaS_DMqRDza4ibwKnCdZNwv8BfA4JBS4jAjylxtzMg",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   }
+  },
+  {
+   "applied": [],
+   "expect": "chain.diverged",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "name": "owner_policy_bundle_pk_not_the_delegations",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:08:40Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:fc80debcbe332dc8debad2486fa6f3b6a944a1ffca9ca6a7a023128ecdb06dcf",
+      "head": "sha256:5b9a1fa602c1872b0ff14d89dd92ffb3ed1e1ef6431394afc2c64229479893ad",
+      "seq": 2
+     }
+    },
+    "sig": "bLq6FNRVSwvEFrtYtAjkhZQ6dw9nYpW_beYfmSnYpaVmGGtyqI3GEe_pbtAmZG6kD7uOG5C43nLVMFNuYah4cw"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:5b9a1fa602c1872b0ff14d89dd92ffb3ed1e1ef6431394afc2c64229479893ad"
+    ]
+   },
+   "recorded": null,
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:08:40Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:fc80debcbe332dc8debad2486fa6f3b6a944a1ffca9ca6a7a023128ecdb06dcf",
+       "head": "sha256:5b9a1fa602c1872b0ff14d89dd92ffb3ed1e1ef6431394afc2c64229479893ad",
+       "seq": 2
+      }
+     },
+     "sig": "bLq6FNRVSwvEFrtYtAjkhZQ6dw9nYpW_beYfmSnYpaVmGGtyqI3GEe_pbtAmZG6kD7uOG5C43nLVMFNuYah4cw"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:08:40Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "uq3Yql2ToKjvJBFJZoQBJzSXQfOMjbN-74JYL87cU1231FkjJ9ScMioUlouvP3_B-4DKTKHZ1LKsH5obg8uSAw",
+     "id": "01J9ZK0000000000000000001T",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "4HnXNLVc50obOlHNvcmaJc-ZX28xi0EwWhtUUgtyDXaFnvptZnQRpQmOj3T_ASywFRXgM9e6ZVMK1P73ymE6oA",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BI14lIzDuy3ZvsMm9bkLZdzvYh9pT6NacDmef4dgenr0c78HIZjtcHf2lvbVlmMxv6lX0LXFgD8rCZLcoL_KJig"
+   }
+  },
+  {
+   "applied": [],
+   "expect": "chain.diverged",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "name": "signed_source_other_n_higher_same_hash",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:08:50Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:6f0a9f431189fab8ee9a1d9aba69b025b6f15767e690c0d21d9d749b9b6e2222",
+      "head": "sha256:3efca45ee8dae06fc1d0144dfc50856f2e02cf760eb4b55dbb35e7afd8ad3cc0",
+      "seq": 2
+     }
+    },
+    "sig": "3splgaBJ08QEzbW-uPCCSK9H7PXBYg8hT8tXEW7KE4oUBe8BfNfsvyiZFVcdCOpeOAFodGRoWdoWwH5-WnGcpg"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:3efca45ee8dae06fc1d0144dfc50856f2e02cf760eb4b55dbb35e7afd8ad3cc0"
+    ]
+   },
+   "recorded": null,
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:08:50Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:6f0a9f431189fab8ee9a1d9aba69b025b6f15767e690c0d21d9d749b9b6e2222",
+       "head": "sha256:3efca45ee8dae06fc1d0144dfc50856f2e02cf760eb4b55dbb35e7afd8ad3cc0",
+       "seq": 2
+      }
+     },
+     "sig": "3splgaBJ08QEzbW-uPCCSK9H7PXBYg8hT8tXEW7KE4oUBe8BfNfsvyiZFVcdCOpeOAFodGRoWdoWwH5-WnGcpg"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:08:50Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "gwv0DzbCWo5SAccnawcNi9nL3cgjKQh_PYO3GPjHAdgk1s10OUCiqKBF-G9oIZYJ_bx4P_0bIVw20ACFtEIG0g",
+     "id": "01J9ZK0000000000000000001V",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "mW16rDrl1MSzcvY9CV9feJrPkAJaGrggHoC9Xbwo-UyIx0t8F0m2OuW253LSKsYHy09akPCz-KwNs00Uemt-SQ",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 4
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   }
+  },
+  {
+   "applied": [],
+   "expect": "chain.diverged",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_revocations": [
+    {
+     "pk_pub": "BI14lIzDuy3ZvsMm9bkLZdzvYh9pT6NacDmef4dgenr0c78HIZjtcHf2lvbVlmMxv6lX0LXFgD8rCZLcoL_KJig",
+     "revocation": {
+      "o": {
+       "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+       "kind": "revocation",
+       "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+       "reason": "lost",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "9hA3XWy2ZF_xS6Etgsmqu58g84EONyLW4ICmJ5nZB2YysJgcMYvwwOCh19fzuzqMyqdhKvycsT_JJeoNdKroOQ"
+     }
+    }
+   ],
+   "name": "evidence_under_another_stored_key",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:09:00Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:9a4a56893fe19603aa35aae5df61c94a3a16239b58991c7a282e6e9831dc0a22",
+      "head": "sha256:cb8c0a911db7cfe7da6b0c2eda49d8a060ccf61e4923c7e38f60679705d2440e",
+      "seq": 2
+     }
+    },
+    "sig": "SEmDpG07Hhfvqv8VJ06SGvY7AAJ1DkPnqvwdxRHY9cBxONc1DyEmCQdsBo0A3XxiA4mugQ2JpD8I37nTbGcRPw"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:cb8c0a911db7cfe7da6b0c2eda49d8a060ccf61e4923c7e38f60679705d2440e"
+    ]
+   },
+   "recorded": null,
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:09:00Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:9a4a56893fe19603aa35aae5df61c94a3a16239b58991c7a282e6e9831dc0a22",
+       "head": "sha256:cb8c0a911db7cfe7da6b0c2eda49d8a060ccf61e4923c7e38f60679705d2440e",
+       "seq": 2
+      }
+     },
+     "sig": "SEmDpG07Hhfvqv8VJ06SGvY7AAJ1DkPnqvwdxRHY9cBxONc1DyEmCQdsBo0A3XxiA4mugQ2JpD8I37nTbGcRPw"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:09:00Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "ddx_xakkVc3kPWtHlY2bZiaCHow8iR1JzCmLI3FfBPwGN9zGaM6oRyHnCpL0TwVSgnDnyOfVzyOlbtFGHKPSqA",
+     "id": "01J9ZK0000000000000000001W",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [
+      {
+       "device_cert": {
+        "o": {
+         "created_ms": 1790000000000,
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "dk_kx_pub": "BIlUSKpH5g9UpFflsUrYfy8c7ncIRHcJp2ORIDBUDb8S4SQtpy-EAPsSOgwT5nGhQApdzXloHjknkHiRsRkpcgc",
+         "dk_sig_pub": "BAAqPda-S695x08QBckUQMV2AglUMT8Y5yq57pu8wyCZnyHo1QrmNAzup8JXqewAFFKQ6VnP5Kq8GMNfZeWI0sY",
+         "expires_ms": null,
+         "kind": "device_cert",
+         "label_sealed": "bGFiZWwgbGVuYTE",
+         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+         "scopes_max": [
+          "look",
+          "decide",
+          "operate",
+          "type"
+         ],
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "3LAHSi-Droiur4llCSuUzsq6jxSWmpqmsak7L9vbNi82dp2nTr1rQXwE_-hRJ0ntDsrf8ER3KDThWYolZaabwQ"
+       },
+       "pk_pub": "BAoPza8kl-gXxaP7-Qc17lCTIw6H7vxUpVcgi6ai9wZ3jDRClQu1bQ9VmPrAqbVtoqkhi3VMVyu7SwpHydtPWGA",
+       "revocation": {
+        "o": {
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "kind": "revocation",
+         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+         "reason": "compromised",
+         "revoked_ms": 1790000100000,
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "fIf6e11E-xrUn04x1UcWQhU_KskxQ4O0LqpBW1po3qkVb3A8Wtv_-c18LZ2OACeOyFLWNoLTvL4_UVYepd6n5g"
+       }
+      }
+     ],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "YkJq8HYDUpZ7ydUbDX-FiLFp6ndG0bp81Zo2KUK-Vvdp_3ekEkHgnqbaVBJeKiXxyQAk7bJqq6Ey8E-nUj5fSQ",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   }
+  },
+  {
+   "applied": [],
+   "expect": "chain.diverged",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_revocations": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "c65032f21d43401cc223b05723c1e5b4",
+       "kind": "revocation",
+       "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+       "reason": "compromised",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "m6Hn5CDdhaR2wa5eHoLyggWQLvGC6XCCeDA43UvLO7_0IssTDgZXz-sYW03mDMYXL4i1n-zsYMdLyCBqhaBxyw"
+     }
+    }
+   ],
+   "name": "relay_refuses_a_known_revoked_owner_device",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:09:10Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:667efba59e2677aafd92833b8b52a8ee9dd6ce8feea80d46c098d23661d1856a",
+      "head": "sha256:0036797789b64558ed1d07bf3d02e704fa9378696e3b527cca844216eab71e9c",
+      "seq": 2
+     }
+    },
+    "sig": "vkomUUFcIJlwYMS-X9birnHP6GtYOjJSWURf_TyIWODeJtXuu5YbUC309S6j-8boqDTSmnMllJKbXazpICEtaw"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:0036797789b64558ed1d07bf3d02e704fa9378696e3b527cca844216eab71e9c"
+    ]
+   },
+   "recorded": null,
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:09:10Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:667efba59e2677aafd92833b8b52a8ee9dd6ce8feea80d46c098d23661d1856a",
+       "head": "sha256:0036797789b64558ed1d07bf3d02e704fa9378696e3b527cca844216eab71e9c",
+       "seq": 2
+      }
+     },
+     "sig": "vkomUUFcIJlwYMS-X9birnHP6GtYOjJSWURf_TyIWODeJtXuu5YbUC309S6j-8boqDTSmnMllJKbXazpICEtaw"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:09:10Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "huaaUcccSdwuradUJCT8U-Zv44Upb-tD7g5WhFVoae_bFdbL8T1SSsuuoj7Zj3dS7Wnb995eLNQbTFrp_oTxig",
+     "id": "01J9ZK0000000000000000001X",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [
+      {
+       "device_cert": {
+        "o": {
+         "created_ms": 1790000000000,
+         "device_id": "c65032f21d43401cc223b05723c1e5b4",
+         "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+         "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+         "expires_ms": null,
+         "kind": "device_cert",
+         "label_sealed": "bGFiZWwgc2V2MQ",
+         "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+         "scopes_max": [
+          "look",
+          "decide",
+          "operate",
+          "type"
+         ],
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+       },
+       "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94",
+       "revocation": {
+        "o": {
+         "device_id": "c65032f21d43401cc223b05723c1e5b4",
+         "kind": "revocation",
+         "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+         "reason": "compromised",
+         "revoked_ms": 1790000100000,
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "m6Hn5CDdhaR2wa5eHoLyggWQLvGC6XCCeDA43UvLO7_0IssTDgZXz-sYW03mDMYXL4i1n-zsYMdLyCBqhaBxyw"
+       }
+      }
+     ],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "3agdO-Y8TEsFe9wB958liKQZSmQUpVIOyFDBaSHDwfUOzzyMiKYGk3vfpmAMTaopd_MFOOUbF67epAbGmBp1sg",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   }
+  },
+  {
+   "applied": [],
+   "expect": "ok",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "name": "target_at_clock_ceiling_minus_one",
+   "now": "2026-10-10T10:55:01Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T11:00:00Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:e2c275fb68d4ed9f1d5825aaf7ff53f17c72f565d34c50006fd1efabcae5171b",
+      "head": "sha256:401b58f4766a9f5cc69901426b55fd93283d71ca3c7ef23c4fcb1a033455205c",
+      "seq": 2
+     }
+    },
+    "sig": "XuF5SiXyMoKgYZPtTY_UOCCGIgkCsccsqBtTFs_JEMOToUwBLcWQirqc2IOG28F937vpb1BzT5xTpLyqV30iuw"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:401b58f4766a9f5cc69901426b55fd93283d71ca3c7ef23c4fcb1a033455205c"
+    ]
+   },
+   "recorded": "01J9ZK0000000000000000001Y",
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T11:00:00Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:e2c275fb68d4ed9f1d5825aaf7ff53f17c72f565d34c50006fd1efabcae5171b",
+       "head": "sha256:401b58f4766a9f5cc69901426b55fd93283d71ca3c7ef23c4fcb1a033455205c",
+       "seq": 2
+      }
+     },
+     "sig": "XuF5SiXyMoKgYZPtTY_UOCCGIgkCsccsqBtTFs_JEMOToUwBLcWQirqc2IOG28F937vpb1BzT5xTpLyqV30iuw"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T11:00:00Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "UUB3ReOqidvXCHJEhi5_dnVNICzy656PZsPvjkm2jdih8WIKM3G1vnq8LCpqE_LgVPm9EyknaK6Yd2DEzpfNzg",
+     "id": "01J9ZK0000000000000000001Y",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "nHa76XMCKodoIwzyY4i6W5sC-yfOAQ2E82lV9XOan_tWU1su-WnvE3fbBUxhd5pZzNuGyxe7DCX0L7vhzShakA",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   }
+  },
+  {
+   "applied": [],
    "expect": "ok",
    "held": {
     "o": {
@@ -15602,6 +16814,312 @@
     },
     "forward_heads": [],
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   }
+  },
+  {
+   "applied": [],
+   "expect": "sync.incomplete",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 1,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+      "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "seq": 1
+     }
+    },
+    "sig": "R8qC8qThcPJJVpdYYpbY61mVfolRJId6rC4up2v6bFR1cDa95n-4uILVHLu3u8_2Kv7_FR3TE-hvrcjITcsahg"
+   },
+   "name": "forward_proof_acc_from_swapped",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:00:50Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 2,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:f5a5c75f7557b6f4cc556cb75f8cac7369d1351db6cc8e0bafb80eaf44ca89f7",
+      "head": "sha256:9da6779dbb16b689676d106c540c88f2b01fb8b0af7d700834d2cf6f0c80f08f",
+      "seq": 4
+     }
+    },
+    "sig": "cYl24FUQ2QguVD1xUWAz21VwD85mieov-RUN5qFXM4eda_rcG5j_9uU_x0g5SjNyIvp3SGkgP11o1plVXnVq8g"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:9da6779dbb16b689676d106c540c88f2b01fb8b0af7d700834d2cf6f0c80f08f"
+    ]
+   },
+   "recorded": null,
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 1,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+       "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+       "seq": 1
+      }
+     },
+     "sig": "R8qC8qThcPJJVpdYYpbY61mVfolRJId6rC4up2v6bFR1cDa95n-4uILVHLu3u8_2Kv7_FR3TE-hvrcjITcsahg"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:00:50Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 2,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:f5a5c75f7557b6f4cc556cb75f8cac7369d1351db6cc8e0bafb80eaf44ca89f7",
+       "head": "sha256:9da6779dbb16b689676d106c540c88f2b01fb8b0af7d700834d2cf6f0c80f08f",
+       "seq": 4
+      }
+     },
+     "sig": "cYl24FUQ2QguVD1xUWAz21VwD85mieov-RUN5qFXM4eda_rcG5j_9uU_x0g5SjNyIvp3SGkgP11o1plVXnVq8g"
+    },
+    "abandoned_heads": [],
+    "acc_before": "sha256:44a9df442095f6d167e9c15033122ccf8038126cb5d676595dc7e3164256493e",
+    "acc_from": "sha256:d8ac8692649473bc9e9a9e40652a2f9cc8f904bad7e8de548c074275e6e3679d",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": null,
+     "abandoned_decisions": [],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:00:50Z",
+     "auth": "passphrase",
+     "based_on": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+     "from_seq": 3,
+     "hash_v": 1,
+     "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+     "host_sig": "6PRYqs5Gjkd_BuwZFhg4DsQ4gULWh8-uVEoY3xWti5jmn3j7CxB3S5t7t33O0prV5v1zSRkwhj-OzpzQa4DvPQ",
+     "id": "01J9ZK00000000000000000005",
+     "prev": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+     "reason": "other",
+     "revocations": [],
+     "roster_v": 3,
+     "seq": 4,
+     "sig": "JunCemAArNrNuI5y4Tl5Bv4Pj4IROYNacHZWqRzs4OyFo8aFNj4Gs9v8m2R8JaDG6YiK_Q5Aj01rmYVbLUWS1g",
+     "source": {
+      "hash": "sha256:d0a4ca7ccdb25b75f517e3942dfee1b08278c536d0eff4f49adbb0e44970168a",
+      "n": 1
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   }
+  },
+  {
+   "applied": [],
+   "expect": "sync.incomplete",
+   "held": null,
+   "name": "null_source_acc_from_swapped",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:02:10Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 1,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:b691fed60d642226009861f852682d1c3a5c94380e6b1f3193a61a48a775f760",
+      "head": "sha256:2dffca651dad53e7dd1dbab0bdd0f3f478a84d24ebb8d274473b10b7e0eb9ddd",
+      "seq": 4
+     }
+    },
+    "sig": "F4YjsgJP5BETE64s2lOiItnqLSs6i8aeS467epImt6wPqo5N2lx-qYFGrQCSNy3vEumo1CIBCSm6jFQa6VzGfw"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:2dffca651dad53e7dd1dbab0bdd0f3f478a84d24ebb8d274473b10b7e0eb9ddd"
+    ]
+   },
+   "recorded": null,
+   "restore": {
+    "C": null,
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:02:10Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 1,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:b691fed60d642226009861f852682d1c3a5c94380e6b1f3193a61a48a775f760",
+       "head": "sha256:2dffca651dad53e7dd1dbab0bdd0f3f478a84d24ebb8d274473b10b7e0eb9ddd",
+       "seq": 4
+      }
+     },
+     "sig": "F4YjsgJP5BETE64s2lOiItnqLSs6i8aeS467epImt6wPqo5N2lx-qYFGrQCSNy3vEumo1CIBCSm6jFQa6VzGfw"
+    },
+    "abandoned_heads": [],
+    "acc_before": "sha256:44a9df442095f6d167e9c15033122ccf8038126cb5d676595dc7e3164256493e",
+    "acc_from": "sha256:d8ac8692649473bc9e9a9e40652a2f9cc8f904bad7e8de548c074275e6e3679d",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": null,
+     "abandoned_decisions": [],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:02:10Z",
+     "auth": "passphrase",
+     "based_on": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+     "from_seq": 3,
+     "hash_v": 1,
+     "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+     "host_sig": "hw8hLK_BwPFWI5_BlRYr1Tl_xCbX10k2sKiob8bCw1Sf-AzuwO9yJVcQ-4hsGL5LBjUDOnLlodGtQGHkJKJdzQ",
+     "id": "01J9ZK0000000000000000000D",
+     "prev": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+     "reason": "rollback",
+     "revocations": [],
+     "roster_v": 3,
+     "seq": 4,
+     "sig": "3dVAEszwhcFPbskmAO1czZ_2SPka4f3WOJH0LcOuf-cIbOG1Qmt-FtbSs9gn8yfmJzMz4RacfiYPZgK8Q9K1cQ",
+     "source": null,
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [
+     "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    }
   }
