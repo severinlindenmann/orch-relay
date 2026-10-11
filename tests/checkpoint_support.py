@@ -175,7 +175,10 @@ def seed(path, state, case, now=None, ws=WS):
             if d in state["ever_devices"]:
                 con.execute("INSERT INTO ever_devices VALUES (?,?,1)", (ws, d))
         for d in state["ever_devices"]:
-            con.execute("INSERT INTO checkpoint_ever_devices VALUES (?,?)", (ws, d))
+            # As in production: list members are G2 ever_devices only; restore evidence and
+            # signers outside the list are checkpoint_ever_devices only (review R2).
+            if d not in state["members"]:
+                con.execute("INSERT INTO checkpoint_ever_devices VALUES (?,?)", (ws, d))
         for cursor, d in enumerate(sorted(revs), 1):
             rev = revs[d]
             con.execute(

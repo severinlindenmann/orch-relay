@@ -96,6 +96,54 @@ def add_checkpoints_g4(out):
     run(c, st, {'op': 'proof', 'now_ms': NOW, 'to': C.checkpoint_hash(held), 'log': 'workspace', 'from': other},
         'not_found')
 
+    # Review R2 (round 2): guards no G0b vector pinned.
+    def entry(hs):
+        acc = C.ZERO
+        for h in hs:
+            acc = C.log_acc(acc, h)
+        return {'seq': len(hs), 'head': hs[-1], 'acc': acc}
+
+    def pg(kind, log, start, hs):
+        p = {'kind': kind, 'log': log, 'after_seq': start['seq'], 'from_acc': start['acc'], 'heads': hs}
+        p['digest'] = C.page_digest(p)
+        return p
+
+    def staged(c, st, target, pages, source):
+        args = {'source': source, 'target': C.checkpoint_hash(target)}
+        pages = sorted(pages, key=lambda p: (p['kind'], p['log'], p['after_seq']))
+        for i, p in enumerate(pages):
+            run(c, st, {'op': 'page', 'now_ms': NOW, 'i': i, 'body': p, **args})
+        run(c, st, {'op': 'manifest', 'now_ms': NOW, 'body': {'pages': [C.descriptor(i, p) for i, p in enumerate(pages)]}, **args})
+        return {'checkpoint': target, 'source_hash': source}
+
+    # A first publication whose signed genesis is the pin but whose workspace log starts elsewhere.
+    wrong = [C.digest(b'FAKE G4 other root'), C.digest(b'FAKE G4 next')]
+    bad_root = R.sign_object(S, keys['wsk_a.sig'], {**accepted['held']['o'], 'workspace_log': entry(wrong)})
+    c, st = new('first_publication_workspace_root_not_genesis', pinned)
+    body = staged(c, st, bad_root, [pg('appended', 'workspace', C.EMPTY, wrong)], None)
+    run(c, st, {'op': 'publish', 'now_ms': NOW, 'body': body}, 'genesis_mismatch')
+
+    # R3: the signed `abandoned` must cover C (abandoned.seq >= C.seq); here C.seq = 4, abandoned 3.
+    rb = copy.deepcopy(restore[2]['input']['body'])
+    line, held_heads = rb['restore']['line'], [n['head'] for n in sorted(
+        accepted['nodes']['workspace'].values(), key=lambda n: n['seq'])]
+    line['abandoned'] = {'seq': 3, 'head': held_heads[2]}
+    ws = v['ids']['workspace_a']
+    line['sig'] = R.b64u(S.sign(keys['phone.sig'], C.event_bytes(S, line, ws, 'workspace')))
+    line['host_sig'] = R.b64u(S.sign(keys['wsk_a.sig'], C.event_bytes(S, line, ws, 'workspace', True)))
+    t = R.sign_object(S, keys['wsk_a.sig'], {**rb['checkpoint']['o'],
+                      'workspace_log': entry(held_heads[:2] + [C.event_head(line)])})
+    c, st = new('restore_abandoned_must_cover_source', accepted)
+    body = staged(c, st, t, [pg('abandoned', 'workspace', entry(held_heads[:2]), held_heads[2:])], base_h)
+    body['restore'] = rb['restore']
+    run(c, st, {'op': 'publish', 'now_ms': NOW, 'body': body}, 'restore_invalid')
+
+    # §19.8: "An unlisted page is a conflict": a manifest omitting an already staged page.
+    c, st = new('manifest_omitting_staged_page_conflict', accepted)
+    run(c, st, used)
+    run(c, st, {**used, 'i': 1, 'body': extra})
+    run(c, st, {**manifest_input, 'body': {'pages': [C.descriptor(0, used['body'])]}}, 'staging_conflict')
+
     # Cross-workspace isolation. Workspace A holds n=1, a pinned baseline and one staged page; B is
     # another workspace of the same owner whose only member is Bob's phone. A's hashes mean nothing
     # under B: reads are 404, a baseline cannot pin them, a DELETE is a no-op, and B's staging set

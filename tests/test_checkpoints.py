@@ -159,6 +159,26 @@ def publish_self_certified_restore(client, path):
     return t["line"]["revocations"][0]["revocation"]["o"]["person_id"]
 
 
+def evidence_person_card(person):
+    """A valid first card for a new workspace whose owner is `person` (the intruder key)."""
+    import hashlib
+
+    from directory_support import CARD, V, signed
+
+    from orch_relay import proto as P
+    from ref import orch_protocol_ref as R
+
+    ws = "00" * 15 + "07"
+    delegation = signed(
+        {**CARD["delegation"]["o"], "workspace_id": ws, "owner_person_id": person}, "intruder.sig"
+    )
+    o = {**CARD["o"], "workspace_id": ws, "owner_person_id": person}
+    o["sealed_hash"] = P.b64u(hashlib.sha256(P.unb64u(CARD["sealed"])).digest())
+    wsk = R.SUITES[2].sig_key(bytes.fromhex(V["keys"]["wsk_a.sig"]["seed"]))
+    sig = R.b64u(R.SUITES[2].sign(wsk, P.L["sig_card_wsk"] + P.cj(o)))
+    return {"o": o, "sig": sig, "delegation": delegation, "sealed": CARD["sealed"]}
+
+
 def test_evidence_only_person_cannot_register_devices_or_cards(tmp_path):
     from directory_support import V, sign, signed
     from fastapi.testclient import TestClient
@@ -183,6 +203,23 @@ def test_evidence_only_person_cannot_register_devices_or_cards(tmp_path):
         )
         r = client.put(f"/v2/devices/{fresh['o']['device_id']}", json={"cert": fresh})
         assert (r.status_code, r.json()) == (403, {"error": "other_person"}), r.text
+        # Nor may it own a workspace: a first card whose delegation and owner are the intruder.
+        card = evidence_person_card(person)
+        r = client.put(f"/v2/workspaces/{card['o']['workspace_id']}/card", json={"card": card})
+        assert (r.status_code, r.json()) == (403, {"error": "other_person"}), r.text
+        # Nor join a list: a live device of the person (stored directly, as no route stores one)
+        # is refused by membership's certificate check before any grant is sealed to it.
+        from orch_relay.directory import Refusal
+        from orch_relay.members import certificate
+
+        with closing(db.connect(path)) as con:
+            con.row_factory = __import__("sqlite3").Row
+            client.app.state.directory.store_device(con, fresh)
+            member = {"device_id": fresh["o"]["device_id"], "person_id": person, "scopes": ["look"]}
+            with pytest.raises(Refusal) as refused:
+                certificate(con, member, person, [], 1790000000000)
+            assert refused.value.code == "other_person"
+            con.rollback()
         # Redeeming an invite turns the evidence-only row into the person's account.
         from orch_relay.directory import digest as hexdigest
 
@@ -553,3 +590,55 @@ def test_many_ticket_publication_work_is_linear_in_staged_pages(tmp_path, refuse
     assert small.visits <= small_pages and large.visits <= large_pages, (small.visits, large.visits)
     # 8x the tickets: linear is ~8x the time, the quadratic scan ~64x.
     assert large_s <= 24 * small_s + 0.05, (small_s, large_s)
+
+
+# --- transport refusals of PUT checkpoint: charged after W(g), capped by the window (review L1) ---
+
+
+def test_transport_refusals_are_charged_only_after_auth_and_stop_at_the_budget(tmp_path):
+    from checkpoint_support import CORPUS, seed
+    from fastapi.testclient import TestClient
+
+    from orch_relay.app import create_app
+    from orch_relay.checkpoints import REQUEST_CAP
+
+    case = next(
+        c
+        for c in CORPUS["suites"]["2"]["checkpoints"]["cases"]
+        if c["name"] == "checkpoint_gone_all_endpoint_routes"
+    )
+    url = f"/v2/workspaces/{WS}/checkpoint"
+    host = {
+        "Authorization": "Bearer FAKE-workspace",
+        "Orch-Holder": "1",
+        "Content-Type": "application/json",
+    }
+    with TestClient(create_app(tmp_path)) as client:
+        path = tmp_path / db.DB_NAME
+        seed(path, case["state"], case)
+        client.app.state.directory.clock = lambda: 1790000000000
+
+        def failures():
+            with closing(db.connect(path)) as con:
+                return con.execute("SELECT count(*) FROM checkpoint_failures").fetchone()[0]
+
+        big = b" " * (REQUEST_CAP + 1)
+        for headers, charged in [
+            (host, 1),
+            ({k: v for k, v in host.items() if k != "Authorization"}, 1),  # 401: never charged
+            ({**host, "Orch-Holder": "0"}, 1),  # fenced: never charged
+            ({**host, "Content-Type": "text/plain"}, 2),  # malformed transport, authorized
+        ]:
+            r = client.put(
+                url, content=big if headers is not host or charged == 1 else b"{}", headers=headers
+            )
+            assert r.status_code == 400, r.text
+            assert failures() == charged, headers
+        with closing(db.connect(path)) as con, con:
+            con.executemany(
+                "INSERT INTO checkpoint_failures VALUES (?,1,?)",
+                [(WS, 1790000000000) for _ in range(14)],
+            )
+        for _ in range(3):  # the window is full: refused, but no further rows (L1)
+            assert client.put(url, content=big, headers=host).status_code == 400
+        assert failures() == 16
