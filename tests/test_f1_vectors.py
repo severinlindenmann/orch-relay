@@ -16,6 +16,7 @@ import re
 import subprocess
 import sys
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -1235,6 +1236,9 @@ def checkpoint_schema_and_signature_ok(signed):
         and isinstance(o["at"], str)
         and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", o["at"])
         is not None
+        # A real UTC date: `at` is compared as a string and must not decrease, so an impossible
+        # high value would refuse every later honest checkpoint.
+        and datetime.strptime(o["at"], "%Y-%m-%dT%H:%M:%S%z") is not None
         and all(
             entry_ok(x)
             for x in (
@@ -1264,6 +1268,30 @@ def checkpoint_ok(signed):
         return bool(checkpoint_schema_and_signature_ok(signed))
     except (KeyError, TypeError, ValueError, AttributeError):
         return False
+
+
+def workspace_checkpoint_ok(signed):
+    """H, C, T and every receiver offer are workspace checkpoints (a ticket checkpoint is refused)."""
+    return checkpoint_ok(signed) and signed["o"]["kind"] == "workspace_checkpoint"
+
+
+# Receiver state the shared vectors do not carry as such.
+# The workspace card's PK-signed delegation (P3-D24: "the card's delegation"). Relays hold it with the card and
+# devices pin it with the genesis; it is the delegation of the genesis event whose head is the pinned genesis.
+GENESIS_EVENT = load("genesis")["valid"]["event"]
+CARD_DELEGATION = GENESIS_EVENT["delegation"]
+# The relay clock for the shared vectors: after every vector checkpoint, so the ceiling never binds there.
+VECTOR_CLOCK = "2026-10-10T10:05:00Z"
+# P3-D25 / relay design R3a: every published checkpoint, T included, has o.at <= relay clock + 300 s.
+FUTURE_CEILING_MS = 300_000
+
+
+def test_card_delegation_is_the_pinned_genesis_owner():
+    assert head(GENESIS_EVENT) == CP["genesis"]
+    pk = R.unb64u(GENESIS_EVENT["owner"]["pk_pub"])
+    assert "ok" in R.verify_delegation(S, CARD_DELEGATION, pk)
+    assert CARD_DELEGATION["o"]["workspace_id"] == CP["workspace_id"]
+    assert CARD_DELEGATION["o"]["wsk_pub"] == CP["wsk_pub"]
 
 
 @pytest.mark.parametrize("kind", ["ticket_checkpoint", "workspace_checkpoint"])
@@ -1477,8 +1505,11 @@ def entries(signed):
     return {"workspace": signed["o"]["workspace_log"], **signed["o"]["tickets"]}
 
 
-def transition_ok(held, offered, restore, applied, known):
-    """P3-D24 receiver policy intentionally does not infer the owner's current roster role."""
+def transition_ok(held, offered, restore, applied, known, card=CARD_DELEGATION):
+    """P3-D24 receiver policy intentionally does not infer the owner's current roster role.
+
+    It is bound to the workspace card's owner: the bundle's delegation must be byte-identical (cj) to the card's.
+    """
     try:
         e, log, C = restore["event"], restore["log"], restore["C"]
         cert, pk, delegation = (
@@ -1489,7 +1520,7 @@ def transition_ok(held, offered, restore, applied, known):
         if (
             restore["T"] != offered
             or C != held
-            or (C is not None and not checkpoint_ok(C))
+            or (C is not None and not workspace_checkpoint_ok(C))
             or e["source"] != (checkpoint_ref(C) if C else None)
             or e["id"] in applied
             or e["type"] != "restore"
@@ -1498,6 +1529,7 @@ def transition_ok(held, offered, restore, applied, known):
             or e["prev"] != e["head"]
             or not host_ok_event(e, CP["wsk_pub"], CP["workspace_id"], log)
             or not person_ok(e, cert, CP["workspace_id"], log)
+            or R.cj(delegation) != R.cj(card)
             or "ok" not in R.verify_delegation(S, delegation, pk)
             or delegation["o"]["workspace_id"] != CP["workspace_id"]
             or delegation["o"]["wsk_pub"] != CP["wsk_pub"]
@@ -1508,16 +1540,22 @@ def transition_ok(held, offered, restore, applied, known):
             or any(s.startswith("drop:") for s in cert["o"]["scopes_max"])
             or (C and e["at"] < C["o"]["at"])
             or e["at"] > offered["o"]["at"]
+            # Relay design R3: a ticket restore names a workspace seq T already commits.
+            or (log != "workspace" and e["ws_seq"] > offered["o"]["workspace_log"]["seq"])
         ):
             return "chain.diverged", None
-        carried = {x["revocation"]["o"]["device_id"]: x["revocation"] for x in e["revocations"]}
-        for x in known:
+        carried = {x["revocation"]["o"]["device_id"]: x for x in e["revocations"]}
+        # Completeness (R4) applies to workspace restores only; a ticket restore carries [].
+        for x in known if log == "workspace" else ():
             r = x["revocation"]
             device = r["o"]["device_id"]
             if (
                 device == cert["o"]["device_id"]
                 or device not in carried
-                or strength(carried[device]) < strength(r)
+                or strength(carried[device]["revocation"]) < strength(r)
+                # F1 §5.10 / R4: evidence for a known device is from its known person (and stored key).
+                or carried[device]["revocation"]["o"]["person_id"] != r["o"]["person_id"]
+                or ("pk_pub" in x and carried[device]["pk_pub"] != x["pk_pub"])
             ):
                 return "chain.diverged", None
         if not all(revocation_evidence_ok(x) for x in e["revocations"]):
@@ -1553,8 +1591,15 @@ def transition_ok(held, offered, restore, applied, known):
         return "sync.incomplete", None
 
 
-def checkpoint_offer(held, offered, restore=None, applied=(), proofs=None, known=()):
-    if not checkpoint_ok(offered):
+def checkpoint_offer(
+    held, offered, restore=None, applied=(), proofs=None, known=(), *, now, card=CARD_DELEGATION
+):
+    """A receiver with held H (or None), relay clock `now`, and the workspace card's delegation.
+
+    `checkpoint_time` is the relay's refusal of an `o.at` beyond its clock + 300 s (P3-D25); the relay reports
+    it as 409 `checkpoint_time` for a plain publication and `restore_invalid` for a restore.
+    """
+    if not workspace_checkpoint_ok(offered):
         return "chain.diverged", None
     if held == offered:
         return "ok", None
@@ -1570,9 +1615,11 @@ def checkpoint_offer(held, offered, restore=None, applied=(), proofs=None, known
             return ("ignored", None) if stale else ("chain.diverged", None)
         if o["at"] < h["at"] or not old.keys() <= new.keys():
             return "chain.diverged", None
+    if milliseconds(offered["o"]["at"]) > milliseconds(now) + FUTURE_CEILING_MS:
+        return "checkpoint_time", None
     recorded = None
     if restore:
-        result, retained = transition_ok(held, offered, restore, applied, known)
+        result, retained = transition_ok(held, offered, restore, applied, known, card)
         if result != "ok":
             return result, None
         log, e = restore["log"], restore["event"]
@@ -1607,6 +1654,7 @@ def test_checkpoint_transition(c):
         c["applied"],
         c.get("proofs"),
         c.get("known_revocations", ()),
+        now=VECTOR_CLOCK,
     ) == (c["expect"], c["recorded"])
 
 
@@ -1629,6 +1677,7 @@ def test_workspace_checkpoint_receiver(c):
         c.get("restore"),
         c.get("applied", ()),
         c.get("proofs"),
+        now=VECTOR_CLOCK,
     )
     assert result == c["expect"]
     assert recorded == c.get("recorded")
@@ -2169,13 +2218,13 @@ def test_first_checkpoint_requires_signature_and_pinned_genesis():
     from copy import deepcopy
 
     first = CP["workspace_checkpoint"]["signed"]
-    assert checkpoint_offer(None, first) == ("ok", None)
+    assert checkpoint_offer(None, first, now=VECTOR_CLOCK) == ("ok", None)
     changed = deepcopy(first)
     changed["o"]["genesis"] = "sha256:" + "0" * 64
-    assert checkpoint_offer(None, changed) == ("chain.diverged", None)
+    assert checkpoint_offer(None, changed, now=VECTOR_CLOCK) == ("chain.diverged", None)
     changed = deepcopy(first)
     changed["sig"] = R.b64u(bytes(64))
-    assert checkpoint_offer(None, changed) == ("chain.diverged", None)
+    assert checkpoint_offer(None, changed, now=VECTOR_CLOCK) == ("chain.diverged", None)
 
 
 def test_checkpoint_lower_n_extra_uid_diverges(monkeypatch):
@@ -2183,7 +2232,7 @@ def test_checkpoint_lower_n_extra_uid_diverges(monkeypatch):
 
     No shared vector yet (asked the core for `lower_n_extra_uid`); signatures are out of scope here.
     """
-    monkeypatch.setattr(sys.modules[__name__], "checkpoint_ok", lambda signed: True)
+    monkeypatch.setattr(sys.modules[__name__], "workspace_checkpoint_ok", lambda signed: True)
     log = {"seq": 3, "head": "sha256:" + "a" * 64}
     held = {"o": {"n": 5, "workspace_log": log, "tickets": {}}}
     offered = {
@@ -2193,7 +2242,7 @@ def test_checkpoint_lower_n_extra_uid_diverges(monkeypatch):
             "tickets": {"01EXTRA": {"seq": 1, "head": "sha256:" + "b" * 64}},
         }
     }
-    assert checkpoint_offer(held, offered) == ("chain.diverged", None)
+    assert checkpoint_offer(held, offered, now=VECTOR_CLOCK) == ("chain.diverged", None)
 
 
 def test_agent_event_with_person_fields_refused_at_append():
@@ -2209,25 +2258,26 @@ def checkpoint_at(clock, last_at):
 
 
 def restore_at(clock, last_at, held):
-    baseline = held["o"]["at"] if held else last_at
-    if milliseconds(baseline) > milliseconds(clock) + 300000:
-        raise ValueError("held checkpoint too far in the future")
-    return max(clock, last_at, baseline)
+    """§5.10 (f1094b3f): restore append sets at = max(clock, C.o.at, last at). F1 has no host-side 300 s
+    refusal; the 300 s rule is the receiver ceiling of P3-D25 (`checkpoint_offer(..., now=)`)."""
+    return max(clock, last_at, held["o"]["at"] if held else last_at)
 
 
 def test_checkpoint_and_restore_clock_rules():
+    from datetime import timedelta
+
     held = CP["workspace_n_held"]
     at = held["o"]["at"]
     assert checkpoint_at("2026-10-10T10:00:00Z", at) == at
     assert checkpoint_at("2026-10-10T11:00:00Z", at) == "2026-10-10T11:00:00Z"
     assert restore_at(at, "2026-10-10T10:00:00Z", held) == at
-    from datetime import datetime, timedelta
-
-    clock = datetime.fromisoformat(at) - timedelta(seconds=300)
-    boundary = clock.strftime("%Y-%m-%dT%H:%M:%SZ")
-    assert restore_at(boundary, boundary, held) == at
-    with pytest.raises(ValueError):
-        restore_at((clock - timedelta(seconds=1)).strftime("%Y-%m-%dT%H:%M:%SZ"), boundary, held)
+    assert restore_at("2026-10-10T11:00:00Z", at, held) == "2026-10-10T11:00:00Z"
+    assert (
+        restore_at("2026-10-10T09:00:00Z", "2026-10-10T09:30:00Z", None) == "2026-10-10T09:30:00Z"
+    )
+    # Far behind the held checkpoint: the host still writes C.o.at (no invented refusal).
+    clock = datetime.fromisoformat(at) - timedelta(seconds=301)
+    assert restore_at(clock.strftime("%Y-%m-%dT%H:%M:%SZ"), "2026-10-10T09:00:00Z", held) == at
 
 
 @pytest.mark.parametrize("acc,h", [("sha256:" + "00" * 31, ZERO_ACC), (ZERO_ACC, "00" * 32)])
@@ -2346,33 +2396,46 @@ def local_transition(name="restore_accumulator_fold"):
     return deepcopy(next(c for c in CP["transition_cases"] if c["name"] == name))
 
 
-def resign_transition(c):
-    """Rebuild both outer signatures, the event head, tail proof and target signature."""
+def sign_checkpoint(o):
+    return {
+        "o": o,
+        "sig": R.b64u(S.sign(published_f1_key("wsk"), L["sig_checkpoint"].encode() + cjt(o))),
+    }
+
+
+def resign_transition(c, person="dk_sev1", host="wsk"):
+    """Rebuild both outer signatures, the event head, tail proof and target signature.
+
+    `person`/`host` name the signing keys; anything but the bundle's device key and the WSK yields a
+    well-formed signature by the wrong key, isolating one signature check.
+    """
     r = c["restore"]
     e, log = r["event"], r["log"]
     e["sig"] = R.b64u(
-        S.sign(published_f1_key("dk_sev1"), signed_event_bytes(e, CP["workspace_id"], log))
+        S.sign(published_f1_key(person), signed_event_bytes(e, CP["workspace_id"], log))
     )
     e["host_sig"] = R.b64u(
-        S.sign(published_f1_key("wsk"), signed_event_bytes(e, CP["workspace_id"], log, True))
+        S.sign(published_f1_key(host), signed_event_bytes(e, CP["workspace_id"], log, True))
     )
     target = c["offered"]
     entry = target["o"]["workspace_log"] if log == "workspace" else target["o"]["tickets"][log]
     c["proofs"][log] = [head(e)]
     entry.update(head=head(e), acc=log_acc(r["acc_from"], head(e)))
-    target["sig"] = R.b64u(
-        S.sign(published_f1_key("wsk"), L["sig_checkpoint"].encode() + cjt(target["o"]))
-    )
+    target["sig"] = sign_checkpoint(target["o"])["sig"]
     r["T"] = target
     # Negatives must reach the intended check with valid signatures and accumulator evidence.
-    assert person_ok(e, r["device_cert"], CP["workspace_id"], log)
-    assert host_ok_event(e, CP["wsk_pub"], CP["workspace_id"], log)
+    assert person_ok(e, r["device_cert"], CP["workspace_id"], log) == (
+        SIG["keys"][person]["pub_b64u"] == r["device_cert"]["o"]["dk_sig_pub"]
+    )
+    assert host_ok_event(e, CP["wsk_pub"], CP["workspace_id"], log) == (host == "wsk")
     assert checkpoint_ok(target)
     assert fold(r["acc_from"], c["proofs"][log]) == entry["acc"]
 
 
-def offer_local_transition(c):
-    return checkpoint_offer(c["held"], c["offered"], c["restore"], proofs=c["proofs"])
+def offer_local_transition(c, now=VECTOR_CLOCK, known=(), card=CARD_DELEGATION):
+    return checkpoint_offer(
+        c["held"], c["offered"], c["restore"], proofs=c["proofs"], known=known, now=now, card=card
+    )
 
 
 @pytest.mark.parametrize("bootstrap", [False, True])
@@ -2467,6 +2530,13 @@ def test_restore_bundle_revokes_its_signer(reason):
         ("abandoned", {"seq": True, "head": ZERO_ACC}),
         ("reason", "unknown"),
         ("revocations", {}),
+        # Added for the mutation sweep: each kills one schema clause no other rule covers.
+        ("at", "2026-10-10T10:00:40+00:00"),
+        ("abandoned_decisions", {}),
+        ("abandoned", {"seq": 1, "head": ZERO_ACC}),
+        ("abandoned", {"seq": 3, "head": "bad"}),
+        ("source", {"n": 0, "hash": ZERO_ACC}),
+        ("source", {"n": 3, "hash": "bad"}),
     ],
 )
 def test_restore_signed_schema_refusal(field, value):
@@ -2551,3 +2621,482 @@ def test_restore_transition_embedded_evidence(defect):
     assert offer_local_transition(c) == ("chain.diverged", None)
     # Refusal returns no ID to record; the valid offer with the same ID remains usable.
     assert offer_local_transition(valid) == ("ok", valid["restore"]["event"]["id"])
+
+
+# --- Local signed regressions for the relay security review of PR #41 (request shared vectors from orch-core).
+# Each negative changes one thing, re-signs everything else validly, and expects a refusal; where useful the
+# same bundle is shown accepted when only that one thing is undone.
+
+
+def person_hex(pk_name):
+    return R.person_id(S, R.unb64u(SIG["keys"][pk_name]["pub_b64u"])).hex()
+
+
+def device_hex(dk_name):
+    return R.device_id(S, R.unb64u(SIG["keys"][dk_name]["pub_b64u"])).hex()
+
+
+def reissue_cert(cert, pk_name="pk_sev", dk=None, **fields):
+    from copy import deepcopy
+
+    o = deepcopy(cert["o"])
+    if dk:
+        o.update(dk_sig_pub=SIG["keys"][dk]["pub_b64u"], device_id=device_hex(dk))
+    o.update(fields)
+    return R.sign_object(S, published_f1_key(pk_name), o)
+
+
+def reissue_delegation(pk_name="pk_sev", **fields):
+    from copy import deepcopy
+
+    o = deepcopy(CARD_DELEGATION["o"])
+    o.update(fields)
+    return R.sign_object(S, published_f1_key(pk_name), o)
+
+
+def utc(at, seconds=0):
+    from datetime import timedelta
+
+    return (datetime.fromisoformat(at) + timedelta(seconds=seconds)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def accepted(c):
+    return ("ok", c["restore"]["event"]["id"])
+
+
+def test_local_signing_reproduces_the_shared_vectors():
+    """RFC 6979: re-signing an unchanged object reproduces the shared bytes, so the helpers sign what the
+    vectors sign."""
+    c = local_transition()
+    original = local_transition()
+    resign_transition(c)
+    assert c == original
+    assert (
+        sign_checkpoint(CP["workspace_checkpoint"]["signed"]["o"])
+        == CP["workspace_checkpoint"]["signed"]
+    )
+    assert reissue_delegation() == CARD_DELEGATION
+    assert offer_local_transition(c) == accepted(c)
+
+
+def foreign_owner_bundle():
+    """Review PoC 1: lena self-issues a delegation over the public workspace_id/wsk_pub, certifies her own
+    device and signs the restore; a WSK holder adds host_sig and T."""
+    c = local_transition()
+    r = c["restore"]
+    lena = person_hex("pk_lena")
+    r["delegation"] = reissue_delegation("pk_lena", owner_person_id=lena)
+    r["device_cert"] = reissue_cert(r["device_cert"], "pk_lena", dk="dk_lena1", person_id=lena)
+    r["pk_pub"] = SIG["keys"]["pk_lena"]["pub_b64u"]
+    r["event"]["actor"] = {
+        "kind": "person",
+        "id": "p_" + lena,
+        "device": "d_" + device_hex("dk_lena1"),
+    }
+    resign_transition(c, person="dk_lena1")
+    return c
+
+
+def test_restore_delegation_of_another_person():
+    c = foreign_owner_bundle()
+    r = c["restore"]
+    pk = R.unb64u(r["pk_pub"])
+    assert "ok" in R.verify_delegation(S, r["delegation"], pk)
+    assert "ok" in R.verify_cert(S, r["device_cert"], pk, milliseconds(r["event"]["at"]))
+    assert offer_local_transition(c) == ("chain.diverged", None)
+    # Only the card binding refuses it: a receiver whose card names lena accepts the same bundle.
+    assert offer_local_transition(c, card=r["delegation"]) == accepted(c)
+
+
+def test_restore_delegation_must_be_byte_identical_to_the_card():
+    c = local_transition()
+    # Same owner, workspace and WSK, validly PK-signed, but not the card's delegation.
+    other = reissue_delegation(issued_ms=CARD_DELEGATION["o"]["issued_ms"] + 1)
+    assert "ok" in R.verify_delegation(S, other, R.unb64u(c["restore"]["pk_pub"]))
+    c["restore"]["delegation"] = other
+    resign_transition(c)
+    assert offer_local_transition(c) == ("chain.diverged", None)
+    assert offer_local_transition(c, card=other) == accepted(c)
+
+
+def owner_policy_defect(c, defect):
+    """Apply one P3-D24 defect; return the card the receiver holds."""
+    r = c["restore"]
+    e, cert = r["event"], r["device_cert"]
+    card = CARD_DELEGATION
+    person, host = "dk_sev1", "wsk"
+    if defect == "person_sig_by_another_key":
+        person = "dk_sev2"
+    elif defect == "host_sig_by_another_key":
+        host = "wsk_other"
+    elif defect == "bundle_key_is_not_the_card_owner":
+        # The card's delegation, but pk_pub and the certificate belong to lena.
+        r["pk_pub"] = SIG["keys"]["pk_lena"]["pub_b64u"]
+        r["device_cert"] = reissue_cert(cert, "pk_lena", person_id=person_hex("pk_lena"))
+    elif defect in ("card_for_another_workspace", "card_for_another_wsk"):
+        field, value = (
+            ("workspace_id", "f" * 32)
+            if defect == "card_for_another_workspace"
+            else ("wsk_pub", SIG["keys"]["wsk_other"]["pub_b64u"])
+        )
+        card = r["delegation"] = reissue_delegation(**{field: value})
+    elif defect == "cert_not_signed_by_the_pk":
+        r["device_cert"] = R.sign_object(S, published_f1_key("pk_mara"), cert["o"])
+    elif defect == "actor_id_is_not_the_owner":
+        e["actor"]["id"] = "p_" + person_hex("pk_lena")
+    elif defect == "actor_device_is_not_the_cert":
+        e["actor"]["device"] = "d_" + device_hex("dk_sev2")
+    elif defect == "cert_without_operate":
+        r["device_cert"] = reissue_cert(cert, scopes_max=["look", "decide"])
+    elif defect == "cert_with_drop_scope":
+        r["device_cert"] = reissue_cert(
+            cert, scopes_max=["drop:" + "ab" * 16], expires_ms=milliseconds(e["at"]) + 86_400_000
+        )
+    elif defect == "cert_expired_at_line_at":
+        r["device_cert"] = reissue_cert(cert, expires_ms=milliseconds(e["at"]))
+    else:
+        raise AssertionError(defect)
+    resign_transition(c, person=person, host=host)
+    return card
+
+
+OWNER_POLICY_DEFECTS = [
+    "person_sig_by_another_key",
+    "host_sig_by_another_key",
+    "bundle_key_is_not_the_card_owner",
+    "card_for_another_workspace",
+    "card_for_another_wsk",
+    "cert_not_signed_by_the_pk",
+    "actor_id_is_not_the_owner",
+    "actor_device_is_not_the_cert",
+    "cert_without_operate",
+    "cert_with_drop_scope",
+    "cert_expired_at_line_at",
+]
+
+
+@pytest.mark.parametrize("defect", OWNER_POLICY_DEFECTS)
+def test_restore_owner_device_policy_single_defect(defect):
+    """P3-D24 / R1: each signature and policy check refuses on its own (review finding 2)."""
+    c = local_transition()
+    assert offer_local_transition(c) == accepted(c)
+    card = owner_policy_defect(c, defect)
+    assert offer_local_transition(c, card=card) == ("chain.diverged", None)
+
+
+def test_restore_cert_unexpired_at_line_at_is_accepted():
+    c = local_transition()
+    r = c["restore"]
+    r["device_cert"] = reissue_cert(
+        r["device_cert"], expires_ms=milliseconds(r["event"]["at"]) + 1000
+    )
+    resign_transition(c)
+    assert offer_local_transition(c) == accepted(c)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"hash": "sha256:" + "11" * 32}, {"n": 2}, {"n": 4}],
+    ids=["hash", "n_lower", "n_higher"],
+)
+def test_restore_signed_source_must_name_the_held_checkpoint(change):
+    """Review finding 3: C == held and C is valid, but the owner-signed source names another checkpoint."""
+    c = local_transition()
+    assert c["restore"]["C"] == c["held"] and workspace_checkpoint_ok(c["held"])
+    c["restore"]["event"]["source"].update(change)
+    resign_transition(c)
+    assert offer_local_transition(c) == ("chain.diverged", None)
+
+
+@pytest.mark.parametrize("field", ["seq", "prev"])
+def test_restore_line_must_chain_onto_the_retained_head(field):
+    """F1 §5.10: line.seq = from_seq + 1 and line.prev = head (review finding 4)."""
+    c = local_transition()
+    e = c["restore"]["event"]
+    if field == "seq":
+        e["seq"] = e["from_seq"] + 2
+    else:
+        e["prev"] = e["abandoned"]["head"]
+    resign_transition(c)
+    assert offer_local_transition(c) == ("chain.diverged", None)
+
+
+@pytest.mark.parametrize(
+    "abandoned,ok",
+    [
+        (None, False),
+        ({"seq": 2, "head": "sha256:" + "33" * 32}, False),
+        ({"seq": 3, "head": "sha256:" + "33" * 32}, False),
+        ({"seq": 4, "head": "sha256:" + "33" * 32}, True),
+    ],
+    ids=["null", "below_C", "equal_height_other_head", "above_C"],
+)
+def test_restore_abandoned_names_at_least_the_held_entry(abandoned, ok):
+    """F1 §5.10: `abandoned` names the highest known entry above from_seq, C's included (review finding 5)."""
+    c = local_transition()
+    e = c["restore"]["event"]
+    assert e["from_seq"] < c["held"]["o"]["workspace_log"]["seq"] == 3
+    e["abandoned"] = abandoned
+    resign_transition(c)
+    assert offer_local_transition(c) == (accepted(c) if ok else ("chain.diverged", None))
+
+
+def test_target_must_commit_to_the_restore_head():
+    """Review finding 6: a WSK-signed T whose restored entry folds a different head X with a consistent proof."""
+    c = local_transition()
+    resign_transition(c)
+    r = c["restore"]
+    x = "sha256:" + "22" * 32
+    entry = c["offered"]["o"]["workspace_log"]
+    assert entry["seq"] == r["event"]["from_seq"] + 1
+    entry.update(head=x, acc=log_acc(r["acc_from"], x))
+    c["offered"] = r["T"] = sign_checkpoint(c["offered"]["o"])
+    c["proofs"]["workspace"] = [x]
+    assert workspace_checkpoint_ok(c["offered"])
+    assert growth_ok({"seq": r["event"]["from_seq"], "acc": r["acc_from"]}, entry, [x])
+    assert offer_local_transition(c) == ("sync.incomplete", None)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("genesis", "sha256:" + "0" * 64),
+        ("workspace_id", "f" * 32),
+        ("n", 0),
+        ("n", True),
+        ("n", "1"),
+        ("at", "2026-99-99T99:99:99Z"),
+        ("at", "2026-02-30T10:00:00Z"),
+        ("at", "2026-10-1T10:00:00Z"),
+        ("at", "2026-10-10T10:00:00+00:00"),
+        ("kind", "ticket_checkpoint"),
+        ("v", 3),
+        ("suite", 1),
+        ("extra", 1),
+        ("tickets", None),
+        ("kind", "other_checkpoint"),
+        ("workspace_log", {"seq": True, "head": ZERO_ACC, "acc": ZERO_ACC}),
+        ("workspace_log", {"seq": 0, "head": ZERO_ACC, "acc": ZERO_ACC}),
+        ("workspace_log", {"seq": 1, "head": "bad", "acc": ZERO_ACC}),
+        ("workspace_log", {"seq": 1, "head": ZERO_ACC, "acc": ZERO_ACC, "x": 1}),
+    ],
+)
+def test_wsk_signed_checkpoint_trust_root(field, value):
+    """Review finding 7: a validly WSK-signed checkpoint with another genesis, workspace, n or an impossible at
+    (and the schema fields), so that only the named check can refuse it."""
+    from copy import deepcopy
+
+    o = deepcopy(CP["workspace_checkpoint"]["signed"]["o"])
+    o[field] = value
+    if value is None:
+        del o[field]
+    signed = sign_checkpoint(o)
+    assert signature_ok(CP["wsk_pub"], signed["sig"], L["sig_checkpoint"].encode() + cjt(o))
+    assert not checkpoint_ok(signed)
+    assert checkpoint_offer(None, signed, now=VECTOR_CLOCK) == ("chain.diverged", None)
+
+
+def test_checkpoint_signed_object_has_exactly_o_and_sig():
+    signed = dict(CP["workspace_checkpoint"]["signed"], note="x")
+    assert not checkpoint_ok(signed)
+    assert checkpoint_offer(None, signed, now=VECTOR_CLOCK) == ("chain.diverged", None)
+
+
+def test_valid_ticket_checkpoint_is_not_a_workspace_offer():
+    """Review finding 11: refused, not a KeyError."""
+    ticket = CP["ticket_checkpoint"]["signed"]
+    assert checkpoint_ok(ticket)
+    assert checkpoint_offer(None, ticket, now=VECTOR_CLOCK) == ("chain.diverged", None)
+    assert checkpoint_offer(CP["workspace_n_held"], ticket, now=VECTOR_CLOCK) == (
+        "chain.diverged",
+        None,
+    )
+    c = local_transition()
+    c["restore"]["C"] = ticket
+    assert offer_local_transition(c) == ("chain.diverged", None)
+
+
+@pytest.mark.parametrize("ahead,ok", [(299, True), (300, True), (301, False)])
+def test_receiver_future_ceiling(ahead, ok):
+    """P3-D25 / R3a: o.at <= relay clock + 300 s for every published checkpoint, T included (finding 8)."""
+    refused = ("checkpoint_time", None)
+    first = CP["workspace_checkpoint"]["signed"]
+    now = utc(first["o"]["at"], -ahead)
+    assert checkpoint_offer(None, first, now=now) == (("ok", None) if ok else refused)
+    growth = next(c for c in CP["workspace_n_offers"] if c["name"] == "verified_accumulator_growth")
+    held, offered = CP["workspace_n_held"], growth["checkpoint"]
+    now = utc(offered["o"]["at"], -ahead)
+    result = checkpoint_offer(held, offered, proofs=growth["proofs"], now=now)
+    assert result == (("ok", None) if ok else refused)
+    c = local_transition()
+    now = utc(c["offered"]["o"]["at"], -ahead)
+    assert offer_local_transition(c, now=now) == (accepted(c) if ok else refused)
+
+
+def test_far_future_checkpoint_cannot_freeze_the_receiver():
+    from copy import deepcopy
+
+    o = deepcopy(CP["workspace_checkpoint"]["signed"]["o"])
+    o["at"] = "2100-01-01T00:00:00Z"
+    assert checkpoint_offer(None, sign_checkpoint(o), now=VECTOR_CLOCK) == ("checkpoint_time", None)
+    c = local_transition()
+    c["offered"]["o"]["at"] = "2100-01-01T00:00:00Z"
+    resign_transition(c)
+    assert offer_local_transition(c) == ("checkpoint_time", None)
+    # An identical retry of the held checkpoint is not a new publication.
+    held = CP["workspace_n_held"]
+    assert checkpoint_offer(held, held, now=utc(held["o"]["at"], -3600)) == ("ok", None)
+
+
+def completeness_case(pk_name, reason="lost"):
+    """The relay holds lena's `lost` for dk_lena1; the bundle carries evidence for that device signed by pk_name."""
+    c = local_transition("relay_requires_every_held_revocation")
+    known = c["known_revocations"]
+    assert known[0]["revocation"]["o"]["device_id"] == device_hex("dk_lena1")
+    assert known[0]["revocation"]["o"]["person_id"] == person_hex("pk_lena")
+    cert = reissue_cert(
+        c["restore"]["device_cert"], pk_name, dk="dk_lena1", person_id=person_hex(pk_name)
+    )
+    evidence = local_revocation_evidence(cert, pk_name=pk_name, reason=reason)
+    assert revocation_evidence_ok(evidence)
+    c["restore"]["event"]["revocations"] = [evidence]
+    resign_transition(c)
+    return c, known
+
+
+def test_completeness_accepts_the_known_persons_evidence():
+    c, known = completeness_case("pk_lena")
+    assert offer_local_transition(c, known=known) == accepted(c)
+
+
+def test_completeness_refuses_evidence_from_another_person():
+    """Review finding 9 / PoC 2: mara-signed `compromised` evidence for lena's known device."""
+    c, known = completeness_case("pk_mara", reason="compromised")
+    assert offer_local_transition(c, known=known) == ("chain.diverged", None)
+
+
+def test_completeness_refuses_evidence_under_another_stored_key():
+    from copy import deepcopy
+
+    c, known = completeness_case("pk_lena")
+    known = deepcopy(known)
+    known[0]["pk_pub"] = SIG["keys"]["pk_lena"]["pub_b64u"]
+    assert offer_local_transition(c, known=known) == accepted(c)
+    # A receiver whose stored key for the device's person differs refuses (person ids alone agree here).
+    known[0]["pk_pub"] = SIG["keys"]["pk_mara"]["pub_b64u"]
+    assert offer_local_transition(c, known=known) == ("chain.diverged", None)
+
+
+def ticket_transition(ws_seq):
+    """A signed ticket-log restore over the shared held checkpoint: a new ticket log, forward proof from acc_0."""
+    from copy import deepcopy
+
+    c = local_transition()
+    r, held = c["restore"], c["held"]
+    uid = CP["ticket_checkpoint"]["signed"]["o"]["uid"]
+    first = CP["ticket_log"]["heads"][0]
+    assert uid not in held["o"]["tickets"]
+    r["log"] = uid
+    r["event"].update(
+        seq=2,
+        from_seq=1,
+        head=first,
+        prev=first,
+        based_on=first,
+        ws_seq=ws_seq,
+        abandoned=None,
+        abandoned_decisions=[],
+        revocations=[],
+    )
+    r["acc_from"] = log_acc(ZERO_ACC, first)
+    r["forward_heads"] = [first]
+    target = c["offered"]["o"]
+    target["workspace_log"] = deepcopy(held["o"]["workspace_log"])
+    target["tickets"] = {uid: {"seq": 2, "head": first, "acc": first}}
+    c["proofs"] = {}
+    resign_transition(c)
+    return c
+
+
+@pytest.mark.parametrize("ws_seq,ok", [(1, True), (3, True), (4, False)])
+def test_ticket_restore_ws_seq_is_committed_by_the_target(ws_seq, ok):
+    """Relay design R3: a ticket restore has ws_seq <= T.workspace_log.seq (review finding 10)."""
+    c = ticket_transition(ws_seq)
+    assert c["offered"]["o"]["workspace_log"]["seq"] == 3
+    assert offer_local_transition(c) == (accepted(c) if ok else ("chain.diverged", None))
+
+
+def test_ticket_restore_is_not_checked_for_revocation_completeness():
+    """F1 §5.10 / R4: a ticket restore carries []; held revocations do not refuse it."""
+    known = local_transition("relay_requires_every_held_revocation")["known_revocations"]
+    c = ticket_transition(3)
+    assert offer_local_transition(c, known=known) == accepted(c)
+
+
+@by_name([c for c in TAMPER["cases"] if "field_set" in c["name"] and c["chain_broken_at"]])
+def test_field_set_tamper_refused_at_append(c):
+    """§5.11 step 0: the shared host/agent field-set tamper events are refused by the append path too."""
+    workspace = TAMPER["workspace_events"]
+    broken = c["chain_broken_at"]
+    state = F1State(TAMPER["workspace_id"])
+    state.wsk = workspace[0]["wsk_pub"]
+    state.logs = {"workspace": workspace, c["log"]: c["events"][: broken - 1]}
+    assert state.judge(c["events"][broken - 1], c["log"]) == "validation.field_set"
+    assert state.judge(c["events"][broken - 1], c["log"], replay=True) == "chain.broken"
+
+
+@pytest.mark.parametrize("field", ["sig", "auth", "roster_v"])
+def test_host_event_with_person_fields_refused_at_append(field):
+    state = F1State("ws")
+    e = {"type": "device.revoked", "actor": {"kind": "host"}, "seq": 99, "prev": None, field: "x"}
+    assert state.judge(e, "workspace") == "validation.field_set"
+
+
+def test_restore_revocation_entry_has_exactly_three_fields():
+    c = local_transition()
+    cert = reissue_cert(c["restore"]["device_cert"], dk="dk_sev2")
+    evidence = local_revocation_evidence(cert)
+    c["restore"]["event"]["revocations"] = [evidence]
+    resign_transition(c)
+    assert offer_local_transition(c) == accepted(c)
+    evidence["note"] = "x"
+    resign_transition(c)
+    assert revocation_evidence_ok(evidence)
+    assert not restore_schema_ok(c["restore"]["event"], "workspace")
+    assert offer_local_transition(c) == ("chain.diverged", None)
+
+
+@pytest.mark.parametrize("defect", ["seq_skips_a_head", "head_is_not_the_last_proof_head"])
+def test_wsk_signed_growth_entry_must_match_its_proof(defect):
+    """§5.10 growth: exactly t - s heads, the last the offered head. A WSK-signed entry whose acc folds the proof
+    but whose seq or head disagrees with it is incomplete."""
+    from copy import deepcopy
+
+    growth = next(c for c in CP["workspace_n_offers"] if c["name"] == "verified_accumulator_growth")
+    held, o, proofs = CP["workspace_n_held"], deepcopy(growth["checkpoint"]["o"]), growth["proofs"]
+    ((uid, heads),) = proofs.items()
+    entry = o["tickets"][uid]
+    assert entry["acc"] == fold(held["o"]["tickets"][uid]["acc"], heads)
+    if defect == "seq_skips_a_head":
+        entry["seq"] += 1
+    else:
+        entry["head"] = "sha256:" + "77" * 32
+    offered = sign_checkpoint(o)
+    assert workspace_checkpoint_ok(offered)
+    assert checkpoint_offer(held, offered, proofs=proofs, now=VECTOR_CLOCK) == (
+        "sync.incomplete",
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    "case", ["source_precedes_retained_prefix", "null_source_with_pinned_genesis"]
+)
+def test_forward_proof_must_derive_acc_from(case):
+    """§5.10: when from_seq >= C.seq, acc_from comes from a forward proof from C (or acc_0). A T re-signed over
+    another acc_from is incomplete."""
+    c = local_transition(case)
+    assert offer_local_transition(c) == accepted(c)
+    c["restore"]["acc_from"] = "sha256:" + "44" * 32
+    resign_transition(c)
+    assert offer_local_transition(c) == ("sync.incomplete", None)
