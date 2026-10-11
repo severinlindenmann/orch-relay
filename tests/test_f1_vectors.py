@@ -1460,6 +1460,7 @@ def transition_ok(held, offered, restore, applied, known):
             or "operate" not in cert["o"]["scopes_max"]
             or any(s.startswith("drop:") for s in cert["o"]["scopes_max"])
             or (C and e["at"] < C["o"]["at"])
+            or e["at"] > offered["o"]["at"]
         ):
             return "chain.diverged", None
         carried = {x["revocation"]["o"]["device_id"]: x["revocation"] for x in e["revocations"]}
@@ -2278,3 +2279,75 @@ def test_restore_line_cap_includes_lf():
     assert restore_schema_ok(e, "workspace")
     e["note"] += "x"
     assert not restore_schema_ok(e, "workspace")
+
+
+# Local signed regression cases; request matching vectors from orch-core.
+def published_f1_key(name):
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    key = SIG["keys"][name]
+    private = ec.derive_private_key(int(key["scalar_hex"], 16), ec.SECP256R1())
+    assert R.b64u(S.sig_pub(private)) == key["pub_b64u"]
+    return private
+
+
+def local_transition(name="restore_accumulator_fold"):
+    from copy import deepcopy
+
+    return deepcopy(next(c for c in CP["transition_cases"] if c["name"] == name))
+
+
+def resign_transition(c):
+    """Rebuild both outer signatures, the event head, tail proof and target signature."""
+    r = c["restore"]
+    e, log = r["event"], r["log"]
+    e["sig"] = R.b64u(
+        S.sign(published_f1_key("dk_sev1"), signed_event_bytes(e, CP["workspace_id"], log))
+    )
+    e["host_sig"] = R.b64u(
+        S.sign(published_f1_key("wsk"), signed_event_bytes(e, CP["workspace_id"], log, True))
+    )
+    target = c["offered"]
+    entry = target["o"]["workspace_log"] if log == "workspace" else target["o"]["tickets"][log]
+    c["proofs"][log] = [head(e)]
+    entry.update(seq=e["seq"], head=head(e), acc=log_acc(r["acc_from"], head(e)))
+    target["sig"] = R.b64u(
+        S.sign(published_f1_key("wsk"), L["sig_checkpoint"].encode() + cjt(target["o"]))
+    )
+    r["T"] = target
+    # Negatives must reach the intended check with valid signatures and accumulator evidence.
+    assert person_ok(e, r["device_cert"], CP["workspace_id"], log)
+    assert host_ok_event(e, CP["wsk_pub"], CP["workspace_id"], log)
+    assert checkpoint_ok(target)
+    assert fold(r["acc_from"], c["proofs"][log]) == entry["acc"]
+
+
+def offer_local_transition(c):
+    return checkpoint_offer(c["held"], c["offered"], c["restore"], proofs=c["proofs"])
+
+
+@pytest.mark.parametrize("bootstrap", [False, True])
+@pytest.mark.parametrize("offset", [-1, 0, 1])
+def test_restore_position_upper_bound(bootstrap, offset):
+    from datetime import datetime, timedelta
+
+    c = local_transition(
+        "null_source_with_pinned_genesis" if bootstrap else "restore_accumulator_fold"
+    )
+    at = datetime.fromisoformat(c["offered"]["o"]["at"]) + timedelta(seconds=offset)
+    c["restore"]["event"]["at"] = at.strftime("%Y-%m-%dT%H:%M:%SZ")
+    resign_transition(c)
+    expected = ("chain.diverged", None) if offset > 0 else ("ok", c["restore"]["event"]["id"])
+    assert offer_local_transition(c) == expected
+
+
+@pytest.mark.parametrize("offset", [-1, 0])
+def test_restore_position_lower_bound(offset):
+    from datetime import datetime, timedelta
+
+    c = local_transition()
+    at = datetime.fromisoformat(c["held"]["o"]["at"]) + timedelta(seconds=offset)
+    c["restore"]["event"]["at"] = at.strftime("%Y-%m-%dT%H:%M:%SZ")
+    resign_transition(c)
+    expected = ("chain.diverged", None) if offset < 0 else ("ok", c["restore"]["event"]["id"])
+    assert offer_local_transition(c) == expected
