@@ -702,3 +702,58 @@ def test_challenge_retry_expiry_and_retained_terminals(client, resign, state, of
     )
     assert again.status_code == response.status_code
     assert sql(client, "SELECT * FROM cert_requests")[0] == after
+
+
+def test_host_poll_skips_request_whose_device_certificate_expired(client):
+    # Revocation and departure prune queued rows; only certificate expiry reaches handoff.
+    sql(client, "UPDATE devices SET expires_ms=? WHERE device_id=?", (NOW + 5000, DEVICE))
+    assert post_raw(client, binary("bridge_device_post")).status_code == 202
+    advance(client, 10000)
+    r = host_poll(client)
+    assert r.status_code == 200
+    assert r.json()["items"] == []
+
+
+def test_device_mailbox_reads_only_own_response_chunks(client):
+    assert post_raw(client, binary("bridge_device_post")).status_code == 202
+    assert post_raw(client, binary("bridge_host_post"), True).status_code == 202
+    sql(client, "INSERT INTO members VALUES (?,?,?,?)", (WS, PRIMARY, PERSON, P.cj(["look"])))
+    sql(
+        client,
+        "INSERT INTO sessions VALUES (?,?,?,?)",
+        (token_hash("FAKE-primary"), "device", PRIMARY, NOW + 900000),
+    )
+    url = f"/v2/workspaces/{WS}/bridge/{RID}"
+    other = client.get(url, headers={"Authorization": "Bearer FAKE-primary"})
+    assert other.status_code == 200
+    assert other.json() == {"chunks": []}
+    own = client.get(url, headers={"Authorization": "Bearer FAKE-device"})
+    assert len(own.json()["chunks"]) == 1
+
+
+def post_cert_request(client):
+    return client.post(
+        f"/v2/persons/{PERSON}/cert-requests", json={"request": OBJECTS["request"]}, headers=HOST
+    )
+
+
+def test_cert_request_to_revoked_primary_rejected(client):
+    sql(
+        client,
+        "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
+        (PRIMARY, PERSON, P.cj(RECORD), "lost", NOW, 1),
+    )
+    r = post_cert_request(client)
+    assert r.status_code == 403 and r.json() == {"error": "revoked"}
+    assert sql(client, "SELECT count(*) FROM cert_requests") == [(0,)]
+
+
+def test_cert_request_to_drop_scoped_primary_rejected(client):
+    sql(
+        client,
+        "UPDATE devices SET scopes_max=? WHERE device_id=?",
+        (P.cj(["drop:" + WS]), PRIMARY),
+    )
+    r = post_cert_request(client)
+    assert r.status_code == 403 and r.json() == {"error": "not_for_this_device"}
+    assert sql(client, "SELECT count(*) FROM cert_requests") == [(0,)]
