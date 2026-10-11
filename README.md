@@ -68,3 +68,7 @@ before parsing; oversized input returns 413. Devices may hold eight live tokens.
 G1 implements §19.1. Membership publication, holder acquisition, bridge and pairing
 routes remain the G2/G3 groups. Shared tables and integration rules are documented
 in [directory integration](docs/directory-integration.md).
+
+## License
+
+Licensed under the PolyForm Noncommercial License 1.0.0. Commercial use requires a separate license from the author. See [LICENSE](LICENSE).
