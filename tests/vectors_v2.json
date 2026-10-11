@@ -46193,6 +46193,70 @@
       }
      },
      {
+      "name": "old_epoch_data_past_deadline_is_noop",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 1,
+       "last_requeue_ms": 1790000899999,
+       "keep_until_ms": 1790000959999,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        },
+        {
+         "n": 2,
+         "expires_ms": 1790000959999
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 2,
+       "now_ms": 1790000900000
+      },
+      "expect": {
+       "result": {
+        "ok": "replay"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 1,
+        "last_requeue_ms": 1790000899999,
+        "keep_until_ms": 1790000959999,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         },
+         {
+          "n": 2,
+          "expires_ms": 1790000959999
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
       "name": "restore_1_of_8",
       "op": "chunk",
       "state": {
@@ -46829,6 +46893,65 @@
        }
       },
       "restart": true
+     },
+     {
+      "name": "cap_precedes_budget",
+      "op": "chunk",
+      "state": {
+       "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+         "flags": 1,
+         "expires_ms": 1790000540001,
+         "restores": 8
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020101705d40abbb8c1c90354a1acaa94c935ced2a9b65180497dd0022753339a5a378fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31b53204dfc68c376f926791d858d404cb0026635a81614dfcace6b6bed5272f469e834690d2475af6d22093395f6999a14594e9179d9d0d3833ce26eb96cd6bac2225e25af6c2afe781e49dd47caeea0c",
+       "epoch": 1,
+       "now_ms": 1790000600001,
+       "room": 204
+      },
+      "expect": {
+       "result": {
+        "refuse": "retry_exhausted"
+       },
+       "state": {
+        "digest": "e8eecd1555359adc256c8904a4b57896592456ef2ae736b671f8966b77dd1a04",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "6bbd1377e35abe3848897071f1b24291120efa7cc1bcc3239f740064cdf7bd4e",
+          "flags": 1,
+          "expires_ms": 1790000540001,
+          "restores": 8
+         }
+        }
+       }
+      }
      },
      {
       "name": "alternating_store_chunk_0",
@@ -245085,6 +245208,70 @@
       }
      },
      {
+      "name": "old_epoch_data_past_deadline_is_noop",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 1,
+       "last_requeue_ms": 1790000899999,
+       "keep_until_ms": 1790000959999,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        },
+        {
+         "n": 2,
+         "expires_ms": 1790000959999
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000060001
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 2,
+       "now_ms": 1790000900000
+      },
+      "expect": {
+       "result": {
+        "ok": "replay"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 1,
+        "last_requeue_ms": 1790000899999,
+        "keep_until_ms": 1790000959999,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         },
+         {
+          "n": 2,
+          "expires_ms": 1790000959999
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000060001
+         }
+        }
+       }
+      }
+     },
+     {
       "name": "restore_1_of_8",
       "op": "chunk",
       "state": {
@@ -245721,6 +245908,65 @@
        }
       },
       "restart": true
+     },
+     {
+      "name": "cap_precedes_budget",
+      "op": "chunk",
+      "state": {
+       "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+       "req_epoch": 1,
+       "first_ms": 1790000000000,
+       "requeues": 0,
+       "last_requeue_ms": 1790000000000,
+       "keep_until_ms": 1790000900000,
+       "copies": [
+        {
+         "n": 1,
+         "expires_ms": 1790000060000
+        }
+       ],
+       "chunks": {
+        "0": {
+         "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+         "flags": 1,
+         "expires_ms": 1790000540001,
+         "restores": 8
+        }
+       }
+      },
+      "args": {
+       "raw": "4f52423202020102705d40abbb8c1c90354a1acaa94c935c4177b27d8e4ac182e8d388b247d2b136fde154f24ef24b8eccff1cb87c930438000000000000000000000000000000000000000000000000000001a0c4506c000000000164c2f0b601ef8127b2dafd94434294230800603d8dd47bd50c7d7bda27ac9c2d31e17d9587f9f069f855291aed4c52dc39d2a27353375a03a3f4f6b773a423bf73662280ecc2dff8018b1de6a35d38a046c82b966934e7086db570413fa1e49592ed649f40e6de7065cfdafdc9e7d13e1d",
+       "epoch": 1,
+       "now_ms": 1790000600001,
+       "room": 204
+      },
+      "expect": {
+       "result": {
+        "refuse": "retry_exhausted"
+       },
+       "state": {
+        "digest": "31b51bfc0a5cf2a8d8b958cdb86295ad794f5c6e68b04ece2bf57b67ad7cc2dc",
+        "req_epoch": 1,
+        "first_ms": 1790000000000,
+        "requeues": 0,
+        "last_requeue_ms": 1790000000000,
+        "keep_until_ms": 1790000900000,
+        "copies": [
+         {
+          "n": 1,
+          "expires_ms": 1790000060000
+         }
+        ],
+        "chunks": {
+         "0": {
+          "digest": "be0aac466dfd17e1a86c12af0aa77f9b234215d18df6fda95e13c0fdea0d0009",
+          "flags": 1,
+          "expires_ms": 1790000540001,
+          "restores": 8
+         }
+        }
+       }
+      }
      },
      {
       "name": "alternating_store_chunk_0",

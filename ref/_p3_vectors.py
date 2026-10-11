@@ -436,6 +436,8 @@ def restore_cases(S, case, cases, bs, stored, tail, ca, env, refusal):
     case("restore_before_deadline_late_record", "chunk", late, {**ca, "now_ms": NOW + 899999}, "restored")
     case("restore_at_deadline_refused", "chunk", late, {**ca, "now_ms": NOW + 900000}, "expired")
     case("restore_after_deadline_refused", "chunk", late, {**ca, "now_ms": NOW + 959998}, "expired")
+    # Order (review T1): the epoch rule precedes the deadline, so old-epoch data past it stays a no-op.
+    case("old_epoch_data_past_deadline_is_noop", "chunk", late, {**ca, "epoch": 2, "now_ms": NOW + 900000}, "replay")
     # A durable cap of eight restorations per chunk.
     state = stored
     for i in range(1, 9):
@@ -445,6 +447,9 @@ def restore_cases(S, case, cases, bs, stored, tail, ca, env, refusal):
     case("ninth_restoration_refused", "chunk", state, {**ca, "now_ms": NOW + 540001}, "retry_exhausted")
     case("restoration_count_survives_restart", "chunk", state, {**ca, "now_ms": NOW + 600001}, "retry_exhausted")
     cases[-1]["restart"] = True
+    # Order (review T2): the cap precedes the budgets, so a capped chunk spends nothing.
+    size = len(bytes.fromhex(ca["raw"]))
+    case("cap_precedes_budget", "chunk", state, {**ca, "now_ms": NOW + 600001, "room": size - 1}, "retry_exhausted")
     # Two chunks restored in turn cannot keep the rid alive: keep_until_ms never moves.
     raw0, raw1 = env(2, 1, idx=0).hex(), env(2, 1, R.F_LAST, idx=1).hex()
     pair = case("alternating_store_chunk_0", "chunk", bs, {**ca, "raw": raw0}, "stored")
@@ -460,7 +465,6 @@ def restore_cases(S, case, cases, bs, stored, tail, ca, env, refusal):
     case("restore_fenced_holder_refused", "chunk", stored, {**expired, "fenced": True}, "fenced")
     case("restore_revoked_target_refused", "chunk", stored, {**expired, "revoked": True}, "revoked")
     case("restore_removed_target_refused", "chunk", stored, {**expired, "member": False}, "not_eligible")
-    size = len(bytes.fromhex(ca["raw"]))
     case("restore_budget_boundary_accepted", "chunk", stored, {**expired, "room": size}, "restored")
     case("restore_budget_exhausted_refused", "chunk", stored, {**expired, "room": size - 1}, "quota_exceeded")
     restore = cases[start:]
