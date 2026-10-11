@@ -2840,10 +2840,20 @@ holds two collections, per workspace:
   protocol §6.2 `verify_revocation` under the person key of the person the revocation names, against a device
   certificate of that same person (`device_learn` checks it; the caller is never trusted). A device id's person
   binding, once known (a known device, chain or local evidence, a verified signer), is never replaced: contradicting
-  evidence is not admitted (`revocation_conflict`) and is never an input to judgment. For an unbound device the
-  first verified evidence wins (F1 row 151; a forged first one makes the genuine later one contradicting, so honest
-  restores carrying it are refused: fails closed, the attacker must control the delivery order, recovery is a
-  re-pair). Evidence first learned out of band is promoted when an accepted restore later carries it.
+  evidence is not admitted (`device_learn` answers `admitted: false`) and is never an input to judgment. For an
+  unbound device the first verified evidence wins (F1 row 151; a forged first one makes the genuine later one
+  contradicting, so honest restores carrying it are refused: fails closed, the attacker must control the delivery
+  order, recovery is a re-pair). Evidence first learned out of band is promoted when an accepted restore later
+  carries it.
+- *Contested* (`contested`, relay refinement after a security review): verified evidence that contradicts the
+  binding is still kept, keyed by device and person. It changes no binding and is no judgment input, but it refuses
+  a restore signer of that device **and** person (checked by the walk after the judge has verified the signer's
+  certificate) and it alarms for a committed signer. Without it the row-151 rule failed *open* for signers: bob
+  (any person) certifies the id of alice's not-yet-known laptop under his own key and revokes it; a relay delivers
+  it first (feed, or the entries of any bundle in a walk that fails, which needs no WSK); alice's own compromised
+  revocation of her laptop then contradicts bob's binding and was discarded, and bob's revocation does not match
+  the laptop's signer person, so a restore signed with the stolen laptop key was accepted (vector
+  `walk_contested_revocation_still_refuses_its_signer`).
 
 The two collections keep **separate reasons**: a chain-learned `lost` and a local `compromised` of one device are two
 entries, and the local upgrade never becomes chain-learned merely because the weaker one is. What each is used for:
@@ -2894,7 +2904,9 @@ stored a signer as a bare device id has no recorded person; such a signer alarms
 fewer). (3) The relay server's R1 refuses a signer revoked in any revocation it holds by device id; this equals F1's
 device-and-person match there because evidence is bound to the registry's first person (R4), so a held revocation of
 a registered owner device is always of that person. (4) The relay server does not report `revocation.unpublished`
-in its publication result (G4 follow-up, transport detail 6 (c)).
+in its publication result (G4 follow-up, transport detail 6 (c)). (5) `contested` evidence (above) refuses its own person's device as a
+signer and alarms although F1 says contradicting evidence is not an input: stricter than F1 (fails closed), raised
+with orch-52.
 
 **Reads, retention and pairing (P3-D13/D19/D20).** A GET returns an immutable endpoint E. Page transitions
 with `after_n=k&to=E`, ordered by target_n, exclusively after k and no later than E.n; k does not need to

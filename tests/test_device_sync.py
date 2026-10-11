@@ -580,3 +580,54 @@ def test_unexpected_walk_errors_still_keep_verified_evidence(monkeypatch):
     got = C.dispatch(S, state, **step)
     assert got["status"] == 400 and got["error"] == "malformed"
     assert got["device"] == case["steps"][0]["expect"]["device"]
+
+
+def _poisoned_device():
+    """Security review flags (1)/(2), PoC: another person (bob) certifies the laptop's device id under his own key
+    and revokes it. The device does not know the laptop yet, so bob's evidence binds it first (F1 row 151). Then
+    alice, the laptop's real person and the workspace owner, revokes it as compromised."""
+    case = CASES["device_learn_admission"]
+    bob = case["steps"][2]["input"]["body"]["evidence"]
+    alice = _walk_result("walk_failed_walk_drops_alarm_of_uncommitted_transition")["device"][
+        "local"
+    ]
+    ((laptop, alice_bad),) = alice.items()
+    dev = copy.deepcopy(
+        CASES["walk_failed_walk_drops_alarm_of_uncommitted_transition"]["steps"][0]["input"]["body"]
+    )
+    dev = C.device_learn(S, dev, bob)["device"]
+    assert (
+        dev["local"][laptop]["revocation"]["o"]["person_id"] == bob["revocation"]["o"]["person_id"]
+    )
+    return dev, laptop, alice_bad
+
+
+def test_poisoned_binding_never_drops_a_genuine_signer_revocation():
+    """The first binding stays bob's (no replacement), but alice's verified revocation is kept, not discarded, and
+    still refuses her laptop as a restore signer (C3): without it the poisoned binding failed open."""
+    dev, laptop, alice_bad = _poisoned_device()
+    got = C.dispatch(S, {}, "device_learn", {"device": dev, "evidence": alice_bad})
+    assert got["status"] == 200 and got["admitted"] is False
+    told = got["device"]
+    assert (
+        told["local"][laptop]["revocation"]["o"]["person_id"]
+        != alice_bad["revocation"]["o"]["person_id"]
+    )
+    assert list(told["contested"].values()) == [alice_bad]
+    case = CASES[
+        "walk_retry_after_failed_walk_refuses_former_alarm"
+    ]  # the relay of t1, signed by the laptop
+    state = copy.deepcopy(case["state"])
+    step = {**case["steps"][0]["input"], "body": told}
+    assert C.dispatch(S, state, **step) == {"status": 409, "error": "chain_diverged"}
+    # Control (up to t1): with only bob's (poisoning) evidence the laptop's restore is accepted, as F1 requires;
+    # before the fix alice's revocation was refused (revocation_conflict) and this was the device's state: fail open.
+    t1 = CASES["walk_failed_walk_keeps_evidence_and_alarms_committed_signer"]["steps"][0]["input"][
+        "endpoint"
+    ]
+    upto = {**step, "endpoint": t1}
+    assert C.dispatch(S, copy.deepcopy(case["state"]), **{**upto, "body": dev})["status"] == 200
+    assert C.dispatch(S, copy.deepcopy(case["state"]), **{**upto, "body": told}) == {
+        "status": 409,
+        "error": "chain_diverged",
+    }

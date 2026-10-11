@@ -1018,10 +1018,28 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     assert list(out['device']['local']) == [laptop_id]
 
     # Out-of-band intake verifies and admits: another person's evidence for a device bound to its person is not
-    # admitted (F1 row 151), first verified evidence binds an unbound device, unverifiable evidence is refused.
+    # admitted (F1 row 151) but kept as contested, first verified evidence binds an unbound device, unverifiable
+    # evidence is refused.
     c, st = new('device_learn_admission', accepted)
-    run(c, st, 'device_learn', {'device': paired, 'evidence': bob_laptop}, error='revocation_conflict')
+    out = run(c, st, 'device_learn', {'device': paired, 'evidence': bob_laptop})
+    assert out['admitted'] is False and out['device']['local'] == {} and len(out['device']['contested']) == 1
     run(c, st, 'device_learn', {'device': dev(base), 'evidence': {**bob_laptop, 'pk_pub': x['pk']}}, error='malformed')
     taken = run(c, st, 'device_learn', {'device': dev(base), 'evidence': bob_laptop})
+    assert taken['admitted'] is True
     assert taken['device']['local'][laptop_id]['revocation']['o']['person_id'] == x['bob_id']
-    run(c, st, 'device_learn', {'device': taken['device'], 'evidence': laptop_bad}, error='revocation_conflict')
+    told = run(c, st, 'device_learn', {'device': taken['device'], 'evidence': laptop_bad})
+    assert told['admitted'] is False and list(told['device']['contested'].values()) == [laptop_bad]
+    # Security review (binding poisoning): bob's first-come evidence keeps the laptop's binding, yet alice's own
+    # compromised revocation, kept as contested, still refuses her laptop as a restore signer (C3) ...
+    poisoned = C.device_learn(S, dev(ticket_base), bob_laptop)['device']
+    poisoned = C.device_learn(S, poisoned, laptop_bad)['device']
+    sync('walk_contested_revocation_still_refuses_its_signer', late, poisoned, error='chain_diverged')
+    # ... and alarms when the laptop signed a committed transition.
+    c, st = new('walk_contested_revocation_alarms_committed_signer', late)
+    committed_t1 = run(c, st, 'device_sync', dev(ticket_base), endpoint=C.checkpoint_hash(t1))
+    bob_first = copy.deepcopy(committed_t1['device'])
+    bob_first['devices'].pop(laptop_id)
+    bob_first = C.device_learn(S, bob_first, bob_laptop)['device']
+    bob_first['devices'][laptop_id] = committed_t1['device']['devices'][laptop_id]
+    alarmed = run(c, st, 'device_learn', {'device': bob_first, 'evidence': laptop_bad})
+    assert alarmed['admitted'] is False and alarmed['device']['alarms'] == [laptop_id]
