@@ -120,3 +120,29 @@ def test_device_sync_never_mutates_the_device_on_refusal():
     before = copy.deepcopy(device)
     assert C.dispatch(S, state, "device_sync", device, now_ms=case["steps"][0]["input"]["now_ms"])["status"] == 409
     assert device == before
+
+
+def _hostile_reader(monkeypatch, op, page):
+    """A relay that never ends a page sequence; fail instead of hanging if the walk keeps asking."""
+    real, calls = C.read, []
+
+    def read(state, o, args, now):
+        if o == op:
+            calls.append(1)
+            assert len(calls) < 200, "unbounded paging loop"
+            return page(args)
+        return real(state, o, args, now)
+
+    monkeypatch.setattr(C, "read", read)
+
+
+@pytest.mark.parametrize("op,page", [
+    ("transitions", lambda a: {"transitions": [], "next": str(a["after_n"])}),
+    ("proof", lambda a: {"heads": ["sha256:" + "11" * 32], "next": a["from"]}),
+])
+def test_walk_paging_is_bounded_against_a_hostile_relay(monkeypatch, op, page):
+    case = CASES["walk_two_restores_then_growth"]
+    state = copy.deepcopy(case["state"])
+    step = case["steps"][0]["input"]
+    _hostile_reader(monkeypatch, op, page)
+    assert C.dispatch(S, state, **step) == {"status": 409, "error": "sync_incomplete"}

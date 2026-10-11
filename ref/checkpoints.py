@@ -83,7 +83,7 @@ def reference(cp):
 
 def initial(ws, wsk_pub, owner_pk, delegation, members):
     return {'ws': ws, 'wsk_pub': wsk_pub, 'owner_pk': owner_pk, 'delegation': delegation,
-            'members': members, 'persons': {delegation['o']['owner_person_id']: owner_pk},
+            'members': members,
             'ever_devices': sorted(members), 'revocations': {}, 'genesis': None, 'held': None,
             'checkpoints': {}, 'gone': [], 'nodes': {}, 'staging': {}, 'transitions': [],
             'baselines': {}, 'receipts': {}, 'failures': []}
@@ -301,10 +301,10 @@ def restore_shape(line):
     need(isinstance(line['revocations'], list))
 
 
-def revocation_evidence(S, state, line, log, persons=None):
-    """F1 B1 entries. A known person's pk_pub must equal the stored key; any other person is accepted
-    self-certifying, because verify_cert binds person_id = H(h_person_id || suite || pk_pub) (review 5)."""
-    persons = state['persons'] if persons is None else persons
+def revocation_evidence(S, state, line, log):
+    """F1 B1 entries, self-certifying for every person (review 5): verify_cert binds
+    person_id = H(h_person_id || suite || pk_pub), so a known person's pk_pub can only be its stored key
+    and an unknown person (abandoned-only, v1 import) needs no relay record."""
     need(log == 'workspace' or line['revocations'] == [], 'restore_invalid', 409)
     listed = {}
     order = []
@@ -312,7 +312,6 @@ def revocation_evidence(S, state, line, log, persons=None):
         need(set(item) == {'revocation', 'device_cert', 'pk_pub'}, 'restore_invalid', 409)
         pk = R.unb64u(item['pk_pub'])
         c = item['device_cert']['o']
-        need(persons.get(c['person_id'], item['pk_pub']) == item['pk_pub'], 'restore_invalid', 409)
         checked = R.verify_cert(S, item['device_cert'], pk, c['created_ms'])
         need('ok' in checked, 'restore_invalid', 409)
         rev = R.verify_revocation(S, item['revocation'], pk, checked['ok'])
@@ -624,7 +623,7 @@ def judge_offer(S, held, offered, *, genesis, wsk_pub, restore=None, applied=(),
                 return DIVERGED, None
             if len(R.cj(ev)) + 1 > LINE_CAP or (held and ev['at'] < held['at']):
                 return DIVERGED, None
-            listed = revocation_evidence(S, {'persons': {}}, ev, log)
+            listed = revocation_evidence(S, {}, ev, log)
             if cert['device_id'] in listed:
                 return DIVERGED, None
             for item in known:
@@ -719,19 +718,21 @@ def sync_walk(S, dev, relay, now, endpoint=None):
         need(cp['o']['genesis'] == genesis, 'genesis_mismatch', 409)
         return cp
 
-    def heads(log, start, to):
+    def heads(log, start, to, cap):
+        # Bounded by the signed heights: a relay cannot keep a device paging (or cycling a cursor) forever.
         out = []
         while True:
             page = get('proof', log=log, to=to, **{'from': start})
             need(page['heads'] or page['next'] is None, 'sync_incomplete', 409)
             out += page['heads']
+            need(len(out) <= cap, 'sync_incomplete', 409)
             if page['next'] is None:
                 return out
             start = page['next']
 
     def growth(work, x, skip=None):
         old = entries(work) if work else {}
-        return {log: heads(log, old.get(log, EMPTY)['acc'], checkpoint_hash(x))
+        return {log: heads(log, old.get(log, EMPTY)['acc'], checkpoint_hash(x), e['seq'] - old.get(log, EMPTY)['seq'])
                 for log, e in entries(x).items() if log != skip and e['seq'] > old.get(log, EMPTY)['seq']}
 
     def judge(work, x, **kw):
@@ -746,15 +747,15 @@ def sync_walk(S, dev, relay, now, endpoint=None):
     end_hash = checkpoint_hash(end)
     work = dev['held']
     learned, signers = dict(dev['revocations']), []
-    after = last = work['o']['n'] if work else 0
+    after = work['o']['n'] if work else 0
     while work is None or end['o']['n'] > work['o']['n']:
         page = get('transitions', to=end_hash, after_n=after)
         for b in page['transitions']:
             need(isinstance(b, dict) and set(b) == BUNDLE_FIELDS and b['restore_id'] == b['line']['id'],
                  'chain_diverged', 409)
-            # Ascending target_n, bounded by E.
-            need(type(b['target_n']) is int and last < b['target_n'] <= end['o']['n'], 'chain_diverged', 409)
-            last = b['target_n']
+            # Ascending order and the E bound follow from T.n == target_n and each judged step (n grows,
+            # and the final judge refuses a work state above E); they need no separate check.
+            need(type(b['target_n']) is int, 'chain_diverged', 409)
             if b['source_hash'] is not None and (work is None or b['source_hash'] != checkpoint_hash(work)):
                 # Prove the exact extension work -> B.source; a lower or equal source never qualifies.
                 c = fetch(b['source_hash'])
@@ -772,15 +773,16 @@ def sync_walk(S, dev, relay, now, endpoint=None):
             # Signatures, source binding, owner policy and revocations first; only then fetch proofs.
             code, _ = judge(work, t, restore=restore, known=known)
             need(code == INCOMPLETE, WALK_CODES.get(code, 'chain_diverged'), 409)
+            top_seq = entries(t).get(log, EMPTY)['seq']
             if type(fs) is int and 1 <= fs < old['seq']:
-                full = heads(log, ZERO, b['target_hash'])
+                full = heads(log, ZERO, b['target_hash'], top_seq)
                 need(len(full) > fs, 'sync_incomplete', 409)
                 restore['acc_before'] = fold(ZERO, full[:fs - 1])
                 restore['acc_from'] = log_acc(restore['acc_before'], full[fs - 1])
-                restore['abandoned_heads'] = heads(log, restore['acc_from'], checkpoint_hash(work))
+                restore['abandoned_heads'] = heads(log, restore['acc_from'], checkpoint_hash(work), old['seq'] - fs)
                 tail = full[fs:]
             else:
-                seg = heads(log, old['acc'], b['target_hash'])
+                seg = heads(log, old['acc'], b['target_hash'], top_seq - old['seq'])
                 k = fs - old['seq'] if type(fs) is int else 0
                 restore['forward_heads'], tail = seg[:k], seg[k:]
                 restore['acc_from'] = fold(old['acc'], seg[:k])
@@ -794,7 +796,10 @@ def sync_walk(S, dev, relay, now, endpoint=None):
             work = t
         if page['next'] is None:
             break
-        after = int(page['next'])
+        # The cursor strictly advances and stays within E, so the paging loop is bounded by E.n.
+        cursor = int(page['next'])
+        need(page['transitions'] and after < cursor <= end['o']['n'], 'sync_incomplete', 409)
+        after = cursor
     result = 'ok'
     if work is None or checkpoint_hash(work) != end_hash:
         code, _ = judge(work, end, proofs=growth(work, end) if not work or end['o']['n'] > work['o']['n'] else {})

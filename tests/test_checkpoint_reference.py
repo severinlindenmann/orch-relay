@@ -233,3 +233,17 @@ def test_checkpoint_request_caps_match_http_registry():
         "publish": "checkpoint_put",
     }
     assert C.REQUEST_CAPS == {op: CAPS[route] for op, route in routes.items()}
+
+
+def test_manifest_bytes_count_toward_the_staging_quota(monkeypatch):
+    # Review 11: a manifest alone is charged against the per-workspace staging bytes.
+    case = CASES["staging_immutable_page_and_manifest"]
+    state = copy.deepcopy(case["state"])
+    manifest = next(s["input"] for s in case["steps"] if s["input"]["op"] == "manifest")
+    size = len(R.cj(manifest["body"]))
+    monkeypatch.setattr(C, "STAGE_CAP", size - 1)
+    before = copy.deepcopy(state)
+    assert C.dispatch(S, state, **manifest) == {"status": 429, "error": "quota_exceeded"}
+    assert state == before
+    monkeypatch.setattr(C, "STAGE_CAP", size)
+    assert C.dispatch(S, state, **manifest)["status"] == 200

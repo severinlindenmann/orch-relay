@@ -481,7 +481,7 @@ def add_checkpoints(out):
         add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore, cp, resign, entry,
                   {'base': base, 'accepted': accepted, 'pinned': pinned, 'restored': restored_state,
                    'bundle': bundle, 't': t, 'heads': heads, 'root': root, 'ws': ws, 'wsk': wsk, 'pk': pk,
-                   'cert': cert, 'delegation': delegation, 'other': other, 'rev': rev})
+                   'cert': cert, 'delegation': delegation, 'other': other, 'rev': rev, 'self_rev': self_rev})
         for c in cases:
             c['expect'] = replay(S, c)
             assert c['expect']['results'] == [s['expect'] for s in c['steps']]
@@ -549,6 +549,13 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     out = sync('walk_plain_growth', grown, dev(base))
     assert out['device']['held'] == grown['held']
     sync('walk_initial_device_full_proof', accepted, dev())
+    # A source above the device's work state must still extend it (review 2, extension proof).
+    regrown = copy.deepcopy(grown)
+    tg, bg = restore(3, source=grown['held'], ident='01NNNNNNNNNNNNNNNNNNNNNNNN',
+                     modifications={'abandoned': {'seq': 6, 'head': extra[1]}})
+    publish(regrown, tg, [page('abandoned', 'workspace', entry(heads[:2]), heads[2:] + extra)], bg)
+    sync('walk_source_must_extend_work', regrown, dev(cp(1, heads[:3] + [C.digest(b'FAKE local fork')])),
+         error='sync_incomplete')
     sync('walk_lagging_relay_ignored', accepted, dev(cp(2)), result='ignored')
     sync('walk_endpoint_gone_keeps_held', grown, dev(base), error='checkpoint_gone',
          endpoint=C.checkpoint_hash(base), now=NOW + C.DAY)
@@ -600,6 +607,16 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     lower = cp(1, heads + extra[:1], time=NOW + 1000)
     forge(higher, lower, 'workspace', entry(heads), extra[:1])
     sync('walk_endpoint_lower_n_higher_entry', higher, dev(cp(2)), error='chain_diverged')
+
+    # The device's own checks, where an honest relay would already have refused.
+    self_revoked = copy.deepcopy(accepted)
+    ts, bs = restore(revocations=[{'revocation': x['self_rev'], 'device_cert': x['cert'], 'pk_pub': x['pk']}])
+    forge(self_revoked, ts, 'workspace', entry(heads[:2]), [C.event_head(bs['line'])], bs, base)
+    sync('walk_signer_revoked_in_own_bundle_refused', self_revoked, dev(base), error='chain_diverged')
+    rootless = copy.deepcopy(pinned)
+    wrong = [C.digest(b'FAKE other root')] + heads[1:]
+    forge(rootless, cp(1, wrong), 'workspace', C.EMPTY, wrong)
+    sync('walk_initial_device_refuses_wrong_root', rootless, dev(), error='sync_incomplete')
 
     spliced = copy.deepcopy(grown)
     acc5 = entry(heads + extra[:1])['acc']
