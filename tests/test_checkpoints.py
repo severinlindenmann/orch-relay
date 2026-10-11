@@ -245,7 +245,7 @@ def test_staging_page_put_cost_does_not_grow_with_staged_pages(tmp_path, manifes
             wire = P.cj(page)
             steps = [0]
 
-            def tick():
+            def tick(steps=steps):
                 steps[0] += 1
                 return 0
 
@@ -254,3 +254,91 @@ def test_staging_page_put_cost_does_not_grow_with_staged_pages(tmp_path, manifes
             con.set_progress_handler(None, 0)
             costs[i] = steps[0]
     assert costs[1199] <= 2 * costs[5] + 20, (costs[5], costs[1199])
+
+
+# --- G4 precondition (c): the deployment-wide staged-bytes ceiling ------------------------------
+
+
+def stage_page(relay, target, i, cap):
+    from orch_relay import proto as P
+    from orch_relay.checkpoints import page_digest
+
+    page = {
+        "kind": "appended",
+        "log": "workspace",
+        "after_seq": 0,
+        "from_acc": ZERO,
+        "heads": [digest(f"FAKE global {i}".encode())],
+    }
+    page["digest"] = page_digest(page)
+    wire = P.cj(page)
+    return relay.put_staging(None, target, 0, page, wire, cap), len(wire)
+
+
+def test_global_staging_ceiling_refuses_across_workspaces_without_eviction(tmp_path):
+    from orch_relay.checkpoints import HOUR, Relay
+    from orch_relay.directory import Refusal
+
+    path = tmp_path / db.DB_NAME
+    db.migrate(path)
+    now = 1790000000000
+    other = "282193f85af5b8d07610fbb3a8448857"
+    with closing(db.connect(path)) as con, con:
+        _, size = stage_page(Relay(None, con, WS, now), digest(b"FAKE a"), 0, 1 << 40)
+        cap = 2 * size
+        stage_page(Relay(None, con, other, now), digest(b"FAKE b"), 1, cap)
+        # A third workspace-scoped quota would allow it; the deployment ceiling does not.
+        with pytest.raises(Refusal) as refused:
+            stage_page(Relay(None, con, other, now), digest(b"FAKE c"), 2, cap)
+        assert (refused.value.code, refused.value.status) == ("overloaded", 503)
+        rows = con.execute("SELECT workspace_id, bytes FROM checkpoint_staging").fetchall()
+    with closing(db.connect(path)) as con, con:
+        # Nothing was evicted, and an expired set no longer counts against the ceiling.
+        assert sorted(rows) == sorted(
+            con.execute("SELECT workspace_id, bytes FROM checkpoint_staging")
+        )
+        later = Relay(None, con, other, now + HOUR)
+        later.purge()
+        Relay(None, con, WS, now + HOUR).purge()
+        stage_page(Relay(None, con, other, now + HOUR), digest(b"FAKE c"), 2, cap)
+
+
+def test_global_staging_ceiling_over_http_is_503_with_retry_after(tmp_path):
+    from checkpoint_support import CORPUS, seed
+    from fastapi.testclient import TestClient
+
+    from orch_relay.app import create_app
+    from orch_relay.checkpoints import page_digest
+
+    case = next(
+        c
+        for c in CORPUS["suites"]["2"]["checkpoints"]["cases"]
+        if c["name"] == "staging_immutable_page_and_manifest"
+    )
+    with TestClient(create_app(tmp_path)) as client:
+        path = tmp_path / db.DB_NAME
+        seed(path, case["state"], case)
+        client.app.state.directory.clock = lambda: 1790000000000
+        client.app.state.checkpoints.global_stage_cap = 10
+        page = {
+            "kind": "appended",
+            "log": "workspace",
+            "after_seq": 0,
+            "from_acc": ZERO,
+            "heads": [digest(b"FAKE over the ceiling")],
+        }
+        page["digest"] = page_digest(page)
+        url = f"/v2/workspaces/{WS}/staging/null/{digest(b'FAKE t')}/pages/0"
+        r = client.put(
+            url,
+            content=__import__("json").dumps(page),
+            headers={
+                "Authorization": "Bearer FAKE-workspace",
+                "Orch-Holder": "1",
+                "Content-Type": "application/json",
+            },
+        )
+        assert (r.status_code, r.json()) == (503, {"error": "overloaded"}), r.text
+        assert int(r.headers["retry-after"]) >= 1
+        with closing(db.connect(path)) as con:
+            assert not con.execute("SELECT 1 FROM checkpoint_staging").fetchone()
