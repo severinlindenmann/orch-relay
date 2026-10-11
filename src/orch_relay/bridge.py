@@ -190,10 +190,14 @@ class Bridge:
         ).fetchone()
         epoch = current[0] if current else 0
         hashed = digest(raw)
-        # Pairing headers name an unproven device; transaction() charges
-        # pairing address/workspace/global limits, never device quotas.
-        if offer is None:
-            self.d.rate("bridge-post", device, 1000, 20, now)
+
+        def charge():
+            # Charged only after replay/coalescing checks, so identical resends are free.
+            # Pairing headers name an unproven device; transaction() charges
+            # pairing address/workspace/global limits, never device quotas.
+            if offer is None:
+                self.d.rate("bridge-post", device, 1000, 20, now)
+
         if direction == 1:
             if seen:
                 if seen["req_digest"] != hashed or seen["offer"] != offer:
@@ -208,7 +212,9 @@ class Bridge:
                     refuse("retry_exhausted", 409)
                 if now < seen["last_requeue_ms"] + 10000:
                     fail("rate_limited", math.ceil((seen["last_requeue_ms"] + 10000 - now) / 1000))
+                charge()
             else:
+                charge()
                 if offer is None and h["epoch"] != epoch:
                     refuse("stale_epoch", 409, epoch=epoch)
                 if (
@@ -266,6 +272,7 @@ class Bridge:
                 if chunk[0] != hashed:
                     refuse("chunk_conflict", 409)
                 return {}
+            charge()
             if h["epoch"] != seen["req_epoch"] or (
                 offer is None and epoch != h["epoch"] and h["flags"] & 5 != 5
             ):
