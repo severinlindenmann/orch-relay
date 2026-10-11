@@ -94,7 +94,15 @@ def test_orch52_transition_cases_against_reference_judge(c):
         "proofs": c["proofs"],
         "card": c["pinned_delegation"],
     }
-    got = judge(F52, c["held"], c["offered"], c["now"], known=c.get("known_revocations", []), **kw)
+    got = judge(
+        F52,
+        c["held"],
+        c["offered"],
+        c["now"],
+        known=c.get("known_revocations", []),
+        known_devices=c.get("known_devices"),
+        **kw,
+    )
     assert got == (c["expect"], c["recorded"])
     if "learned_later_in_walk" in c:
         again = judge(
@@ -312,7 +320,7 @@ def test_initial_requires_registered_members_and_the_owner_key():
     assert (
         fresh["registry"] == {"d1": owner}
         and fresh["bound"] == {}
-        and fresh["self_certified"] == {}
+        and fresh["global_revocations"] == {}
     )
     with pytest.raises(C.Refusal):
         C.initial(
@@ -400,3 +408,10 @@ def test_device_binds_evidence_for_a_known_device_to_its_stored_key():
         **kw,
     )
     assert got == ("chain.diverged", None)
+
+
+def test_alarms_read_round_two_signer_format():
+    dev = {"signers": {"r1": "d1", "r2": {"device": "d2", "person_id": "p"}}, "alarms": []}
+    rev = {"o": {"reason": "compromised"}}
+    C.raise_alarms(dev, {"d1": rev, "d2": rev})
+    assert dev["alarms"] == ["d1", "d2"]

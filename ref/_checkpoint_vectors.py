@@ -498,6 +498,10 @@ def add_checkpoints(out):
         b = copy.deepcopy(bundle)
         b['authz']['delegation'] = R.sign_object(S, keys['person_alice.sig'], {**delegation['o'], 'issued_ms': delegation['o']['issued_ms'] + 1})
         offer_restore(c, state, t, b, 'restore_not_owner')
+        c, state = new('restore_delegation_same_content_bad_signature', accepted)
+        b = copy.deepcopy(bundle)
+        b['authz']['delegation'] = {**delegation, 'sig': R.b64u(bytes(64))}
+        offer_restore(c, state, t, b, 'restore_not_owner')
         if S.id == 2:
             # A re-signed (here: malleated ECDSA) delegation with the same content is the same delegation.
             raw = R.unb64u(delegation['sig'])
@@ -794,24 +798,53 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     forge(forged_late, tf, 'workspace', entry(heads[:2]), [C.event_head(bf['line'])], bf, t1)
     sync('walk_evidence_for_applied_signer_from_another_person', forged_late, dev(ticket_base),
          error='chain_diverged')
-    # Review F3: self-certified evidence for a device the registry later binds to another person is discarded.
+    # Review A/B: self-certified evidence registers the device globally in the same transaction; the first
+    # accepted binding wins at the relay and on devices, and a held revocation is never discarded.
     q_pub = R.b64u(bytes.fromhex(v['keys']['intruder.sig']['pub']))
     q_id = R.person_id(S, R.unb64u(q_pub)).hex()
     q_cert = R.sign_object(S, keys['intruder.sig'], {**laptop['o'], 'person_id': q_id})
-    q_rev = R.sign_object(S, keys['intruder.sig'], {'v': 2, 'suite': S.id, 'kind': 'revocation', 'person_id': q_id,
-        'device_id': laptop_id, 'revoked_ms': NOW - 1000, 'reason': 'compromised'})
+
+    def q_rev(reason):
+        return R.sign_object(S, keys['intruder.sig'], {'v': 2, 'suite': S.id, 'kind': 'revocation', 'person_id': q_id,
+                             'device_id': laptop_id, 'revoked_ms': NOW - 1000, 'reason': reason})
+    q_item = {'revocation': q_rev('compromised'), 'device_cert': q_cert, 'pk_pub': q_pub}
     selfcert = copy.deepcopy(accepted)
-    r1, rb1 = restore(2, ident='01TTTTTTTTTTTTTTTTTTTTTTTT',
-                      revocations=[{'revocation': q_rev, 'device_cert': q_cert, 'pk_pub': q_pub}])
+    r1, rb1 = restore(2, ident='01TTTTTTTTTTTTTTTTTTTTTTTT', revocations=[q_item])
     publish(selfcert, r1, ab, rb1)
-    assert selfcert['self_certified'][laptop_id]['person_id'] == q_id
-    selfcert['registry'][laptop_id] = x['cert']['o']['person_id']  # the laptop registers as the owner's
-    c, st = new('B1_self_certified_then_registered_is_discarded', selfcert)
-    r2, rb2 = restore(3, source=r1, prefix=heads[:2] + [C.event_head(rb1['line'])], ident='01VVVVVVVVVVVVVVVVVVVVVVVV',
-                      revocations=[{'revocation': x['rev']('lost'), 'device_cert': laptop, 'pk_pub': x['pk']}])
-    offer_restore(c, st, r2, rb2, pages=[])
-    assert st['revocations'][laptop_id]['o']['person_id'] == x['cert']['o']['person_id']
-    assert st['discarded'] == [{'device_id': laptop_id, 'person_id': q_id}]
+    assert selfcert['registry'][laptop_id] == q_id and laptop_id in selfcert['global_revocations']
+    after_r1 = heads[:2] + [C.event_head(rb1['line'])]
+    alice_item = {'revocation': x['rev']('compromised'), 'device_cert': laptop, 'pk_pub': x['pk']}
+    r2, rb2 = restore(3, source=r1, prefix=after_r1, ident='01VVVVVVVVVVVVVVVVVVVVVVVV', revocations=[alice_item])
+    r3, rb3 = restore(3, source=r1, prefix=after_r1, ident='01XXXXXXXXXXXXXXXXXXXXXXXX', revocations=[q_item])
+    r4, rb4 = restore(3, source=r1, prefix=after_r1, ident='01YYYYYYYYYYYYYYYYYYYYYYYY')
+    c, st = new('B1_self_certified_registers_globally', selfcert)
+    # A later registration of the key, by the real owner or anyone, is refused: the registry cannot contradict.
+    run(c, st, 'register_device', {'device_id': laptop_id, 'person_id': x['cert']['o']['person_id']}, error='revoked')
+    run(c, st, 'register_device', {'device_id': device, 'person_id': x['bob_id']}, error='cert_conflict')
+    run(c, st, 'register_device', {'device_id': device, 'person_id': x['cert']['o']['person_id']})
+    offer_restore(c, st, r2, rb2, 'restore_invalid', pages=[])  # first accepted binding (Q) kept
+    offer_restore(c, st, r3, rb3, pages=[])
+    assert st['revocations'][laptop_id]['o']['person_id'] == q_id
+    c, st = new('B1_self_certified_coverage_still_demanded', selfcert)
+    offer_restore(c, st, r4, rb4, 'restore_missing_revocation', pages=[])
+    # A registry that contradicts (a race before this fix) or agrees never discards the held revocation.
+    for name, person in [('B1_registry_contradiction_keeps_revocation', x['cert']['o']['person_id']),
+                         ('B1_registry_same_person_keeps_revocation', q_id)]:
+        raced = copy.deepcopy(selfcert)
+        raced['registry'][laptop_id] = person
+        del raced['global_revocations'][laptop_id]
+        c, st = new(name, raced)
+        offer_restore(c, st, r4, rb4, 'restore_missing_revocation', pages=[])
+        offer_restore(c, st, r2, rb2, 'restore_invalid', pages=[])
+        c, st = new(name + '_accepts_first_person', raced)
+        offer_restore(c, st, r3, rb3, pages=[])
+    # The relay and devices agree: a device that walked r1 accepts r3 and refuses r2 like the relay does.
+    agreed = copy.deepcopy(selfcert)
+    publish(agreed, r3, [], rb3)
+    sync('walk_first_binding_agrees_with_relay', agreed, dev(base))
+    alice_forged = copy.deepcopy(selfcert)
+    forge(alice_forged, r2, 'workspace', entry(after_r1), [C.event_head(rb2['line'])], rb2, r1)
+    sync('walk_first_binding_refuses_like_relay', alice_forged, dev(base), error='chain_diverged')
     # Review N1 at the relay: a device the relay learned as a restore signer is bound to its person.
     signer_known = copy.deepcopy(ticket_held)
     signer_known['members'] = members

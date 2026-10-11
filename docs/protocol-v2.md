@@ -2385,7 +2385,10 @@ The `Orch-Holder` generation is required (a missing one is 400 `malformed`, unch
 may spend at most 16 refusals per rolling hour, so a compromised former holder cannot use up its successor's
 slice; across generations the workspace is capped at 48 refusals per rolling hour (review F1). Takeovers are not
 rate limited, because P3-D10 lets a WSK holder (and an honest host restarting after a crash) always take over; the
-workspace ceiling is what bounds a WSK holder that takes over from itself repeatedly. Order: size cap and parse, then
+workspace ceiling is what bounds a WSK holder that takes over from itself repeatedly. Accepted cost: a WSK holder
+that takes over three or more times an hour can keep the 48 refusals full, and then valid publications are also
+429 until the window frees. This adds no power, since a WSK holder can already deny service by fighting over
+the lease (P3-D10); the remedy for a hostile WSK holder is rotating the WSK. Order: size cap and parse, then
 an exact retry of an accepted publication returns its stored result (also with the budget spent), then the budget
 check (429 `quota_exceeded`, not charged), then signature and fold work. `ignored` lower-n publications are not
 charged; they cost one signature check and one canonicalisation of at most 2 MiB.
@@ -2429,12 +2432,19 @@ in that one context only, never by trying T's entries.
   `H(h_person_id || suite || pk_pub)`. **Device binding (review N1/F3, as F1 `model/workspace.restore`):** the
   relay binds a device to a person authoritatively from its global device registry (§19.1/§6.2, live at check
   time, so a member added later is bound) or from a restore signer it verified under the owner PK; the person's
-  key is the directory account key. Evidence for an authoritatively bound device MUST carry that person and key.
-  A device with no authoritative binding but earlier self-certified evidence is bound to that person and key.
-  Only a wholly unknown device (an abandoned-only or v1-imported member's) is accepted self-certifying (review 5),
-  and that binding is recorded as self-certified. When an authoritative binding later contradicts a self-certified
-  one, the relay discards the self-certified binding and its held revocation (and logs the event) before judging,
-  so attacker-made evidence for a not-yet-registered device cannot brick the device's real person's restores.
+  key is the directory account key. **The first accepted binding wins (review A/B):** a device whose revocation the
+  relay holds is bound to that revocation's person, ahead of any registry entry (its key is fixed by
+  `person_id = H(pk_pub)`). Evidence for a bound device MUST carry that person and key. Only a wholly unknown device (an
+  abandoned-only or v1-imported member's) is accepted self-certifying (review 5); in the same transaction the
+  relay registers that device's certificate in the global device registry and records the revocation through
+  §19.5 intake, so a later `PUT /v2/devices/{device}` for the key is 403 `revoked` (or 409 `cert_conflict`) and the
+  registry can never contradict the binding. A held revocation is never deleted (§6.2 "no un-revoke"), whatever
+  the registry later says. Accepted consequence: if a malicious WSK host gets an owner device to sign a restore
+  carrying another person's evidence for an owner device the registry does not know yet, that device stays bound
+  to the other person and revoked, and must pair again with new keys (§6.2); the relay and devices agree on this,
+  because devices also keep the first accepted binding. Recommendation for G1 (not changed here): `PUT
+  /v2/devices/{device}` is self-authenticating under the account PK only, with no proof of possession of `dk_sig`; requiring
+  one for new registrations would narrow pre-registration of not-yet-registered (v1) device ids.
   Otherwise `restore_invalid`. Entries are sorted and unique by device. For each held revocation of an ever-device,
   require the same or stronger reason: compromised > lost = retired. Missing/weaker coverage returns
   `restore_missing_revocation` with sorted `devices`. Byte identity with the earliest chain evidence
@@ -2469,7 +2479,10 @@ a lower-n bundle in this walk, refuses that transition (`chain_diverged`), whate
 learned out of band (the §19.5 revocation feed, the member list, the owner's own action). The **signer check**
 uses both sets: every revocation the device holds refuses its signer. The **person/key binding** of carried
 evidence uses everything the device knows of a device's person: chain revocations, local revocations and known
-active devices (the pairing member list, applied signers, accepted evidence; review F2, orch-52 #377). Only the
+active devices (the pairing member list, applied signers, accepted evidence; review F2, orch-52 #377).
+A member added after pairing is bound on first sight: its first accepted evidence or applied signature on the
+chain. The device does not take bindings from later member lists, because those are WSK-signed and a WSK holder
+could pre-bind persons with them; P8's owner-signed roster closes this. Only the
 **completeness check** (a workspace restore must list every held revocation, a `compromised` one as
 `compromised`) uses chain revocations alone. Both sets are durable and both feed the resurrection rule. A local
 `compromised` revocation of a device that signed an applied transition raises the alarm when it is learned,

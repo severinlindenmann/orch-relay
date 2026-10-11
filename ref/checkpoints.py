@@ -95,7 +95,7 @@ def initial(ws, wsk_pub, owner_pk, delegation, members, registry, person_keys):
     need(all(d in registry for d in members) and person_keys.get(owner_person) == owner_pk)
     return {'ws': ws, 'wsk_pub': wsk_pub, 'owner_pk': owner_pk, 'delegation': delegation,
             'members': members, 'registry': dict(registry), 'person_keys': dict(person_keys),
-            'bound': {}, 'self_certified': {}, 'discarded': [], 'generation': 1,
+            'bound': {}, 'global_revocations': {}, 'generation': 1,
             'ever_devices': sorted(members), 'revocations': {}, 'genesis': None, 'held': None,
             'checkpoints': {}, 'gone': [], 'nodes': {}, 'staging': {}, 'transitions': [],
             'baselines': {}, 'receipts': {}, 'failures': []}
@@ -320,26 +320,25 @@ def authority(state, device):
 
 def known_holder(state, device):
     """(person_id, pk_pub or None) the relay binds to a device, or None for a wholly unknown device.
-    Strict: the binding maps are required state, read at check time (review F3)."""
-    person = authority(state, device)
-    if person is not None:
-        return person, state['person_keys'].get(person)
-    # A self-certified binding always came with its held revocation, whose person it is.
+
+    The first accepted binding wins: a held revocation's person comes first, so no later registry write can
+    rebind it (review A/B; §6.2 "no un-revoke"). Otherwise the live registry or a verified restore signer.
+    The key is the directory account key when known; person_id = H(pk_pub) binds any evidence key to the
+    person anyway. Strict: the binding maps are required state, read at check time (review F3)."""
     held = state['revocations'].get(device)
-    return (held['o']['person_id'], None) if held is not None else None
+    person = held['o']['person_id'] if held is not None else authority(state, device)
+    return (person, state['person_keys'].get(person)) if person is not None else None
 
 
-def reconcile(state):
-    """A self-certified binding that an authoritative one later contradicts is discarded with its held
-    revocation, so it cannot brick coverage for the device's real person (review F3)."""
-    for d, sc in sorted(state['self_certified'].items()):
-        person = authority(state, d)
-        if person is not None and person != sc['person_id']:
-            held = state['revocations'].get(d)
-            if held is not None and held['o']['person_id'] == sc['person_id']:
-                del state['revocations'][d]
-            del state['self_certified'][d]
-            state['discarded'].append({'device_id': d, 'person_id': sc['person_id']})
+def register_device(state, body):
+    """The global registry's first-writer-wins PUT /v2/devices (G1), as far as checkpoints need it: a device
+    whose revocation the relay holds globally is 403 revoked, another person's device is 409 cert_conflict."""
+    need(set(body) == {'device_id', 'person_id'})
+    d, person = body['device_id'], body['person_id']
+    need(d not in state['global_revocations'], 'revoked', 403)
+    need(state['registry'].get(d, person) == person, 'cert_conflict', 409)
+    state['registry'][d] = person
+    return {}
 
 
 def revocation_evidence(S, state, line, log):
@@ -403,7 +402,6 @@ def owner_policy(S, state, bundle, now, extra=(), historical=False):
 
 def restore_check(S, state, body, target, held, stage, used, now):
     bundle = body['restore']
-    reconcile(state)
     try:
         need(set(bundle) == {'line', 'cert', 'authz', 'log'})
         line = bundle['line']
@@ -456,7 +454,12 @@ def restore_check(S, state, body, target, held, stage, used, now):
     for d, item in listed.items():
         rev = item['revocation']
         if known_holder(state, d) is None:
-            state['self_certified'][d] = {'person_id': rev['o']['person_id'], 'pk_pub': item['pk_pub']}
+            # Self-certified evidence registers the device and its key globally in the same transaction, so
+            # the registry can never later contradict this binding (review A/B).
+            state['registry'][d] = rev['o']['person_id']
+        g = state['global_revocations'].get(d)
+        if g is None or STRENGTH[rev['o']['reason']] > STRENGTH[g['o']['reason']]:
+            state['global_revocations'][d] = rev  # §19.5 intake: the device is refused everywhere
         if d not in state['revocations'] or STRENGTH[rev['o']['reason']] > STRENGTH[state['revocations'][d]['o']['reason']]:
             state['revocations'][d] = rev
     state['bound'][cert['device_id']] = cert['person_id']
@@ -643,7 +646,7 @@ def judge_offer(S, held, offered, *, genesis, workspace_id, now, wsk_pub, restor
                 known=(), revoked=(), card=None, known_devices=None, initial_proof=False):
     """held/offered are checkpoint `o` objects; now is the receiver clock in ms. Returns (code, recorded id).
 
-    Ports orch-core judge_offer as of orch-52's fix/restore-receiver-vectors (24305776), F1 codes included.
+    Ports orch-core judge_offer as of orch-52's fix/restore-receiver-vectors (9918c805), F1 codes included.
     Relay additions: `revoked` (device ids learned out of band; they refuse a signer but are not demanded in
     a restore's evidence, protocol-v2 §19.8) and initial_proof (full proof from acc_0 for a first checkpoint,
     where F1 accepts it without ancestry). known_devices ({device_id: {person_id, pk_pub?}}, orch-52 #377)
@@ -816,7 +819,8 @@ def device_initial(ws, wsk_pub, owner_pk, genesis, card, devices, held=None):
 
 def raise_alarms(dev, revocations):
     """P3-D24: a compromised revocation of a device that signed any applied transition alarms."""
-    signed = {s['device'] for s in dev['signers'].values()}
+    # Round-2 device state stored the signer device id as a string; both forms are read.
+    signed = {s['device'] if isinstance(s, dict) else s for s in dev['signers'].values()}
     for d in sorted(signed):
         rev = revocations.get(d)
         if rev is not None and rev['o']['reason'] == 'compromised' and d not in dev['alarms']:
@@ -1030,6 +1034,8 @@ def _dispatch(S, state, op, body, now_ms, **args):
             result = read(trial, op, args, now_ms)
         elif op in ('baseline', 'baseline_delete'):
             result = baseline(trial, body, now_ms, op == 'baseline_delete', args.get('role'))
+        elif op == 'register_device':
+            result = register_device(trial, body)
         elif op == 'device_learn':
             result = device_learn(body['device'], body['revocation'])
         elif op == 'device_sync':

@@ -69,7 +69,8 @@ def enrich(output, v):
             if error == 'wrong_suite':
                 continue  # fixture carries a valid alternate-suite object
             matches = [(c, i, s) for c in v['checkpoints']['cases'] for i, s in enumerate(c['steps'])
-                       if s['input']['op'] == op and s['expect'].get('error') == error]
+                       if s['input']['op'] == op and s['expect'].get('error') == error
+                       and c['name'] != 'publish_generation_required']  # bound to its own fixture below
             if not matches:
                 continue
             vector, index, step = matches[0]
@@ -108,6 +109,17 @@ def enrich(output, v):
                     c['request']['headers']['Authorization'] = 'Bearer FAKE-device'
                     c['given'].update(vector={'section': 'checkpoints', 'name': vector['name'], 'step': i},
                                       now_ms=step['input']['now_ms'])
+                    fixture['cases'].append(c)
+                    continue
+                if name == 'checkpoint_put' and vector['name'] == 'publish_generation_required':
+                    c = copy.deepcopy(fixture['cases'][0])
+                    c['name'] = 'missing_orch_holder'
+                    c['request']['json'] = step['input']['body']
+                    c['request']['headers'].pop('Orch-Holder', None)
+                    c['given'].update(vector={'section': 'checkpoints', 'name': vector['name'], 'step': i},
+                                      now_ms=step['input']['now_ms'], condition='The Orch-Holder header is absent.')
+                    c['response']['status'] = step['expect']['status']
+                    c['response']['json'] = {k: value for k, value in step['expect'].items() if k != 'status'}
                     fixture['cases'].append(c)
                     continue
                 if name != 'checkpoint_put' or vector['name'] not in {

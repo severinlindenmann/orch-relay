@@ -68,7 +68,10 @@ def test_actual_transport_byte_caps_before_parsing(op, cap, status):
     state = copy.deepcopy(CASES["first_checkpoint_full_proof"]["state"])
     before = copy.deepcopy(state)
     extra = {"generation": 1} if op == "publish" else {}
-    assert C.dispatch(S, state, op, b" " * (cap + 1), **extra) == {"status": status, "error": "too_large"}
+    assert C.dispatch(S, state, op, b" " * (cap + 1), **extra) == {
+        "status": status,
+        "error": "too_large",
+    }
     assert C.contract(state) == C.contract(before)
 
 

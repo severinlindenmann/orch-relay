@@ -67,12 +67,7 @@
       "given": {
         "scenario": "malformed",
         "now_ms": 1790000000000,
-        "condition": "checkpoint_put: Unknown query parameter; strict route parsing refuses before dispatch.",
-        "vector": {
-          "section": "checkpoints",
-          "name": "publish_generation_required",
-          "step": 0
-        }
+        "condition": "checkpoint_put: Unknown query parameter; strict route parsing refuses before dispatch."
       },
       "request": {
         "method": "PUT",
@@ -2871,6 +2866,129 @@
           "result": "accepted",
           "n": 2,
           "hash": "sha256:ad11df343a6c27235aff563e8a3b13961d6511fbb860dff66af99e3619eff4eb"
+        }
+      }
+    },
+    {
+      "name": "missing_orch_holder",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000,
+        "vector": {
+          "section": "checkpoints",
+          "name": "publish_generation_required",
+          "step": 0
+        },
+        "condition": "The Orch-Holder header is absent."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/checkpoint",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "checkpoint": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "workspace_checkpoint",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "genesis": "sha256:0b8218975f6951f4eeec4fb4913c0818dbd79faa78e0cfef0712b3422031cc4c",
+              "n": 2,
+              "at": "2026-09-21T14:13:20Z",
+              "tickets": {},
+              "workspace_log": {
+                "seq": 3,
+                "head": "sha256:e4b8ae9193a1d16d1dbfe594941cc48d42aee882e463ade99751399b0031e0ce",
+                "acc": "sha256:67bb4a232c68fc49c86dbff1d7fbea530d835d5ed9f7c549833453d1f13e1f81"
+              }
+            },
+            "sig": "hpjlRItrsoXML7ZwF-eyQQQHoXDkPUVHCRlvp58HsJiwaI_VEf2zzST1JTvEadIPKTF4cwrPTSai2pwKgTfCbA"
+          },
+          "source_hash": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155",
+          "restore": {
+            "line": {
+              "v": 2,
+              "hash_v": 1,
+              "id": "01BBBBBBBBBBBBBBBBBBBBBBBB",
+              "seq": 3,
+              "at": "2026-09-21T14:13:20Z",
+              "type": "restore",
+              "actor": {
+                "kind": "person",
+                "id": "p_5c0574d08d9b869beaa7b630cc83893d",
+                "device": "d_4177b27d8e4ac182e8d388b247d2b136"
+              },
+              "based_on": "sha256:f651c7436ee0a94ad032231e55ce3e1374e2ed04a25132131e90368a8dd17680",
+              "prev": "sha256:f651c7436ee0a94ad032231e55ce3e1374e2ed04a25132131e90368a8dd17680",
+              "roster_v": 1,
+              "auth": "passphrase",
+              "from_seq": 2,
+              "head": "sha256:f651c7436ee0a94ad032231e55ce3e1374e2ed04a25132131e90368a8dd17680",
+              "abandoned": {
+                "seq": 4,
+                "head": "sha256:a3acc61dece91142d46355a1c411db852d40960d82ec61a5c1d2509f0d81df73"
+              },
+              "abandoned_decisions": [],
+              "source": {
+                "n": 1,
+                "hash": "sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155"
+              },
+              "reason": "rollback",
+              "revocations": [],
+              "sig": "B83YyUM-UtkcjxcrOGonz2F_H1x5n6ljW2bma1Fbx9wxOOoj9RK3aPGYaWI9ROaxhxOLpZn_0hBdscLHL0fUig",
+              "host_sig": "q7tpBLzHBcEim-RPAqBQ0kOtZq6M1eONmVc2aZU9ErfWP2iRQ3hMOcoU-tjsqA-TQmY7IJapSLflbGH-sGKzYA"
+            },
+            "cert": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "device_cert",
+                "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+                "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+                "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+                "created_ms": 1789913600000,
+                "expires_ms": null,
+                "scopes_max": [
+                  "look",
+                  "decide",
+                  "operate",
+                  "type"
+                ]
+              },
+              "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+            },
+            "authz": {
+              "delegation": {
+                "o": {
+                  "v": 2,
+                  "suite": 2,
+                  "kind": "ws_delegation",
+                  "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                  "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                  "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                  "client_hosted": false,
+                  "issued_ms": 1789913600000
+                },
+                "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+              }
+            },
+            "log": "workspace"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
         }
       }
     }

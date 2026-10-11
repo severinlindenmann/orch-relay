@@ -773,7 +773,8 @@ commit atomically: H = E, record the restore ids, apply the bundles' revocations
   Round 3: a device also binds carried evidence for every device it knows as active (pairing member list,
   applied signers) or locally revoked (orch-52 #377), and a local `compromised` revocation alarms when learned.
   At the relay, device→person comes from the live global device registry (or a verified restore signer), not a
-  snapshot; a self-certified binding that the registry later contradicts is discarded with its revocation. The
+  snapshot. Round 4: a held revocation is never discarded; self-certified evidence registers the device globally in
+  the same transaction, so the first accepted binding wins at the relay and on devices alike. The
   failed-publication budget is 16 per holder generation and 48 per workspace-hour: takeovers stay unlimited
   (P3-D10), so the workspace ceiling, not a takeover limit, bounds a WSK holder taking over from itself.
 - **Devices keep their durable revocation knowledge and tombstones.** A restore can never resurrect a device they know
