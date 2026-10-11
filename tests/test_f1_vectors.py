@@ -1154,6 +1154,9 @@ class F1State:
     def judge(self, e, log):
         t, a = e["type"], e["actor"]
         lines = self.logs.get(log, [])
+        # §5.11 step 0 at append: field set (`validation.*`). sig, auth and roster_v are person-only (§5.2).
+        if a["kind"] != "person" and any(k in e for k in ("sig", "auth", "roster_v")):
+            return "validation.field_set"
         # §5.11 steps 1–4, in order. At append, person signature is step 5.
         if e["seq"] != len(lines) + 1 or e["prev"] != (head(lines[-1]) if lines else None):
             return "chain.broken"
@@ -1497,3 +1500,29 @@ def test_checkpoint_lower_n_extra_uid_diverges(monkeypatch):
         }
     }
     assert checkpoint_offer(held, offered) == ("chain.diverged", None)
+
+
+def test_restore_window_replayed_workspace_first():
+    """§5.10: the re-append window closes at the first other workspace event.
+
+    The shared scenario appends ticket steps before the late host revocation, so a window that never
+    closed would not be noticed there. Replaying the whole workspace log first, then the ticket steps,
+    must still accept every ticket step.
+    """
+    c = next(
+        s
+        for s in load("restore")["scenarios"]
+        if s["name"] == "restore_window_ends_before_a_later_host_revocation"
+    )
+    state = F1State(c["workspace_id"])
+    ordered = [s for s in c["steps"] if s["log"] == "workspace"] + [
+        s for s in c["steps"] if s["log"] != "workspace"
+    ]
+    assert [state.append(s["event"], s["log"]) for s in ordered] == [s["expect"] for s in ordered]
+
+
+def test_agent_event_with_person_fields_refused_at_append():
+    """§5.11 step 0 / §5.2: an agent or host event carrying sig, auth or roster_v is refused before any other check."""
+    state = F1State("ws")
+    e = {"type": "log.added", "actor": {"kind": "agent"}, "seq": 99, "prev": None, "sig": "x"}
+    assert state.judge(e, "01TICKET") == "validation.field_set"
