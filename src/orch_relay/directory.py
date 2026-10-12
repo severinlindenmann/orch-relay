@@ -414,7 +414,16 @@ class Directory:
         if not P.SUITE.pub_ok(pub):
             fail("cert_invalid")
         check_suite(body["device_cert"])
-        o = checked(P.verify_cert(body["device_cert"], pub, now))
+        # As PUT /v2/devices (recovery): a device id with any held revocation is never registered
+        # (the device-auth cutoff, by device id). Since 0010 such an id can exist without a
+        # registry row (restore evidence registers nothing), so account creation checks it too.
+        cert_o = body["device_cert"].get("o") if isinstance(body["device_cert"], dict) else None
+        did = cert_o.get("device_id") if isinstance(cert_o, dict) else None
+        prior = (
+            isinstance(did, str)
+            and con.execute("SELECT 1 FROM revocations WHERE device_id=?", (did,)).fetchone()
+        )
+        o = checked(P.verify_cert(body["device_cert"], pub, now, {did} if prior else set()))
         if not P.SUITE.verify(
             P.unb64u(o["dk_sig_pub"]),
             P.unb64u(body["sig"]),

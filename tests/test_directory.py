@@ -489,3 +489,26 @@ def test_device_auth_cutoff_stays_by_device_id(tmp_path):
         with closing(db.connect(d.path)) as con, con:
             _other_person_row(con, DEVICE)
         assert issue_login(c).json() == {"error": "revoked"}
+
+
+def test_account_creation_refuses_a_revoked_device_id(tmp_path):
+    """PR #53 review R1 (reviewer PoC): since 0010 a device id can hold a revocation without a
+    registry row (here bob's pair for alice's not-yet-registered phone, as restore evidence stores
+    it). POST /v2/accounts refuses it like PUT /v2/devices does (403 revoked, by device id) and writes
+    no account, device or invite use; otherwise the registry would associate the id with alice and
+    strand any workspace whose chain holds (phone, bob)."""
+    from orch_relay.directory import create_invite
+
+    invite = create_invite(tmp_path / db.DB_NAME, DAY)
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        d.clock = lambda: NOW
+        with closing(db.connect(d.path)) as con, con:
+            _other_person_row(con, DEVICE)
+        r = c.post("/v2/accounts", json=account_body(c, invite))
+        assert (r.status_code, r.json()) == (403, {"error": "revoked"})
+        with closing(db.connect(d.path)) as con:
+            assert not con.execute("SELECT 1 FROM devices").fetchone()
+            assert not con.execute("SELECT 1 FROM accounts").fetchone()
+            assert con.execute("SELECT used_ms FROM invites").fetchone()[0] is None
+

@@ -1,8 +1,8 @@
 {
-  "aggregate": "57a4c16b1be11740edef920d5d668036744b418e463a66cab5df7a50263d8ae0",
+  "aggregate": "6781766addaa3cc767d67da0d9031ce1e60a80e251dc7972b2f3518a8ab10072",
   "files": {
     "README.md": "a4a11f1d535366d9fd22bc2d9f913c79010fee55191bc46a361e99e88072be58",
-    "accounts.json": "25068c96173a565bfc86917e454136df2dafa9b8642d3badb8ea89a1cc1151cc",
+    "accounts.json": "060776501099476673fa1026afa1256ec7c06f8c922c9b3542ee63ee6058d1c3",
     "baseline_delete.json": "d463dc15149dc8ed0669ffc1cad74f53e9d841957f3e91de0bc91b9582f0dd1f",
     "baseline_post.json": "595b7d56c266ca88888c7c2c32cc9444838e9b3879ddc2391f367a8078f8bcec",
     "bridge_device_poll.json": "3e6ba249aa83db67c2da3e34d7d8923c9ca3d429525e513215dc0dfc123493b2",
@@ -42,5 +42,5 @@
     "staging_page.json": "e3aa4048ed1fa171954ccae68907b67085342b8eb88b66ba37d58f6746fd9545",
     "transitions.json": "f1e5f37a65ca8ebdf6d51c3cd92c6759f7e33b49b42d0440c01065a4159400e3"
   },
-  "revision": 7
+  "revision": 8
 }
