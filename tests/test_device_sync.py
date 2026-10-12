@@ -925,3 +925,17 @@ def test_resubmitting_evidence_never_churns(monkeypatch):
     for item in [*flood, *flood, *flood]:
         dev = C.device_learn(S, dev, item)["device"]
     assert _held(dev) == flood
+
+
+def test_judge_bounds_the_line_before_any_signature_check(monkeypatch):
+    """orch-core #397: a bundle line over the event line cap is refused before any signature check,
+    T's included, so nothing is verified (or harvested) from it."""
+    c = next(x for x in F1["transition_cases"] if x["name"] == "restore_accumulator_fold")
+    assert judge(F1, c["held"], c["offered"], c["now"], **view(c))[0] == "ok"
+    calls = []
+    real_object, real_verify = R.verify_object, S.verify
+    monkeypatch.setattr(R, "verify_object", lambda *a, **k: calls.append(1) or real_object(*a, **k))
+    monkeypatch.setattr(S, "verify", lambda *a, **k: calls.append(1) or real_verify(*a, **k))
+    monkeypatch.setattr(C, "LINE_CAP", len(R.cj(c["restore"]["event"])))
+    assert judge(F1, c["held"], c["offered"], c["now"], **view(c)) == REFUSED
+    assert calls == []
