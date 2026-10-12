@@ -31,6 +31,9 @@ MINUTE, HOUR, DAY = 60_000, 3_600_000, 86_400_000
 # P3-D34 (G3): workspaces one account (owner person) may own; a first card beyond it is 429
 # quota_exceeded. Bounds per-account staging fairness and storage (x the per-workspace node quota).
 ACCOUNT_WORKSPACES = 32
+# P3-D36 (review F2): an audited per-account override (migration 0016, `orch-relay account-cap`),
+# 1..MAX_ACCOUNT_WORKSPACES, replaces the global cap for that account only.
+MAX_ACCOUNT_WORKSPACES = 10_000
 MAX_RESPONSE = 4 * 1024 * 1024
 # P3-D35 (pre-public-deploy blocker 4): token buckets for authenticated requests, as (burst,
 # refill per minute); round 2 after the Opus review (F1-F3). Every request with a valid session on
@@ -478,6 +481,14 @@ class Directory:
     def assert_can_wait(self):
         """G3 must call before a long-poll wait, outside its database transaction."""
         assert not self.lock._is_owned(), "long poll cannot wait while holding directory.lock"
+
+    def workspace_cap(self, con, person):
+        """P3-D36: the account's override of the workspaces cap, else the global cap. One
+        indexed read on the caller's connection (the pre-check's snapshot or the transaction)."""
+        row = con.execute(
+            "SELECT cap FROM account_workspace_override WHERE person_id=?", (person,)
+        ).fetchone()
+        return row[0] if row else self.account_workspaces
 
     def rate(self, purpose, identity, duration, cap, now, charge=True):
         with self.budget:
@@ -1072,7 +1083,7 @@ class Directory:
             owned = con.execute(
                 "SELECT count(*) FROM workspaces WHERE owner_person_id=?", (owner,)
             ).fetchone()[0]
-            if owned >= self.account_workspaces:
+            if owned >= self.workspace_cap(con, owner):
                 fail("quota_exceeded")
         self.authorized(state)
         if not stored:
@@ -1427,3 +1438,92 @@ def create_invite(path, ttl_ms):
             (digest(code.encode()), time.time_ns() // 1_000_000 + ttl_ms),
         )
     return code
+
+
+ADMIN_TEXT = re.compile(r"[^\x00-\x1f\x7f]*")
+
+
+def admin_text(value, limit, name, required=True):
+    if value is None and not required:
+        return None
+    if not isinstance(value, str) or not value or len(value) > limit:
+        raise ValueError(f"{name} must be 1..{limit} characters")
+    if not ADMIN_TEXT.fullmatch(value):
+        raise ValueError(f"{name} must not contain control characters")
+    return value
+
+
+def set_account_cap(path, person, cap, by, note=None, now_ms=None, timeout_ms=5000):
+    """P3-D36: set an account's workspaces cap override (operator command, never HTTP) and append
+    its audit row in ONE write transaction; returns (old cap or None, new cap).
+
+    Works with the relay running or stopped: BEGIN IMMEDIATE takes SQLite's write lock, waiting up
+    to `timeout_ms` for the relay's own write transactions (each held well under a second); past
+    that it raises sqlite3.OperationalError and writes nothing. The relay reads the row on the
+    next first card (no cache, no restart)."""
+    P.unhex(person)
+    if type(cap) is not int or not 1 <= cap <= MAX_ACCOUNT_WORKSPACES:
+        raise ValueError(f"cap must be an integer in 1..{MAX_ACCOUNT_WORKSPACES}")
+    by = admin_text(by, 128, "--by")
+    note = admin_text(note, 1024, "--note", required=False)
+    db.migrate(path)
+    now = time.time_ns() // 1_000_000 if now_ms is None else now_ms
+    with closing(db.connect(path)) as con:
+        con.execute(f"PRAGMA busy_timeout={int(timeout_ms)}")
+        con.isolation_level = None
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            if not con.execute("SELECT 1 FROM accounts WHERE person_id=?", (person,)).fetchone():
+                raise ValueError("no account with that person_id")
+            row = con.execute(
+                "SELECT cap FROM account_workspace_override WHERE person_id=?", (person,)
+            ).fetchone()
+            old = row[0] if row else None
+            con.execute(
+                "INSERT INTO account_workspace_override VALUES (?,?,?,?,?) ON CONFLICT(person_id) "
+                "DO UPDATE SET cap=excluded.cap, set_by=excluded.set_by, "
+                "set_at_ms=excluded.set_at_ms, note=excluded.note",
+                (person, cap, by, now, note),
+            )
+            con.execute(
+                "INSERT INTO account_workspace_override_audit"
+                "(person_id, old_cap, new_cap, set_by, set_at_ms, note) VALUES (?,?,?,?,?,?)",
+                (person, old, cap, by, now, note),
+            )
+            con.execute("COMMIT")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+    return old, cap
+
+
+def show_account_cap(path, person, global_cap):
+    """The account's owned workspaces, effective cap and override row (read-only)."""
+    P.unhex(person)
+    db.migrate(path)
+    with closing(db.connect(path)) as con:
+        owned = con.execute(
+            "SELECT count(*) FROM workspaces WHERE owner_person_id=?", (person,)
+        ).fetchone()[0]
+        row = con.execute(
+            "SELECT cap, set_by, set_at_ms, note FROM account_workspace_override WHERE person_id=?",
+            (person,),
+        ).fetchone()
+    override = dict(zip(("cap", "set_by", "set_at_ms", "note"), row)) if row else None
+    cap = row[0] if row else global_cap
+    return {"person_id": person, "owned": owned, "cap": cap, "override": override}
+
+
+def account_cap_audit(path, person=None):
+    """The audit rows, oldest first (one account's, or all)."""
+    if person is not None:
+        P.unhex(person)
+    db.migrate(path)
+    names = ("seq", "person_id", "old_cap", "new_cap", "set_by", "set_at_ms", "note")
+    with closing(db.connect(path)) as con:
+        rows = con.execute(
+            f"SELECT {','.join(names)} FROM account_workspace_override_audit "
+            "WHERE ?1 IS NULL OR person_id=?1 ORDER BY seq",
+            (person,),
+        ).fetchall()
+    return [dict(zip(names, row)) for row in rows]
