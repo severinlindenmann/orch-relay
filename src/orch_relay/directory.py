@@ -691,8 +691,11 @@ class Directory:
         `{pairs, next}`. The registered person's pair is first on page 1; the others follow
         chain before feed, then by §19.5 cursor (earliest first), never by person_id, which an
         attacker chooses (minted keys) to push genuine pairs off page 1. `next` is opaque and
-        passed back as `after`. A pair upgraded or carried during a walk may be listed again or
-        keep its earlier entry. Intake is not capped (that would let an attacker block restores).
+        passed back as `after`. A walk is not a snapshot: a pair whose label or cursor changes
+        during it (upgraded, a feed pair carried by a restore, a registry pair created after page 1)
+        may be MISSED or repeated; a client restarts from page 1 for a consistent view. A valid
+        `after` past the last pair is an empty 200 page, also for a device with no pairs.
+        Intake is not capped (that would let an attacker block restores).
 
         provenance: 'registry' when the pair's person is the device's association (its registry row,
         excluding P3-D29 evidence-only rows, which restores created); 'chain' when an accepted
@@ -712,7 +715,12 @@ class Directory:
             continuation = P.parse_json(P.unb64u(query["after"]))
             fields(continuation, "device rank cursor")
             rank, cursor = continuation["rank"], continuation["cursor"]
-            if continuation["device"] != device or rank not in (0, 1, 2) or type(cursor) is not int:
+            if (
+                continuation["device"] != device
+                or type(rank) is not int
+                or rank not in (0, 1, 2)
+                or type(cursor) is not int
+            ):
                 fail("malformed")
         rows = con.execute(
             "SELECT * FROM (SELECT r.person_id, r.reason, r.record, r.cursor, CASE "

@@ -606,8 +606,17 @@ def test_revocation_route_pages_by_provenance_then_cursor(tmp_path):
         assert seen == [PERSON, BOB, *minted]
         for bad in ({"limit": "33"}, {"limit": "0"}, {"after": "x"}, {"next": "x"}):
             assert c.get(url, params=bad).json() == {"error": "malformed"}
-        other = P.b64u(P.cj({"device": PRIMARY, "rank": 0, "cursor": 0}))
-        assert c.get(url, params={"after": other}).json() == {"error": "malformed"}
+        for token in (
+            {"device": PRIMARY, "rank": 0, "cursor": 0},
+            {"device": DEVICE, "rank": True, "cursor": 0},  # a JSON boolean is no rank
+            {"device": DEVICE, "rank": 3, "cursor": 0},
+        ):
+            after = P.b64u(P.cj(token))
+            assert c.get(url, params={"after": after}).json() == {"error": "malformed"}
+        # A valid token for a device with no (more) pairs is an empty page, not 404.
+        empty = P.b64u(P.cj({"device": PRIMARY, "rank": 0, "cursor": 0}))
+        empty_url = "/v2/devices/" + PRIMARY + "/revocation"
+        assert c.get(empty_url, params={"after": empty}).json() == {"pairs": [], "next": None}
 
 
 @pytest.mark.parametrize("expiring", [False, True])
@@ -847,6 +856,13 @@ def test_redeeming_evidence_only_person_never_associates_its_evidence_devices(tm
             )
             _chain_row(con, laptop, PERSON, "person_alice.sig", PK, ws="aa" * 16)
             _chain_row(con, laptop, BOB, "person_bob.sig", BOB_PK, ws="bb" * 16)
+            # A bystander (delta review S-a): bob's genuinely registered primary device, revoked by
+            # bob and holding a self-certified pair of the evidence person. Only the evidence
+            # person's OWN device rows go; bob's row survives the redemption.
+            con.execute("INSERT INTO accounts VALUES (?,?,?)", (BOB, BOB_PK, NOW))
+            d.store_device(con, _cert_of(BOB, "person_bob.sig", PRIMARY))
+            _chain_row(con, PRIMARY, PERSON, "person_alice.sig", PK, ws="bb" * 16)
+            _other_person_row(con, PRIMARY, reason="lost")  # bob's own pair
 
         def association(con):
             return Relay.association(type("Relay", (), {"con": con})(), laptop)
@@ -858,7 +874,9 @@ def test_redeeming_evidence_only_person_never_associates_its_evidence_devices(tm
         with closing(db.connect(d.path)) as con:
             con.row_factory = sqlite3.Row
             assert association(con) is None
-            assert [tuple(r) for r in con.execute("SELECT device_id FROM devices")] == [(DEVICE,)]
+            assert sorted(
+                tuple(r) for r in con.execute("SELECT device_id, person_id FROM devices")
+            ) == sorted([(DEVICE, PERSON), (PRIMARY, BOB)])
             assert not con.execute(
                 "SELECT 1 FROM sessions WHERE subject_id=?", (laptop,)
             ).fetchone()

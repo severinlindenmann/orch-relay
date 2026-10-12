@@ -166,6 +166,9 @@ def test_0012_drops_evidence_only_device_rows_and_keeps_revocations(tmp_path):
         con.execute("INSERT INTO devices VALUES ('da','pa','{}','s','k','[]',NULL)")
         con.execute("INSERT INTO sessions VALUES ('t1','device','de',9),('t2','device','da',9)")
         con.execute("INSERT INTO revocations VALUES ('de','pe','{}','lost',5,7)")
+        # A registered AND revoked device of a real account (delta review S-a): it stays.
+        con.execute("INSERT INTO revocations VALUES ('da','pa','{}','lost',5,8)")
+        con.execute("INSERT INTO revocations VALUES ('da','pe','{}','compromised',5,9)")
     con.close()
     name = "0012_drop_evidence_devices.sql"
     shutil.copy(str(src.joinpath(name)), mdir / name)
@@ -176,4 +179,8 @@ def test_0012_drops_evidence_only_device_rows_and_keeps_revocations(tmp_path):
     assert con.execute("SELECT token_hash FROM sessions").fetchall() == [("t2",)]
     assert con.execute("SELECT person_id FROM evidence_persons").fetchall() == [("pe",)]
     assert con.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 2
-    assert con.execute("SELECT * FROM revocations").fetchall() == [("de", "pe", "{}", "lost", 5, 7)]
+    assert con.execute("SELECT * FROM revocations ORDER BY cursor").fetchall() == [
+        ("de", "pe", "{}", "lost", 5, 7),
+        ("da", "pa", "{}", "lost", 5, 8),
+        ("da", "pe", "{}", "compromised", 5, 9),
+    ]
