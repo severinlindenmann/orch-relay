@@ -2472,6 +2472,40 @@ private half; the publicly derived reference key is only a test artifact.
   gets its replay; one on a used invite (or one expired for over a minute) is refused by the first
   check, its challenge consumed. Window checks never charge. Relay operators SHOULD also rate-limit per client
   address at the reverse proxy.
+- **Session buckets (P3-D35).** Every request with a valid session on a directory (§19.1, §19.2, §19.5), bridge
+  (§19.3, certificate queues included) or checkpoint (§19.8, unpublished included) route is charged to one bucket
+  class after authentication and before any lock, write transaction, poll slot or waiter; a request without a
+  valid session takes nothing. Read class: the device's (or a W session's token's) bucket and the person's (or
+  the workspace's). Page class (proof and transition pages): the page buckets of the same identities, one token
+  per started 1 000 heads returned (a transition page by its bytes at 74 per head), at least one; one token is
+  taken before the read and the rest after it, which may leave the bucket below zero. Staging class (staging page
+  and manifest PUTs): the workspace's staging bucket. Host answers (a W session's direction-2 ORB2 post on the
+  bridge or a pair): the (workspace, target device) bucket when the target has a live request on that rid, all
+  pair answers of a workspace one (workspace, pair) bucket, anything else the host's read buckets. A refusal
+  after authentication takes one read-class token. An empty bucket answers 429 `rate_limited` with `Retry-After` (whole seconds until the tokens are
+  back) in place of the request's answer. Long polls take one token per request. In memory, reset on restart.
+
+  | Bucket | Key | Burst | Refill | Override |
+  |---|---|---|---|---|
+  | session | device (device session) or token (W session) | 600 | 600/min (10/s) | `ORCH_RELAY_THROTTLE_SESSION` |
+  | person | person of a device session | 1 200 | 1 200/min | `ORCH_RELAY_THROTTLE_PERSON` |
+  | workspace | workspace of a W session | 1 200 | 1 200/min | `ORCH_RELAY_THROTTLE_WORKSPACE` |
+  | page-session | as session (pages) | 5 914 | 600/min | `ORCH_RELAY_THROTTLE_PAGE_SESSION` |
+  | page-person | as person (pages) | 11 828 | 1 200/min | `ORCH_RELAY_THROTTLE_PAGE_PERSON` |
+  | page-workspace | as workspace (pages) | 11 828 | 1 200/min | `ORCH_RELAY_THROTTLE_PAGE_WORKSPACE` |
+  | staging | workspace (staging PUTs) | 27 777 | 3 000/min (50/s) | `ORCH_RELAY_THROTTLE_STAGING` |
+  | host-answer | (workspace, requesting device) or (workspace, pair) | 1 200 | 1 200/min (20/s) | `ORCH_RELAY_THROTTLE_HOST_ANSWER` |
+
+  Overrides are `burst/per-minute`. Honest clients long-poll or poll at most every few seconds. A first sync walks
+  one proof per grown log: a full 64 MiB set is 17 pages of at most 56 678 heads (913 tokens), and a
+  5 000-ticket workspace adds 5 001 one-page logs, so 5 914 tokens. A new device proves every log from its start,
+  so the cost grows with the workspace's whole history: a first sync waits on no 429 only while the history is at
+  most about 907 000 heads over at most 5 001 logs, and beyond it waits about (heads / 1 000 + logs − 5 914) / 10
+  seconds in all, obeying `Retry-After`. A staging set has at most 27 776 pages (a
+  4 MiB manifest of 150-byte descriptors) plus its manifest. The public revocation-pair read (§19.5) is
+  limited to 60 per minute per address and 960 per minute per IPv6 /56. A relay behind a reverse proxy MUST be
+  configured with the proxy's address (`ORCH_RELAY_TRUSTED_PROXY`); otherwise every client shares one address,
+  and the relay logs a warning.
 - **Waiting long polls** hold no lock, transaction or worker thread. Commits that insert or change
   rows wake only the affected polls (new requests → that workspace's host; responses → that rid;
   revocation, logout, certificate store → that device's polls and the hosts of its workspaces;
@@ -2663,7 +2697,8 @@ on membership and host bridge posts still apply. A wrong principal or inaccessib
 403 `not_eligible`. W(g) routes additionally refuse 409 `fenced` for missing, stale or expired
 holder authority. Signature objects of another deployment suite are 400 `wrong_suite`.
 Route-table bare statuses mean: 400 `malformed`, 401 `unauthenticated`, 403 `not_eligible`,
-404 `not_found`, 410 `expired`, 429 `rate_limited` or `quota_exceeded`. Rate windows return
+404 `not_found`, 410 `expired`, 429 `rate_limited` or `quota_exceeded`. Every authenticated route can
+also refuse 429 `rate_limited` from its session's buckets (P3-D35, §19.4). Rate windows return
 429 `rate_limited`; storage/concurrency caps return 429 `quota_exceeded` (also the P3-D34 caps: staged bytes per owner account,
 workspaces per account, stored log nodes per workspace, self-certified restore evidence per owner account, §19.8); shared global bridge
 budgets return 503 `overloaded`. Each 429/503 includes integer delta-seconds `Retry-After`.

@@ -29,6 +29,7 @@ from pathlib import Path
 sys.path[:0] = [str(Path(__file__).parent), str(Path(__file__).parents[1])]
 
 from checkpoint_support import CORPUS, WS, seed
+from directory_support import unthrottled
 from fastapi.testclient import TestClient
 
 from orch_relay import db
@@ -137,6 +138,7 @@ def scenario(name):
         path = tmp / db.DB_NAME
         seed(path, pinned["state"], pinned)
         client.app.state.directory.clock = lambda: NOW
+        unthrottled(client.app.state.directory)  # benchmark, not the P3-D35 buckets
         ws_heads = [root] + [C.digest(f"FAKE ws {i}".encode()) for i in range(1, 4)]
         if name == "append_200k":
             o = base_object(root, entry(ws_heads))

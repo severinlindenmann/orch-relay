@@ -6,7 +6,7 @@ from contextlib import closing
 
 import pytest
 from bridge_support import CRID, HOST, RID, binary
-from directory_support import DEVICE, NOW, PERSON, PRIMARY, RECORD, WS, seed
+from directory_support import DEVICE, NOW, PERSON, PRIMARY, RECORD, WS, seed, unthrottled
 from fastapi.testclient import TestClient
 
 from orch_relay import db
@@ -377,6 +377,7 @@ def throughput(client, seconds=1.0):
 @pytest.mark.slow
 def test_idle_long_polls_do_not_starve_other_routes(client):
     """Before the event-driven loop, 50 idle pair polls cut this route by about 10x."""
+    unthrottled(client.app.state.directory)  # a throughput flood of one session (P3-D35)
     throughput(client, 0.3)  # warm up
     baseline = throughput(client)
     polls = 200
@@ -537,6 +538,7 @@ def test_long_poll_ceiling_does_not_starve_other_routes(tmp_path, monkeypatch):
     app = create_app(tmp_path)
     db.migrate(app.state.data_dir / db.DB_NAME)
     seed(app.state.directory)
+    unthrottled(app.state.directory)  # one session floods on purpose (P3-D35)
     polls = B.POLL_CEILING
 
     async def run():
@@ -606,6 +608,7 @@ def test_long_poll_ceiling_deadline_does_not_stall_other_routes(tmp_path, monkey
     app = create_app(tmp_path)
     db.migrate(app.state.data_dir / db.DB_NAME)
     seed(app.state.directory)
+    unthrottled(app.state.directory)  # one session floods on purpose (P3-D35)
     polls, wait = B.POLL_CEILING, 25  # the longest wait leaves room for admission
     bridge = app.state.bridge
     first_steps = []

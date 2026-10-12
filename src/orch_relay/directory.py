@@ -15,7 +15,7 @@ import secrets
 import sqlite3
 import threading
 import time
-from collections import Counter
+from collections import Counter, OrderedDict
 from contextlib import closing
 
 from cryptography.hazmat.primitives import serialization
@@ -32,6 +32,60 @@ MINUTE, HOUR, DAY = 60_000, 3_600_000, 86_400_000
 # quota_exceeded. Bounds per-account staging fairness and storage (x the per-workspace node quota).
 ACCOUNT_WORKSPACES = 32
 MAX_RESPONSE = 4 * 1024 * 1024
+# P3-D35 (pre-public-deploy blocker 4): token buckets for authenticated requests, as (burst,
+# refill per minute); round 2 after the Opus review (F1-F3). Every request with a valid session on
+# a directory, bridge or checkpoint route is charged after authentication and before any lock, slot
+# or write, to exactly one bucket class (protocol §19.4 has the table):
+# - read (everything else): the session's bucket, keyed by the DEVICE for a device session (so a
+#   logout and login cannot refill it, F2) and by the token for a W session, plus the person's
+#   bucket (device sessions) or the workspace's (W sessions, which are not capped in number);
+# - page (proof and transition pages): the same identities' page buckets, weighted by the work
+#   returned: one token per started 1,000 heads (PAGE_TOKEN_HEADS), at least one (F1);
+# - staging (staging page and manifest PUTs): one bucket per workspace, not the session's (F1);
+# - answer (a host's ORB2 response or pair answer): one bucket per (workspace, target device), not
+#   the host's session or workspace (F3: a member can spend only the host's answers to itself).
+# A refusal after authentication is always charged one token of the read class, so a valid session
+# spamming refused requests is throttled and can never spend another workspace's or device's
+# staging or answer bucket.
+# Arithmetic: honest clients long-poll (up to 25 s) or poll every few seconds and a directory sync
+# is a handful of reads, so 600 burst and 10/s per device is far above it. A first sync walks one
+# proof per grown log (ref sync_walk): a full 64 MiB set is 17 pages of up to PROOF_PAGE_HEADS heads
+# (16 x 57 tokens + 1 = 913) and a 5,000-ticket workspace adds one small page per log (SYNC_LOGS),
+# so the page burst is 913 + 5,001 = 5,914 tokens with a 10/s refill (10,000 heads/s, ~740 kB/s,
+# a full re-walk every ~10 min). One manifest describes at most MANIFEST_PAGES = 27,776 pages
+# (PAGE_CAP over the smallest canonical descriptor, 150 bytes plus a comma), so the staging burst
+# is one full set plus its manifest, refilled at 50/s. The answer bucket matches the existing
+# bridge-host-post window (20 chunks/s per workspace and target). Overrides:
+# ORCH_RELAY_THROTTLE_<NAME>="burst/per-minute". In memory, reset on restart (accepted).
+PAGE_BYTES = 4 * 1024 * 1024  # checkpoints.PAGE_CAP (pinned by tests)
+PROOF_PAGE_HEADS = (PAGE_BYTES - 128) // 74  # checkpoints.PROOF_PAGE_HEADS
+STAGE_HEADS = 64 * 1024 * 1024 // 74  # heads in a full 64 MiB staging set (checkpoints.STAGE_CAP)
+PAGE_TOKEN_HEADS = 1_000
+SYNC_LOGS = 5_001  # logs of a 5,000-ticket workspace (bench_checkpoint_capacity's shape)
+FULL_SET_TOKENS = (STAGE_HEADS // PROOF_PAGE_HEADS) * math.ceil(
+    PROOF_PAGE_HEADS / PAGE_TOKEN_HEADS
+) + math.ceil(STAGE_HEADS % PROOF_PAGE_HEADS / PAGE_TOKEN_HEADS)
+PAGE_BURST = FULL_SET_TOKENS + SYNC_LOGS
+_DESCRIPTOR = {"i": 0, "kind": "appended", "log": "workspace", "after_seq": 0, "count": 1}
+MANIFEST_PAGES = (PAGE_BYTES - len(P.cj({"pages": []}))) // (
+    len(P.cj({**_DESCRIPTOR, "digest": "sha256:" + "0" * 64})) + 1
+)
+THROTTLES = {
+    "session": (600, 600),
+    "person": (1200, 1200),
+    "workspace": (1200, 1200),
+    "page-session": (PAGE_BURST, 600),
+    "page-person": (2 * PAGE_BURST, 1200),
+    "page-workspace": (2 * PAGE_BURST, 1200),
+    "staging": (MANIFEST_PAGES + 1, 3000),
+    "host-answer": (1200, 1200),
+}
+# Buckets kept per key class (8 classes; ORCH_RELAY_THROTTLE_TABLE), evicting full buckets first.
+# Only authenticated identities create entries (a flood of bad tokens adds none); about 470 B per
+# entry (measured), ~7.6 MB per full class, ~61 MB if every class were full.
+THROTTLE_TABLE = 16_384
+# P3-D35 item 4: the unauthenticated revocation-pair read per IPv6 /56 (as challenges and pairing).
+REVOCATION_READ_PARENT = 960
 BODY_CAPS = {"accounts": 65536, "card": 65536, "card_keys": 65536, "membership": 2097152}
 
 
@@ -251,6 +305,86 @@ def window_rate(state, purpose, identity, duration, cap, now, charge=True):
         state.windows[key] = (end, count + 1)
 
 
+class Buckets:
+    """Token buckets with bounded tables (P3-D35); the caller holds Directory.budget.
+
+    Levels are integers in 1/60,000 of a token, so a refill of `rate` tokens per minute adds
+    exactly `rate` units per millisecond and every count is deterministic under an injected clock.
+    A missing entry is a full bucket. Each key class (the key's first element: session, person,
+    workspace, page-*, staging, host-answer) has its own table of at most `limit` entries, so keys
+    of one class never evict another's. Beyond the limit the entry evicted is, among the EVICT_SCAN
+    least recently charged, the first that has refilled completely (evicting it loses nothing),
+    else the one closest to full: a depleted bucket is never reset by a flood of fresh identities
+    while fuller entries remain (security review of round 2)."""
+
+    UNIT = 60_000
+    EVICT_SCAN = 64
+
+    def __init__(self, limit=THROTTLE_TABLE):
+        self.limit = limit
+        self.tables = {}  # class -> OrderedDict key -> (level, ms of the level, burst, rate)
+
+    @property
+    def table(self):
+        """Every entry (a read-only snapshot, for tests and diagnostics)."""
+        return {key: entry for table in self.tables.values() for key, entry in table.items()}
+
+    def clear(self):
+        self.tables.clear()
+
+    @staticmethod
+    def kind(key):
+        return key[0] if isinstance(key, tuple) else None
+
+    def take(self, key, burst, rate, now, charge=True, cost=1, debt=False):
+        """Refuse 429 `rate_limited` (Retry-After to when `cost` tokens are back, whole seconds)
+        when fewer than `cost` tokens are left; else, with charge, take them. A check
+        (charge=False) has no side effects at all. With `debt` it never refuses and the level may
+        go below zero: work measured after it was done (a proof page's heads) delays the next."""
+        need = cost * self.UNIT
+        full = burst * self.UNIT
+        table = self.tables.get(self.kind(key), {})
+        level, at = table.get(key, (full, now))[:2]
+        level = min(full, level + max(0, now - at) * rate)
+        if level < need and not debt:
+            fail("rate_limited", max(1, math.ceil((need - level) / rate / 1000)))
+        if charge:
+            table = self.tables.setdefault(self.kind(key), OrderedDict())
+            table[key] = (level - need, max(now, at), burst, rate)
+            table.move_to_end(key)
+            while len(table) > self.limit:
+                del table[self.victim(table, now)]
+
+    def victim(self, table, now):
+        best, best_fill = None, None
+        for n, (key, (level, at, burst, rate)) in enumerate(table.items()):
+            if n == self.EVICT_SCAN:
+                break
+            full = burst * self.UNIT
+            fill = min(full, level + max(0, now - at) * rate) / full
+            if fill >= 1:
+                return key
+            if best_fill is None or fill > best_fill:
+                best, best_fill = key, fill
+        return best
+
+
+def throttle_settings(env):
+    """THROTTLES and THROTTLE_TABLE with ORCH_RELAY_THROTTLE_* overrides (positive integers)."""
+    settings = dict(THROTTLES)
+    for name in THROTTLES:
+        text = env.get("ORCH_RELAY_THROTTLE_" + name.upper().replace("-", "_"))
+        if text is not None:
+            burst, rate = (int(part) for part in text.split("/"))
+            if burst <= 0 or rate <= 0:
+                raise ValueError(f"throttle {name} needs a positive burst/per-minute")
+            settings[name] = (burst, rate)
+    table = int(env.get("ORCH_RELAY_THROTTLE_TABLE", THROTTLE_TABLE))
+    if table <= 0:
+        raise ValueError("ORCH_RELAY_THROTTLE_TABLE must be positive")
+    return settings, table
+
+
 class Proceed(Exception):
     """A pre-check reached the route's authorization point: the transaction decides the rest."""
 
@@ -275,6 +409,9 @@ class Directory:
         self.challenge_parents = Counter()
         self.window_expiry = []
         self.windows = {}  # (purpose, identity, duration) -> (window end, count)
+        self.throttles = dict(THROTTLES)  # P3-D35; ORCH_RELAY_THROTTLE_*
+        self.buckets = Buckets()  # under self.budget
+        self.proxy_warned = False
         self.clock = lambda: time.time_ns() // 1_000_000
         self.changed = None  # event-loop callback(*keys) after committed writes (wakes polls)
         self.random = secrets.token_bytes
@@ -330,6 +467,45 @@ class Directory:
     def rate(self, purpose, identity, duration, cap, now, charge=True):
         with self.budget:
             window_rate(self, purpose, identity, duration, cap, now, charge)
+
+    def throttle(self, session, now, bucket="read", ident=None, cost=1, debt=False):
+        """P3-D35: charge an authenticated request's buckets of one class (see THROTTLES), or
+        refuse 429. Callers charge only after authentication (a request without a valid session
+        charges nothing) and before any lock, slot or write; a refusal after authentication is
+        charged to the "read" class. "staging" and "answer" name their key in `ident` and are
+        charged only once the request is authorized for it. All keys are checked before any is
+        charged, under the budget mutex."""
+        if bucket in ("read", "page"):
+            if session["kind"] == "device":
+                keys = [("session", ("device", session["subject_id"]))]
+                keys.append(("person", session["person_id"]))
+            else:
+                keys = [("session", ("token", session["token_hash"]))]
+                keys.append(("workspace", session["subject_id"]))
+            if bucket == "page":
+                keys = [("page-" + purpose, identity) for purpose, identity in keys]
+        elif bucket in ("staging", "host-answer"):
+            keys = [(bucket, ident)]
+        else:
+            raise ValueError(bucket)
+        with self.budget:
+            for charge in (False, True):
+                if debt and not charge:
+                    continue
+                for key in keys:
+                    self.buckets.take(key, *self.throttles[key[0]], now, charge, cost, debt)
+
+    def client_address(self, peer, headers):
+        """canonical_address(), warning once (N4) when a proxy forwards but none is trusted."""
+        forwarded = headers.get("x-forwarded-for")
+        if forwarded and not self.trusted_proxy and not self.proxy_warned:
+            self.proxy_warned = True
+            logging.getLogger(__name__).warning(
+                "X-Forwarded-For received but ORCH_RELAY_TRUSTED_PROXY is unset: behind a reverse "
+                "proxy every client shares the proxy's address (pair polls, address windows); set "
+                "it to the proxy's IP address"
+            )
+        return canonical_address(peer, forwarded, self.trusted_proxy)
 
     def consume(self, challenge, now):
         P.unb64u(challenge, 32)
@@ -402,7 +578,7 @@ class Directory:
         if device["expires_ms"] is not None and now >= device["expires_ms"]:
             fail("cert_expired")
 
-    def authenticate(self, con, headers, now):
+    def authenticate(self, con, headers, now, state=None):
         authorization = headers.get("authorization", "")
         if not authorization.startswith("Bearer "):
             fail("unauthenticated")
@@ -425,6 +601,8 @@ class Directory:
             "SELECT 1 FROM workspaces WHERE workspace_id=?", (session["subject_id"],)
         ).fetchone():
             fail("unauthenticated")
+        if state is not None:
+            state["session"] = session  # handle() charges its buckets (P3-D35)
         return session
 
     def person_access(self, con, session, person):
@@ -848,7 +1026,7 @@ class Directory:
             check_suite(card.get("delegation"))
         stored = con.execute("SELECT * FROM workspaces WHERE workspace_id=?", (ws,)).fetchone()
         if stored:
-            session = self.authenticate(con, headers, now)
+            session = self.authenticate(con, headers, now, state)
             self.workspace_access(con, session, ws, write=True)
             self.fence(con, headers, ws, now)
         if not isinstance(card, dict) or not isinstance(card.get("o"), dict):
@@ -944,9 +1122,16 @@ class Directory:
         if route == "device" and method == "PUT":
             return self.recovery(con, body, raw, address, now, ident, state)
         if route == "revocation":
-            # Public and read-only after its address window (charged once per request).
+            # Public and read-only after its address windows (charged once per request).
             if not (state and "revocation-read" in state):
-                self.rate("revocation-read", address, MINUTE, 60, now)
+                windows = [("revocation-read", address, 60)]
+                parent = ipv6_parent(address)
+                if parent:
+                    windows.append(("revocation-read-parent", parent, REVOCATION_READ_PARENT))
+                with self.budget:
+                    for charge in (False, True):
+                        for purpose, identity, cap in windows:
+                            self.rate(purpose, identity, MINUTE, cap, now, charge)
             if state is not None:
                 state["revocation-read"] = True
             result = self.revocation_pairs(con, ident, query)
@@ -954,7 +1139,7 @@ class Directory:
             return result
         if route == "card" and method == "PUT":
             return self.card_put(con, ident, body, headers, address, now, state)
-        session = self.authenticate(con, headers, now)
+        session = self.authenticate(con, headers, now, state)
         if route == "device":
             row = con.execute("SELECT * FROM devices WHERE device_id=?", (ident,)).fetchone()
             if row is None:
@@ -1097,9 +1282,10 @@ class Directory:
         try:
             if len(raw) > body_cap(route):
                 fail("too_large")
-            address = canonical_address(peer, headers.get("x-forwarded-for"), self.trusted_proxy)
+            address = self.client_address(peer, headers)
             # Authorize first: a refused request takes no lock and no write transaction, and is
-            # charged only what the transaction would charge before refusing it.
+            # charged only what the transaction would charge before refusing it, plus (P3-D35) its
+            # session's buckets once the session is authenticated.
             state = {}
             try:
                 result = self.preauthorize(
@@ -1107,6 +1293,12 @@ class Directory:
                 )
             except sqlite3.Error:
                 result = None  # the transaction authorizes on its own
+            except (Refusal, ValueError, TypeError, KeyError, AttributeError):
+                if "session" in state:
+                    self.throttle(state["session"], self.clock())
+                raise
+            if "session" in state:
+                self.throttle(state["session"], self.clock())
             if result is not None:
                 response = JSONResponse(result)
                 response.wake = []  # FINAL steps change no row
@@ -1149,6 +1341,14 @@ def install(app, data):
     directory.account_workspaces = int(
         os.environ.get("ORCH_RELAY_ACCOUNT_WORKSPACES", ACCOUNT_WORKSPACES)
     )
+    directory.throttles, directory.buckets.limit = throttle_settings(os.environ)
+    behind = os.environ.get("ORCH_RELAY_BEHIND_PROXY", "").strip().lower()
+    if behind not in ("", "0", "false", "no") and not directory.trusted_proxy:
+        # N4: behind Caddy without a trusted proxy every client has the proxy's address.
+        logging.getLogger(__name__).warning(
+            "ORCH_RELAY_BEHIND_PROXY is set but ORCH_RELAY_TRUSTED_PROXY is unset: every client "
+            "shares the proxy's address (4 pair polls relay-wide, shared address windows)"
+        )
     app.state.directory = directory
 
     def endpoint(route):

@@ -8,6 +8,7 @@ import secrets
 import sqlite3
 import struct
 import time
+from collections import Counter
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -16,7 +17,6 @@ from starlette.concurrency import run_in_threadpool
 from . import proto as P
 from .directory import (
     Refusal,
-    canonical_address,
     check_response_budget,
     digest,
     fail,
@@ -140,6 +140,54 @@ RID_POLLS = 16  # pair polls per (ws, offer, rid): bounds one answer's wake fan-
 POLL_TICK = (5.0, 7.0)
 
 
+class Polls(dict):
+    """Admitted long polls per admission key, with running totals (G3 re-review N3).
+
+    `total` counts every admitted poll and `kinds[kind]` those of one key kind ("pair", "device",
+    "workspace"), updated by every write to the table, so admit() reads them in O(1) instead of
+    summing the table. Touched on the event loop only."""
+
+    def __init__(self):
+        super().__init__()
+        self.total = 0
+        self.kinds = Counter()
+
+    def _count(self, key, delta):
+        self.total += delta
+        self.kinds[key[0]] += delta
+        if not self.kinds[key[0]]:
+            del self.kinds[key[0]]
+
+    def __setitem__(self, key, value):
+        self._count(key, value - self.get(key, 0))
+        super().__setitem__(key, value)
+
+    def __delitem__(self, key):
+        self._count(key, -self[key])
+        super().__delitem__(key)
+
+    def pop(self, key, *default):
+        if key in self:
+            value = self[key]
+            del self[key]
+            return value
+        return super().pop(key, *default)
+
+    def clear(self):
+        super().clear()
+        self.total = 0
+        self.kinds.clear()
+
+    def popitem(self):
+        raise NotImplementedError
+
+    def setdefault(self, key, default=None):
+        raise NotImplementedError
+
+    def update(self, *args, **kwargs):
+        raise NotImplementedError
+
+
 def pair_group_caps(address):
     try:
         network = ipaddress.ip_network(address, strict=False)
@@ -166,7 +214,7 @@ class Bridge:
 
     def __init__(self, directory):
         self.d = directory
-        self.polls = {}
+        self.polls = Polls()
         self.waiters = {}  # wake key -> set of asyncio.Event; touched on the event loop only
         self.pair_groups = {}  # address group -> admitted pair polls
 
@@ -581,7 +629,7 @@ class Bridge:
         so anonymous pairing traffic cannot exhaust them (same caps, own namespace). With
         charge=False a pure check (P3-D32): handle() runs it before the first transaction."""
         purpose = ("pair-host-" if session else "pair-") + method
-        address = canonical_address(peer, headers.get("x-forwarded-for"), self.d.trusted_proxy)
+        address = self.d.client_address(peer, headers)
         limits = [
             (address, 60 if method == "POST" else 120),
             ("global", 6000 if method == "POST" else 12000),
@@ -704,6 +752,17 @@ class Bridge:
             if not (method == "POST" and len(raw) >= 6 and raw[5] == 2):
                 return None, None  # anonymous by design; charged in pairing windows
         session = d.authenticate(con, headers, now)
+        try:
+            self.authorize_session(con, session, route, method, params, headers, now)
+        except Refusal as error:
+            error.session = session  # handle() charges the session's buckets (P3-D35)
+            raise
+        return session, self.expiry(con, headers)
+
+    def authorize_session(self, con, session, route, method, params, headers, now):
+        """authorize_snapshot()'s checks after authentication."""
+        d = self.d
+        ws = params.get("ws")
         if route == "cert_requests":
             if method == "GET":
                 if session["kind"] != "device" or session["person_id"] != params["person"]:
@@ -725,15 +784,47 @@ class Bridge:
                 d.fence(con, headers, ws, now)
             if route == "bridge" and method == "GET" and session["kind"] != "device":
                 fail("not_eligible")
-        return session, self.expiry(con, headers)
+
+    def answer_key(self, route, method, session, params, raw):
+        """The host-answer bucket of an authorized host's ORB2 response (direction 2), or None
+        (then the host's read buckets are charged). The key is never chosen freely by the poster
+        (security review of round 2): a bridge response is keyed by its target device only when
+        that device has a live request on the rid (rid_seen, written only by an eligible member
+        device's post), so the keys are bounded by the members' own requests; every pair answer
+        of a workspace shares one key (anonymous pair requests are windowed per workspace)."""
+        if not (
+            session
+            and route in ("bridge", "pair")
+            and method == "POST"
+            and session["kind"] == "workspace"
+            and len(raw) >= 40
+            and raw[5] == 2
+        ):
+            return None
+        ws = params["ws"]
+        if route == "pair":
+            return (ws, "pair")
+        device = bytes(raw[24:40]).hex()
+        try:
+            with self.reading() as con:
+                con.execute("BEGIN")
+                seen = con.execute(
+                    "SELECT 1 FROM rid_seen WHERE workspace_id=? AND device_id=? AND rid=? "
+                    "AND offer IS NULL",
+                    (ws, device, params["rid"]),
+                ).fetchone()
+        except sqlite3.Error:
+            return None
+        return (ws, device) if seen else None
 
     def admit(self, key):
-        """Concurrency caps; callers run on the event loop, so no lock is needed."""
-        if sum(self.polls.values()) >= POLL_CEILING:
+        """Concurrency caps; callers run on the event loop, so no lock is needed. O(1): the
+        totals are running counters (N3)."""
+        if self.polls.total >= POLL_CEILING:
             refuse("overloaded", 503, 1)
         groups = pair_group_caps(key[1]) if key[0] == "pair" else []
         if key[0] == "pair":
-            if sum(v for k, v in self.polls.items() if k[0] == "pair") >= PAIR_POLL_CEILING:
+            if self.polls.kinds["pair"] >= PAIR_POLL_CEILING:
                 refuse("overloaded", 503, 1)
             if self.polls.get(key, 0) >= PAIR_POLLS_PER_ADDRESS or any(
                 self.pair_groups.get(group, 0) >= cap for group, cap in groups
@@ -845,7 +936,9 @@ class Bridge:
             for value in params.values():
                 P.unhex(value)
             # Authorize first: a refused request takes no lock, write transaction, budget,
-            # slot or waiter (anonymous pairing is charged only to its own windows).
+            # slot or waiter (anonymous pairing is charged only to its own windows). Then, before
+            # any of those, its session's buckets (P3-D35), also when it is refused after
+            # authentication.
             try:
                 session, expiry = self.preauthorize(route, request.method, params, headers, raw)
                 checked = True
@@ -853,12 +946,22 @@ class Bridge:
                 # The full transaction authorizes on its own; without a pre-check there is
                 # no admission key, so answer once instead of waiting.
                 session, expiry, wait, checked = None, None, 0, False
+            except Refusal as error:
+                if getattr(error, "session", None):
+                    self.d.throttle(error.session, self.d.clock())
+                raise
+            target = self.answer_key(route, request.method, session, params, raw)
+            if target:
+                # A host's response or pair answer (P3-D35 F3): charged per (workspace, target
+                # device), never to the host's session or workspace, so a member that sends
+                # requests at its own limit can spend only the host's answers to itself.
+                self.d.throttle(session, self.d.clock(), "host-answer", target)
+            elif session:
+                self.d.throttle(session, self.d.clock())
             if wait:
                 subject = None
                 if route == "pair":
-                    address = canonical_address(
-                        peer, headers.get("x-forwarded-for"), self.d.trusted_proxy
-                    )
+                    address = self.d.client_address(peer, headers)
                     candidate = ("pair", address)
                 else:
                     subject = session["subject_id"]

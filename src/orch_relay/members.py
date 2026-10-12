@@ -287,7 +287,7 @@ def dispatch(directory, con, route, ws, body, raw, query, headers, now, state=No
     allowed = {"epoch"} if route == "grants" else {"card_seq"} if route == "card_key" else set()
     if set(query) - allowed:
         fail("malformed")
-    session = directory.authenticate(con, headers, now)
+    session = directory.authenticate(con, headers, now, state)
     write = route in {"membership", "card_keys"}
     directory.workspace_access(con, session, ws, write=write)
     if write:

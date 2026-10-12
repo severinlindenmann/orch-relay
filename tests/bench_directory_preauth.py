@@ -25,7 +25,7 @@ sys.path[:0] = [str(Path(__file__).parent), str(Path(__file__).parents[1])]
 logging.disable(logging.WARNING)
 
 from bridge_support import RID
-from directory_support import DEVICE, PERSON, WS, seed
+from directory_support import DEVICE, PERSON, WS, seed, unthrottled
 
 from orch_relay import db
 from orch_relay import proto as P
@@ -42,6 +42,7 @@ app = create_app(tmp)
 db.migrate(app.state.data_dir / db.DB_NAME)
 d, bridge = app.state.directory, app.state.bridge
 seed(d)
+unthrottled(d)  # measures the lock path, not the P3-D35 buckets
 
 
 class TimedLock:

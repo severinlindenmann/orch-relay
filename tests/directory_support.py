@@ -38,6 +38,11 @@ def signed(o, key="person_alice.sig"):
     return {"o": o, "sig": sign(key, P.L["sig_" + o["kind"]] + P.cj(o))}
 
 
+def unthrottled(directory):
+    """Lift the P3-D35 session buckets for load tests that flood one session on purpose."""
+    directory.throttles = {name: (10**9, 10**9) for name in directory.throttles}
+
+
 def seed(directory, accounts=True, devices=True, card=True):
     directory.clock = lambda: NOW
     directory.origin = ORIGIN
