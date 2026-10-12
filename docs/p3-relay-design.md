@@ -293,7 +293,7 @@ In P3, lists have one person in practice.
 | `POST /v2/workspaces/{ws}/bridge/{rid}` (device) | D(m) | raw ORB2, direction 1 → 202 `{}` | ≤ 1 MiB whole envelope; P3-D9 coalescing; budgets of P3-D17 | 400 `malformed`, `wrong_suite`; 403 `not_for_this_device`, `not_eligible`, `revoked`; 409 `rid_conflict`, `stale_epoch` (`epoch`); 429 | §8.1, §8.9 |
 | `GET /v2/workspaces/{ws}/bridge/{rid}?after=i&wait=s` (device) | D(m), own mailbox | → `{chunks: [{id, idx, last, stream, envelope}]}` | non-consuming | 401; 403 | §8.8 |
 | `POST /v2/workspaces/{ws}/host/hold` | W | `{gen: int \| null, take_over: bool}` → `{gen, lease_s: 40, cursor}` | `gen` = the current generation: renews the lease, same `gen`; `gen: null`: a new generation when the lease is expired or `take_over` is set, otherwise 409; a stale `gen` → 409 `fenced` | 409 `holder_conflict`, `fenced` | P3-D10 |
-| `GET /v2/workspaces/{ws}/host/poll?after=n&wait=s` | W(g) | → `{items: [{n, route, device, rid, offer, envelope}], notices: {revocations_cursor, cert_requests, rotation_due}, next}` | non-consuming; `after` acknowledges everything up to it (stored as `holders.cursor`); renews the lease; ≤ 16 items or 4 MiB | 409 `fenced`; 401 | P3-D10 |
+| `GET /v2/workspaces/{ws}/host/poll?after=n&wait=s` | W(g) | → `{items: [{n, route, device, rid, offer, envelope}], notices: {revocations_cursor, cert_requests, rotation_due, unpublished}, next}` | non-consuming; `after` acknowledges everything up to it (stored as `holders.cursor`); renews the lease; ≤ 16 items or 4 MiB | 409 `fenced`; 401 | P3-D10 |
 | `POST /v2/workspaces/{ws}/bridge/{rid}` (host) | W(g) | raw ORB2, direction 2 → 202 `{}` | ≤ 256 KiB whole chunk; same `(device, rid, idx)` and bytes → no-op while a copy is live, stored again after it expired within P3-D27's bounds; other bytes → 409; epoch rule P3-D22 | 400; 403 `not_eligible`, `revoked`; 409 `chunk_conflict`, `stale_epoch`, `fenced`, `retry_exhausted`; 410 `expired`; 429 | §8.1, §8.5, §8.9 |
 | `POST /v2/workspaces/{ws}/pair/{offer}/{rid}` | none (device), W(g) (host answer) | raw epoch-0 ORB2 → 202 | ≤ 64 KiB; per workspace and per address 60/min; global 6 000/min | 400; 401 `unknown_workspace`; 429 | §8.3, §8.9 |
 | `GET /v2/workspaces/{ws}/pair/{offer}/{rid}?after=i&wait=s` | none | → `{chunks}` | per address 120/min; global 12 000/min | 429 | §8.3 |
@@ -1216,7 +1216,44 @@ HTTP fixture.
       request person; the account route always a new registration;
     - the `revocation_get` fixtures `every_pair_*`, including pages;
     - production tests in `tests/test_directory.py` and `tests/test_migrations.py`.
-  - *Separate.* The retrieval route for `unpublished_refs` is P3-D31, a separate design. It is not implemented here.
+  - *Separate.* The retrieval route for `unpublished_refs` is P3-D31 (below).
+- **P3-D31 (retrieval of unpublished revocation evidence; orch-52 decision point 7, approved with answers (a) to
+  (d)).** Protocol §19.5 "P3-D31" is normative; this is the decision record.
+  - *Routes.* `GET /v2/workspaces/{ws}/unpublished?cursor=&limit=` → `{items, cursor, more}` and
+    `POST /v2/workspaces/{ws}/unpublished/ack` with `{cursor}` → `{acked}`, both W(g); host-poll `notices.unpublished`.
+  - *Derived view, not a queue* (orch-52 (a)). An item exists while the global §19.5 table holds `(d, p)`, `d` is a
+    G2 ever-device, `p` its registry person (evidence-only persons excluded) and the workspace chain holds the pair
+    weaker or not at all. No intake hook, fan-out, eviction or rebuild: response loss, host restart and relay
+    restart all recover by re-reading. Items keep `provenance.digest = sha256(cj(revocation))` (equal to the ref's),
+    stable for identical evidence, so the host dedupes by `(device_id, person_id, provenance.digest)`.
+  - *Retention* (orch-52 (b)): indefinite, until an accepted workspace restore carries the pair at equal or greater
+    strength. The optional advisory ack field `published: [{device_id, person_id, event_id}]` is **not**
+    implemented: the high-water mark already silences the notice, the event ids are unverifiable at the relay, and
+    the field would add a table and a refusal surface for no change in what the route serves. An ack body with any
+    other field is 400 `malformed`; the field can be added later as a new optional member.
+  - *Budgets* (orch-52 (c)): ≤ 64 items and ≤ 256 KiB of `cj(response)` per page (the first item always);
+    fetch 120/min and 2 000/h, ack 30/min per workspace, charged only after W(g); ≤ 4 096 ever-devices per
+    workspace (membership 429 `quota_exceeded`).
+  - *Ack* (orch-52 (d)): no per-item acknowledgement; a monotonic per-workspace high-water mark (migration 0013
+    `unpublished_acks`) that drives the notice only. Not publication; never hides an item.
+  - *Positions:* `b64u(cj({v: 1, ws, c}))`, bound to the workspace (another workspace's is 400 `malformed`), not to
+    the generation; behind is a legal re-serve, ahead of the relay's state is 409 `cursor_ahead` (new code).
+  - *Authorization first, no oracle:* 401, then 403 `not_eligible` (never 404/410), then 409 `fenced`, read-only
+    before any lock, write or window; a fetch is one `query_only` snapshot.
+  - *Publication hints (U10):* `unpublished_refs` are exactly the view's items after the restore minus the signer's
+    device (the `holder is None` branch is removed, F1: no association keeps evidence pending), so every ref is
+    served; `checkpoint_unpublished` is no longer written. Safe: nothing ever read that table, the view holds every
+    ref (refs ⊆ items in the same transaction), and the receipt still replays the stored refs. The table is kept (no
+    destructive migration); a later cleanup may drop it.
+  - *Host obligations (MUST, P3 bridge):* re-read from the start at every takeover, after `cursor_ahead` and daily;
+    verify every item independently under its person key with a matching certificate; check its own association;
+    store durably before acking; publish only as F1 §5.3 permits (protocol §19.5).
+  - *Deviations from the approved design text, by existing convention:* the ever-device quota answers 429
+    `quota_exceeded` (§19.6: storage caps are 429), not 409; the ack's 1 KiB cap and unknown query parameters are
+    refused at the transport before authorization, uncharged, as on every §19.8 route.
+  - *Pinned by:* the `unpublished` vector group (23 cases, reference and production), the `unpublished_get`,
+    `unpublished_ack`, `host_poll` (`unpublished_notice*`) and `checkpoint_put` (`restore_with_unpublished_refs`)
+    fixtures, and `tests/test_unpublished.py` (lock and window spies, snapshot, page cost, wakeups, hints, quota).
 - *Measured* (`uv run python tests/bench_checkpoint_capacity.py`, `docs/p3-checkpoint-capacity.md`).
 
 - *Round 2 (Opus review of PR #51).* R1: staged descriptors are grouped by `(kind, log)` once per
@@ -1272,9 +1309,11 @@ public deployment.
   cause it from their
   own workspace (hundreds of entries per 512 KiB line); this is what made the round-2 unpublished scan
   (review N2, now a per-device lookup) a cost for every workspace. Needs a per-workspace storage quota (429)
-  and a quota on self-certified evidence per account. The `unpublished` retrieval or poll route (orch-52
-  decision point 7) does not exist yet; it is a gate before the #397 host side relies on `unpublished`.
-- **Unthrottled authenticated work.** Reads (up to 56,680 heads per proof page), staging, genesis and
+  and a quota on self-certified evidence per account. The per-workspace ever-device quota (4 096, P3-D31) is
+  in place; `checkpoint_unpublished` no longer grows (P3-D31). The `unpublished` retrieval route is closed by
+  P3-D31.
+- **Unthrottled authenticated work.** (The P3-D31 unpublished routes are throttled per workspace.) Reads (up to
+  56,680 heads per proof page), staging, genesis and
   baseline refusals, and `ignored` lower-n publications (full stateless validation, uncharged; exact retries
   skip it since round 3) are not rate-limited; with the G3 review's `Directory.handle` finding (directory routes
   take the lock before authenticating, D4) these are the same gate.
@@ -1417,3 +1456,4 @@ No new decisions.
 | P3-D28 | Pairing attempt binding: device `attempt` nonce, fresh keys per attempt, bound challenge and rejection, two `rejected` forms, `approved` join anchor (G3b) | §3.3 |
 | P3-D29 | Evidence-only person rows for self-certified restore evidence; no account powers until an invite (G4) | §10 |
 | P3-D30 | Per-pair device cutoff under the registry person; new registration refused on any chain-learned revocation; per-pair `GET /revocation` list; registry-pair notice cursor (orch-52 rulings 1 to 4) | §10, proto §19.5 |
+| P3-D31 | Retrieval of unpublished revocation evidence: derived per-workspace view, W(g) `GET`/`POST ack`, `notices.unpublished`, refs as hints, 4 096 ever-devices per workspace (orch-52 decision point 7) | §10, proto §19.5 |

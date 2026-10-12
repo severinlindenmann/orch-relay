@@ -2540,6 +2540,81 @@ person the device authenticates as. The person always comes from the registry ro
 - `notices.revocations_cursor` (§19.3) counts only registry pairs of the workspace's ever-devices, with the
   `unpublished` eligibility filter (evidence-only persons, P3-D29, excluded). Another person's pair never moves it.
 
+**P3-D31 (retrieval of unpublished evidence).** `GET /v2/workspaces/{ws}/unpublished` (W(g)) serves the global
+pairs this workspace's host still has to publish, as a **derived view**, never a materialized queue. An item exists
+exactly while:
+
+- U1 (eligibility): the §19.5 table holds `(d, p)`; `d` is a G2 ever-device of `ws` (a current or former list
+  member; restore-only `checkpoint_ever_devices` never qualify); `p` is the person the live registry associates with
+  `d` (P3-D29 evidence-only persons excluded, as for `revocations_cursor`). Every other pair of `d` (another person's
+  self-certified "revocation") and every pair of a device the workspace never listed is never served, whatever its
+  reason or arrival order.
+- U2 (unpublished): `STRENGTH[global] > STRENGTH[chain]`, where `chain` is the workspace's
+  `checkpoint_revocations` row of the same pair (strength 0 when absent; equal strength is no item).
+
+An item is retired only when an accepted workspace restore carries the pair at equal or greater strength (the chain
+row then reaches the global one, atomically with the checkpoint). Nothing else retires or hides one: not an ack, not
+time, not a ticket restore, not a host's `device.revoked` append, not a membership change; retention is indefinite
+until then (global revocations are never deleted), bounded by the workspace's ever-devices (one eligible pair each).
+A newer or upgraded global pair moves to a new, higher §19.5 cursor, so an item reappears at its new position.
+
+Item: `{device_id, person_id, reason, revocation, device_cert, pk_pub, provenance: {cursor, digest}, chain_reason}`,
+in ascending `provenance.cursor`. `revocation` is the global record; `device_cert` the registry certificate and
+`pk_pub` the account key (an eligible pair always has both); `provenance.cursor` is the §19.5 cursor and
+`provenance.digest` is `sha256:` over `cj(revocation)`, both equal to the publication's `unpublished_refs` entry, so
+`(device_id, person_id, digest)` identifies identical evidence across re-reads; `chain_reason` is null when the chain
+lacks the pair, else the weaker reason it holds (a chain-pair upgrade: published through `device.revoked`, never
+carried in a restore). A page holds at most `limit` items (default and maximum 64) and at most 256 KiB of
+`cj(response)` as sent; the first item is always included. `cursor` is the opaque position after the last item (the
+request's own position on an empty page) and is never null; `more` says items exist after it. This departs from
+§19.6's `next`-is-null-at-end convention on purpose: the stream is resumable.
+
+Positions are `b64u(cj({v: 1, ws, c}))`, meaning "items with cursor > c". Decoding is strict (400 `malformed`:
+§2.3 JSON, exactly `{v, ws, c}`, `v` 1, `ws` the path's, `c` a safe integer ≥ 0); another workspace's position is
+400 `malformed` after authorization, never 403/404. A position at or below the relay's newest §19.5 cursor is legal
+and re-serves items; one above it is **409 `cursor_ahead`** (a bug, a forgery or a relay restored from backup): the
+host restarts from the beginning and deduplicates. Positions are bound to the workspace, not to the holder
+generation: a takeover continues from any stored position.
+
+`POST /v2/workspaces/{ws}/unpublished/ack` with `{cursor}` → `{acked}` raises the workspace's high-water mark to
+`max(stored, c)` (a lower or equal position is a no-op returning the stored mark; above the relay's state is 409
+`cursor_ahead`). Its only effect is `notices.unpublished` (§19.6): it is **not publication**, retires nothing, hides
+nothing (a fetch from the start after an ack returns every live item) and does not change retention. A new holder
+inherits it. There is no per-item acknowledgement (orch-52: the high-water mark is enough); the optional advisory
+`published` field is not implemented (an ack body with any other field is 400 `malformed`).
+
+Order of checks: (1) 401 `unauthenticated`; (2) 403 `not_eligible` for any principal but this workspace's W session
+(a device session, another workspace's host), identical whether `{ws}` exists or not: nothing on either route
+answers 404 or 410; (3) 409 `fenced` (missing or stale `Orch-Holder`, expired lease). Steps 1 to 3 run read-only
+before any lock, write transaction or rate window. Then (4) the per-workspace window: fetch 120 per minute and 2 000
+per hour, ack 30 per minute (429 `rate_limited` with `Retry-After`; in memory under their own mutex, never
+`directory.lock`, reset on restart); (5) query or body parsing and the position (400); (6) `cursor_ahead` (409). The
+ack's 1 KiB JSON cap and an unknown query parameter are refused at the transport, before authorization, uncharged,
+as on every §19.8 route. A fetch is one `query_only` snapshot: no lock, no write. The ack re-authorizes and re-checks
+the position under the lock in its write transaction. Each page costs O(|ever_devices(ws)|) primary-key lookups (the
+view is read from `ever_devices` outward, never from the relay-wide table), and membership publication caps
+ever-devices at **4 096 per workspace** (429 `quota_exceeded`, §19.2).
+
+**Host obligations (normative for the P3 bridge):**
+
+1. **Start.** After every `host/hold` that grants a new generation, after any `cursor_ahead`, and at least once a
+   day, the host MUST read from the start (no `cursor`) until `more` is false. Otherwise it reads from its stored
+   position whenever `notices.unpublished` is non-null.
+2. **Verify each item independently** before use, because the relay is not trusted: `person_id` is the id of
+   `pk_pub`; `device_cert` verifies under `pk_pub` at its own `created_ms` (as R4 does) and names `device_id`; the
+   revocation verifies under `pk_pub` against that certificate; `device_id`, `person_id` and `reason` match it; and
+   `provenance.digest` is `sha256:` over `cj(revocation)`. An item that fails is discarded and logged.
+3. **Check its own association:** accept an item only if the host's store associates `device_id` with `person_id`;
+   otherwise keep it pending or drop it (F1 §5.10).
+4. **Store durably first**, in the pair-keyed host evidence store keyed by `(device_id, person_id,
+   provenance.digest)` (F1 caps; chain provenance sticky), and only then ack the page's `cursor`.
+5. **Publish only as F1 §5.3 permits** (`device.revoked`, or carried in the next workspace restore; a chain-pair
+   upgrade is never carried). It MUST NOT re-append duplicate or weaker evidence and MUST NOT treat an ack as
+   publication.
+
+A malicious relay can withhold or delay items (F1's accepted limit) but cannot forge one. A relay rolled back from a
+backup can skip items silently once new intake passes a stale host position; obligation 1 mitigates this.
+
 
 ### 19.6 Exact HTTP shapes and common refusals (P3-D1/D2/D10/D17)
 
@@ -2589,9 +2664,11 @@ A cancelled same-generation poll returns an empty success; it cannot later deliv
 
 Host poll `route` is `bridge` or `pair`; `offer` is null for bridge and the offer id for pair.
 `notices` is exactly `{revocations_cursor, cert_requests: [request_id],
-rotation_due: [{device_id, revocation_cursor, epoch}]}`; arrays are sorted by id. The cursor
+rotation_due: [{device_id, revocation_cursor, epoch}], unpublished}`; arrays are sorted by id. The cursor
 is the latest relevant revocation-feed position (0 if none): a registry pair of one of the workspace's ever-devices
-(§19.5 P3-D30). `cert_requests` lists requester
+(§19.5 P3-D30). `unpublished` (P3-D31) is the opaque position of the newest unpublished item while it is above the
+workspace's ack, else null; like every notice it readies a poll only when it differs from the notices last
+delivered to the current generation, so it wakes the host once per intake and once after its own ack. `cert_requests` lists requester
 records with challenge/rejection/certificate results to fetch. Cert-request GET always returns
 all four fields `{state, challenge, cert, rejection}`, using null when absent.
 
@@ -2953,7 +3030,7 @@ that F1 reports as learned later (`Verdict.alarms`) is the alarm the walk raises
 all-or-nothing over E, so a bundle accepted inside a walk that later fails contributes no chain evidence (F1 lets a
 receiver persist each accepted bundle; both are atomic, the relay's is coarser). (2) The relay server reports
 `revocation.unpublished` in its publication result as the `unpublished` / `unpublished_refs` fields (transport detail
-8); no shared vector pins them, and the reference relay model has none. (3) The device runtime's caps count local
+8), as hints; the reference relay model reports them too and serves the P3-D31 view (vector group `unpublished`). (3) The device runtime's caps count local
 entries only (chain-learned pairs are separate and never evicted). F1 C3 is kept as is: every held revocation of
 the signer pair refuses, whatever its reason; refusing only on `compromised` was rejected. (The former differences
 on legacy bare-id alarms, the first-come binding and `contested` are gone: F1 now resolves a legacy signer to the
@@ -3069,10 +3146,9 @@ rules and must be confirmed before G4 ships:
    target checkpoint as provenance, never removed), not the global §19.5 revocation table; a global (out-of-band)
    revocation of an ever-device that a restore omits or carries weaker is accepted and reported as
    `revocation.unpublished`, while R1 keeps refusing a signer pair revoked in any revocation the relay holds. **In G4**
-   the production relay emits `unpublished` and `unpublished_refs` in the accepted result (transport detail 8),
-   pinned by production unit tests (`tests/test_checkpoints.py`) only: there is no shared vector yet, and the
-   reference relay model (`ref/checkpoints.py`) keys chain and global revocations by pair (since the #397 re-pin) but
-   has no `unpublished`.
+   the production relay emits `unpublished` and `unpublished_refs` in the accepted result (transport detail 8) as
+   hints, and serves the authoritative P3-D31 view; both are pinned by the shared vector group `unpublished`, which
+   the reference relay model (`ref/checkpoints.py`) and production replay.
    **Status (G4):** (a) `log_nodes` stores a deterministic skip pointer per node (the ancestor at
    `skip_height(seq)`, as Bitcoin's block index), so a page finds its endpoint node and checks that `from` is
    on E's branch in O(log N) and then reads `limit` nodes: O(limit + log N) per page and O(N) for a full walk
@@ -3104,20 +3180,25 @@ rules and must be confirmed before G4 ships:
    `revocations` table is keyed by `(device_id, person_id)` (migration 0010, rows and feed cursors kept), so a
    first-come row never drops another person's genuine revocation. A revocation the relay holds globally (the §19.5
    feed, another workspace's restore) never causes `restore_missing_revocation`: when an accepted workspace restore
-   omits it or carries it weaker under the same pair, and the workspace associates the device (a G2 ever-device: a
-   current or former list member) with that person or with none, the result carries
+   omits it or carries it weaker under the same pair, and the pair is one the P3-D31 view serves (a G2 ever-device:
+   a current or former list member, under its registry person), the result carries
    `unpublished: ["d_<device>", ...]` and `unpublished_refs: [{device_id, person_id, reason, cursor, digest}]`
-   (the §19.5 revocation cursor and the record's digest), stored durably in `checkpoint_unpublished`. Both
+   (the §19.5 revocation cursor and the record's digest). **P3-D31 (U10):** the refs are exactly the view's items
+   after the restore, minus the signer's device, so every ref is retrievable from `GET .../unpublished` in the next
+   snapshot unless upgraded (new cursor and digest) or retired; they are **hints**, the route is authoritative, and a
+   host acts on the route, never on a ref. A device without registry association is no longer reported (the former
+   `holder is None` branch: F1 keeps such evidence pending). `checkpoint_unpublished` is no longer written (kept,
+   not dropped; the view replaces it); an exact retry still returns the stored result, refs included. Both
    fields are additive and absent when empty; ticket restores report none. A stronger global revocation of a pair
    already in the workspace chain, carried only at the chain strength, is reported too. Only the devices this
    workspace knows are looked up (never the relay-wide table). `unpublished_refs` are relay claims, not
    self-authenticating: a correct host fetches the record (§19.5) and verifies it under the named person's key with
    a matching device certificate before acting. A ref goes stale when the revocation is later upgraded, because its
-   cursor and digest change. The retrieval route for `unpublished_refs` is designed separately (P3-D31) and is not part of
-   P3-D30. `GET /v2/devices/{device}/revocation` lists every pair of a device, labelled, but
+   cursor and digest change. The retrieval route is P3-D31 (§19.5): `GET /v2/workspaces/{ws}/unpublished`, with
+   `POST .../unpublished/ack` and `notices.unpublished`. `GET /v2/devices/{device}/revocation` lists every pair of a device, labelled, but
    serves no evidence (P3-D30).
    Not reported (still retained and enforced): the signer's device (equivalent here, because a signer is a
-   registered member), a pair whose device is registered to another person, and devices this workspace knows only
+   registered member), a pair whose device is registered to another person or to no one, and devices this workspace knows only
    through restore evidence (tombstones: `checkpoint_ever_devices` alone), which count as unknown for forwarding.
    The signer refusal (R1) uses every revocation the relay holds of the signer's **pair**. The device-auth cutoff
    (sessions, login, member certificates, stored certificates) is per pair too, under the registry person, and a
