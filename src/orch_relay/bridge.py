@@ -564,24 +564,8 @@ class Bridge:
                     ).fetchone():
                         refuse("unknown_workspace", 401)
                     if first:
-                        # Authenticated host answers get their own windows, so anonymous
-                        # pairing traffic cannot exhaust them (same caps, own namespace).
-                        purpose = "pair-host-" if session else "pair-"
-                        address = canonical_address(
-                            peer, headers.get("x-forwarded-for"), d.trusted_proxy
-                        )
-                        limits = [
-                            (address, 60 if method == "POST" else 120),
-                            ("global", 6000 if method == "POST" else 12000),
-                        ]
-                        parent = ipv6_parent(address)
-                        if parent:
-                            limits.append((parent, 480 if method == "POST" else 960))
-                        if method == "POST":
-                            limits.append((ws, 60))
                         for charge in (False, True):
-                            for identity, cap in limits:
-                                d.rate(purpose + method, identity, 60000, cap, now, charge)
+                            self.pair_windows(ws, method, session, headers, peer, now, charge)
                 if route == "hold":
                     return self.hold(con, ws, P.parse_json(raw), now), True
                 if method == "POST":
@@ -611,6 +595,24 @@ class Bridge:
                     )
                     con.execute("UPDATE bridge_msgs SET delivered=1 WHERE n=?", (row["n"],))
                 return {"chunks": chunks}, bool(chunks)
+
+    def pair_windows(self, ws, method, session, headers, peer, now, charge):
+        """Pair rate windows (first step only). Authenticated host answers get their own windows,
+        so anonymous pairing traffic cannot exhaust them (same caps, own namespace). With
+        charge=False a pure check (P3-D32): handle() runs it before the first transaction."""
+        purpose = ("pair-host-" if session else "pair-") + method
+        address = canonical_address(peer, headers.get("x-forwarded-for"), self.d.trusted_proxy)
+        limits = [
+            (address, 60 if method == "POST" else 120),
+            ("global", 6000 if method == "POST" else 12000),
+        ]
+        parent = ipv6_parent(address)
+        if parent:
+            limits.append((parent, 480 if method == "POST" else 960))
+        if method == "POST":
+            limits.append((ws, 60))
+        for identity, cap in limits:
+            self.d.rate(purpose, identity, 60000, cap, now, charge)
 
     def ready(self, con, route, params, query, headers, token, now):
         """Read-only mirror of a waiting poll step: may the full transaction hand over data?
@@ -872,10 +874,11 @@ class Bridge:
             # slot or waiter (anonymous pairing is charged only to its own windows).
             try:
                 session, expiry = self.preauthorize(route, request.method, params, headers, raw)
+                checked = True
             except sqlite3.Error:
                 # The full transaction authorizes on its own; without a pre-check there is
                 # no admission key, so answer once instead of waiting.
-                session, expiry, wait = None, None, 0
+                session, expiry, wait, checked = None, None, 0, False
             if wait:
                 subject = None
                 if route == "pair":
@@ -898,6 +901,12 @@ class Bridge:
                     self.waiters.setdefault(wake_key, set()).add(event)
             # Long waits end up to 10% (at most 1 s) early, so polls admitted together (e.g.
             # after a restart) do not all time out in the same instant. Clients re-poll anyway.
+            if route == "pair" and checked:
+                # In the transaction's order (after admission): a full pair window refuses
+                # without the lock or a write transaction (G3 re-review D4); it charges there.
+                self.pair_windows(
+                    params["ws"], request.method, session, headers, peer, self.d.clock(), False
+                )
             spread = random.uniform(0, min(1.0, wait / 10)) if wait >= 5 else 0
             token, deadline = secrets.token_hex(16), time.monotonic() + wait - spread
             step = (route, params, request.method, bytes(raw), query, headers, peer, token)

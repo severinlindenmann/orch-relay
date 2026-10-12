@@ -787,6 +787,31 @@ def test_host_pair_answers_not_blocked_by_anonymous_pair_windows(client):
     assert r.status_code == 202, r.text
 
 
+@pytest.mark.parametrize("method", ["POST", "GET"])
+def test_full_pair_windows_refuse_without_lock_or_transaction(client, monkeypatch, method):
+    """G3 re-review D4: an anonymous pair request over its window is refused by a check before
+    the first transaction (no Directory.lock, no BEGIN IMMEDIATE + collect()), uncharged."""
+    from bridge_support import request
+
+    bridge, d = client.app.state.bridge, client.app.state.directory
+    d.windows[(f"pair-{method}", "global", 60000)] = (
+        NOW + 60000,
+        6000 if method == "POST" else 12000,
+    )
+    windows = dict(d.windows)
+    calls = []
+    monkeypatch.setattr(bridge, "transaction", lambda *args: calls.append(args))
+    fixture = request("pair_device_post")
+    if method == "POST":
+        r = client.post(
+            fixture["path"], content=P.unb64u(fixture["body_b64u"]), headers=fixture["headers"]
+        )
+    else:
+        r = client.get(fixture["path"])
+    assert r.status_code == 429 and r.json() == {"error": "rate_limited"}
+    assert calls == [] and d.windows == windows
+
+
 def test_host_chunks_do_not_spend_the_devices_post_rate(client):
     windows = client.app.state.directory.windows
     assert post(client, binary("bridge_device_post")).status_code == 202
