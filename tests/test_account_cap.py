@@ -362,19 +362,30 @@ def test_cli_reports_a_busy_database(stopped, monkeypatch, capsys):
     assert "nothing was written" in capsys.readouterr().err
 
 
-def test_a_data_directory_of_another_user_is_refused(stopped, monkeypatch):
-    """The -wal/-shm files are created in the directory: its owner must match too."""
+@pytest.mark.parametrize("other", ["directory", "file"])
+def test_a_file_or_data_directory_of_another_user_is_refused(stopped, monkeypatch, other):
+    """The database and its directory (where -wal/-shm are created) must both be the user's."""
     import os
 
     real = os.stat
-    directory = str(stopped.parent)
+    target = str(stopped.parent) if other == "directory" else str(stopped)
 
-    def stat(target, *args, **kwargs):
-        result = real(target, *args, **kwargs)
-        if str(target) == directory:
+    def stat(path, *args, **kwargs):
+        result = real(path, *args, **kwargs)
+        if str(path) == target:
             return os.stat_result((*result[:4], result.st_uid + 1, *result[5:]))
         return result
 
     monkeypatch.setattr(D.os, "stat", stat)
     with pytest.raises(ValueError, match="sudo -u"):
         D.account_cap_audit(stopped)
+
+
+def test_the_operator_connection_never_creates_a_database(tmp_path):
+    missing = tmp_path / "gone" / db.DB_NAME
+    with pytest.raises(sqlite3.OperationalError):
+        db.connect_existing(missing)
+    (tmp_path / "gone").mkdir()
+    with pytest.raises(sqlite3.OperationalError):
+        db.connect_existing(missing)
+    assert list((tmp_path / "gone").iterdir()) == []
