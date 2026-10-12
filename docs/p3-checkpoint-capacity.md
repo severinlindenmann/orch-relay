@@ -71,10 +71,10 @@ Round 2 (review of PR #57; bench once, 2026-10-12): append_200k longest hold 0.2
 review's PoCs (phase A refuses before any fold, state changes before phase C) folded 40,000 heads under the
 lock for a 20,000-head set before round 2 and fold none after (longest hold 0.08 s).
 
-Memory: phase A needs about 1.3 KB of peak process memory per new node (a full set ~1.2 GB). The gate admits
-at most `ORCH_RELAY_PUBLISH_WIDTH` (2) publications whose reserved heads stay under
-`ORCH_RELAY_PUBLISH_HEADS` (1.5 million, about 2 GB); a larger one runs alone. Set the width to 1 on small
-hosts.
+Memory: phase A needs about 1.3 KB of peak process memory per new node (a full 64 MiB set ~1.2 GB). The gate
+admits at most `ORCH_RELAY_PUBLISH_WIDTH` (2) publications whose reserved heads stay under
+`ORCH_RELAY_PUBLISH_HEADS`; a larger one runs alone, so the gate alone never bounded one publication. Since
+P3-D37 (below) the heads cap defaults to the heads of one maximal set (226,719; was 1.5 million, about 2 GB).
 
 No head is folded and no staged page is read while the lock is held (pinned by
 `tests/test_publication_phases.py`). A node chunk of 20,000 rows holds the lock about 0.1–0.2 s on a
@@ -109,3 +109,27 @@ publications, each refused one costing the refused-heads budget instead) and sta
 publication over the node quota is refused at phase A's commit point, after its folds (whose work is recorded as
 refused heads: about two full sets per workspace-hour), and inserts nothing. Sizing the knobs to a VPS (memory
 for the publication gate, disk for the node quota): docs/p3-relay-design.md §10, "Pre-public-deploy checklist".
+
+## P3-D37: hard maximum publication size
+
+`ORCH_RELAY_MAX_PUBLICATION_BYTES` bounds one staging set (manifest plus pages, as `checkpoint_staging.bytes`
+counts them); `too_large` at the staging manifest (from the size it implies, before any page) and pages (413) and
+at the final publication before any fold (400). Phase A memory per instance ≈ heads x 1.3 KB (macOS arm64,
+CPython 3.14; not measured on the VPS Python, so +25 %) plus a ~250 MB baseline; the heads cap defaults to
+`max // 74`, so at most one maximal set is in phase A per instance. systemd `M` is MiB.
+
+| Maximum | Heads (bytes / 74) | Phase A (1.3 KB) | +25 % | + 250 MB baseline | Fits |
+|---:|---:|---:|---:|---:|---|
+| 4 MiB | 56,679 | 74 MB | 92 MB | 342 MB | internal `MemoryMax=450M` (472 MB), 28 % headroom: **recommended internal** |
+| 6 MiB | 85,019 | 111 MB | 138 MB | 388 MB | internal, 18 % headroom: only with a measured baseline ≤ 200 MB |
+| 8 MiB | 113,359 | 147 MB | 184 MB | 434 MB | internal, 8 % headroom: too tight |
+| 16 MiB (default) | 226,719 | 295 MB | 368 MB | 618 MB | public `MemoryMax=900M` (944 MB), 34 % headroom: **public** |
+| 32 MiB | 453,438 | 589 MB | 737 MB | 987 MB | a 4 GB VPS |
+| 64 MiB (the staging quota) | 906,876 | 1,179 MB | 1,474 MB | 1,724 MB | an 8 GB VPS |
+
+The dev VPS (1,961 MB, no swap) with one maximal publication in flight on each instance: 618 + 342 + Caddy ~100 +
+OS ~250 ≈ 1,310 MB (67 %). Honest sets for scale: a 5,000-ticket first publication (4 heads per log) stages
+3.56 MB (fits 4 MiB); the 200,000-head append above stages ~14.8 MB (fits 16 MiB, not 4 MiB: an internal host
+publishes it as several checkpoints). A restore cannot be split: one whose set exceeds the maximum cannot be
+published (docs/p3-relay-design.md §10, P3-D37). The follow-up that lifts the limit is the streaming verify
+(compact rows ~4–5x less, or a temporary table at O(chunk) memory).

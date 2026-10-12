@@ -2693,7 +2693,10 @@ an answer of `host/hold` itself. A host MUST `POST host/hold` before any write, 
 
 All routes can refuse 400 `malformed` for invalid fields, paths, query or strict JSON; bounded
 JSON requests refuse 413 `too_large` before parsing (G0a review 2), except the P3-D20 final checkpoint request (400); bounded ORB2 requests
-retain 400 `too_large`. Authenticated routes can refuse 401 `unauthenticated`.
+retain 400 `too_large`. `too_large` is permanent for those bytes: never retry the same body unchanged. It is
+also the answer, after authorization, when a checkpoint staging set exceeds the deployment's maximum publication
+size (P3-D37, §19.8): 413 on the staging routes, 400 on the final checkpoint request. Authenticated routes can
+refuse 401 `unauthenticated`.
 (G0a review 6) Only D sessions can fail session checks with 400 `cert_expired` or 403 `revoked`;
 W sessions have no device certificate. Membership uses only 403 `cert_expired`, because the
 expired certificate is a proposed member's, not the W session's. Target-device revocation checks
@@ -2835,11 +2838,11 @@ F1 defines event/checkpoint bytes; the relay adds storage, transport and present
 | Method, path | Auth | Request → response | Idempotency, limits | Refusals | Decision |
 |---|---|---|---|---|---|
 | `PUT /v2/workspaces/{ws}/genesis` | W(g) | `{pin, cert}` → `{}` | JSON cap 64 KiB; once, identical pin is a retry | 401 `bad_signature`; 409 `genesis_mismatch`, `restore_not_owner` | P3-D18 |
-| `PUT /v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/pages/{i}` | W(g) | `{kind, log, after_seq, from_acc, heads, digest}` → `{}` | JSON cap 4 MiB; immutable page; 1 h set expiry; 64 MiB per workspace and 512 MiB per owner account across its workspaces (429), 4 GiB per deployment (503 `overloaded`) | 409 `staging_conflict`; 429 `quota_exceeded` | P3-D20 |
-| `PUT /v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/manifest` | W(g) | `{pages: [{i, kind, log, after_seq, count, digest}]}` → `{complete, missing}` | JSON cap 4 MiB; immutable terminal marker; same staging caps as pages | 409 `staging_conflict`; 429 `quota_exceeded` | P3-D20 |
+| `PUT /v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/pages/{i}` | W(g) | `{kind, log, after_seq, from_acc, heads, digest}` → `{}` | JSON cap 4 MiB; immutable page; 1 h set expiry; one set at most the maximum publication size (default 16 MiB, 413 `too_large`, P3-D37); 64 MiB per workspace and 512 MiB per owner account across its workspaces (429), 4 GiB per deployment (503 `overloaded`) | 409 `staging_conflict`; 413 `too_large`; 429 `quota_exceeded` | P3-D20/D37 |
+| `PUT /v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/manifest` | W(g) | `{pages: [{i, kind, log, after_seq, count, digest}]}` → `{complete, missing}` | JSON cap 4 MiB; immutable terminal marker; same staging caps as pages; the maximum publication size is checked on the size the manifest implies, before any page | 409 `staging_conflict`; 413 `too_large`; 429 `quota_exceeded` | P3-D20/D37 |
 | `POST /v2/workspaces/{ws}/baselines` | W(g) | `{hash, offer_id}` → `{until_ms}` | JSON cap 16 KiB; 7 days, at most 16 pins | 404 `not_found`; 410 `checkpoint_gone`; 429 `quota_exceeded` | P3-D13/D20 |
 | `DELETE /v2/workspaces/{ws}/baselines/{hash}[?offer_id=o]` | W(g), or D(m) after initialization naming `offer_id` | no body → `{}` | idempotent release; W(g) releases any pin, D(m) only the pin whose `offer_id` it names, otherwise a no-op | — | P3-D13/D20 |
-| `PUT /v2/workspaces/{ws}/checkpoint` | W(g) | `{checkpoint, source_hash, restore?}` with `restore = {line, cert, authz, log}` → `{result: "accepted" or "ignored", n, hash}` | JSON cap 2624 KiB; atomic; exact retry returns prior result; `Orch-Holder` required; at most 16 refusals per holder generation and 48 per workspace in any rolling hour | 400 `wrong_suite`, `too_large`; 401 `bad_signature`; 409 `fenced`, `no_genesis`, `genesis_mismatch`, `chain_diverged`, `checkpoint_time`, `staging_incomplete`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation`; 429 `quota_exceeded` | P3-D13/D20/D24/D25 |
+| `PUT /v2/workspaces/{ws}/checkpoint` | W(g) | `{checkpoint, source_hash, restore?}` with `restore = {line, cert, authz, log}` → `{result: "accepted" or "ignored", n, hash}` | JSON cap 2624 KiB; atomic; exact retry returns prior result; `Orch-Holder` required; at most 16 refusals per holder generation and 48 per workspace in any rolling hour; staged set at most the maximum publication size (400 `too_large`, P3-D37) | 400 `wrong_suite`, `too_large`; 401 `bad_signature`; 409 `fenced`, `no_genesis`, `genesis_mismatch`, `chain_diverged`, `checkpoint_time`, `staging_incomplete`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation`; 429 `quota_exceeded` | P3-D13/D20/D24/D25 |
 | `GET /v2/workspaces/{ws}/checkpoint[?hash=h]` | D(m) or W | `{genesis: {pin, cert}, checkpoint, transitions_head}` | held H or immutable hash h | 404 `not_found`; 410 `checkpoint_gone` | P3-D18/D19 |
 | `GET /v2/workspaces/{ws}/transitions?after_n=k&to=E&limit=` | D(m) or W | `{transitions: [bundle], next}` | ascending target_n; default/max 16, at most 4 MiB | 404 `not_found`; 410 `checkpoint_gone` | P3-D13/D19 |
 | `GET /v2/workspaces/{ws}/proof?log=L&from=acc&to=E&limit=` | D(m) or W | `{heads: [head], next}` | default/max 65 536, at most 4 MiB | 404 `not_found`; 410 `checkpoint_gone` | P3-D19 |
@@ -2952,6 +2955,24 @@ policy may use: any other publication is refused once the stored plus new nodes 
 reserve, so a WSK holder that fills the workspace cannot prevent the owner's restore (a restore adds its line plus
 the heads of its staged set the relay does not hold yet: 1 node for a roll-back to a stored prefix). These answers
 need relay state far beyond any vector, so they are pinned by relay tests, not HTTP fixtures.
+
+**Maximum publication size (P3-D37).** A deployment bounds the staged bytes of one set (its manifest plus its
+pages, the bytes the staging caps count) by its maximum publication size (`ORCH_RELAY_MAX_PUBLICATION_BYTES`,
+default 16 MiB = 16,777,216 bytes, at most the 64 MiB workspace quota; a smaller deployment may set less, e.g.
+4 MiB). It is a permanent refusal for that set, `too_large`, never 429 and without `Retry-After`, checked after
+authorization (401, 403, 409 `fenced` first) and the staging conflict checks, before the staging quotas (429,
+503): a page PUT is refused 413 when the set's staged bytes plus the page would exceed it; a manifest PUT is
+refused 413, before any page is uploaded, when the set's staged bytes plus the manifest plus 74 bytes per head of
+every listed page not staged yet would exceed it (a lower bound: a page of n heads is at least 74 n bytes); the
+final publication is refused 400 `too_large` (this route's `too_large` status) when its staged set exceeds it,
+after `staging_incomplete` and before any fold, charged to the failure budget with no fold work. A refusal writes
+nothing; the set keeps its earlier pages until it expires. Restores use the same maximum. A host does not retry
+such a set: it splits ordinary growth into several checkpoints (intermediate `n`, each set within the maximum);
+a restore cannot be split, so a restore whose abandoned suffix, retained branch and other logs' growth exceed the
+maximum cannot be published (about 226,000 heads at the default; before P3-D37 the same limit was the 64 MiB
+quota, ~906,000 heads), and the owner migrates to a new workspace. The relay does not advertise its maximum yet.
+These answers depend on deployment configuration and are pinned by relay tests, not HTTP fixtures or vectors (no
+vector stages more than 16 MiB).
 
 **Restore rules (P3-D13/D23/D24/D25).** `restore` is `{line, cert, authz: {delegation}, log}`.
 `line` is the full F1 event object, with its payload fields at the top level, not an interim nested payload.

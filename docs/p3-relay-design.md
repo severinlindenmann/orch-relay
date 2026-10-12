@@ -1795,6 +1795,106 @@ HTTP fixture.
     characters, audit deletable or updatable, no schema CHECK, busy exit 0, `show` and `audit` filters, no
     schema check).
 
+- **P3-D37 (a hard maximum publication size; owner decision, no VPS resize).** Protocol §19.6 and §19.8 state
+  the observable rule. *Why:* the dev VPS has 1,961 MB of RAM and no swap. Phase A holds every new node of a
+  publication (about 1.3 KB of peak process memory each, measured on macOS), and the gate (`Gate.fits`) admits a
+  publication above `ORCH_RELAY_PUBLISH_HEADS` when nothing else runs, so the gate never bounded one
+  publication: a full 64 MiB set (906,876 heads) needs about 1.2–1.45 GB in phase A, above either relay unit's
+  `MemoryMax` (public 900M, internal 450M in the dev-kit PR #27 draft), and the unit is OOM-killed.
+  - *The limit.* `ORCH_RELAY_MAX_PUBLICATION_BYTES` (`Caps.max_publication`, default `MAX_PUBLICATION` =
+    **16 MiB**) bounds the staged bytes of one set, measured exactly as `checkpoint_staging.bytes` (the manifest
+    plus every page, the bytes the P3-D20 quotas charge). Validated at start-up: a decimal integer in
+    `1..STAGE_CAP` (64 MiB), else the app does not start (`ValueError`). It is a per-set bound below the
+    per-workspace 64 MiB quota (two sets), the per-account 512 MiB and the 4 GiB deployment ceiling, which are
+    unchanged.
+  - *Where it is checked.* (1) Staging, 413 `too_large`, after authorization and the existing staging checks
+    (identical retries stay free no-ops, conflicts stay `staging_conflict`) and **before** the transient staging
+    quotas (429/503), so a host never retries a set that can never fit. A page PUT: the set's staged bytes plus
+    this page (running total). A manifest PUT, before any page is uploaded: the set's staged bytes, plus the
+    manifest, plus 74 bytes per head of every listed page not staged yet. That is a lower bound of the whole
+    set (a page of n heads is at least 74 n bytes: 73 JSON bytes per head plus separators and its framing), so
+    a manifest whose set cannot fit is refused at once and an honest set is never refused early; the pages
+    then meet the running total. (2) The final publication, 400 `too_large` (the route's existing `too_large`
+    status, P3-D20), right after `staging_incomplete` and before `load_stage`: no staged page is read and no
+    head is folded, in phase A and again in phase C (defence in depth: a set staged under an older, larger
+    maximum, or a restart with a lowered one). Charged like the route's other `too_large` (one failure row,
+    zero refused heads: it did no fold work); its set reserves no heads in the gate (`weigh` is 0).
+    (3) The gate: unset, `ORCH_RELAY_PUBLISH_HEADS` is now `max // 74` (226,719 by default; was 1,500,000), the
+    heads the maximum implies, so one maximal publication always fits alone and the publications in flight on
+    one instance never reserve more than one maximal set together (small ones still run two wide). An operator
+    may set the heads cap lower than the maximum implies (a maximal set then runs alone) or higher (two maximal
+    sets may then run at once: count `max(heads cap, max // 74) x 1.3 KB` in the memory budget).
+  - *Code decision: `too_large`, never 429.* The limit is permanent for that set: the same bytes can never be
+    accepted, whatever the host waits, so a 429 `quota_exceeded` with `Retry-After` (transient by §19.6) would
+    make hosts retry forever, and the P3-D34 permanent quotas are already flagged as looking transient (checklist
+    item 6). `too_large` is the existing permanent size refusal; each route keeps its one `too_large` status
+    (413 on the staging routes, §19.6; 400 on the final publication, P3-D20), so no new code or status. A host
+    that gets it on a request within the request cap knows it is the set.
+  - *Cleanup: the staged set is kept.* A refusal writes nothing (the module rule: "a refused write leaves the
+    database unchanged"); pages staged before the refusal stay until the set's one-hour expiry, and they never
+    exceed the maximum (each accepted PUT stayed within it). Deleting the set would make every refused PUT a
+    write under the lock and gain nothing: the set's bytes are bounded and
+    expire, and its slot (two live sets per workspace) frees within the hour. A final publication refused as `too_large` also keeps its set,
+    like every publication refusal (P3-D33).
+  - *Restores* use the same maximum: a restore's staged set (abandoned, retained and appended pages) goes
+    through the same routes and the same publication check. **Limitation:** a restore must stage its whole
+    abandoned suffix (from `from_seq` up to the source's height) plus any retained branch and other logs' growth
+    in one set, and cannot be split, so a restore whose set exceeds the maximum (about 226,000 heads at 16 MiB,
+    56,000 at the 4 MiB recommended for the internal instance) cannot be published. Before P3-D37 the same
+    limit existed at the 64 MiB quota (~906,000 heads). A WSK holder can grow the hostile suffix past it with
+    several publications (each within the maximum), and then the owner's roll-back past that suffix is
+    impossible; the exit is migration to a new workspace (as for the node quota). Ordinary growth is not
+    limited the same way: a host can publish a long backlog as several checkpoints with intermediate `n`, each
+    within the maximum (a host change, see below). A larger limit for restores alone was not taken: staging
+    cannot tell a restore set from another before the final request, and phase A's memory for abandoned pages
+    is not measured. Follow-up: the streaming verify below, which removes the reason for the limit.
+  - *Constants not changed.* The staging bucket's burst (28,801, P3-D36) is derived from the 64 MiB quota; with
+    a smaller maximum every honest set costs fewer tokens, so the burst still uploads any honest set with no
+    429 (it only becomes generous). `REFUSED_HEADS` (about two 64 MiB sets of fold work per workspace-hour) is a
+    CPU budget; a refused publication now folds at most one maximal set (eight fit the budget). The node-quota
+    reserve is unchanged (a restore now adds at most `max // 74 + 1` new nodes, 226,720 by default). No schema
+    change.
+  - *Memory arithmetic (the defaults and the per-instance recommendation).* Assumptions: 1.3 KB per new node
+    in phase A as measured on macOS arm64 (CPython 3.14); **the figure on the VPS's Python is not measured**
+    (run `tests/bench_publication_lockhold.py` there), so add a 25 % margin; a head is 74 bytes on the wire;
+    a ~250 MB baseline per instance (Python, SQLite, read-pool page caches, throttle tables, in-flight bodies);
+    systemd's `900M`/`450M` are MiB (943.7 MB / 471.9 MB). Public, **16 MiB**: 16,777,216 / 74 = 226,719
+    heads x 1.3 KB = 295 MB, +25 % = 368 MB, + 250 MB = **~618 MB < 944 MB** (`900M`; 34 % headroom).
+    Internal (`450M` = 471.9 MB): 8 MiB = 113,359 heads, 147 MB, +25 % 184 MB, + 250 = 434 MB, 8 % headroom:
+    too tight (the baseline alone ranges 150–250 MB plus up to 61 MB of throttle tables); 6 MiB = 85,019 heads,
+    111 MB, 138 MB, **388 MB** (18 %); 4 MiB = 56,679 heads, 74 MB, 92 MB, **342 MB** (28 %). Recommended:
+    **4 MiB on the internal instance** (keeps the checklist's 25 % headroom; it still carries a 5,000-ticket first
+    publication with 4 heads per log, 5,001 pages of 542 B and an 854,055-byte manifest = 3.56 MB of
+    4.19 MB), 6 MiB only once `MemoryPeak` on the VPS shows a baseline of 200 MB or less.
+    The VPS with one maximal publication in flight per instance: 618 + 342 + Caddy ~100 + OS ~250 = **~1,310 MB
+    of 1,961 MB** (67 %, under the 75 % rule); even both units at their `MemoryMax` (944 + 472 MB) plus 350 MB
+    is 1,766 MB, and an overrun kills the relay unit, not another process.
+  - *Long-term follow-up: streaming verify* (P3-D33 residual). Phase A materialises every new node (dicts and
+    tuples, ~1.3 KB each) and every staged page body until phase B. Either pack rows compactly (raw 32-byte
+    `acc`, `head`, `prev_acc` and the seq in arrays: ~110 B of payload, roughly 250–300 B per node with
+    container overhead, 4–5x less: a 64 MiB set ~250 MB) or stream them to a temporary table in `NODE_CHUNK`
+    chunks that phase B copies (memory O(chunk): 20,000 rows ~26 MB plus one 4 MiB page, independent of the set).
+    With that, the maximum can return to the 64 MiB quota and restores of large histories become possible again.
+  - *Host side (orch-52).* A host must treat 413 `too_large` on a staging PUT and 400 `too_large` on a final
+    publication within the request cap as permanent for that set: do not retry it unchanged; split ordinary
+    growth into several checkpoints, and surface an oversized restore to the owner (migration). The maximum is
+    a deployment value the relay does not advertise yet (a `details` field or `/healthz` would be a protocol
+    change: open).
+  - *Pinned by* `tests/test_max_publication.py`: each place refuses at max + 1 and accepts at max exactly (page
+    running total, manifest implied size with and without staged pages, final publication in phase A and in
+    phase C), the manifest refusal stores nothing (no set, no page), the page refusal keeps the set's pages at or
+    under the maximum and identical retries free, the refusal precedes the 429 staging quotas and follows
+    authorization (401, 409 `fenced`), the publication refusal reads no page, folds nothing, reserves nothing in
+    the gate, records one failure and no refused heads and keeps the set; a restore refused and accepted at the
+    boundary, its staging refused too; the environment, its default, the derived heads cap and its validation
+    (0, -1, non-decimal, empty, above 64 MiB). Honest flows unchanged: every vector and fixture byte-identical;
+    one unit test that lowers the 64 MiB quota below the default maximum now reads its caps first.
+    Mutation, one at a time on a scratch copy: 18 of 18 killed (each check removed; the manifest's missing
+    pages ignored or counted at 73 bytes; `<` instead of `<=` in staging and at the publication; the
+    environment ignored; a 64 MiB default; no upper or lower validation; the heads cap not derived; an
+    oversized set reserved in the gate; a retryable 429; the publication check after `load_stage`, in phase A
+    only, or with 413; the page check after the staging quotas).
+
 - *Round 2 (Opus review of PR #51).* R1: staged descriptors are grouped by `(kind, log)` once per
   publication; a refused 10,000-ticket x 2-page first publication held the lock 12.7 s (9.4 s in the
   review), now 1.1 s. G2: parsing and every check that needs no database state run after the read-only
@@ -1999,30 +2099,39 @@ handling of 429 `quota_exceeded` on a membership publication (do not retry uncha
 
 **Pre-public-deploy checklist (operator, per VPS).**
 
-1. **Memory fits the publication gate.** Phase A holds every new node of a publication, about 1.3 KB of peak
-   process memory per node, so a full 64 MiB staging set (~906,876 heads) needs about 1.2 GB. The gate admits
-   at most `ORCH_RELAY_PUBLISH_WIDTH` (default 2) publications whose reserved heads stay under
-   `ORCH_RELAY_PUBLISH_HEADS` (default 1,500,000, about 2 GB); a single publication above the heads cap still
-   runs alone, so one full set (1.2 GB) is the floor whatever the cap. Per relay instance:
-   `peak ≈ max(HEADS_CAP, 906,876) x 1.3 KB + baseline`, where the baseline is the Python process and SQLite
-   (about 150–250 MB measured, plus up to 48 pooled read connections' page caches, ~2 MB each by default, and
-   in-flight request bodies: staging pages up to 4 MiB, waiting publications up to 2.6 MiB each). The VPS needs
-   `Σ instances (peak) + other services (Caddy, orch-publish, hosts and agents on the box, the OS: about
-   0.5–0.8 GB) ≤ 75 % of RAM` (25 % headroom). Note that `provision.sh` defines two relay instances
+1. **Memory fits the publication gate and the maximum publication size (P3-D37).** Phase A holds every new
+   node of a publication, about 1.3 KB of peak process memory per node (measured on macOS; not yet on the VPS's
+   Python: add 25 %), so a full 64 MiB staging set (~906,876 heads) needs about 1.2–1.45 GB. Since P3-D37 one
+   set is at most `ORCH_RELAY_MAX_PUBLICATION_BYTES` (default 16 MiB = 226,719 heads), refused as `too_large`
+   before any fold, and the gate's `ORCH_RELAY_PUBLISH_HEADS` defaults to the heads that maximum implies
+   (`max // 74`), so the publications in flight on one instance (at most `ORCH_RELAY_PUBLISH_WIDTH`, default 2)
+   reserve at most one maximal set together. Per relay instance:
+   `peak ≈ max(HEADS_CAP, MAX // 74) x 1.3 KB x 1.25 + baseline`, where the baseline is the Python process and
+   SQLite (about 150–250 MB measured, plus up to 48 pooled read connections' page caches, ~2 MB each by default,
+   up to ~61 MB of throttle tables (item 7), and in-flight request bodies: staging pages up to 4 MiB, waiting
+   publications up to 2.6 MiB each). The VPS needs `Σ instances (peak) + other services (Caddy, orch-publish,
+   hosts and agents on the box, the OS: about 0.35–0.8 GB) ≤ 75 % of RAM` (25 % headroom), and each instance's
+   peak must stay under its unit's `MemoryMax` (systemd `M` = MiB). `provision.sh` defines two relay instances
    (`orch-relay` and `orch-relay-int`), each with its own gate. Recommended settings (in `/etc/orch/relay.env`
-   and `/etc/orch/relay-int.env`, the units' `EnvironmentFile`):
-   - 2 GB VPS: width 1, heads 400,000 (≈ 0.5 GB). One full set still costs ~1.45 GB per instance, so two
-     instances publishing full sets at once do not fit: run the internal instance elsewhere or only one
-     publishing instance, add 2 GB swap as a stopgap, or take the follow-up below.
-   - 4 GB VPS: width 1, heads 900,000 on both instances (≈ 1.45 GB each, ~3.5 GB with the rest: tight).
-   - 8 GB VPS: the defaults (width 2, heads 1,500,000; ≈ 2.2 GB per instance, ~5 GB in all).
+   and `/etc/orch/relay-int.env`, the units' `EnvironmentFile`; the dev-kit units and README take these values):
+   - **2 GB VPS (the dev VPS: 1,961 MB, no swap; units `MemoryMax=900M` public, `450M` internal).** Public:
+     `ORCH_RELAY_MAX_PUBLICATION_BYTES=16777216` (the default; 226,719 heads, 295 MB, +25 % 368 MB, + 250 MB
+     = ~618 MB of 944 MB). Internal: `ORCH_RELAY_MAX_PUBLICATION_BYTES=4194304` (4 MiB; 56,679 heads, 74 MB,
+     +25 % 92 MB, + 250 MB = ~342 MB of 472 MB, 28 % headroom; 8 MiB would be ~434 MB, 8 % headroom: too tight;
+     6 MiB ~388 MB only once `MemoryPeak` shows a baseline of 200 MB or less). Leave `ORCH_RELAY_PUBLISH_HEADS`
+     and the width unset. In all: 618 + 342 + Caddy ~100 + OS ~250 ≈ 1,310 MB of 1,961 MB (67 %).
+   - 4 GB VPS: public 32 MiB (453,438 heads, ~0.99 GB), internal 16 MiB (~0.62 GB); `MemoryMax` about 1.2G and
+     800M.
+   - 8 GB VPS: 64 MiB, the staging quota, on both (906,876 heads, ~1.72 GB each, ~4.2 GB with the rest).
    How to read it: on the VPS `free -m` (`total` and `available`), `systemctl show orch-relay -p MemoryCurrent
    -p MemoryPeak` (and the same for `orch-relay-int`) after a large publication, and the bench
    (`uv run python tests/bench_publication_lockhold.py`) for the per-node figure on the deployed Python. A
    `MemoryMax=` in the units makes an overrun kill (and restart) the relay instead of a random process.
-   If it does not fit: the follow-up is to stop materialising every new node in phase A, either packing rows
-   compactly (raw 32-byte fields in arrays instead of dicts and tuples, roughly 4–5x less) or streaming them to a
-   temporary table in chunks that phase B copies; not implemented (P3-D33 residual).
+   Limitation: a restore whose staged set exceeds the maximum cannot be published (P3-D37). The follow-up (the
+   streaming verify, P3-D33 residual) is to stop materialising every new node in phase A, either packing rows
+   compactly (raw 32-byte fields in arrays instead of dicts and tuples, roughly 4–5x less: ~250 MB for a 64 MiB
+   set) or streaming them to a temporary table in `NODE_CHUNK` chunks that phase B copies (O(chunk): ~26 MB plus
+   one page, whatever the set); then the maximum can return to 64 MiB. Not implemented.
 2. **Disk fits the storage caps.** Worst case is `accounts x ORCH_RELAY_ACCOUNT_WORKSPACES x
    ORCH_RELAY_WORKSPACE_NODES x 293 B` of nodes (an account with a P3-D36 override counts with its own cap) (defaults: 32 x 1.17 GB ≈ 37.5 GB per account) plus the 4 GiB
    staging ceiling plus the WAL and the self-certified evidence (≤ ~75 MB per account). Lower the workspace node
@@ -2197,3 +2306,4 @@ No new decisions.
 | P3-D34 | Per-account and per-workspace caps (429 `quota_exceeded`): 512 MiB staged per owner person, 32 workspaces per account, 4,000,000 stored nodes per workspace before phase B, newest 256 receipts and 4,096 tombstones per workspace, 50,000 new self-certified evidence pairs per owner person; ever-device recovery design (G3, G4 gates) | §10, proto §19.8 |
 | P3-D35 | Token buckets on every authenticated directory, bridge and checkpoint request, charged after authentication (refusals to the read class): read buckets per device (or W token) and person (or workspace), page buckets weighted by heads, a staging bucket per workspace, host answers per (workspace, target device); bounded LRU table; O(1) poll admission counters (N3); proxy misconfiguration warning (N4); revocation-read /56 window (blocker 4; round 2: review F1-F3) | §10, proto §19.4, §19.6 |
 | P3-D36 | Pre-public limits: staging weighted by body size (one token per started 64 KiB, burst 28,801, refill 600/min); a node-quota reserve (5 %, 200,000 nodes) only owner-signed restores may use; an audited per-account override of the workspaces cap (migration 0016, `orch-relay account-cap`, no HTTP route) (checklist items 3, 4, 8) | §10, proto §19.4, §19.8 |
+| P3-D37 | A hard maximum publication size (`ORCH_RELAY_MAX_PUBLICATION_BYTES`, default 16 MiB, 1..64 MiB): `too_large` at the staging manifest (implied size, before any page) and pages (413, running total) and at the final publication before any fold (400, phase A and C); restores alike; the publication heads cap defaults to the heads it implies (checklist item 1) | §10, proto §19.6, §19.8 |
