@@ -2468,8 +2468,9 @@ private half; the publicly derived reference key is only a test artifact.
   and check order it always had, and is charged only the windows charged before that refusal: the
   recovery address windows and the revocation-pair read window (before authentication, by design)
   and challenge issuance. A login challenge is consumed by the first check whatever follows; an
-  account request with an existing invite is decided by the transaction, so an exact retry still
-  gets its replay. Window checks never charge. Relay operators SHOULD also rate-limit per client
+  account request on an unused invite is decided by the transaction, so an exact retry still
+  gets its replay; one on a used invite (or one expired for over a minute) is refused by the first
+  check, its challenge consumed. Window checks never charge. Relay operators SHOULD also rate-limit per client
   address at the reverse proxy.
 - **Waiting long polls** hold no lock, transaction or worker thread. Commits that insert or change
   rows wake only the affected polls (new requests → that workspace's host; responses → that rid;
