@@ -1075,10 +1075,17 @@ class Relay:
         )
         need(not missing, "restore_missing_revocation", 409, devices=missing)
         unpublished = []
-        for d, p, reason, cursor, record in self.con.execute(
-            "SELECT device_id,person_id,reason,cursor,record FROM revocations ORDER BY device_id"
-        ):
-            if d in known and (d, p) not in chain and carried.get((d, p), 0) < STRENGTH[reason]:
+        # Only the devices this workspace knows (review N2): never the relay-wide table, which
+        # any account holder grows with self-certified evidence. A chain pair whose global
+        # revocation is stronger than what the restore carries is reported too (review N1).
+        rows = []
+        for d in sorted(known):
+            rows += self.con.execute(
+                "SELECT device_id,person_id,reason,cursor,record FROM revocations WHERE device_id=?",
+                (d,),
+            ).fetchall()
+        for d, p, reason, cursor, record in rows:
+            if carried.get((d, p), 0) < STRENGTH[reason]:
                 unpublished.append(
                     {
                         "device_id": d,
