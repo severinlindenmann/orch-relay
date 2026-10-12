@@ -575,17 +575,17 @@ class Relay:
     def fold(self, log, key, start, heads):
         """Nodes.extend(start, heads()) for one staged page or the restore line (P3-D33): phase A
         records the result or the refusal, phase C reuses it, so no head is folded under the
-        lock. A fold phase A never reached is done live."""
+        lock. A fold phase A never reached, or whose start node phase C cannot see, is done live."""
         nodes, memo = self.log(log), self.memo
         slot = (log, key, start["seq"], start["acc"])
         if memo is not None and not self.dry and slot in memo.folds:
             previous = nodes.get(start["acc"])
-            need(previous is not None and previous["seq"] == start["seq"], "chain_diverged", 409)
-            memo.hits += 1
-            done = memo.folds[slot]
-            if isinstance(done, tuple):
-                raise again(done)
-            return dict(done)
+            if previous is not None and previous["seq"] == start["seq"]:
+                memo.hits += 1
+                done = memo.folds[slot]
+                if isinstance(done, tuple):
+                    raise again(done)
+                return dict(done)
         batch = heads()
         self.folded += len(batch)
         try:

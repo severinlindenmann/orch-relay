@@ -111,9 +111,11 @@ def relay(tmp_path):
         )
 
 
-def append(r, count, per_page, tag="a", wrong=False):
+def append(r, count, per_page, tag="a", wrong=False, at=None, tickets=None):
     """Stage an append of `count` heads to the workspace log after r.first; the body and heads.
-    `wrong`: the signed entry disagrees with the proof (refused after every fold)."""
+    `wrong`: the signed entry disagrees with the proof (refused after every fold). `at`: another
+    checkpoint time (another target over the same pages). `tickets`: {log: (heads, entry)}, new
+    ticket logs with one page each and the signed entry."""
     heads = [C.digest(f"FAKE {tag} {i}".encode()) for i in range(count)]
     pages, cursor = [], r.tip
     for k in range(0, count, per_page):
@@ -121,7 +123,13 @@ def append(r, count, per_page, tag="a", wrong=False):
         pages.append(page("workspace", cursor, chunk))
         cursor = entry(chunk, cursor["acc"], cursor["seq"])
     signed = {**cursor, "acc": C.digest(b"FAKE wrong")} if wrong else cursor
-    target = R.sign_object(S, WSK, {**r.o, "n": 2, "workspace_log": signed})
+    o = {**r.o, "n": 2, "workspace_log": signed}
+    if at:
+        o["at"] = at
+    for log, (ticket_heads, signed_entry) in (tickets or {}).items():
+        o["tickets"] = {**o["tickets"], log: signed_entry}
+        pages.append(page(log, C.EMPTY, ticket_heads))
+    target = R.sign_object(S, WSK, o)
     return stage(r.path, r.first, target, pages), heads
 
 
@@ -219,6 +227,7 @@ def test_no_head_is_folded_under_the_lock_and_each_hold_inserts_one_chunk(relay,
     assert len(holds) == 6 + 1, recorder.holds  # the background sweeps hold it too, briefly
     assert max(holds) <= 0.25 * wall, (holds, wall)
     assert proof(relay, body) == heads
+    assert usage(relay.path) == (node_count(relay.path), 0)  # counted, none orphaned
 
 
 def test_lock_order_gate_then_lock_and_no_pooled_read_connection_held_while_locking(
@@ -406,6 +415,61 @@ def test_staging_deleted_between_a_and_c_is_refused_and_counts_orphans(relay):
     assert put(relay.client, body)["result"] == "accepted"
     assert usage(relay.path) == (nodes[0] + 40, nodes[1] + 40)
     assert proof(relay, body) == heads
+
+
+def test_staging_replaced_between_a_and_c_is_judged_on_the_live_set(relay):
+    """Phase A's folds are keyed by page digest: a set re-staged under the same key with other
+    pages misses them, and phase C folds the live pages (here: refused, as the live path is)."""
+    body, _ = append(relay, 40, 20)
+
+    def replace(**kw):
+        sql(relay.path, "DELETE FROM checkpoint_staging WHERE workspace_id=?", (WS,))
+        bad = [C.digest(f"FAKE bad {i}".encode()) for i in range(40)]
+        stage(relay.path, relay.first, body["checkpoint"], [page("workspace", relay.tip, bad)])
+
+    relay.cps.hooks["before_c"] = replace
+    assert put(relay.client, body) == {"status": 409, "error": "chain_diverged"}
+    assert failures(relay.path) == 1
+    spent = sql(relay.path, "SELECT heads FROM checkpoint_refused_heads")
+    assert spent == [(80,)]  # phase A's 40 and phase C's live 40
+
+
+def test_a_refusal_after_folds_is_answered_by_phase_c_as_by_the_live_path(relay):
+    """The workspace log folds and passes its genesis root check on phase A's new nodes, then a
+    new ticket's signed entry disagrees with its proof. Phase C (no phase B ran) answers the
+    same chain_diverged: it reads phase A's nodes for the root check."""
+    ticket = "01" + "0" * 24
+    heads = [C.digest(f"FAKE ticket {i}".encode()) for i in range(3)]
+    body, _ = append(relay, 30, 10, tickets={ticket: (heads, entry(heads[:2]))})
+    memos = []
+    relay.cps.hooks["after_a"] = lambda **kw: memos.append(kw["memo"].accepted)
+    assert put(relay.client, body) == {"status": 409, "error": "chain_diverged"}
+    assert memos == [False] and node_count(relay.path) == 4  # nothing inserted
+
+
+def test_phase_b_skips_nodes_another_publication_stored(relay):
+    """Two targets over the same pages, phases interleaved without the mutex: the second's phase
+    B finds every node stored (idempotent inserts) and orphans nothing."""
+    cps = relay.cps
+    one, _ = append(relay, 30, 10, "same")
+    two, _ = append(relay, 30, 10, "same", at="2026-09-21T13:46:41Z")
+    params, runs = {"ws": WS}, []
+    for body in (one, two):
+        raw = P.cj(body)
+        prepared = cps.prepare(
+            "checkpoint_put", WS, raw, cps.preauthorize("checkpoint_put", WS, LOWER)
+        )
+        runs.append((raw, prepared, cps.phase_a(WS, LOWER, raw, prepared)))
+    before = usage(relay.path)
+    for k, (raw, prepared, memo) in enumerate(runs):
+        cps.phase_b(WS, LOWER, memo)
+        assert memo.inserted == (30 if k == 0 else 0)
+        try:
+            cps.phase_c(params, LOWER, raw, prepared, memo)
+        except checkpoints.Refusal as exc:
+            assert k == 1 and exc.code == "chain_diverged"
+        cps.settle(WS, memo)
+    assert usage(relay.path) == (before[0] + 30, before[1])
 
 
 RESTORE = "workspace_restore_and_exact_retry"
