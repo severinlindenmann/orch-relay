@@ -142,3 +142,38 @@ def test_0011_indexes_chain_revocations_by_device_and_keeps_rows(tmp_path):
     assert any("checkpoint_revocation_device" in str(r) for r in plan)
     with con:
         con.execute(src.joinpath(name).read_text().split("\n")[-2])  # the CREATE, again: no-op
+
+
+def test_0012_drops_evidence_only_device_rows_and_keeps_revocations(tmp_path):
+    """P3-D30 round 2 (review R1): 0012 deletes device rows of evidence-only persons (and their
+    sessions); accounts, evidence_persons, other devices and every revocation stay."""
+    import shutil
+    from importlib import resources
+
+    mdir = tmp_path / "m"
+    mdir.mkdir()
+    src = resources.files("orch_relay").joinpath("migrations")
+    for e in src.iterdir():
+        if e.name.endswith(".sql") and e.name < "0012":
+            shutil.copy(str(e), mdir / e.name)
+    path = tmp_path / "r.sqlite3"
+    db.migrate(path, mdir)
+    con = sqlite3.connect(path)
+    with con:
+        con.execute("INSERT INTO accounts VALUES ('pe','pk',0),('pa','pk2',0)")
+        con.execute("INSERT INTO evidence_persons VALUES ('pe')")
+        con.execute("INSERT INTO devices VALUES ('de','pe','{}','s','k','[]',NULL)")
+        con.execute("INSERT INTO devices VALUES ('da','pa','{}','s','k','[]',NULL)")
+        con.execute("INSERT INTO sessions VALUES ('t1','device','de',9),('t2','device','da',9)")
+        con.execute("INSERT INTO revocations VALUES ('de','pe','{}','lost',5,7)")
+    con.close()
+    name = "0012_drop_evidence_devices.sql"
+    shutil.copy(str(src.joinpath(name)), mdir / name)
+    assert db.migrate(path, mdir) == ["0012_drop_evidence_devices"]
+    assert db.migrate(path, mdir) == []
+    con = sqlite3.connect(path)
+    assert con.execute("SELECT device_id FROM devices").fetchall() == [("da",)]
+    assert con.execute("SELECT token_hash FROM sessions").fetchall() == [("t2",)]
+    assert con.execute("SELECT person_id FROM evidence_persons").fetchall() == [("pe",)]
+    assert con.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 2
+    assert con.execute("SELECT * FROM revocations").fetchall() == [("de", "pe", "{}", "lost", 5, 7)]

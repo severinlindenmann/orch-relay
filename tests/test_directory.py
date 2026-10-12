@@ -780,3 +780,53 @@ def test_revocation_route_discloses_no_certificate_or_account_key(tmp_path):
         )
         for secret in (CERT["o"]["dk_kx_pub"], CERT["sig"], PK, chain_cert["sig"], INTRUDER_PK):
             assert secret not in response.text
+
+
+def test_redeeming_evidence_only_person_never_associates_its_evidence_devices(tmp_path):
+    """P3-D30 round 2 (review R1 PoC): a pre-0010 registry row written by restore evidence for an
+    evidence-only person (P3-D29) is no association, so another workspace W2 could carry a
+    stranger's pair for that device. When the person later redeems an invite with ANOTHER device,
+    the old row must not become an association contradicting W2's chain pair (the F1 §5.10
+    strand): the evidence device rows are dropped, the revocations stay and still refuse the id."""
+    import sqlite3
+
+    from orch_relay.checkpoints import Relay
+    from orch_relay.directory import create_invite
+
+    laptop = V["ids"]["device_laptop"]
+    invite = create_invite(tmp_path / db.DB_NAME, DAY)
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d, accounts=True, devices=False, card=False)
+        with closing(db.connect(d.path)) as con, con:
+            con.execute("INSERT INTO evidence_persons VALUES (?)", (PERSON,))
+            d.store_device(con, V["certs"]["signed"]["laptop"])
+            con.execute(
+                "INSERT INTO sessions VALUES (?,?,?,?)", ("stale", "device", laptop, NOW + 1000)
+            )
+            _chain_row(con, laptop, PERSON, "person_alice.sig", PK, ws="aa" * 16)
+            _chain_row(con, laptop, BOB, "person_bob.sig", BOB_PK, ws="bb" * 16)
+
+        def association(con):
+            return Relay.association(type("Relay", (), {"con": con})(), laptop)
+
+        with closing(db.connect(d.path)) as con:
+            assert association(con) is None
+        r = c.post("/v2/accounts", json=account_body(c, invite))
+        assert r.status_code == 200, r.text
+        with closing(db.connect(d.path)) as con:
+            con.row_factory = sqlite3.Row
+            assert association(con) is None
+            assert [tuple(r) for r in con.execute("SELECT device_id FROM devices")] == [(DEVICE,)]
+            assert not con.execute(
+                "SELECT 1 FROM sessions WHERE subject_id=?", (laptop,)
+            ).fetchone()
+            assert (
+                con.execute(
+                    "SELECT COUNT(*) FROM revocations WHERE device_id=?", (laptop,)
+                ).fetchone()[0]
+                == 2
+            )
+        laptop_cert = V["certs"]["signed"]["laptop"]
+        again = c.put("/v2/devices/" + laptop, json={"cert": laptop_cert})
+        assert (again.status_code, again.json()) == (403, {"error": "revoked"})

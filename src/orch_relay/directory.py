@@ -476,7 +476,18 @@ class Directory:
         if usable_account(con, o["person_id"]):
             fail("account_exists")
         # P3-D29: redeeming an invite turns an evidence-only row (same person_id, so the same
-        # pk_pub) into the account; its revoked devices stay revoked.
+        # pk_pub) into the account; its revocations stay. P3-D30 round 2 (review R1): its device
+        # rows, written by pre-0010 restore evidence, are deleted first. Restores create no
+        # association (ruling 1), and keeping them would make each one an association the moment
+        # the person stops being evidence-only, contradicting any other workspace's chain pair for
+        # that id (the F1 §5.10 strand). Each such device is cut off by its own revoked pair and
+        # its re-registration is refused by its chain pair. Nothing else can reference it: no
+        # session (its pair is revoked), member row, grant, wrap or queue (all need a usable
+        # account); sessions and queues are cleared anyway.
+        if con.execute(
+            "SELECT 1 FROM evidence_persons WHERE person_id=?", (o["person_id"],)
+        ).fetchone():
+            self.drop_evidence_devices(con, o["person_id"])
         con.execute("DELETE FROM evidence_persons WHERE person_id=?", (o["person_id"],))
         con.execute(
             "INSERT INTO accounts VALUES (?,?,?) ON CONFLICT(person_id) DO UPDATE SET "
@@ -489,6 +500,18 @@ class Directory:
             (now, o["person_id"], digest(raw), invite_hash),
         )
         return {"person_id": o["person_id"]}
+
+    def drop_evidence_devices(self, con, person):
+        """Delete an evidence-only person's device rows (P3-D30 round 2; migration 0012 did the
+        same once for every evidence-only person)."""
+        from .members import prune_device
+
+        for (did,) in con.execute(
+            "SELECT device_id FROM devices WHERE person_id=?", (person,)
+        ).fetchall():
+            con.execute("DELETE FROM sessions WHERE kind='device' AND subject_id=?", (did,))
+            prune_device(con, did)
+        con.execute("DELETE FROM devices WHERE person_id=?", (person,))
 
     def login(self, con, body, now):
         # Consume a recognizable challenge even if other fields are malformed.
