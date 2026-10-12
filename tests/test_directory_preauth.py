@@ -404,6 +404,21 @@ def test_authorized_requests_still_take_the_lock(tmp_path, monkeypatch):
         assert c.post("/v2/session/logout", json={}, headers=DEV).json() == {}
         assert (spy.locks, spy.writes) == (2, 2)
         assert c.get(f"/v2/workspaces/{WS}/members", headers=DEV).status_code == 401
+        sql(
+            d,
+            "INSERT INTO sessions VALUES (?,?,?,?)",
+            (token_hash("FAKE-device"), "device", DEVICE, NOW + 900_000),
+        )
+        # Authorized reads are answered by the transaction, never from the pre-check's snapshot
+        # (review F4): only the FINAL steps documented in P3-D32 answer early.
+        for path in (
+            f"/v2/devices/{DEVICE}",
+            f"/v2/workspaces/{WS}/card",
+            f"/v2/persons/{PERSON}/revocations",
+        ):
+            before = spy.locks
+            assert c.get(path, headers=DEV).status_code == 200
+            assert spy.locks == before + 1, path
 
 
 def test_precheck_passes_but_transaction_refuses(tmp_path, monkeypatch):
@@ -748,3 +763,60 @@ def test_windows_and_challenges_are_guarded_by_the_budget_mutex(tmp_path):
     count = len(held)
     d.consume(challenge, NOW)
     assert len(held) > count
+
+
+def test_budget_mutex_is_never_held_while_taking_the_lock(tmp_path, monkeypatch):
+    """Lock order (review F4): Directory.lock, then Directory.budget, never the reverse. Pre-checks
+    charge windows under the budget alone while transactions charge under the lock; a reversed
+    order anywhere would deadlock them. Explicit order check plus a concurrent stress."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        held, violations, budget_uses = threading.local(), [], []
+        real_lock, real_budget = d.lock, d.budget
+
+        class Lock:
+            def __enter__(self):
+                if getattr(held, "budget", 0):
+                    violations.append("lock taken while holding the budget")
+                return real_lock.__enter__()
+
+            def __exit__(self, *exc):
+                return real_lock.__exit__(*exc)
+
+            def __getattr__(self, name):
+                return getattr(real_lock, name)
+
+        class Budget:
+            def __enter__(self):
+                held.budget = getattr(held, "budget", 0) + 1
+                budget_uses.append(real_lock._is_owned())
+                return real_budget.__enter__()
+
+            def __exit__(self, *exc):
+                held.budget -= 1
+                return real_budget.__exit__(*exc)
+
+        monkeypatch.setattr(d, "lock", Lock())
+        monkeypatch.setattr(d, "budget", Budget())
+        d.trusted_proxy = "testclient"
+
+        def request(i):
+            client = {"X-Forwarded-For": f"198.51.100.{i % 200}"}
+            kind = i % 4
+            if kind == 0:  # pre-check refusal charging the deferred recovery window
+                return c.post("/v2/revocations", json={"x": i}, headers=client)
+            if kind == 1:  # challenge issuance under the budget alone
+                return c.post("/v2/session/challenge", json={}, headers=client)
+            if kind == 2:  # a transaction charging a window under the lock
+                return c.put(f"/v2/devices/{DEVICE}", json={"cert": CERT}, headers=client)
+            return c.post("/v2/session/login", json=login_body(), headers=client)
+
+        with ThreadPoolExecutor(16) as pool:
+            futures = [pool.submit(request, i) for i in range(400)]
+            for future in futures:
+                assert future.result(timeout=30).status_code in (200, 400, 401, 429)
+        assert violations == []
+        assert True in budget_uses and False in budget_uses  # both orders of use occurred
