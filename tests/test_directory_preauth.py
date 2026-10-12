@@ -646,11 +646,11 @@ def test_worker_thread_churn_opens_no_new_connections(tmp_path, monkeypatch):
                     assert r.status_code in (200, 401), r.text
             time.sleep(0.2)  # every worker thread idles out
 
-        burst()
-        settled = len(LIVE)
-        for _ in range(8):
+        # The pool grows lazily up to the peak concurrency, so bound by it rather than by the first
+        # burst: 24 borrowers + 1 on the event loop + the write connection (per-thread: ~160).
+        for _ in range(9):
             burst()
-        assert len(LIVE) <= settled + 2, (settled, len(LIVE))
+            assert len(LIVE) <= 24 + 2, len(LIVE)
         assert c.app.state.directory.pool.count() <= c.app.state.directory.pool.size + 1
     assert not LIVE  # shutdown closes everything
 
@@ -780,8 +780,13 @@ def test_budget_mutex_is_never_held_while_taking_the_lock(tmp_path, monkeypatch)
         class Lock:
             def __enter__(self):
                 if getattr(held, "budget", 0):
+                    # Fail, never block: a real inversion would deadlock the pool's threads and
+                    # hang the suite (ThreadPoolExecutor.__exit__ waits for them).
                     violations.append("lock taken while holding the budget")
-                return real_lock.__enter__()
+                    raise AssertionError("Directory.lock taken while holding Directory.budget")
+                if not real_lock.acquire(timeout=10):
+                    raise AssertionError("Directory.lock not acquired within 10 s")
+                return self
 
             def __exit__(self, *exc):
                 return real_lock.__exit__(*exc)
@@ -793,7 +798,10 @@ def test_budget_mutex_is_never_held_while_taking_the_lock(tmp_path, monkeypatch)
             def __enter__(self):
                 held.budget = getattr(held, "budget", 0) + 1
                 budget_uses.append(real_lock._is_owned())
-                return real_budget.__enter__()
+                if not real_budget.acquire(timeout=10):
+                    held.budget -= 1
+                    raise AssertionError("Directory.budget not acquired within 10 s")
+                return self
 
             def __exit__(self, *exc):
                 held.budget -= 1

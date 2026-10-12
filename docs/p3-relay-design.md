@@ -1289,10 +1289,10 @@ HTTP fixture.
   - *Connections (round 2, review F1).* anyio retires idle worker threads after 10 s and starts new ones, so
     per-thread connections (Directory's, and the Bridge's on develop) were never closed: bursts of refused requests
     leaked them until shutdown. `db.Connections` owns every connection instead: one write connection shared by
-    Directory, Bridge and checkpoints and used only under `Directory.lock` (asserted), and a pool of at most 48
+    Directory, Bridge and checkpoints and used only under `Directory.lock` (guarded by a debug `assert`), and a pool of at most 48
     `query_only` read connections borrowed per use and returned in a `finally` that ends the snapshot ("read" with
     `busy_timeout=0`, "query" waiting); a borrow beyond the pool gets a temporary closed on return. Thread churn
-    test (idle timeout 0.05 s, 9 bursts): 21 → 161 open connections before, 5 → 6 after.
+    test (idle timeout 0.05 s, 9 bursts): 21 → 161 open connections before; after, never more than the 24-wide burst + 2 (the pool grows lazily to the peak concurrency, then stays flat).
   - *Bridge.* Anonymous and host pair requests check their pairing windows (`charge=False`) before the first
     transaction, after admission, i.e. in the transaction's order.
   - *Measured* (`uv run python tests/bench_directory_preauth.py`, in process, idle laptop): a refused directory
