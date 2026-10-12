@@ -2461,6 +2461,16 @@ private half; the publicly derived reference key is only a test artifact.
   (never 404), so it learns nothing about request ids. Host pair answers use separate
   pairing windows with the same caps, and host response chunks are rate-limited per (workspace,
   target device), never against the device's own 20 posts/s.
+- **Directory routes authorize first too (P3-D32, G3 re-review D4).** Every §19.1, §19.2 and §19.5
+  route (sessions, accounts, devices, revocations, cards, membership and keys) runs its checks up to
+  authentication, authorization and fencing on a read-only snapshot before it takes the directory
+  lock or a write transaction; the transaction repeats them. A refused request gets the code, body
+  and check order it always had, and is charged only the windows charged before that refusal: the
+  recovery address windows and the revocation-pair read window (before authentication, by design)
+  and challenge issuance. A login challenge is consumed by the first check whatever follows; an
+  account request with an existing invite is decided by the transaction, so an exact retry still
+  gets its replay. Window checks never charge. Relay operators SHOULD also rate-limit per client
+  address at the reverse proxy.
 - **Waiting long polls** hold no lock, transaction or worker thread. Commits that insert or change
   rows wake only the affected polls (new requests → that workspace's host; responses → that rid;
   revocation, logout, certificate store → that device's polls and the hosts of its workspaces;
