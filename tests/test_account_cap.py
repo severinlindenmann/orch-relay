@@ -139,6 +139,79 @@ def test_override_and_audit_are_written_together(app):
     assert len(rows(d.path, "SELECT * FROM account_workspace_override_audit")) == 2
 
 
+def test_the_audit_refuses_replace_of_an_existing_row(app):
+    """Round 2 (review F1): REPLACE's implicit delete fires no DELETE trigger (recursive triggers
+    are off), so a row naming an existing seq is refused by its own trigger; new rows still go in."""
+    _c, d = app
+    D.set_account_cap(d.path, PERSON, 40, "FAKE-op-1", now_ms=NOW)
+    D.set_account_cap(d.path, PERSON, 41, "FAKE-op-1", now_ms=NOW)
+    for statement in (
+        "REPLACE INTO account_workspace_override_audit VALUES (1,?,NULL,8888,'f',1,NULL)",
+        "INSERT OR REPLACE INTO account_workspace_override_audit VALUES (2,?,NULL,8888,'f',1,NULL)",
+        "INSERT INTO account_workspace_override_audit VALUES (1,?,NULL,8888,'f',1,NULL)",
+        "UPDATE OR REPLACE account_workspace_override_audit SET new_cap=8888 WHERE ?=?",
+    ):
+        args = (PERSON,) * statement.count("?")
+        with pytest.raises(sqlite3.DatabaseError), closing(db.connect(d.path)) as con, con:
+            con.execute(statement, args)
+    with closing(db.connect(d.path)) as con, con:  # a new row naming a fresh seq is allowed
+        con.execute(
+            "INSERT INTO account_workspace_override_audit VALUES (9,?,41,42,'op',1,NULL)", (PERSON,)
+        )
+    assert rows(d.path, "SELECT seq, new_cap FROM account_workspace_override_audit") == [
+        (1, 40),
+        (2, 41),
+        (9, 42),
+    ]
+    assert D.set_account_cap(d.path, PERSON, 43, "FAKE-op-1") == (41, 43)
+    assert rows(d.path, "SELECT max(seq) FROM account_workspace_override_audit") == [(10,)]
+
+
+def test_a_missing_database_is_never_created(tmp_path, monkeypatch):
+    """Round 2 (review F2): a wrong or unset ORCH_RELAY_DATA must not leave a stray database."""
+    path = tmp_path / "nowhere" / db.DB_NAME
+    for call in (
+        lambda: D.set_account_cap(path, PERSON, 5, "op"),
+        lambda: D.show_account_cap(path, PERSON, 32),
+        lambda: D.account_cap_audit(path),
+    ):
+        with pytest.raises(ValueError, match="no database"):
+            call()
+    assert not (tmp_path / "nowhere").exists()
+    monkeypatch.setenv("ORCH_RELAY_DATA", str(tmp_path / "nowhere"))
+    with pytest.raises(SystemExit) as exited:
+        cli.main(["account-cap", "show", PERSON])
+    assert exited.value.code == 2
+    assert not (tmp_path / "nowhere").exists()
+
+
+def test_another_users_database_is_refused(stopped, monkeypatch):
+    """Round 2 (review F2): run as the relay's user, or sidecar files may end up owned by
+    another user and lock the relay out (readonly database)."""
+    import os
+
+    uid = os.stat(stopped).st_uid
+    monkeypatch.setattr(D.os, "geteuid", lambda: uid + 1)
+    for call in (
+        lambda: D.set_account_cap(stopped, PERSON, 5, "op"),
+        lambda: D.show_account_cap(stopped, PERSON, 32),
+        lambda: D.account_cap_audit(stopped),
+        lambda: D.create_invite(stopped, 60_000),
+    ):
+        with pytest.raises(ValueError, match="sudo -u"):
+            call()
+    monkeypatch.setenv("ORCH_RELAY_DATA", str(stopped.parent))
+    for argv in (["account-cap", "audit"], ["invite", "create"]):
+        with pytest.raises(SystemExit) as exited:
+            cli.main(argv)
+        assert exited.value.code == 2
+    assert rows(stopped, "SELECT count(*) FROM account_workspace_override_audit") == [(0,)]
+    assert rows(stopped, "SELECT count(*) FROM invites") == [(0,)]
+    monkeypatch.setattr(D.os, "geteuid", lambda: uid)  # the owner: an existing database works
+    assert D.set_account_cap(stopped, PERSON, 5, "op") == (None, 5)
+    assert D.create_invite(stopped, 60_000)
+
+
 @pytest.mark.parametrize("cap", [-1, 0, 10_001, 2**63, True, 5.0, "5", None])
 def test_bad_caps_are_rejected(app, cap):
     _c, d = app

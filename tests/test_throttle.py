@@ -759,6 +759,23 @@ def test_staging_puts_are_weighted_by_body_size(client):
     assert level() == 63  # a refusal charges nothing of the staging bucket
 
 
+def test_staging_weight_is_the_bytes_read_not_the_declared_length(client):
+    """P3-D36 round 2 (review F4): a chunked body declares no length; the charge is the bytes the
+    transport actually read (3 x 64 KiB + 1 = 4 tokens)."""
+    d = client.app.state.directory
+    limit(client, staging=(70, 60))
+    host = {**HOST, "Orch-Holder": "1", "Content-Type": "application/json"}
+    url = f"/v2/workspaces/{WS}/staging/null/sha256:{'1' * 64}/pages/0"
+    body = b" " * (3 * 65_536) + b"{"
+
+    def chunks():
+        for k in range(0, len(body), 10_000):
+            yield body[k : k + 10_000]
+
+    client.put(url, content=chunks(), headers=host)
+    assert d.buckets.table[("staging", WS)][0] // Buckets.UNIT == 70 - 4
+
+
 def test_checkpoint_writes_are_charged_after_authorization(client):
     limit(client, session=(2, 60), workspace=(100, 60))
     path = f"/v2/workspaces/{WS}/baselines"
