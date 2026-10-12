@@ -2904,7 +2904,12 @@ refusal, never a different acceptance), and an expired endpoint answers 410 `che
 expired per workspace, 404 `not_found` beyond. The node quota shares the code with the transient refused-heads
 budget, so a host cannot tell them apart from one answer: it retries after `Retry-After` with backoff (cheap for
 the relay: once the budget is spent the answer comes before any fold) and surfaces a `quota_exceeded` that
-persists past an hour to the owner (a workspace at its node quota migrates to a new one). These answers
+persists past an hour to the owner (a workspace at its node quota migrates to a new one). The permanent caps
+(nodes, workspaces, evidence) answer `Retry-After: 1` like the transient ones; each retry over the node quota
+costs the relay a full verification until the refused-heads budget is spent. The node quota applies to restores
+too: every restore adds at least one node (its line), so a workspace a hostile WSK holder filled to the quota can
+no longer be restored by its owner (P3-D34 residual; a restore reserve or an operator override is a
+pre-public-deploy item). These answers
 need relay state far beyond any vector, so they are pinned by relay tests, not HTTP fixtures.
 
 **Restore rules (P3-D13/D23/D24/D25).** `restore` is `{line, cert, authz: {delegation}, log}`.
