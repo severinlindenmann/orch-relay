@@ -167,6 +167,10 @@ def build(vectors=None):
     cert, card = v["certs"]["signed"]["phone"], v["card"]["card"]
     revocation = v["revocations"][0]["signed"]
     publication = objs["publication"]
+    alice_pk = R.b64u(bytes.fromhex(v["keys"]["person_alice.sig"]["pub"]))
+    # P3-D30: GET /v2/devices/{device}/revocation lists every held pair, the registered person's first.
+    registry_pair = {"person_id": person, "reason": revocation["o"]["reason"], "revocation": revocation,
+                     "device_cert": cert, "pk_pub": alice_pk, "provenance": "registry"}
     def chunk(raw):
         h = R.Header.decode(raw)
         return {"id": h.rid.hex(), "idx": h.seq, "last": bool(h.flags & R.F_LAST), "stream": bool(h.flags & R.F_STREAM), "envelope": R.b64u(raw)}
@@ -189,7 +193,7 @@ def build(vectors=None):
         "session_logout": ({}, {}),
         "accounts": ({"invite": "FAKE-single-use-invite", "pk_pub": R.b64u(bytes.fromhex(v["keys"]["person_alice.sig"]["pub"])), "device_cert": cert, "challenge": objs["login"]["challenge"], "sig": objs["login"]["sig"]}, {"person_id": person}),
         "device_put": ({"cert": cert}, {"device_id": device}), "device_get": (None, {"cert": cert}),
-        "revocations_post": ({"record": revocation}, {"device_id": device}), "revocation_get": (None, {"record": revocation}),
+        "revocations_post": ({"record": revocation}, {"device_id": device}), "revocation_get": (None, {"pairs": [registry_pair]}),
         "revocation_feed": (None, {"revocations": [{"cursor": 1, "record": revocation}], "next": None}),
         "card_put": ({"card": card}, {"card_seq": 1}), "card_get": (None, {"card": card}),
         "membership": (publication, {"list_seq": 1, "epoch": 1}),
@@ -333,6 +337,31 @@ def build(vectors=None):
             extra("filtered_workspace_feed", response_json={"revocations": [{"cursor": 1, "record": v["revocations"][0]["signed"]}], "next": None},
                   given="W ever_devices contains only the phone; records for the same person's other devices are excluded before pagination")
             cases[-1]["request"]["headers"]["Authorization"] = "Bearer FAKE-workspace-token"
+        if name == "revocation_get":
+            # P3-D30: bob's out-of-band pair ('feed', no evidence held) and the intruder's restore-carried
+            # pair ('chain', with the carried certificate and key) for the same id; both sort before alice
+            # by person_id, yet the registered person's pair comes first, then by person_id.
+            S2 = R.SUITES[2]
+            def key(name_):
+                return S2.sig_key(bytes.fromhex(v["keys"][name_ + ".sig"]["seed"]))
+            def other(name_, reason):
+                pk = bytes.fromhex(v["keys"][name_ + ".sig"]["pub"])
+                pid = R.person_id(S2, pk).hex()
+                rec = R.sign_object(S2, key(name_), {**revocation["o"], "person_id": pid, "reason": reason})
+                return pid, pk, rec
+            bob_id, _, bob_rec = other("person_bob", "compromised")
+            q_id, q_pk, q_rec = other("intruder", "lost")
+            q_cert = R.sign_object(S2, key("intruder"), {**cert["o"], "person_id": q_id})
+            pairs = [registry_pair] + sorted([
+                {"person_id": bob_id, "reason": "compromised", "revocation": bob_rec, "device_cert": None,
+                 "pk_pub": None, "provenance": "feed"},
+                {"person_id": q_id, "reason": "lost", "revocation": q_rec, "device_cert": q_cert,
+                 "pk_pub": R.b64u(q_pk), "provenance": "chain"}], key=lambda p: p["person_id"])
+            assert person > max(bob_id, q_id)
+            extra("every_pair_registered_person_first", response_json={"pairs": pairs}, given="every_pair")
+            cases[-1]["given"]["condition"] = ("The relay also holds every non-registry pair of the response: 'chain' pairs as "
+                                               "an accepted restore's evidence (certificate and key), 'feed' pairs in the "
+                                               "revocation table only.")
         if name in {"device_put", "cert_challenge", "cert_rejection"}:
             action = {"device_put": "certificate", "cert_challenge": "challenge", "cert_rejection": "rejection"}[name]
             vec = next(c for c in v["p3"]["cases"] if c["name"] == action + "_resigned_identical")

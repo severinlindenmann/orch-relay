@@ -345,22 +345,38 @@ def known_holder(state, device):
     return (person, state['person_keys'].get(person)) if person is not None else None
 
 
-def revoked_device(state, device):
-    """Any held revocation of this device id, whatever the person: the device-auth cutoff (sessions, member
-    certificates, registration), a different concern from restore-signer refusal, which is per pair."""
+def chain_revoked(state, device):
+    """Any chain-learned revocation of this device id, whatever the person: this model's chain pairs (the relay's
+    `checkpoint_revocations`, recorded by accepted restores). Out-of-band (global-only) pairs are not chain-learned."""
     prefix = device + ':'
-    return any(k.startswith(prefix) for k in [*state['global_revocations'], *state['revocations']])
+    return any(k.startswith(prefix) for k in state['revocations'])
 
 
 def register_device(state, body):
-    """The global registry's first-writer-wins PUT /v2/devices (G1), as far as checkpoints need it: a device id
-    with any held revocation is 403 revoked (device-auth cutoff, by device id), another person's device is 409
-    cert_conflict."""
-    need(set(body) == {'device_id', 'person_id'})
+    """The global registry's first-writer-wins registration (G1), as far as checkpoints need it (P3-D30, orch-52
+    rulings 2 and 4). route 'device_put' is PUT /v2/devices/{device}, 'account' is POST /v2/accounts (which also
+    records the new person's account key).
+
+    A NEW registration (no registry row, and always for 'account') is 403 revoked when any chain-learned revocation
+    of the id exists, of any person, or when the new pair itself is revoked; out-of-band evidence of another person
+    alone never refuses it. A registered device is cut off per pair, under its registry person (never the request's).
+    Then 'account' refuses a person who already has an account (409 account_exists), and another person's device is
+    409 cert_conflict. This keeps the registry from ever contradicting a chain pair (the F1 §5.10 stranding limit)."""
+    route = body.get('route', 'device_put')
+    need(set(body) == ({'device_id', 'person_id'} if route == 'device_put' else
+                       {'device_id', 'person_id', 'route', 'pk_pub'}) and route in ('device_put', 'account'))
     d, person = body['device_id'], body['person_id']
-    need(not revoked_device(state, d), 'revoked', 403)
-    need(state['registry'].get(d, person) == person, 'cert_conflict', 409)
+    registered = state['registry'].get(d)
+    if registered is None or route == 'account':
+        need(not chain_revoked(state, d) and not held_pair(state, d, person), 'revoked', 403)
+    else:
+        need(not held_pair(state, d, registered), 'revoked', 403)
+    if route == 'account':
+        need(person not in state['person_keys'], 'account_exists', 409)
+    need(registered in (None, person), 'cert_conflict', 409)
     state['registry'][d] = person
+    if route == 'account':
+        state['person_keys'][person] = body['pk_pub']
     return {}
 
 

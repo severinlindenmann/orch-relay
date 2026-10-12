@@ -860,7 +860,7 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     r4, rb4 = restore(3, source=r1, prefix=after_r1, ident='01YYYYYYYYYYYYYYYYYYYYYYYY')
     r5, rb5 = restore(3, source=r1, prefix=after_r1, ident='01YYYYYYYYYYYYYYYYYYYYYYYZ', revocations=both_items)
     c, st = new('B1_self_certified_evidence_never_registers', selfcert)
-    # The device id stays refused for registration (device-auth cutoff, by device id), but nothing binds its person.
+    # The device id stays refused for registration (its chain-learned pair, P3-D30), but nothing binds its person.
     run(c, st, 'register_device', {'device_id': laptop_id, 'person_id': x['cert']['o']['person_id']}, error='revoked')
     run(c, st, 'register_device', {'device_id': device, 'person_id': x['bob_id']}, error='cert_conflict')
     run(c, st, 'register_device', {'device_id': device, 'person_id': x['cert']['o']['person_id']})
@@ -873,8 +873,8 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     assert sorted(st['revocations']) == sorted([q_key, alice_laptop]) and laptop_id not in st['registry']
     c, st = new('B1_self_certified_coverage_still_demanded', selfcert)
     offer_restore(c, st, r4, rb4, 'restore_missing_revocation', pages=[])
-    # A registry association that contradicts the chain pair (unreachable: registration of a revoked device id is
-    # refused) never discards the held revocation; it strands the workspace (F1 §5.10 accepted availability limit:
+    # A registry association that contradicts the chain pair (unreachable: a new registration of a device id with a
+    # chain-learned revocation of any person is refused on both routes, P3-D30 cases below) never discards the held revocation; it strands the workspace (F1 §5.10 accepted availability limit:
     # a conflicting association plus a completeness obligation). One that agrees keeps carrying it.
     # Each offer is its own case: refused offers keep their staging sets, and two open sets are the quota.
     for name, person, steps in [
@@ -894,6 +894,28 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
         for suffix, target_, bundle_, error_ in steps:
             c, st = new(name + '_' + suffix, raced)
             offer_restore(c, st, target_, bundle_, error_, pages=[])
+    # P3-D30 (orch-52 rulings 2 and 4): the registration refusal that keeps the contradiction above unreachable, on
+    # both routes (PUT /v2/devices = 'device_put', POST /v2/accounts = 'account'). A chain-learned pair of ANY person
+    # refuses a new registration (bob's account attempt is refused before account_exists); out-of-band-only
+    # evidence refuses only its own pair, never another person's registration.
+    def account(person, pk):
+        return {'device_id': laptop_id, 'person_id': person, 'route': 'account', 'pk_pub': pk}
+    alice_id = x['cert']['o']['person_id']
+    c, st = new('P3_D30_chain_learned_pair_refuses_registration', selfcert)
+    run(c, st, 'register_device', {'device_id': laptop_id, 'person_id': alice_id}, error='revoked')
+    run(c, st, 'register_device', account(x['bob_id'], x['bob_pk']), error='revoked')
+    run(c, st, 'register_device', account(q_id, q_pub), error='revoked')
+    oob_q = copy.deepcopy(accepted)
+    oob_q['global_revocations'][q_key] = q_rev('compromised')
+    c, st = new('P3_D30_out_of_band_pair_refuses_only_its_person', oob_q)
+    run(c, st, 'register_device', account(q_id, q_pub), error='revoked')
+    run(c, st, 'register_device', {'device_id': laptop_id, 'person_id': alice_id})
+    assert st['registry'][laptop_id] == alice_id
+    oob_bob = copy.deepcopy(accepted)
+    oob_bob['global_revocations'][laptop_id + ':' + x['bob_id']] = bob_rev_l
+    c, st = new('P3_D30_out_of_band_other_person_never_refuses_account', oob_bob)
+    run(c, st, 'register_device', account(q_id, q_pub))
+    assert st['registry'][laptop_id] == q_id
     # The relay and devices agree: a device that walked r1 accepts r3 and r5 like the relay does, and refuses r2 (Q's
     # chain-learned pair missing) like the relay does.
     agreed = copy.deepcopy(selfcert)
