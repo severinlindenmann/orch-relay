@@ -224,6 +224,26 @@ def test_bucket_table_is_bounded_lru():
     assert list(b.table) == [998, 999, 996, "new"]
 
 
+def test_eviction_keeps_depleted_buckets_and_classes_apart():
+    b = Buckets(limit=4)
+    take(b, ("session", "attacker"), NOW, burst=1)  # depleted
+    for i in range(100):  # fresh identities of the same class, each charged once
+        take(b, ("session", i), NOW)
+    assert ("session", "attacker") in b.table  # never reset by the flood
+    with pytest.raises(Refusal):
+        take(b, ("session", "attacker"), NOW, burst=1)
+    for i in range(1000):  # another class cannot evict it either
+        take(b, ("host-answer", i), NOW)
+    assert ("session", "attacker") in b.table
+    assert sum(1 for key in b.table if key[0] == "host-answer") == 4
+    # A full (idle, refilled) bucket is evicted before a partly used one, though older.
+    b = Buckets(limit=2)
+    take(b, ("c", "idle"), NOW)
+    take(b, ("c", "busy"), NOW + 60_000, burst=1)
+    take(b, ("c", "new"), NOW + 60_000)
+    assert list(b.table) == [("c", "busy"), ("c", "new")]
+
+
 # --- directory ---------------------------------------------------------------------------------
 
 
@@ -270,7 +290,7 @@ def test_a_sessions_refusals_charge_only_its_own_bucket(client):
         (f"/v2/workspaces/{WS}/host/poll", {**HOST, "Orch-Holder": "7"}),  # 409 fenced
         (f"/v2/workspaces/{OTHER}/checkpoint", DEV),  # 403
     ]:
-        client.app.state.directory.buckets.table.clear()
+        client.app.state.directory.buckets.clear()
         statuses = [get(client, path, headers).status_code for _ in range(4)]
         assert 429 not in statuses[:3] and statuses[3] == 429
 
@@ -384,11 +404,42 @@ def test_host_answers_spend_only_the_targets_answer_bucket(client):
     d.throttle(session, NOW, "host-answer", (WS, PRIMARY))
     # A refused answer (stale generation) is charged to the host's read buckets, not the target's.
     limit(client, session=(100, 60), workspace=(100, 60))
-    d.buckets.table.clear()
+    d.buckets.clear()
     stale = {**HOST, "Orch-Holder": "7"}
     assert post(client, answer, stale).status_code == 409
     assert ("host-answer", (WS, DEVICE)) not in d.buckets.table
     assert ("session", ("token", token_hash("FAKE-workspace"))) in d.buckets.table
+
+
+def host_answer(target=DEVICE):
+    raw = bytearray(binary("bridge_host_post"))
+    raw[24:40] = bytes.fromhex(target)
+    return bytes(raw)
+
+
+def test_answers_without_a_request_are_charged_to_the_host(client):
+    """Security review: a W session must not choose fresh (workspace, target) keys at will."""
+    d = client.app.state.directory
+    limit(client, session=(3, 60), workspace=(100, 60))
+    host = {**HOST, "Orch-Holder": "1"}
+    statuses = [post(client, host_answer(f"{i:032x}"), host).status_code for i in range(4)]
+    assert 429 not in statuses[:3] and statuses[3] == 429
+    assert not [key for key in d.buckets.table if key[0] == "host-answer"]
+    # No request on the rid: the same, also for the real target.
+    d.buckets.clear()
+    statuses = [post(client, host_answer(), host).status_code for _ in range(4)]
+    assert statuses == [410, 410, 410, 429]
+
+
+def test_answers_are_keyed_per_requesting_member(client):
+    limit(client, host_answer=(2, 60))
+    host = {**HOST, "Orch-Holder": "1"}
+    request = bytearray(binary("bridge_device_post"))
+    assert post(client, bytes(request)).status_code == 202
+    request[24:40] = bytes.fromhex(PRIMARY)
+    assert post(client, bytes(request), DEV2).status_code == 202
+    assert [post(client, host_answer(), host).status_code for _ in range(3)] == [202, 202, 429]
+    assert post(client, host_answer(PRIMARY), host).status_code == 202
 
 
 def test_throttled_wait_takes_no_slot(client, monkeypatch):
@@ -487,9 +538,28 @@ def test_staging_has_its_own_workspace_bucket(client):
     # A refused staging PUT (another workspace) never charges that workspace's staging bucket.
     other = f"/v2/workspaces/{OTHER}/staging/sha256:{'0' * 64}/sha256:{'1' * 64}/pages/0"
     limit(client, session=(100, 60), workspace=(100, 60))
-    d.buckets.table.clear()
+    d.buckets.clear()
     assert client.put(other, json={}, headers=W2).status_code == 403
     assert ("staging", OTHER) not in d.buckets.table
+
+
+def test_staging_buckets_are_per_workspace(client):
+    d = client.app.state.directory
+    limit(client, staging=(1, 60))
+    with closing(db.connect(d.path)) as con, con:
+        row = list(con.execute("SELECT * FROM workspaces WHERE workspace_id=?", (WS,)).fetchone())
+        con.execute("INSERT INTO workspaces VALUES (?,?,?,?,?,?,?,?)", (OTHER, *row[1:]))
+        con.execute("INSERT INTO holders VALUES (?,?,?,?,?)", (OTHER, 1, NOW + 40_000, 0, None))
+        con.execute(
+            "INSERT INTO sessions VALUES (?,?,?,?)",
+            (token_hash("FAKE-workspace-other"), "workspace", OTHER, NOW + 900_000),
+        )
+    pages = "staging/sha256:" + "0" * 64 + "/sha256:" + "1" * 64 + "/pages/0"
+    host = {**HOST, "Orch-Holder": "1"}
+    other = {"Authorization": "Bearer FAKE-workspace-other", "Orch-Holder": "1"}
+    assert client.put(f"/v2/workspaces/{WS}/{pages}", json={}, headers=host).status_code != 429
+    assert client.put(f"/v2/workspaces/{WS}/{pages}", json={}, headers=host).status_code == 429
+    assert client.put(f"/v2/workspaces/{OTHER}/{pages}", json={}, headers=other).status_code != 429
 
 
 def test_default_staging_burst_covers_a_full_manifest_at_once(client):
