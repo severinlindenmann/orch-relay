@@ -360,3 +360,21 @@ def test_cli_reports_a_busy_database(stopped, monkeypatch, capsys):
         assert cli.main(["account-cap", "set", PERSON, "5", "--by", "op"]) == 1
         holder.execute("ROLLBACK")
     assert "nothing was written" in capsys.readouterr().err
+
+
+def test_a_data_directory_of_another_user_is_refused(stopped, monkeypatch):
+    """The -wal/-shm files are created in the directory: its owner must match too."""
+    import os
+
+    real = os.stat
+    directory = str(stopped.parent)
+
+    def stat(target, *args, **kwargs):
+        result = real(target, *args, **kwargs)
+        if str(target) == directory:
+            return os.stat_result((*result[:4], result.st_uid + 1, *result[5:]))
+        return result
+
+    monkeypatch.setattr(D.os, "stat", stat)
+    with pytest.raises(ValueError, match="sudo -u"):
+        D.account_cap_audit(stopped)
