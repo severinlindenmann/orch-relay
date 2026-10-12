@@ -881,6 +881,13 @@ commit atomically: H = E, record the restore ids, apply the bundles' revocations
   only for committed signers. A hash-only withheld suffix can hide a committed revocation (accepted limit). The relay
   server's R4 must use per-workspace chain-learned revocations in G4, not the global table (protocol-v2 §19.8
   transport detail 6 (c)).
+  Round 6 (orch-core #397, F1 §5.10 at 8a07c5ab, decision row 152, the row-151 fix): every revocation is retained
+  and matched per `(device_id, person_id)`. The round-4 first-come rule is gone at the relay and on devices: restore
+  evidence never registers its device, held revocations (chain pairs, the global set, a device's local evidence)
+  never bind a carried entry's identity (only associations do: registry, verified signers, a device's
+  `known_devices`), a restore may carry two persons' pairs for one device id, completeness and `unpublished` are per
+  pair, and devices have no `contested` store. Held out-of-band evidence on devices is capped per person (members
+  included, the card owner exempt), per device and in total, membership read at eviction time.
 - **Devices keep their durable revocation knowledge and tombstones.** A restore can never resurrect a device they know
   to be revoked. Bundle absence does not prove historical non-revocation, and no retroactive completeness is demanded.
 

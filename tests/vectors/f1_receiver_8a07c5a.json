@@ -2,9 +2,9 @@
  "source": {
   "repo": "orch-core",
   "path": "plugins/orch-core/tests/vectors/f1/checkpoint.json",
-  "branch": "develop (#387 fix/receiver-oob-revocations, merged with develop)",
-  "commit": "e9a26d95c247c4ff7794ae9abfc816a9032e576f",
-  "sha256": "b86c05e36eda0694ab5f54b40fce93f2eb0c67a18df776797eff97d730da6a82",
+  "branch": "develop (#397 fix/receiver-revocation-pairs, merged)",
+  "commit": "8a07c5ab50c808084b48bdfd0af93d91b382e016",
+  "sha256": "3a6d05c08c00c8fd88c8b0212ed2e7ecbe9a71133b6f797fe031ab20489590f8",
   "keys": [
    "workspace_id",
    "wsk_pub",
@@ -1103,7 +1103,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -1300,7 +1302,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -1482,7 +1486,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -1649,7 +1655,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -1814,7 +1822,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -1996,7 +2006,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -2178,7 +2190,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -2360,7 +2374,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -2539,7 +2555,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -2721,7 +2739,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -2903,7 +2923,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [
@@ -3087,7 +3109,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -3269,7 +3293,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -3344,7 +3370,9 @@
     "id": "01J9ZK00000000000000000004",
     "log": "workspace"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -3526,7 +3554,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -3702,7 +3732,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -3878,7 +3910,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -4305,7 +4339,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -4539,7 +4575,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -4773,7 +4811,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -5007,7 +5047,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -5188,7 +5230,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -5328,7 +5372,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -5468,7 +5514,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -5650,7 +5698,9 @@
     "log": "workspace",
     "pk_pub": "BAoPza8kl-gXxaP7-Qc17lCTIw6H7vxUpVcgi6ai9wZ3jDRClQu1bQ9VmPrAqbVtoqkhi3VMVyu7SwpHydtPWGA"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -5832,7 +5882,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -6014,7 +6066,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -6196,7 +6250,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -6378,7 +6434,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -6560,7 +6618,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -6744,7 +6804,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -6926,7 +6988,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -7106,7 +7170,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -7285,7 +7351,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -7467,7 +7535,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -7649,7 +7719,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -7831,7 +7903,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -8013,7 +8087,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -8195,7 +8271,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -8377,7 +8455,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -8559,7 +8639,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -8741,7 +8823,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -8923,7 +9007,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -9102,7 +9188,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -9284,7 +9372,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -9466,7 +9556,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -9648,7 +9740,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -9830,7 +9924,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -10012,7 +10108,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -10194,7 +10292,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -10376,7 +10476,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -10558,7 +10660,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -10740,7 +10844,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -10975,7 +11081,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -11209,7 +11317,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -11433,7 +11543,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -11657,7 +11769,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -11876,7 +11990,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -12095,7 +12211,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -12314,7 +12432,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -12548,7 +12668,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -12730,7 +12852,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -12912,7 +13036,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -13095,7 +13221,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -13277,7 +13405,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -13459,7 +13589,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -13641,7 +13773,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -13822,7 +13956,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -14004,7 +14140,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -14186,7 +14324,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -14368,7 +14508,9 @@
     "log": "workspace",
     "pk_pub": "BI14lIzDuy3ZvsMm9bkLZdzvYh9pT6NacDmef4dgenr0c78HIZjtcHf2lvbVlmMxv6lX0LXFgD8rCZLcoL_KJig"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -14550,7 +14692,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -14785,7 +14929,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -15019,7 +15165,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -15201,7 +15349,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -15401,6 +15551,15 @@
    },
    "unpublished": [
     "d_a6dc67f56b74e07ca65b035348e03bc0"
+   ],
+   "unpublished_evidence": [
+    0
+   ],
+   "unpublished_pairs": [
+    [
+     "d_a6dc67f56b74e07ca65b035348e03bc0",
+     "p_6ce6085b169e8ee5111456b91dc4ae3c"
+    ]
    ]
   },
   {
@@ -15599,7 +15758,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -15797,7 +15958,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -15995,7 +16158,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -16193,7 +16358,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -16405,7 +16572,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -16654,7 +16823,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -16906,6 +17077,15 @@
    },
    "unpublished": [
     "d_a6dc67f56b74e07ca65b035348e03bc0"
+   ],
+   "unpublished_evidence": [
+    0
+   ],
+   "unpublished_pairs": [
+    [
+     "d_a6dc67f56b74e07ca65b035348e03bc0",
+     "p_6ce6085b169e8ee5111456b91dc4ae3c"
+    ]
    ]
   },
   {
@@ -17155,7 +17335,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -17367,7 +17549,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -17602,7 +17786,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -17838,11 +18024,20 @@
    },
    "unpublished": [
     "d_a6dc67f56b74e07ca65b035348e03bc0"
+   ],
+   "unpublished_evidence": [
+    0
+   ],
+   "unpublished_pairs": [
+    [
+     "d_a6dc67f56b74e07ca65b035348e03bc0",
+     "p_6ce6085b169e8ee5111456b91dc4ae3c"
+    ]
    ]
   },
   {
    "applied": [],
-   "expect": "chain.diverged",
+   "expect": "ok",
    "held": {
     "o": {
      "at": "2026-10-10T10:00:30Z",
@@ -17881,7 +18076,8 @@
      }
     }
    ],
-   "name": "out_of_band_foreign_evidence_for_a_revoked_device",
+   "name": "wrong_person_carriage_never_suppresses_unpublished",
+   "note": "mara's carried entry for lena1 is a different pair: lena's held pair is still reported",
    "now": "2026-10-10T12:00:00Z",
    "offered": {
     "o": {
@@ -17919,7 +18115,7 @@
      "sha256:043eaf626d02c4111427116e73757c0c6d836bf9003fcda97fc62be438b0848a"
     ]
    },
-   "recorded": null,
+   "recorded": "01J9ZK0000000000000000002D",
    "restore": {
     "C": {
      "o": {
@@ -18073,7 +18269,18 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [
+    "d_a6dc67f56b74e07ca65b035348e03bc0"
+   ],
+   "unpublished_evidence": [
+    0
+   ],
+   "unpublished_pairs": [
+    [
+     "d_a6dc67f56b74e07ca65b035348e03bc0",
+     "p_6ce6085b169e8ee5111456b91dc4ae3c"
+    ]
+   ]
   },
   {
    "applied": [],
@@ -18097,9 +18304,7 @@
     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
    },
    "known_devices": {},
-   "known_revocations": [],
-   "learned_later_in_walk": [],
-   "local_revocations": [
+   "known_revocations": [
     {
      "revocation": {
       "o": {
@@ -18115,7 +18320,9 @@
      }
     }
    ],
-   "name": "out_of_band_foreign_evidence_for_a_revoked_device_person_only",
+   "learned_later_in_walk": [],
+   "local_revocations": [],
+   "name": "wrong_person_carriage_never_satisfies_completeness",
    "now": "2026-10-10T12:00:00Z",
    "offered": {
     "o": {
@@ -18307,11 +18514,13 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
-   "expect": "chain.diverged",
+   "expect": "ok",
    "held": {
     "o": {
      "at": "2026-10-10T10:00:30Z",
@@ -18330,27 +18539,32 @@
     },
     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
    },
-   "known_devices": {},
+   "known_devices": {
+    "a6dc67f56b74e07ca65b035348e03bc0": {
+     "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+     "pk_pub": "BAoPza8kl-gXxaP7-Qc17lCTIw6H7vxUpVcgi6ai9wZ3jDRClQu1bQ9VmPrAqbVtoqkhi3VMVyu7SwpHydtPWGA"
+    }
+   },
    "known_revocations": [],
    "learned_later_in_walk": [],
    "local_revocations": [
     {
-     "pk_pub": "BI14lIzDuy3ZvsMm9bkLZdzvYh9pT6NacDmef4dgenr0c78HIZjtcHf2lvbVlmMxv6lX0LXFgD8rCZLcoL_KJig",
      "revocation": {
       "o": {
        "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
        "kind": "revocation",
-       "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
-       "reason": "lost",
+       "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+       "reason": "compromised",
        "revoked_ms": 1790000100000,
        "suite": 2,
        "v": 2
       },
-      "sig": "9hA3XWy2ZF_xS6Etgsmqu58g84EONyLW4ICmJ5nZB2YysJgcMYvwwOCh19fzuzqMyqdhKvycsT_JJeoNdKroOQ"
+      "sig": "EW9JWF-YsJDYRbmmAImL816Tfl5DWIiUWYA_PPt4nlUEBMRAU7gVvn7HmmwzlwTbkNVLsrvrZ0EId6YMx-GKeQ"
      }
     }
    ],
-   "name": "out_of_band_evidence_under_another_stored_key",
+   "name": "unpublished_suppressed_for_conflicting_known_association",
+   "note": "known_devices associates lena1 with lena: mara's held pair is not reported (publication eligibility); it stays retained and enforced by the runtime",
    "now": "2026-10-10T12:00:00Z",
    "offered": {
     "o": {
@@ -18363,12 +18577,12 @@
      "v": 2,
      "workspace_id": "0123456789abcdef0123456789abcdef",
      "workspace_log": {
-      "acc": "sha256:2dcac37255ad61c158582211c54cc955ed6b3344592d77ee9783c19b55235790",
-      "head": "sha256:eabcf44fbe1e4df1361feb02f7c6b5e37d91928287452e17efad66013f304634",
+      "acc": "sha256:1035c1495586f017b2165897b97f8c16883f2ff6edc4ddca9c251e2d2aaf0b47",
+      "head": "sha256:fc4fa889933bc6e6e5119c40a7b16166d608b7d4e9be03b2855f20487c79b7e6",
       "seq": 2
      }
     },
-    "sig": "N8NCqVPQQ8O0SeFtb-wMpzWn86gAOvsd46kR0fqO2oBYPC-qmDNHNQgTVaUME-QFWpFul-0c2qhdWhq9pOfGsQ"
+    "sig": "drteV4rf1q10Fw4hUNHpQ134JTBJUYAlaraQtpeAlSlo-NsHzZiWWihrpepeVNuFHqjDiHX5n16Z-7WKkGD86w"
    },
    "pinned_delegation": {
     "o": {
@@ -18385,10 +18599,10 @@
    },
    "proofs": {
     "workspace": [
-     "sha256:eabcf44fbe1e4df1361feb02f7c6b5e37d91928287452e17efad66013f304634"
+     "sha256:fc4fa889933bc6e6e5119c40a7b16166d608b7d4e9be03b2855f20487c79b7e6"
     ]
    },
-   "recorded": null,
+   "recorded": "01J9ZK0000000000000000002F",
    "restore": {
     "C": {
      "o": {
@@ -18419,12 +18633,12 @@
       "v": 2,
       "workspace_id": "0123456789abcdef0123456789abcdef",
       "workspace_log": {
-       "acc": "sha256:2dcac37255ad61c158582211c54cc955ed6b3344592d77ee9783c19b55235790",
-       "head": "sha256:eabcf44fbe1e4df1361feb02f7c6b5e37d91928287452e17efad66013f304634",
+       "acc": "sha256:1035c1495586f017b2165897b97f8c16883f2ff6edc4ddca9c251e2d2aaf0b47",
+       "head": "sha256:fc4fa889933bc6e6e5119c40a7b16166d608b7d4e9be03b2855f20487c79b7e6",
        "seq": 2
       }
      },
-     "sig": "N8NCqVPQQ8O0SeFtb-wMpzWn86gAOvsd46kR0fqO2oBYPC-qmDNHNQgTVaUME-QFWpFul-0c2qhdWhq9pOfGsQ"
+     "sig": "drteV4rf1q10Fw4hUNHpQ134JTBJUYAlaraQtpeAlSlo-NsHzZiWWihrpepeVNuFHqjDiHX5n16Z-7WKkGD86w"
     },
     "abandoned_heads": [
      "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
@@ -18486,51 +18700,14 @@
      "from_seq": 1,
      "hash_v": 1,
      "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
-     "host_sig": "4wbVpDDYS6nxuYu6JRuDXDUhNxljqZhhdxdYitVedPI2VdrZp1lrL-Ys1vrJb3f2vaAK5eikU82NfrWdCO5VfQ",
+     "host_sig": "J-XTbBUn_-uvtD_T17QOUc7ESwfXQL-hR90cMpfdA-YyjaL1VcP3Ulg207TBRD5h68_aq36MSpcVARlbF2Kk7w",
      "id": "01J9ZK0000000000000000002F",
      "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
      "reason": "rollback",
-     "revocations": [
-      {
-       "device_cert": {
-        "o": {
-         "created_ms": 1790000000000,
-         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
-         "dk_kx_pub": "BIlUSKpH5g9UpFflsUrYfy8c7ncIRHcJp2ORIDBUDb8S4SQtpy-EAPsSOgwT5nGhQApdzXloHjknkHiRsRkpcgc",
-         "dk_sig_pub": "BAAqPda-S695x08QBckUQMV2AglUMT8Y5yq57pu8wyCZnyHo1QrmNAzup8JXqewAFFKQ6VnP5Kq8GMNfZeWI0sY",
-         "expires_ms": null,
-         "kind": "device_cert",
-         "label_sealed": "bGFiZWwgbGVuYTE",
-         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
-         "scopes_max": [
-          "look",
-          "decide",
-          "operate",
-          "type"
-         ],
-         "suite": 2,
-         "v": 2
-        },
-        "sig": "3LAHSi-Droiur4llCSuUzsq6jxSWmpqmsak7L9vbNi82dp2nTr1rQXwE_-hRJ0ntDsrf8ER3KDThWYolZaabwQ"
-       },
-       "pk_pub": "BAoPza8kl-gXxaP7-Qc17lCTIw6H7vxUpVcgi6ai9wZ3jDRClQu1bQ9VmPrAqbVtoqkhi3VMVyu7SwpHydtPWGA",
-       "revocation": {
-        "o": {
-         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
-         "kind": "revocation",
-         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
-         "reason": "compromised",
-         "revoked_ms": 1790000100000,
-         "suite": 2,
-         "v": 2
-        },
-        "sig": "fIf6e11E-xrUn04x1UcWQhU_KskxQ4O0LqpBW1po3qkVb3A8Wtv_-c18LZ2OACeOyFLWNoLTvL4_UVYepd6n5g"
-       }
-      }
-     ],
+     "revocations": [],
      "roster_v": 1,
      "seq": 2,
-     "sig": "stuwKcDEn_mqHQglSiJITBoURqdCAWdAo-vYbdcFH8GB-IrHlf381IWfyO9cYI1UFI44CBZ5vJWxR75XX1L0ww",
+     "sig": "2OLy_WU7KHfEQ9z4fciO0MU0ROHns9DlRD9MIyIr1PwFcSwZ5DVT5cKJTpb2yRGCdpNgeY2YdXPr0QUcRnl_fg",
      "source": {
       "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
       "n": 3
@@ -18542,7 +18719,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -18740,7 +18919,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -18938,7 +19119,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -19167,6 +19350,20 @@
    "unpublished": [
     "d_7efc1ba896b95f9151978a1dad982e3a",
     "d_a6dc67f56b74e07ca65b035348e03bc0"
+   ],
+   "unpublished_evidence": [
+    1,
+    0
+   ],
+   "unpublished_pairs": [
+    [
+     "d_7efc1ba896b95f9151978a1dad982e3a",
+     "p_6aae5cce832160e6f8cd9dadfbb4c5cd"
+    ],
+    [
+     "d_a6dc67f56b74e07ca65b035348e03bc0",
+     "p_6ce6085b169e8ee5111456b91dc4ae3c"
+    ]
    ]
   },
   {
@@ -19349,6 +19546,8 @@
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
    "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": [],
    "withheld_event": {
     "actor": {
      "device": "d_c65032f21d43401cc223b05723c1e5b4",
@@ -19580,6 +19779,15 @@
    "unpublished": [
     "d_a6dc67f56b74e07ca65b035348e03bc0"
    ],
+   "unpublished_evidence": [
+    0
+   ],
+   "unpublished_pairs": [
+    [
+     "d_a6dc67f56b74e07ca65b035348e03bc0",
+     "p_6ce6085b169e8ee5111456b91dc4ae3c"
+    ]
+   ],
    "withheld_event": {
     "actor": {
      "device": "d_c65032f21d43401cc223b05723c1e5b4",
@@ -19809,6 +20017,8 @@
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
    "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": [],
    "withheld_event": {
     "actor": {
      "device": "d_c65032f21d43401cc223b05723c1e5b4",
@@ -19842,6 +20052,4006 @@
     "type": "device.revoked",
     "v": 2
    }
+  },
+  {
+   "applied": [],
+   "expect": "chain.diverged",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {},
+   "known_revocations": [],
+   "learned_later_in_walk": [],
+   "local_revocations": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "c65032f21d43401cc223b05723c1e5b4",
+       "kind": "revocation",
+       "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+       "reason": "lost",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "-qb4j625NUGGFqP3ndHpj2m5-OCRoQNn_4OT_IG2nNxO4ucyygNC1sxOa1birMzBp0fbyPBdvKWuE23-sGbDmQ"
+     }
+    },
+    {
+     "revocation": {
+      "o": {
+       "device_id": "c65032f21d43401cc223b05723c1e5b4",
+       "kind": "revocation",
+       "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+       "reason": "compromised",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "m6Hn5CDdhaR2wa5eHoLyggWQLvGC6XCCeDA43UvLO7_0IssTDgZXz-sYW03mDMYXL4i1n-zsYMdLyCBqhaBxyw"
+     }
+    }
+   ],
+   "name": "poisoned_binding_never_drops_a_genuine_signer_revocation",
+   "note": "relay PoC: the poisoned (sev1, mara) pair arrived first; the genuine (sev1, sev) pair is retained and refuses the signer pair",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:13:00Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:8b21f1732d051d391bb2d5b95fe0079359aa74978c99a2c18714c20374fac274",
+      "head": "sha256:ae43001b9337a16160f1972422a8babd4f1a06b51f9cd2f62dd776d899a8028e",
+      "seq": 2
+     }
+    },
+    "sig": "NLq2PuyGZJiMMBPQkN31QM_FLyykETQATLYbcEliW-gdU5IAMeZ_VPJ-jcYysXviyzCMkWvM1oAOCXpF0A8M_Q"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:ae43001b9337a16160f1972422a8babd4f1a06b51f9cd2f62dd776d899a8028e"
+    ]
+   },
+   "recorded": null,
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:13:00Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:8b21f1732d051d391bb2d5b95fe0079359aa74978c99a2c18714c20374fac274",
+       "head": "sha256:ae43001b9337a16160f1972422a8babd4f1a06b51f9cd2f62dd776d899a8028e",
+       "seq": 2
+      }
+     },
+     "sig": "NLq2PuyGZJiMMBPQkN31QM_FLyykETQATLYbcEliW-gdU5IAMeZ_VPJ-jcYysXviyzCMkWvM1oAOCXpF0A8M_Q"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:13:00Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "EHF3gpwydcNRICNe3lfi_ipEOGBKaqgo7V-XHMLcPz1qCBg90EDDaYDnDfm6xTEFVzitW8GSpD8kWcsM9S_zwA",
+     "id": "01J9ZK0000000000000000002N",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "vjC880sDzGKlUsvoCVfHilAWMXm0hii4hKwH3DWez9aWRBGEI8k8Z3g2SeFjKvF91VZR5x_gC-yYUqZosZCNaQ",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
+  },
+  {
+   "applied": [],
+   "expect": "chain.diverged",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {},
+   "known_revocations": [],
+   "learned_later_in_walk": [],
+   "local_revocations": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "c65032f21d43401cc223b05723c1e5b4",
+       "kind": "revocation",
+       "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+       "reason": "compromised",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "m6Hn5CDdhaR2wa5eHoLyggWQLvGC6XCCeDA43UvLO7_0IssTDgZXz-sYW03mDMYXL4i1n-zsYMdLyCBqhaBxyw"
+     }
+    },
+    {
+     "revocation": {
+      "o": {
+       "device_id": "c65032f21d43401cc223b05723c1e5b4",
+       "kind": "revocation",
+       "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+       "reason": "lost",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "-qb4j625NUGGFqP3ndHpj2m5-OCRoQNn_4OT_IG2nNxO4ucyygNC1sxOa1birMzBp0fbyPBdvKWuE23-sGbDmQ"
+     }
+    }
+   ],
+   "name": "genuine_signer_revocation_first_then_poison_refused",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:13:10Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:402f5f514e5a09968d77da929ab093eac7fcf5fa4805752781cdf26d524e4196",
+      "head": "sha256:92ce35484e4f6e81c3257bfb7f386deb91dda1fb5eb934c3d15016dfcd9ff607",
+      "seq": 2
+     }
+    },
+    "sig": "1xKc0FnEEiRcRiPnqL9UdkROY8-FqBJnc6OBlQ1dJf36kSlGdeRqjGJXAMXgvrlliRZDKc--yFFMY5d2guNgNw"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:92ce35484e4f6e81c3257bfb7f386deb91dda1fb5eb934c3d15016dfcd9ff607"
+    ]
+   },
+   "recorded": null,
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:13:10Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:402f5f514e5a09968d77da929ab093eac7fcf5fa4805752781cdf26d524e4196",
+       "head": "sha256:92ce35484e4f6e81c3257bfb7f386deb91dda1fb5eb934c3d15016dfcd9ff607",
+       "seq": 2
+      }
+     },
+     "sig": "1xKc0FnEEiRcRiPnqL9UdkROY8-FqBJnc6OBlQ1dJf36kSlGdeRqjGJXAMXgvrlliRZDKc--yFFMY5d2guNgNw"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:13:10Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "7EIDFbrFXFxLl_PcVaGhWGPrOwtmalFeU5fPsmJAnXtq0ObWby2ggXzAh1e4pmMWJbnYgwJib68ac1OiBV_KUw",
+     "id": "01J9ZK0000000000000000002P",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "Gz9MKWQNsnEX_M_BMp5ii4ckCSgqfxqutDqAoP1PzXydizToFitru9BpAGYDP_uEXuNJgoblMgXcfQfToY2Jjg",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
+  },
+  {
+   "applied": [],
+   "expect": "chain.diverged",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {},
+   "known_revocations": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "c65032f21d43401cc223b05723c1e5b4",
+       "kind": "revocation",
+       "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+       "reason": "compromised",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "m6Hn5CDdhaR2wa5eHoLyggWQLvGC6XCCeDA43UvLO7_0IssTDgZXz-sYW03mDMYXL4i1n-zsYMdLyCBqhaBxyw"
+     }
+    }
+   ],
+   "learned_later_in_walk": [],
+   "local_revocations": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "c65032f21d43401cc223b05723c1e5b4",
+       "kind": "revocation",
+       "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+       "reason": "lost",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "-qb4j625NUGGFqP3ndHpj2m5-OCRoQNn_4OT_IG2nNxO4ucyygNC1sxOa1birMzBp0fbyPBdvKWuE23-sGbDmQ"
+     }
+    }
+   ],
+   "name": "failed_bundle_poison_then_chain_learned_genuine_refused",
+   "note": "the poison came from a bundle whose judgment failed (local evidence only); the genuine pair is chain-learned",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:13:20Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:824c5d21b1913b5b2265986ad3115fe012e323c6c28a8407dd7ccc6858b69ff0",
+      "head": "sha256:5d404f761f6b95a50d395bb187f58623a7b32890b2447fdc859a847f6aa4b344",
+      "seq": 2
+     }
+    },
+    "sig": "5BviLF9pyXOv1lCJxDs3ope3Uh5FaZX9Dvhu0SyMlwWTgpnHi8c6gqONlUNLF2LcAznV8BXhECQUPYFPPphmsg"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:5d404f761f6b95a50d395bb187f58623a7b32890b2447fdc859a847f6aa4b344"
+    ]
+   },
+   "recorded": null,
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:13:20Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:824c5d21b1913b5b2265986ad3115fe012e323c6c28a8407dd7ccc6858b69ff0",
+       "head": "sha256:5d404f761f6b95a50d395bb187f58623a7b32890b2447fdc859a847f6aa4b344",
+       "seq": 2
+      }
+     },
+     "sig": "5BviLF9pyXOv1lCJxDs3ope3Uh5FaZX9Dvhu0SyMlwWTgpnHi8c6gqONlUNLF2LcAznV8BXhECQUPYFPPphmsg"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:13:20Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "IYLNQXQakk-TKWBVJvaCxGAXQncpV1N6qJL0f_stnvA4mWXLBUSDK_UHmimBkZytZH4J3I1bBRoALq7OzTXHeg",
+     "id": "01J9ZK0000000000000000002Q",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "e_tdcOv5HbrmltwswBTXYSl1wxiicTRWhV71MrNcfGzLu9J_2PnNTa6zOeYdYwKWnzpGS82RZAwZ-HiWeMfqSQ",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
+  },
+  {
+   "applied": [],
+   "expect": "chain.diverged",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {
+    "c65032f21d43401cc223b05723c1e5b4": {
+     "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd"
+    }
+   },
+   "known_revocations": [],
+   "learned_later_in_walk": [],
+   "local_revocations": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "c65032f21d43401cc223b05723c1e5b4",
+       "kind": "revocation",
+       "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+       "reason": "compromised",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "m6Hn5CDdhaR2wa5eHoLyggWQLvGC6XCCeDA43UvLO7_0IssTDgZXz-sYW03mDMYXL4i1n-zsYMdLyCBqhaBxyw"
+     }
+    }
+   ],
+   "name": "conflicting_known_device_association_never_suppresses_signer_pair_refusal",
+   "note": "an association is not proof of key ownership: known_devices naming mara for sev1 never suppresses the (sev1, sev) refusal",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:13:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:74a24c15575adc143b46d9a893b977eb5645e01c0bacc48b0123dfc5a38405f5",
+      "head": "sha256:0c7a88773742c4ea929d476da254927c3a275906dcb1d73c947a90edf563d796",
+      "seq": 2
+     }
+    },
+    "sig": "umDm6rvN9-t6kNvTdPNTCAeTZ1IQ5QLWb7XBunbPihmCt7Cu2K0pk-xJ9-h5xlBFtYKLEiqAzxOf0wd2pN6Rtg"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:0c7a88773742c4ea929d476da254927c3a275906dcb1d73c947a90edf563d796"
+    ]
+   },
+   "recorded": null,
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:13:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:74a24c15575adc143b46d9a893b977eb5645e01c0bacc48b0123dfc5a38405f5",
+       "head": "sha256:0c7a88773742c4ea929d476da254927c3a275906dcb1d73c947a90edf563d796",
+       "seq": 2
+      }
+     },
+     "sig": "umDm6rvN9-t6kNvTdPNTCAeTZ1IQ5QLWb7XBunbPihmCt7Cu2K0pk-xJ9-h5xlBFtYKLEiqAzxOf0wd2pN6Rtg"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:13:30Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "yNoDl2ycQQmY1EAJp_lcV5mBs2F-Vxe0KVSa3iC4wPyhX2C67nEa4TxfGCzRnhuuinQnoBeTerYbWdjuUx2fkQ",
+     "id": "01J9ZK0000000000000000002R",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "576ExQsxpZVuWaYY7cxzpFXRuTMjMP8n44tU4ZHOSzhepgqaxZsVYhkcUhMfC4kpMsXng0YZi3KppCF6z_VcAw",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
+  },
+  {
+   "alarm": true,
+   "applied": [],
+   "expect": "ok",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {
+    "c65032f21d43401cc223b05723c1e5b4": {
+     "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd"
+    }
+   },
+   "known_revocations": [],
+   "learned_later_in_walk": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "c65032f21d43401cc223b05723c1e5b4",
+       "kind": "revocation",
+       "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+       "reason": "compromised",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "m6Hn5CDdhaR2wa5eHoLyggWQLvGC6XCCeDA43UvLO7_0IssTDgZXz-sYW03mDMYXL4i1n-zsYMdLyCBqhaBxyw"
+     }
+    }
+   ],
+   "local_revocations": [],
+   "name": "conflicting_known_device_association_never_suppresses_alarm",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:13:40Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:de2a9fe186e1802c041258a0eb03a046f599ab4231e88d64d65777d90dc3eeb3",
+      "head": "sha256:a9c31c929f5c6bce6ae02e363c27b2ec91e319de4ecf23d017b6934e750b1586",
+      "seq": 2
+     }
+    },
+    "sig": "Q2IrEn2Cw9th6HUETjv76CGGnr4HoaNDV_GQT4F2OcIQsMFgXqOknu4nhj-exRlWtDqDFxoNAckv3J9H8-L30Q"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:a9c31c929f5c6bce6ae02e363c27b2ec91e319de4ecf23d017b6934e750b1586"
+    ]
+   },
+   "recorded": "01J9ZK0000000000000000002S",
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:13:40Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:de2a9fe186e1802c041258a0eb03a046f599ab4231e88d64d65777d90dc3eeb3",
+       "head": "sha256:a9c31c929f5c6bce6ae02e363c27b2ec91e319de4ecf23d017b6934e750b1586",
+       "seq": 2
+      }
+     },
+     "sig": "Q2IrEn2Cw9th6HUETjv76CGGnr4HoaNDV_GQT4F2OcIQsMFgXqOknu4nhj-exRlWtDqDFxoNAckv3J9H8-L30Q"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:13:40Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "9sVYj_tcJW2uKjybbdHdzHOxyiELZcw6ewypWOo4uXi5lkrvO9X6FIux3o-XS3_sDneANAvIWl1tDoYeOezEKQ",
+     "id": "01J9ZK0000000000000000002S",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "iz4nzReNMU7HzJf1w_M4YFZEpOVnfEMJ98FIwARx9OY9lQhAePII7pSK6MpY0Iaw6l9_ahyxWb-zeZDTVnOB3A",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
+  },
+  {
+   "applied": [],
+   "expect": "ok",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {},
+   "known_revocations": [],
+   "learned_later_in_walk": [],
+   "local_revocations": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "c65032f21d43401cc223b05723c1e5b4",
+       "kind": "revocation",
+       "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+       "reason": "lost",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "-qb4j625NUGGFqP3ndHpj2m5-OCRoQNn_4OT_IG2nNxO4ucyygNC1sxOa1birMzBp0fbyPBdvKWuE23-sGbDmQ"
+     }
+    },
+    {
+     "revocation": {
+      "o": {
+       "device_id": "c65032f21d43401cc223b05723c1e5b4",
+       "kind": "revocation",
+       "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+       "reason": "compromised",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "m6Hn5CDdhaR2wa5eHoLyggWQLvGC6XCCeDA43UvLO7_0IssTDgZXz-sYW03mDMYXL4i1n-zsYMdLyCBqhaBxyw"
+     }
+    }
+   ],
+   "name": "honest_restore_by_another_owner_device_carries_genuine_evidence_after_poison",
+   "note": "the genuine pair is carried; mara's pair has no known association here, so it is reported (a hint; the runtime decides eligibility)",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:13:50Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:abf37c6e86fa3cd97bc555308b3e24b962352f88e8f2faeadbc1139466d8823b",
+      "head": "sha256:cfad13d607fa6b050c67bea45d2f5f8fdd3699f321cf4e6bf60d30d36abadf16",
+      "seq": 2
+     }
+    },
+    "sig": "lJqu-Vdxg2VGTZbea4mlRsJITscBhI4LHUey8b4eJxSJQ5Mi655ZPZaym3CEC1shxCTiu2B6OCpyArDNDDMeXQ"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:cfad13d607fa6b050c67bea45d2f5f8fdd3699f321cf4e6bf60d30d36abadf16"
+    ]
+   },
+   "recorded": "01J9ZK0000000000000000002T",
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:13:50Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:abf37c6e86fa3cd97bc555308b3e24b962352f88e8f2faeadbc1139466d8823b",
+       "head": "sha256:cfad13d607fa6b050c67bea45d2f5f8fdd3699f321cf4e6bf60d30d36abadf16",
+       "seq": 2
+      }
+     },
+     "sig": "lJqu-Vdxg2VGTZbea4mlRsJITscBhI4LHUey8b4eJxSJQ5Mi655ZPZaym3CEC1shxCTiu2B6OCpyArDNDDMeXQ"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "e83091e11f534e9980bc4fce6fcb00d7",
+      "dk_kx_pub": "BC2jqkBcpx2iRJB2cI_hCVDMEUfc44lAFUocz-b0X0TA5LG38i-oEQ4cfdatj2dsdh0PKH4xY_zKn_jhlwLqz7k",
+      "dk_sig_pub": "BLf4w_nEnr2J4fYYv-1yJ9MrS94uEQ4rU3nmCV3hx8syx4L6QvjFsYbKP_oflzeRuICPxuaEYHyO4QOg_0mnYOE",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2Mg",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "2UbG5A3YqBAicVfOmChNYfgXt1bDFgvry0QaGcWE3r6-Hevx33nr-xvN7pWZcPY9rAjE0d1Ay4nlFHU0oge9YA"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_e83091e11f534e9980bc4fce6fcb00d7",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:13:50Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "zb12rY9KVkNWFosGcgzL8fQCELIeyFcOUDYyz_JNpBCTPfWKf9HT_cG3xiGzZSMGzmga3B1uvP_3yvSG7XJ9pA",
+     "id": "01J9ZK0000000000000000002T",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [
+      {
+       "device_cert": {
+        "o": {
+         "created_ms": 1790000000000,
+         "device_id": "c65032f21d43401cc223b05723c1e5b4",
+         "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+         "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+         "expires_ms": null,
+         "kind": "device_cert",
+         "label_sealed": "bGFiZWwgc2V2MQ",
+         "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+         "scopes_max": [
+          "look",
+          "decide",
+          "operate",
+          "type"
+         ],
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+       },
+       "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94",
+       "revocation": {
+        "o": {
+         "device_id": "c65032f21d43401cc223b05723c1e5b4",
+         "kind": "revocation",
+         "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+         "reason": "compromised",
+         "revoked_ms": 1790000100000,
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "m6Hn5CDdhaR2wa5eHoLyggWQLvGC6XCCeDA43UvLO7_0IssTDgZXz-sYW03mDMYXL4i1n-zsYMdLyCBqhaBxyw"
+       }
+      }
+     ],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "6-pe920sPWYNnA-RwmfWidiBGX7rj6Rg9PJYghUXcFqQ-YJA4zUO-iRbA9VUlHbFWs61ddhS2EG5E-euqsW4qQ",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [
+    "d_c65032f21d43401cc223b05723c1e5b4"
+   ],
+   "unpublished_evidence": [
+    0
+   ],
+   "unpublished_pairs": [
+    [
+     "d_c65032f21d43401cc223b05723c1e5b4",
+     "p_6aae5cce832160e6f8cd9dadfbb4c5cd"
+    ]
+   ]
+  },
+  {
+   "applied": [],
+   "expect": "ok",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {
+    "c65032f21d43401cc223b05723c1e5b4": {
+     "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+    }
+   },
+   "known_revocations": [],
+   "learned_later_in_walk": [],
+   "local_revocations": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "c65032f21d43401cc223b05723c1e5b4",
+       "kind": "revocation",
+       "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+       "reason": "compromised",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "f2o-hzEsIQz4w-UQ24P8_k1LV-59Ydq2mIXecdQ_za93NVPvNzYbKDLiH1-b_TbovOxlojhTJP09aJ-D2IBDWA"
+     }
+    }
+   ],
+   "name": "known_signer_device_other_person_revocation_not_refused",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:14:00Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:e03034f9cbf5a3e7638c4dde9e78d6026507422a2420afa9d82005172ea72031",
+      "head": "sha256:f057c9a04fca6ade8d1f876bd399858dbe664154ed2e80345dc8b3c0fd4e7bba",
+      "seq": 2
+     }
+    },
+    "sig": "zPbZctmMVWYuK0FD6-u0PYPtM5tttCo_txoRYsS3TlyDsvRmNu9Hsh7el7DqtpAswhjyDgt2kQjM9l7cN8s9rA"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:f057c9a04fca6ade8d1f876bd399858dbe664154ed2e80345dc8b3c0fd4e7bba"
+    ]
+   },
+   "recorded": "01J9ZK0000000000000000002V",
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:14:00Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:e03034f9cbf5a3e7638c4dde9e78d6026507422a2420afa9d82005172ea72031",
+       "head": "sha256:f057c9a04fca6ade8d1f876bd399858dbe664154ed2e80345dc8b3c0fd4e7bba",
+       "seq": 2
+      }
+     },
+     "sig": "zPbZctmMVWYuK0FD6-u0PYPtM5tttCo_txoRYsS3TlyDsvRmNu9Hsh7el7DqtpAswhjyDgt2kQjM9l7cN8s9rA"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:14:00Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "yt7qtuJXyFb7Ow0OtQWq_W1hO6e8Wax4o6EJOIt5nL-I450QCzzXPXOQaaT2X_XHcmM0sdchWDLVoiMD8xcxLQ",
+     "id": "01J9ZK0000000000000000002V",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "yJu8sRegUEXmFLkcuX_tWkXmKMCdIagB_iHaoU4SDqpkEJ_UN9hsyfCe-744OwLDnVyV6hu7grVNPeE0xvxcpw",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
+  },
+  {
+   "applied": [],
+   "expect": "ok",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {
+    "c65032f21d43401cc223b05723c1e5b4": {
+     "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+    }
+   },
+   "known_revocations": [],
+   "learned_later_in_walk": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "c65032f21d43401cc223b05723c1e5b4",
+       "kind": "revocation",
+       "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+       "reason": "compromised",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "f2o-hzEsIQz4w-UQ24P8_k1LV-59Ydq2mIXecdQ_za93NVPvNzYbKDLiH1-b_TbovOxlojhTJP09aJ-D2IBDWA"
+     }
+    }
+   ],
+   "local_revocations": [],
+   "name": "known_signer_device_other_person_compromised_learned_later_no_alarm",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:14:10Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:b7c0602ebb3dc25f4316ffa3845a9cadc6efa15699b630d36d21f672e5df46a4",
+      "head": "sha256:fe3006bb219cee31dd92ecdd7106559a1392f027e15a7fd3d1d74d41e3d6b22c",
+      "seq": 2
+     }
+    },
+    "sig": "DEuiiknT1PuzrcKFH01iCqbA3rcILe43ekb3iVa33aYFRjqwwcqYF5ylpT7cIfk1ajKzbkcMbmQd3mKEuiWIeg"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:fe3006bb219cee31dd92ecdd7106559a1392f027e15a7fd3d1d74d41e3d6b22c"
+    ]
+   },
+   "recorded": "01J9ZK0000000000000000002W",
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:14:10Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:b7c0602ebb3dc25f4316ffa3845a9cadc6efa15699b630d36d21f672e5df46a4",
+       "head": "sha256:fe3006bb219cee31dd92ecdd7106559a1392f027e15a7fd3d1d74d41e3d6b22c",
+       "seq": 2
+      }
+     },
+     "sig": "DEuiiknT1PuzrcKFH01iCqbA3rcILe43ekb3iVa33aYFRjqwwcqYF5ylpT7cIfk1ajKzbkcMbmQd3mKEuiWIeg"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:14:10Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "WzqeaGg6T8VbOLOl9K39yDq4T64hN0L-Uy6J8-mKOYCbqGZXPESNV73PhWrJIoe88Crrn29sJ6fqVm2bVeaY5w",
+     "id": "01J9ZK0000000000000000002W",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "xPF7uK9GnjNttdAoZkJHONUVGTUk6JiiioCFOgqxVm-iai66ASavVKH3hENCQ1_8WTBUR7evGnbwnO9DNovwPw",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
+  },
+  {
+   "applied": [],
+   "expect": "ok",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {},
+   "known_revocations": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+       "kind": "revocation",
+       "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+       "reason": "lost",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "9hA3XWy2ZF_xS6Etgsmqu58g84EONyLW4ICmJ5nZB2YysJgcMYvwwOCh19fzuzqMyqdhKvycsT_JJeoNdKroOQ"
+     }
+    }
+   ],
+   "learned_later_in_walk": [],
+   "local_revocations": [],
+   "name": "carried_other_person_pair_beside_a_chain_learned_pair_accepted",
+   "note": "carried-entry identity is checked against known_devices only: a chain-learned (lena1, lena) does not bind lena1, so mara's extra carried pair is harmless (lena's obligation is carried)",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:14:20Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:96ebcc396e9be784a5213102c3caf9a007bfafb4ee3b6af07cc8082c7c0d9a14",
+      "head": "sha256:445b1336e5f20e1e0f3fe99b8cd6fe6b37b0253f11a8190da0268bb7faf98cf1",
+      "seq": 2
+     }
+    },
+    "sig": "YLtK2r0J5bD7YabhtkmYM_lSFdaRiDgRP79l9Pb70rS2ccj8KIynbgE1AOWqxDCMiHKDoi9NV6cXtqwp6TtZPQ"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:445b1336e5f20e1e0f3fe99b8cd6fe6b37b0253f11a8190da0268bb7faf98cf1"
+    ]
+   },
+   "recorded": "01J9ZK0000000000000000002X",
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:14:20Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:96ebcc396e9be784a5213102c3caf9a007bfafb4ee3b6af07cc8082c7c0d9a14",
+       "head": "sha256:445b1336e5f20e1e0f3fe99b8cd6fe6b37b0253f11a8190da0268bb7faf98cf1",
+       "seq": 2
+      }
+     },
+     "sig": "YLtK2r0J5bD7YabhtkmYM_lSFdaRiDgRP79l9Pb70rS2ccj8KIynbgE1AOWqxDCMiHKDoi9NV6cXtqwp6TtZPQ"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:14:20Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "nDAIE4cC9wJd1-LS19sMXyN3hTMgBvlfjyzUIYwMxL_kg83eMutpQ7qGLyrXdUjt-ohLwBVHi03G3uq_2HKtgg",
+     "id": "01J9ZK0000000000000000002X",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [
+      {
+       "device_cert": {
+        "o": {
+         "created_ms": 1790000000000,
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "dk_kx_pub": "BIlUSKpH5g9UpFflsUrYfy8c7ncIRHcJp2ORIDBUDb8S4SQtpy-EAPsSOgwT5nGhQApdzXloHjknkHiRsRkpcgc",
+         "dk_sig_pub": "BAAqPda-S695x08QBckUQMV2AglUMT8Y5yq57pu8wyCZnyHo1QrmNAzup8JXqewAFFKQ6VnP5Kq8GMNfZeWI0sY",
+         "expires_ms": null,
+         "kind": "device_cert",
+         "label_sealed": "bGFiZWwgbGVuYTE",
+         "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+         "scopes_max": [
+          "look",
+          "decide",
+          "operate",
+          "type"
+         ],
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "T_2SdkUd8fpqmuf0YCRNKQoa50Jp6Bddsg59fGtlypY37IktIRNjhcaEX45ebc3yntrqyqEdkOn5pwa5NhhY0A"
+       },
+       "pk_pub": "BI14lIzDuy3ZvsMm9bkLZdzvYh9pT6NacDmef4dgenr0c78HIZjtcHf2lvbVlmMxv6lX0LXFgD8rCZLcoL_KJig",
+       "revocation": {
+        "o": {
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "kind": "revocation",
+         "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+         "reason": "compromised",
+         "revoked_ms": 1790000100000,
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "EW9JWF-YsJDYRbmmAImL816Tfl5DWIiUWYA_PPt4nlUEBMRAU7gVvn7HmmwzlwTbkNVLsrvrZ0EId6YMx-GKeQ"
+       }
+      },
+      {
+       "device_cert": {
+        "o": {
+         "created_ms": 1790000000000,
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "dk_kx_pub": "BIlUSKpH5g9UpFflsUrYfy8c7ncIRHcJp2ORIDBUDb8S4SQtpy-EAPsSOgwT5nGhQApdzXloHjknkHiRsRkpcgc",
+         "dk_sig_pub": "BAAqPda-S695x08QBckUQMV2AglUMT8Y5yq57pu8wyCZnyHo1QrmNAzup8JXqewAFFKQ6VnP5Kq8GMNfZeWI0sY",
+         "expires_ms": null,
+         "kind": "device_cert",
+         "label_sealed": "bGFiZWwgbGVuYTE",
+         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+         "scopes_max": [
+          "look",
+          "decide",
+          "operate",
+          "type"
+         ],
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "3LAHSi-Droiur4llCSuUzsq6jxSWmpqmsak7L9vbNi82dp2nTr1rQXwE_-hRJ0ntDsrf8ER3KDThWYolZaabwQ"
+       },
+       "pk_pub": "BAoPza8kl-gXxaP7-Qc17lCTIw6H7vxUpVcgi6ai9wZ3jDRClQu1bQ9VmPrAqbVtoqkhi3VMVyu7SwpHydtPWGA",
+       "revocation": {
+        "o": {
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "kind": "revocation",
+         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+         "reason": "lost",
+         "revoked_ms": 1790000100000,
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "9hA3XWy2ZF_xS6Etgsmqu58g84EONyLW4ICmJ5nZB2YysJgcMYvwwOCh19fzuzqMyqdhKvycsT_JJeoNdKroOQ"
+       }
+      }
+     ],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "uxcPOhYEOceq5fJg6jivcfk-WXZJYud3FFmFT-hX0FD9L0qIRi-K3WbPA1HTtg1ESnKbpEk0abtlz36iGFYRnw",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
+  },
+  {
+   "applied": [],
+   "expect": "ok",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {},
+   "known_revocations": [],
+   "learned_later_in_walk": [],
+   "local_revocations": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+       "kind": "revocation",
+       "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+       "reason": "lost",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "9hA3XWy2ZF_xS6Etgsmqu58g84EONyLW4ICmJ5nZB2YysJgcMYvwwOCh19fzuzqMyqdhKvycsT_JJeoNdKroOQ"
+     }
+    }
+   ],
+   "name": "carried_other_person_entry_allowed_without_authenticated_identity",
+   "note": "out-of-band evidence imposes no identity: both pairs may be carried; lena's held pair is carried",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:14:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:102ef3b06ad291559d6377dfaa2ee469b657ffc139837c1a540873303a872948",
+      "head": "sha256:d357c32ca995d7dd00b530f1a85d3b948317ea5b6d4197bfae7002a7b53ece3f",
+      "seq": 2
+     }
+    },
+    "sig": "R00U_0ASLJJWjboKbbwwMpUgX92OJ3HtYwiPwC9FOza7-g9A6iAiOetynNMpK3nF2ZJeN1ZGiY-uopZFtnZeYQ"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:d357c32ca995d7dd00b530f1a85d3b948317ea5b6d4197bfae7002a7b53ece3f"
+    ]
+   },
+   "recorded": "01J9ZK0000000000000000002Y",
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:14:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:102ef3b06ad291559d6377dfaa2ee469b657ffc139837c1a540873303a872948",
+       "head": "sha256:d357c32ca995d7dd00b530f1a85d3b948317ea5b6d4197bfae7002a7b53ece3f",
+       "seq": 2
+      }
+     },
+     "sig": "R00U_0ASLJJWjboKbbwwMpUgX92OJ3HtYwiPwC9FOza7-g9A6iAiOetynNMpK3nF2ZJeN1ZGiY-uopZFtnZeYQ"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:14:30Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "nGd-ezn7wz85cGVXACtGZ-buIrH4aWcOkYq1YvFenmp810vBtZZGUy-sKBCLdPo4nSu6GGZbSzkaBFgCTueZAA",
+     "id": "01J9ZK0000000000000000002Y",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [
+      {
+       "device_cert": {
+        "o": {
+         "created_ms": 1790000000000,
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "dk_kx_pub": "BIlUSKpH5g9UpFflsUrYfy8c7ncIRHcJp2ORIDBUDb8S4SQtpy-EAPsSOgwT5nGhQApdzXloHjknkHiRsRkpcgc",
+         "dk_sig_pub": "BAAqPda-S695x08QBckUQMV2AglUMT8Y5yq57pu8wyCZnyHo1QrmNAzup8JXqewAFFKQ6VnP5Kq8GMNfZeWI0sY",
+         "expires_ms": null,
+         "kind": "device_cert",
+         "label_sealed": "bGFiZWwgbGVuYTE",
+         "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+         "scopes_max": [
+          "look",
+          "decide",
+          "operate",
+          "type"
+         ],
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "T_2SdkUd8fpqmuf0YCRNKQoa50Jp6Bddsg59fGtlypY37IktIRNjhcaEX45ebc3yntrqyqEdkOn5pwa5NhhY0A"
+       },
+       "pk_pub": "BI14lIzDuy3ZvsMm9bkLZdzvYh9pT6NacDmef4dgenr0c78HIZjtcHf2lvbVlmMxv6lX0LXFgD8rCZLcoL_KJig",
+       "revocation": {
+        "o": {
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "kind": "revocation",
+         "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+         "reason": "compromised",
+         "revoked_ms": 1790000100000,
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "EW9JWF-YsJDYRbmmAImL816Tfl5DWIiUWYA_PPt4nlUEBMRAU7gVvn7HmmwzlwTbkNVLsrvrZ0EId6YMx-GKeQ"
+       }
+      },
+      {
+       "device_cert": {
+        "o": {
+         "created_ms": 1790000000000,
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "dk_kx_pub": "BIlUSKpH5g9UpFflsUrYfy8c7ncIRHcJp2ORIDBUDb8S4SQtpy-EAPsSOgwT5nGhQApdzXloHjknkHiRsRkpcgc",
+         "dk_sig_pub": "BAAqPda-S695x08QBckUQMV2AglUMT8Y5yq57pu8wyCZnyHo1QrmNAzup8JXqewAFFKQ6VnP5Kq8GMNfZeWI0sY",
+         "expires_ms": null,
+         "kind": "device_cert",
+         "label_sealed": "bGFiZWwgbGVuYTE",
+         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+         "scopes_max": [
+          "look",
+          "decide",
+          "operate",
+          "type"
+         ],
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "3LAHSi-Droiur4llCSuUzsq6jxSWmpqmsak7L9vbNi82dp2nTr1rQXwE_-hRJ0ntDsrf8ER3KDThWYolZaabwQ"
+       },
+       "pk_pub": "BAoPza8kl-gXxaP7-Qc17lCTIw6H7vxUpVcgi6ai9wZ3jDRClQu1bQ9VmPrAqbVtoqkhi3VMVyu7SwpHydtPWGA",
+       "revocation": {
+        "o": {
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "kind": "revocation",
+         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+         "reason": "lost",
+         "revoked_ms": 1790000100000,
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "9hA3XWy2ZF_xS6Etgsmqu58g84EONyLW4ICmJ5nZB2YysJgcMYvwwOCh19fzuzqMyqdhKvycsT_JJeoNdKroOQ"
+       }
+      }
+     ],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "HhPhfG5hKeyLZ14rrpqe-mA7djTd__zDjAsXwjdOR8Kq5Y9W3YJsC0XINyKmBBAYsfIpciThkbmcdmEXSm8SAA",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
+  },
+  {
+   "applied": [],
+   "expect": "ok",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {},
+   "known_revocations": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+       "kind": "revocation",
+       "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+       "reason": "lost",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "9hA3XWy2ZF_xS6Etgsmqu58g84EONyLW4ICmJ5nZB2YysJgcMYvwwOCh19fzuzqMyqdhKvycsT_JJeoNdKroOQ"
+     }
+    },
+    {
+     "revocation": {
+      "o": {
+       "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+       "kind": "revocation",
+       "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+       "reason": "lost",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "cYerHfzV2wGytBlGCbhgnFRWK-RvpMqY8RZORl8uuY1qw0WjDoFQ6nkWkurcHAL6oeOoTuE_nf4P6n372f6vzg"
+     }
+    }
+   ],
+   "learned_later_in_walk": [],
+   "local_revocations": [],
+   "name": "conflicting_chain_obligations_both_carried_accepted",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:14:40Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:5e08bac2973892375d57905767528049019841a5e88e2af790d0bd64758b94e6",
+      "head": "sha256:c82bbf93cad2da4c42643b8f5ddc69255b7d47c2b63bda038cdafe02a4f61504",
+      "seq": 2
+     }
+    },
+    "sig": "qPGQ_3bgWgU8JbTJUyCH--IIhEOy-FjRtyyi7i44VBPWcxupBO1EzpeG4-hXnIcPa5yIhj9QU4I_f4aquaJK6w"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:c82bbf93cad2da4c42643b8f5ddc69255b7d47c2b63bda038cdafe02a4f61504"
+    ]
+   },
+   "recorded": "01J9ZK0000000000000000002Z",
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:14:40Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:5e08bac2973892375d57905767528049019841a5e88e2af790d0bd64758b94e6",
+       "head": "sha256:c82bbf93cad2da4c42643b8f5ddc69255b7d47c2b63bda038cdafe02a4f61504",
+       "seq": 2
+      }
+     },
+     "sig": "qPGQ_3bgWgU8JbTJUyCH--IIhEOy-FjRtyyi7i44VBPWcxupBO1EzpeG4-hXnIcPa5yIhj9QU4I_f4aquaJK6w"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:14:40Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "6tEJqDVymDbQ2zzX4ochKvfFVXdCdT9pW_05Et1_ZkdcyNvTEix8WMQTyyUezPquuPkDtHgGCUbR0xVW2l-UNw",
+     "id": "01J9ZK0000000000000000002Z",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [
+      {
+       "device_cert": {
+        "o": {
+         "created_ms": 1790000000000,
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "dk_kx_pub": "BIlUSKpH5g9UpFflsUrYfy8c7ncIRHcJp2ORIDBUDb8S4SQtpy-EAPsSOgwT5nGhQApdzXloHjknkHiRsRkpcgc",
+         "dk_sig_pub": "BAAqPda-S695x08QBckUQMV2AglUMT8Y5yq57pu8wyCZnyHo1QrmNAzup8JXqewAFFKQ6VnP5Kq8GMNfZeWI0sY",
+         "expires_ms": null,
+         "kind": "device_cert",
+         "label_sealed": "bGFiZWwgbGVuYTE",
+         "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+         "scopes_max": [
+          "look",
+          "decide",
+          "operate",
+          "type"
+         ],
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "T_2SdkUd8fpqmuf0YCRNKQoa50Jp6Bddsg59fGtlypY37IktIRNjhcaEX45ebc3yntrqyqEdkOn5pwa5NhhY0A"
+       },
+       "pk_pub": "BI14lIzDuy3ZvsMm9bkLZdzvYh9pT6NacDmef4dgenr0c78HIZjtcHf2lvbVlmMxv6lX0LXFgD8rCZLcoL_KJig",
+       "revocation": {
+        "o": {
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "kind": "revocation",
+         "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+         "reason": "lost",
+         "revoked_ms": 1790000100000,
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "cYerHfzV2wGytBlGCbhgnFRWK-RvpMqY8RZORl8uuY1qw0WjDoFQ6nkWkurcHAL6oeOoTuE_nf4P6n372f6vzg"
+       }
+      },
+      {
+       "device_cert": {
+        "o": {
+         "created_ms": 1790000000000,
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "dk_kx_pub": "BIlUSKpH5g9UpFflsUrYfy8c7ncIRHcJp2ORIDBUDb8S4SQtpy-EAPsSOgwT5nGhQApdzXloHjknkHiRsRkpcgc",
+         "dk_sig_pub": "BAAqPda-S695x08QBckUQMV2AglUMT8Y5yq57pu8wyCZnyHo1QrmNAzup8JXqewAFFKQ6VnP5Kq8GMNfZeWI0sY",
+         "expires_ms": null,
+         "kind": "device_cert",
+         "label_sealed": "bGFiZWwgbGVuYTE",
+         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+         "scopes_max": [
+          "look",
+          "decide",
+          "operate",
+          "type"
+         ],
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "3LAHSi-Droiur4llCSuUzsq6jxSWmpqmsak7L9vbNi82dp2nTr1rQXwE_-hRJ0ntDsrf8ER3KDThWYolZaabwQ"
+       },
+       "pk_pub": "BAoPza8kl-gXxaP7-Qc17lCTIw6H7vxUpVcgi6ai9wZ3jDRClQu1bQ9VmPrAqbVtoqkhi3VMVyu7SwpHydtPWGA",
+       "revocation": {
+        "o": {
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "kind": "revocation",
+         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+         "reason": "lost",
+         "revoked_ms": 1790000100000,
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "9hA3XWy2ZF_xS6Etgsmqu58g84EONyLW4ICmJ5nZB2YysJgcMYvwwOCh19fzuzqMyqdhKvycsT_JJeoNdKroOQ"
+       }
+      }
+     ],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "F0FzMW4WGtixghibDyjFdJO5tM_vgX5HRqu_CLoQ0qRzKbQ00jAE0JZSQ3RyaXWBg2L7wRthLmPqiyuU63-bVg",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
+  },
+  {
+   "applied": [],
+   "expect": "chain.diverged",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {},
+   "known_revocations": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+       "kind": "revocation",
+       "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+       "reason": "lost",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "9hA3XWy2ZF_xS6Etgsmqu58g84EONyLW4ICmJ5nZB2YysJgcMYvwwOCh19fzuzqMyqdhKvycsT_JJeoNdKroOQ"
+     }
+    },
+    {
+     "revocation": {
+      "o": {
+       "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+       "kind": "revocation",
+       "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+       "reason": "lost",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "cYerHfzV2wGytBlGCbhgnFRWK-RvpMqY8RZORl8uuY1qw0WjDoFQ6nkWkurcHAL6oeOoTuE_nf4P6n372f6vzg"
+     }
+    }
+   ],
+   "learned_later_in_walk": [],
+   "local_revocations": [],
+   "name": "conflicting_chain_obligations_one_carried_diverged",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:14:50Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:729986ef14d0cbc64231210229b5c336ca38b99d478a3bd494d781acc9b58e0f",
+      "head": "sha256:0b6eaac43ced393d553868000836a31f8e974b8d759c2a807f2c775595fc5248",
+      "seq": 2
+     }
+    },
+    "sig": "HRjZlTSoh3_7htitoxYX5e9gkT2T5Zb5456Rvqoro1Bk_914ZQtamTikks4WHt-F6Ynh1-SPrd2dkz77do_SDg"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:0b6eaac43ced393d553868000836a31f8e974b8d759c2a807f2c775595fc5248"
+    ]
+   },
+   "recorded": null,
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:14:50Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:729986ef14d0cbc64231210229b5c336ca38b99d478a3bd494d781acc9b58e0f",
+       "head": "sha256:0b6eaac43ced393d553868000836a31f8e974b8d759c2a807f2c775595fc5248",
+       "seq": 2
+      }
+     },
+     "sig": "HRjZlTSoh3_7htitoxYX5e9gkT2T5Zb5456Rvqoro1Bk_914ZQtamTikks4WHt-F6Ynh1-SPrd2dkz77do_SDg"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:14:50Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "Xb-VTbb7SDtw7bEdZpzA1nCcHdmNuP6mWRNbYmeqQ7XpJNE5C2KX-RhYu9AB-H7KqAyaWMIRZyw9fl3GVFbjwQ",
+     "id": "01J9ZK00000000000000000030",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [
+      {
+       "device_cert": {
+        "o": {
+         "created_ms": 1790000000000,
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "dk_kx_pub": "BIlUSKpH5g9UpFflsUrYfy8c7ncIRHcJp2ORIDBUDb8S4SQtpy-EAPsSOgwT5nGhQApdzXloHjknkHiRsRkpcgc",
+         "dk_sig_pub": "BAAqPda-S695x08QBckUQMV2AglUMT8Y5yq57pu8wyCZnyHo1QrmNAzup8JXqewAFFKQ6VnP5Kq8GMNfZeWI0sY",
+         "expires_ms": null,
+         "kind": "device_cert",
+         "label_sealed": "bGFiZWwgbGVuYTE",
+         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+         "scopes_max": [
+          "look",
+          "decide",
+          "operate",
+          "type"
+         ],
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "3LAHSi-Droiur4llCSuUzsq6jxSWmpqmsak7L9vbNi82dp2nTr1rQXwE_-hRJ0ntDsrf8ER3KDThWYolZaabwQ"
+       },
+       "pk_pub": "BAoPza8kl-gXxaP7-Qc17lCTIw6H7vxUpVcgi6ai9wZ3jDRClQu1bQ9VmPrAqbVtoqkhi3VMVyu7SwpHydtPWGA",
+       "revocation": {
+        "o": {
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "kind": "revocation",
+         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+         "reason": "lost",
+         "revoked_ms": 1790000100000,
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "9hA3XWy2ZF_xS6Etgsmqu58g84EONyLW4ICmJ5nZB2YysJgcMYvwwOCh19fzuzqMyqdhKvycsT_JJeoNdKroOQ"
+       }
+      }
+     ],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "GIQZwCpKJ9ack7ZwbcLbVLx0saGkf2sOP35p33M4H2F8EaSv6G3ckB7MitrEFm411lQtIOZ-e4nQxKOVJtLndQ",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
+  },
+  {
+   "applied": [],
+   "expect": "ok",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {},
+   "known_revocations": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "65f2fa5db7df3062f335c257cdb7ad97",
+       "kind": "revocation",
+       "person_id": "3cc4c8d2742af6d21da48348d014c318",
+       "reason": "lost",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "5wFS0fWkI0qZwEjiFyKTguxqzBa2-Wai9NU3XwIg9ay56inZZvnHN3J6nos7Cf7-q3x6V7Qh4gy8U3MEW0CK7A"
+     }
+    }
+   ],
+   "learned_later_in_walk": [],
+   "local_revocations": [],
+   "name": "tombstone_other_person_pair_in_a_later_restore_accepted",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:15:00Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:1357cdf40f8f1e879d72bbbcd69d1e3b88e60c0e14a11aef204f2b9f83e35d5f",
+      "head": "sha256:4e0298f430ac49a6dd37659da9b3f26c7f1e8dec7bcf7fd6c10cab577e16033b",
+      "seq": 2
+     }
+    },
+    "sig": "7RExzPhxwRJcX-rzaIKfUAJetahAz_9WGklU7seXby7NtDxImYYuFnEX6XPl_HLK9safDMFsOxDNhBhJ0rImKA"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:4e0298f430ac49a6dd37659da9b3f26c7f1e8dec7bcf7fd6c10cab577e16033b"
+    ]
+   },
+   "recorded": "01J9ZK00000000000000000031",
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:15:00Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:1357cdf40f8f1e879d72bbbcd69d1e3b88e60c0e14a11aef204f2b9f83e35d5f",
+       "head": "sha256:4e0298f430ac49a6dd37659da9b3f26c7f1e8dec7bcf7fd6c10cab577e16033b",
+       "seq": 2
+      }
+     },
+     "sig": "7RExzPhxwRJcX-rzaIKfUAJetahAz_9WGklU7seXby7NtDxImYYuFnEX6XPl_HLK9safDMFsOxDNhBhJ0rImKA"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:15:00Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "812JtUFdOG9fDQ0HLqeJTB7t8sp2HEaD_LisJjNJIk7g0S66JC6U20hastuF-bzpbh5MpuLM-K142AaxeN_1Qg",
+     "id": "01J9ZK00000000000000000031",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [
+      {
+       "device_cert": {
+        "o": {
+         "created_ms": 1790000000000,
+         "device_id": "65f2fa5db7df3062f335c257cdb7ad97",
+         "dk_kx_pub": "BJLcO8dkq_J1UEeP5As1MqY2FfTG6UrFwvpm8wBy9gt6WSylu9tXnesSptWdfpYOuH1zl0Psz6VD0aAUuMEyIbk",
+         "dk_sig_pub": "BJXVW_McBpNi5Ep8OI9_IrCo7RopLUJ_0sihndGDkf-6LVPC_9ycr-kaJeX-RpHNcsD0lGX4uBhRh-pYSJS_DS8",
+         "expires_ms": null,
+         "kind": "device_cert",
+         "label_sealed": "bGFiZWwgemVkMQ",
+         "person_id": "3cc4c8d2742af6d21da48348d014c318",
+         "scopes_max": [
+          "look",
+          "decide",
+          "operate",
+          "type"
+         ],
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "kP6gNmTHZ6-9XeSNa7ZiiJe9rawB-GYMRNm_hyGIRAGFV8xp-WPnVCZFnceKEIEmt33fbHh0vyAu9qPztda-3A"
+       },
+       "pk_pub": "BAz90lyMdK2A9CB2j4PtuPzradNsvfbzd4aZuf6thDpBE4NM9dcdaO0a3Yc1RNt6P1qTR7FcVzKuqQg2bdwo1HM",
+       "revocation": {
+        "o": {
+         "device_id": "65f2fa5db7df3062f335c257cdb7ad97",
+         "kind": "revocation",
+         "person_id": "3cc4c8d2742af6d21da48348d014c318",
+         "reason": "lost",
+         "revoked_ms": 1790000100000,
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "5wFS0fWkI0qZwEjiFyKTguxqzBa2-Wai9NU3XwIg9ay56inZZvnHN3J6nos7Cf7-q3x6V7Qh4gy8U3MEW0CK7A"
+       }
+      },
+      {
+       "device_cert": {
+        "o": {
+         "created_ms": 1790000000000,
+         "device_id": "65f2fa5db7df3062f335c257cdb7ad97",
+         "dk_kx_pub": "BJLcO8dkq_J1UEeP5As1MqY2FfTG6UrFwvpm8wBy9gt6WSylu9tXnesSptWdfpYOuH1zl0Psz6VD0aAUuMEyIbk",
+         "dk_sig_pub": "BJXVW_McBpNi5Ep8OI9_IrCo7RopLUJ_0sihndGDkf-6LVPC_9ycr-kaJeX-RpHNcsD0lGX4uBhRh-pYSJS_DS8",
+         "expires_ms": null,
+         "kind": "device_cert",
+         "label_sealed": "bGFiZWwgemVkMQ",
+         "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+         "scopes_max": [
+          "look",
+          "decide",
+          "operate",
+          "type"
+         ],
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "2_FP0ETy1prjF3OV_W696dSUt9_RZsVCSr8ivqQACNIljInGUrBSRzjCirbtzOCCdOxf6f3uJ1Zn9C4-red3cg"
+       },
+       "pk_pub": "BI14lIzDuy3ZvsMm9bkLZdzvYh9pT6NacDmef4dgenr0c78HIZjtcHf2lvbVlmMxv6lX0LXFgD8rCZLcoL_KJig",
+       "revocation": {
+        "o": {
+         "device_id": "65f2fa5db7df3062f335c257cdb7ad97",
+         "kind": "revocation",
+         "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+         "reason": "compromised",
+         "revoked_ms": 1790000100000,
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "W7PPYU5r82Rf1tgAjjWcV2XY_lrd_cF24r_wrPQApDkh_pQVxTMcaLDXUtjIvcjoAt22Rd46h0G_j_yra-gNlA"
+       }
+      }
+     ],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "hVQ42Im6gJD-SeLixpxnz53IkvP1WCyT0BsQfvxm_Ik2HL8lUkVYi_mMETEKZOxe0ez1mH_rHLW4QGhnd_0pbw",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
+  },
+  {
+   "applied": [],
+   "expect": "chain.diverged",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {},
+   "known_revocations": [
+    {
+     "pk_pub": "BI14lIzDuy3ZvsMm9bkLZdzvYh9pT6NacDmef4dgenr0c78HIZjtcHf2lvbVlmMxv6lX0LXFgD8rCZLcoL_KJig",
+     "revocation": {
+      "o": {
+       "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+       "kind": "revocation",
+       "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+       "reason": "lost",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "9hA3XWy2ZF_xS6Etgsmqu58g84EONyLW4ICmJ5nZB2YysJgcMYvwwOCh19fzuzqMyqdhKvycsT_JJeoNdKroOQ"
+     }
+    }
+   ],
+   "learned_later_in_walk": [],
+   "local_revocations": [],
+   "name": "same_pair_other_key_completeness_diverged",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:15:10Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:ea3f50209eddb983e63d8b0dfcb6198ff7f62dab0e9b08950bbf592b02ffee06",
+      "head": "sha256:1480958ba7b9d0b2762aa59a8bcb0ed7300214442c1ec34d40c1a31199f3d1ff",
+      "seq": 2
+     }
+    },
+    "sig": "wAWBaqK3SoYK_BA24H6ceHxhjFqhSg46mSkeE6DkX15Y0wT7thxqA36F5_QNFSanDVZkAQuYjvpoigYV10iU3Q"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:1480958ba7b9d0b2762aa59a8bcb0ed7300214442c1ec34d40c1a31199f3d1ff"
+    ]
+   },
+   "recorded": null,
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:15:10Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:ea3f50209eddb983e63d8b0dfcb6198ff7f62dab0e9b08950bbf592b02ffee06",
+       "head": "sha256:1480958ba7b9d0b2762aa59a8bcb0ed7300214442c1ec34d40c1a31199f3d1ff",
+       "seq": 2
+      }
+     },
+     "sig": "wAWBaqK3SoYK_BA24H6ceHxhjFqhSg46mSkeE6DkX15Y0wT7thxqA36F5_QNFSanDVZkAQuYjvpoigYV10iU3Q"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:15:10Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "MFpUbjFVD3YhiUM8sTSq3V1gsbjhCmnUXICtyr4Y7oj0ZbWXIuVr8_UdMY5DtEuEiamM0M6NPfYyNPGFjQ75gw",
+     "id": "01J9ZK00000000000000000032",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [
+      {
+       "device_cert": {
+        "o": {
+         "created_ms": 1790000000000,
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "dk_kx_pub": "BIlUSKpH5g9UpFflsUrYfy8c7ncIRHcJp2ORIDBUDb8S4SQtpy-EAPsSOgwT5nGhQApdzXloHjknkHiRsRkpcgc",
+         "dk_sig_pub": "BAAqPda-S695x08QBckUQMV2AglUMT8Y5yq57pu8wyCZnyHo1QrmNAzup8JXqewAFFKQ6VnP5Kq8GMNfZeWI0sY",
+         "expires_ms": null,
+         "kind": "device_cert",
+         "label_sealed": "bGFiZWwgbGVuYTE",
+         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+         "scopes_max": [
+          "look",
+          "decide",
+          "operate",
+          "type"
+         ],
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "3LAHSi-Droiur4llCSuUzsq6jxSWmpqmsak7L9vbNi82dp2nTr1rQXwE_-hRJ0ntDsrf8ER3KDThWYolZaabwQ"
+       },
+       "pk_pub": "BAoPza8kl-gXxaP7-Qc17lCTIw6H7vxUpVcgi6ai9wZ3jDRClQu1bQ9VmPrAqbVtoqkhi3VMVyu7SwpHydtPWGA",
+       "revocation": {
+        "o": {
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "kind": "revocation",
+         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+         "reason": "lost",
+         "revoked_ms": 1790000100000,
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "9hA3XWy2ZF_xS6Etgsmqu58g84EONyLW4ICmJ5nZB2YysJgcMYvwwOCh19fzuzqMyqdhKvycsT_JJeoNdKroOQ"
+       }
+      }
+     ],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "TU1NDQ8yXn_cQxR2_huK90wKjICkZSlRpqWfk_1VFh2JfrCzKXYiIXNxOb9zrFMvOAQuW9EEokI5XcmJHLSQjA",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
+  },
+  {
+   "applied": [],
+   "expect": "ok",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {},
+   "known_revocations": [],
+   "learned_later_in_walk": [],
+   "local_revocations": [
+    {
+     "pk_pub": "BI14lIzDuy3ZvsMm9bkLZdzvYh9pT6NacDmef4dgenr0c78HIZjtcHf2lvbVlmMxv6lX0LXFgD8rCZLcoL_KJig",
+     "revocation": {
+      "o": {
+       "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+       "kind": "revocation",
+       "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+       "reason": "lost",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "9hA3XWy2ZF_xS6Etgsmqu58g84EONyLW4ICmJ5nZB2YysJgcMYvwwOCh19fzuzqMyqdhKvycsT_JJeoNdKroOQ"
+     }
+    }
+   ],
+   "name": "same_pair_other_key_still_unpublished",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:15:20Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:fcd9664f7a202f7b6c424c0a46e8fb9dfa6b40633daae51a0204d11d35613ad3",
+      "head": "sha256:c8ba02d2e70d81a69d3899a514f72ac29d2f70ad2f7289b146e174980f8e973c",
+      "seq": 2
+     }
+    },
+    "sig": "X-K-yYzcVhXJ8AMPapS5dOfdOW0mcOmmKta4j-5VMmVkY1d91U5xsWgXfaj56StbX7MTB3bY0yQQDm_WFNvP4Q"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:c8ba02d2e70d81a69d3899a514f72ac29d2f70ad2f7289b146e174980f8e973c"
+    ]
+   },
+   "recorded": "01J9ZK00000000000000000033",
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:15:20Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:fcd9664f7a202f7b6c424c0a46e8fb9dfa6b40633daae51a0204d11d35613ad3",
+       "head": "sha256:c8ba02d2e70d81a69d3899a514f72ac29d2f70ad2f7289b146e174980f8e973c",
+       "seq": 2
+      }
+     },
+     "sig": "X-K-yYzcVhXJ8AMPapS5dOfdOW0mcOmmKta4j-5VMmVkY1d91U5xsWgXfaj56StbX7MTB3bY0yQQDm_WFNvP4Q"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:15:20Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "qq_tE7ssGJvYlU3p6jt5MaBt4-8Y0oW6UA1tcgDFlnD5YKeXpQz9IisCM3uE81a4H0X88vGT4nAl6j5494f_zQ",
+     "id": "01J9ZK00000000000000000033",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [
+      {
+       "device_cert": {
+        "o": {
+         "created_ms": 1790000000000,
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "dk_kx_pub": "BIlUSKpH5g9UpFflsUrYfy8c7ncIRHcJp2ORIDBUDb8S4SQtpy-EAPsSOgwT5nGhQApdzXloHjknkHiRsRkpcgc",
+         "dk_sig_pub": "BAAqPda-S695x08QBckUQMV2AglUMT8Y5yq57pu8wyCZnyHo1QrmNAzup8JXqewAFFKQ6VnP5Kq8GMNfZeWI0sY",
+         "expires_ms": null,
+         "kind": "device_cert",
+         "label_sealed": "bGFiZWwgbGVuYTE",
+         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+         "scopes_max": [
+          "look",
+          "decide",
+          "operate",
+          "type"
+         ],
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "3LAHSi-Droiur4llCSuUzsq6jxSWmpqmsak7L9vbNi82dp2nTr1rQXwE_-hRJ0ntDsrf8ER3KDThWYolZaabwQ"
+       },
+       "pk_pub": "BAoPza8kl-gXxaP7-Qc17lCTIw6H7vxUpVcgi6ai9wZ3jDRClQu1bQ9VmPrAqbVtoqkhi3VMVyu7SwpHydtPWGA",
+       "revocation": {
+        "o": {
+         "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+         "kind": "revocation",
+         "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+         "reason": "lost",
+         "revoked_ms": 1790000100000,
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "9hA3XWy2ZF_xS6Etgsmqu58g84EONyLW4ICmJ5nZB2YysJgcMYvwwOCh19fzuzqMyqdhKvycsT_JJeoNdKroOQ"
+       }
+      }
+     ],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "KInLViLAsI59V9UoRoEVn8ot-jBzbRhI3E9j1ZefRmmbS35CdBWmFnBarpsZt-oZN-fiQ24hGzuU5AbMQozWLQ",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [
+    "d_a6dc67f56b74e07ca65b035348e03bc0"
+   ],
+   "unpublished_evidence": [
+    0
+   ],
+   "unpublished_pairs": [
+    [
+     "d_a6dc67f56b74e07ca65b035348e03bc0",
+     "p_6ce6085b169e8ee5111456b91dc4ae3c"
+    ]
+   ]
+  },
+  {
+   "applied": [],
+   "expect": "ok",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {},
+   "known_revocations": [],
+   "learned_later_in_walk": [],
+   "local_revocations": [
+    {
+     "revocation": {
+      "o": {
+       "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+       "kind": "revocation",
+       "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+       "reason": "lost",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "9hA3XWy2ZF_xS6Etgsmqu58g84EONyLW4ICmJ5nZB2YysJgcMYvwwOCh19fzuzqMyqdhKvycsT_JJeoNdKroOQ"
+     }
+    },
+    {
+     "revocation": {
+      "o": {
+       "device_id": "a6dc67f56b74e07ca65b035348e03bc0",
+       "kind": "revocation",
+       "person_id": "6ce6085b169e8ee5111456b91dc4ae3c",
+       "reason": "compromised",
+       "revoked_ms": 1790000100000,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "fIf6e11E-xrUn04x1UcWQhU_KskxQ4O0LqpBW1po3qkVb3A8Wtv_-c18LZ2OACeOyFLWNoLTvL4_UVYepd6n5g"
+     }
+    }
+   ],
+   "name": "out_of_band_strongest_held_entry_is_reported",
+   "note": "unpublished_evidence points at the compromised entry (index 1)",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:15:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:0ab02abe9d8a066b3b6e03b9ddc904f1dad0055a7ab074482e3c335312d3bed0",
+      "head": "sha256:aa51ca4cb460a6704bca9e3a83bcbf7ef803713f40a96ce359e9519cf46c9403",
+      "seq": 2
+     }
+    },
+    "sig": "lvuIKIxZF9M31Qg4LZxDnkymxKqlxYPkTH3Fol7SyUPT7TwPlFjMwpDJjkR-tVrC7xACtS8Cv4M_gTpnH-kDKg"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:aa51ca4cb460a6704bca9e3a83bcbf7ef803713f40a96ce359e9519cf46c9403"
+    ]
+   },
+   "recorded": "01J9ZK00000000000000000034",
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:15:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:0ab02abe9d8a066b3b6e03b9ddc904f1dad0055a7ab074482e3c335312d3bed0",
+       "head": "sha256:aa51ca4cb460a6704bca9e3a83bcbf7ef803713f40a96ce359e9519cf46c9403",
+       "seq": 2
+      }
+     },
+     "sig": "lvuIKIxZF9M31Qg4LZxDnkymxKqlxYPkTH3Fol7SyUPT7TwPlFjMwpDJjkR-tVrC7xACtS8Cv4M_gTpnH-kDKg"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:15:30Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "jFhyBadVqgWq42NCqN6Y2dKpdtMCPeek1kIPsR7Eq9kVYCLg1VHZyiCfWjeusRz-WItrzyFEGeh_bJmlCnCsxw",
+     "id": "01J9ZK00000000000000000034",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "c0pYN5bxzskscOPlIDxJw_zApcFMKg0PmHceG2Zh3WF-6D6IDq1sbnDi6DxvChD7YM9Ca-Q2Kaz09b3cQ5uqZg",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [
+    "d_a6dc67f56b74e07ca65b035348e03bc0"
+   ],
+   "unpublished_evidence": [
+    1
+   ],
+   "unpublished_pairs": [
+    [
+     "d_a6dc67f56b74e07ca65b035348e03bc0",
+     "p_6ce6085b169e8ee5111456b91dc4ae3c"
+    ]
+   ]
+  },
+  {
+   "applied": [],
+   "expect": "chain.diverged",
+   "held": {
+    "o": {
+     "at": "2026-10-10T10:00:30Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 3,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     }
+    },
+    "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+   },
+   "known_devices": {},
+   "known_revocations": [],
+   "learned_later_in_walk": [],
+   "local_revocations": [],
+   "name": "bundle_carries_another_persons_pair_for_its_signer_device",
+   "note": "the host refuses this earlier (device.cert: sev1 is sev's live device); a log-free receiver refuses it by the self-revocation rule, which matches the signer's device id whatever the person",
+   "now": "2026-10-10T12:00:00Z",
+   "offered": {
+    "o": {
+     "at": "2026-10-10T10:15:40Z",
+     "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "kind": "workspace_checkpoint",
+     "n": 4,
+     "suite": 2,
+     "tickets": {},
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "workspace_log": {
+      "acc": "sha256:16f8ba7bb8de76d4729cb5121b2e25d6c1394e27b093c71a649da0144ec90b87",
+      "head": "sha256:65a0ceb34ca7ac687802ca7242b133ffcf68ba46691c55be19112c0955a064e5",
+      "seq": 2
+     }
+    },
+    "sig": "Q2YJy9_RdHtpY0-iSC31-COi91UdO_94g5ywAIRrenDu1-DHW4WbxsCNrfsv8vSZbgvFFdlsdE0N9hwYAa5IkA"
+   },
+   "pinned_delegation": {
+    "o": {
+     "client_hosted": false,
+     "issued_ms": 1790000000000,
+     "kind": "ws_delegation",
+     "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+     "suite": 2,
+     "v": 2,
+     "workspace_id": "0123456789abcdef0123456789abcdef",
+     "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+    },
+    "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+   },
+   "proofs": {
+    "workspace": [
+     "sha256:65a0ceb34ca7ac687802ca7242b133ffcf68ba46691c55be19112c0955a064e5"
+    ]
+   },
+   "recorded": null,
+   "restore": {
+    "C": {
+     "o": {
+      "at": "2026-10-10T10:00:30Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 3,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:a3a6b067e85e9fae49be8c5b083944c66d11ff0c547bcfad5ec1d6092a53489e",
+       "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+       "seq": 3
+      }
+     },
+     "sig": "RKXwxqMbPG00GSu6Oqzi1s5-07pWTaIv3i88-P5dqmeFyBfFid_QYd6PXB6R1NuUcDYrAyYSct5ryTIBuTSByA"
+    },
+    "T": {
+     "o": {
+      "at": "2026-10-10T10:15:40Z",
+      "genesis": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+      "kind": "workspace_checkpoint",
+      "n": 4,
+      "suite": 2,
+      "tickets": {},
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "workspace_log": {
+       "acc": "sha256:16f8ba7bb8de76d4729cb5121b2e25d6c1394e27b093c71a649da0144ec90b87",
+       "head": "sha256:65a0ceb34ca7ac687802ca7242b133ffcf68ba46691c55be19112c0955a064e5",
+       "seq": 2
+      }
+     },
+     "sig": "Q2YJy9_RdHtpY0-iSC31-COi91UdO_94g5ywAIRrenDu1-DHW4WbxsCNrfsv8vSZbgvFFdlsdE0N9hwYAa5IkA"
+    },
+    "abandoned_heads": [
+     "sha256:90a514d49f67df9d29f1bdc76e0b91d5baedf156a0f222cd8d02338a7179d34e",
+     "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920"
+    ],
+    "acc_before": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "acc_from": "sha256:cc4f9dc2c75ad6af09128a145e1f4820eef5127aef629fc5c275826b0c4d921c",
+    "delegation": {
+     "o": {
+      "client_hosted": false,
+      "issued_ms": 1790000000000,
+      "kind": "ws_delegation",
+      "owner_person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "suite": 2,
+      "v": 2,
+      "workspace_id": "0123456789abcdef0123456789abcdef",
+      "wsk_pub": "BJy4pP7CRCCFIbgVcqF07OgGwnzyG5Mu6nAPOvYZl72rKNxeRWcBwNDpRGc1LBIdbPY6ZrGFuKL1INLjmAeu_Ro"
+     },
+     "sig": "NwRve78-SgAnF30XOlRhDEb9KlCWIYBu5xXmOkGOE6vn70YeyeOXOcF6liH50gz6SfJNWTgZ2wi_KZc-DWXxMA"
+    },
+    "device_cert": {
+     "o": {
+      "created_ms": 1790000000000,
+      "device_id": "c65032f21d43401cc223b05723c1e5b4",
+      "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+      "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+      "expires_ms": null,
+      "kind": "device_cert",
+      "label_sealed": "bGFiZWwgc2V2MQ",
+      "person_id": "75bf75a3bb50b0c4ac02f8a757b90e23",
+      "scopes_max": [
+       "look",
+       "decide",
+       "operate",
+       "type"
+      ],
+      "suite": 2,
+      "v": 2
+     },
+     "sig": "GMFk6HGDHI919l9dSkUuvlioYdJz-QzNR-qUAQ4kPhZevsgiEZBTlZr2SAIfUiNASTIzsMW_c_8yTbnW8kuMfQ"
+    },
+    "event": {
+     "abandoned": {
+      "head": "sha256:709c05a8ff7fdfafa2b1bd09beaa6c3ff095fedbb26662e7976b8b800a8c8920",
+      "seq": 3
+     },
+     "abandoned_decisions": [
+      "01J9ZK00000000000000000002",
+      "01J9ZK00000000000000000003"
+     ],
+     "actor": {
+      "device": "d_c65032f21d43401cc223b05723c1e5b4",
+      "id": "p_75bf75a3bb50b0c4ac02f8a757b90e23",
+      "kind": "person"
+     },
+     "at": "2026-10-10T10:15:40Z",
+     "auth": "passphrase",
+     "based_on": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "from_seq": 1,
+     "hash_v": 1,
+     "head": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "host_sig": "8PJOKihLq5eijo2LGhKKvMKvq8y5vk_wjGjuejxti_onCs6fmN983d_VNpxPhfzr_63iWkDvPe517_O7N-X10g",
+     "id": "01J9ZK00000000000000000035",
+     "prev": "sha256:d24af6280335a5f01ef006cd5ca4b2f302fa464ba9740b0c2f56bf80e18f52b5",
+     "reason": "rollback",
+     "revocations": [
+      {
+       "device_cert": {
+        "o": {
+         "created_ms": 1790000000000,
+         "device_id": "c65032f21d43401cc223b05723c1e5b4",
+         "dk_kx_pub": "BFeVKX_gphRxHCfh2Uw6UQVtj12_1v9LteaSfrwG6oH3QG8yDkYojB0rOpi7i-NDHC0PY47WHle_uYaQHjI534c",
+         "dk_sig_pub": "BEtUkscP1t-MK_B-LkrM8KwbVTJ2kwZBYo-4vnk4QSaltalieRixn4XJf8Z2jR5y10cpdvNZ1i-70-cvOz5Wlwo",
+         "expires_ms": null,
+         "kind": "device_cert",
+         "label_sealed": "bGFiZWwgc2V2MQ",
+         "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+         "scopes_max": [
+          "look",
+          "decide",
+          "operate",
+          "type"
+         ],
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "Xs4SnlLsGWYNKwdk3yZ_qK9XCba_9aYP3k2xtXNGMb_uBHCRB32vQ-WDhoBj1K3FxL_EmliJQLpExBYq_vek9Q"
+       },
+       "pk_pub": "BI14lIzDuy3ZvsMm9bkLZdzvYh9pT6NacDmef4dgenr0c78HIZjtcHf2lvbVlmMxv6lX0LXFgD8rCZLcoL_KJig",
+       "revocation": {
+        "o": {
+         "device_id": "c65032f21d43401cc223b05723c1e5b4",
+         "kind": "revocation",
+         "person_id": "6aae5cce832160e6f8cd9dadfbb4c5cd",
+         "reason": "lost",
+         "revoked_ms": 1790000100000,
+         "suite": 2,
+         "v": 2
+        },
+        "sig": "-qb4j625NUGGFqP3ndHpj2m5-OCRoQNn_4OT_IG2nNxO4ucyygNC1sxOa1birMzBp0fbyPBdvKWuE23-sGbDmQ"
+       }
+      }
+     ],
+     "roster_v": 1,
+     "seq": 2,
+     "sig": "DUppi1eAiPdjeqN5lwGL9asPCqGGxv-WlrK7_MvRkHz2GcuT53TZkQlIYO9locSidineDJlPnnQ-90XFnm_u0w",
+     "source": {
+      "hash": "sha256:b26a1aa5b399205303364c5af75374d6dc785c59682af867fcdf55b4c31a9711",
+      "n": 3
+     },
+     "type": "restore",
+     "v": 2
+    },
+    "forward_heads": [],
+    "log": "workspace",
+    "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
+   },
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -20064,7 +24274,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -20272,7 +24484,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -20480,7 +24694,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -20740,7 +24956,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "alarm": true,
@@ -20965,7 +25183,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -21189,7 +25409,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -21413,7 +25635,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -21638,7 +25862,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -21861,7 +26087,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -22084,7 +26312,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -22307,7 +26537,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -22531,7 +26763,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -22754,7 +26988,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -22978,7 +27214,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -23202,7 +27440,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -23408,7 +27648,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -23617,7 +27859,9 @@
     "log": "01J9ZK4Q7M3R8T2V6X0B5N1C9D",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -23793,7 +28037,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   },
   {
    "applied": [],
@@ -23933,7 +28179,9 @@
     "log": "workspace",
     "pk_pub": "BE9dWaAeWZ2MzJFlmbGeznA13dLlTv6B-2J8IC9YY9JFKzQFCcDEj0hVZhaSrJCcxP-1v9g2FRp2zo2eTKSQe94"
    },
-   "unpublished": []
+   "unpublished": [],
+   "unpublished_evidence": [],
+   "unpublished_pairs": []
   }
  ]
 }
