@@ -1230,10 +1230,14 @@ HTTP fixture.
     strength. The optional advisory ack field `published: [{device_id, person_id, event_id}]` is **not**
     implemented: the high-water mark already silences the notice, the event ids are unverifiable at the relay, and
     the field would add a table and a refusal surface for no change in what the route serves. An ack body with any
-    other field is 400 `malformed`; the field can be added later as a new optional member.
+    other field is 400 `malformed`; the field can be added later as a new optional member. Until the relay
+    announces it, a host MUST NOT send `published` (the field set is exact, so it is refused today).
   - *Budgets* (orch-52 (c)): ≤ 64 items and ≤ 256 KiB of `cj(response)` per page (the first item always);
     fetch 120/min and 2 000/h, ack 30/min per workspace, charged only after W(g); ≤ 4 096 ever-devices per
-    workspace (membership 429 `quota_exceeded`).
+    workspace (membership 429 `quota_exceeded`). The quota is permanent (ever-devices never shrink): a host MUST
+    NOT retry a membership publication refused with it unchanged. One item is at most about 66 KiB (a registry
+    certificate registered through `POST /v2/accounts` is bounded by that route's 64 KiB body cap, not the 16 KiB
+    `PUT /v2/devices` cap), well under the 256 KiB page bound.
   - *Ack* (orch-52 (d)): no per-item acknowledgement; a monotonic per-workspace high-water mark (migration 0013
     `unpublished_acks`) that drives the notice only. Not publication; never hides an item.
   - *Positions:* `b64u(cj({v: 1, ws, c}))`, bound to the workspace (another workspace's is 400 `malformed`), not to
@@ -1312,6 +1316,11 @@ public deployment.
   and a quota on self-certified evidence per account. The per-workspace ever-device quota (4 096, P3-D31) is
   in place; `checkpoint_unpublished` no longer grows (P3-D31). The `unpublished` retrieval route is closed by
   P3-D31.
+- **P3-D31 ever-device quota (review of PR #55).** The 4 096 cap is permanent, so a workspace that reaches it
+  can never list a new device. Before a public deploy: a host-side per-person device cap (so one member cannot
+  burn the workspace's budget with fresh device ids) and a way out for a workspace at the cap (e.g. migrating to a
+  new workspace, or an owner-signed retirement of ever-devices with no held pair). The per-item size bound (about
+  66 KiB, through the 64 KiB `POST /v2/accounts` body) is noted in P3-D31.
 - **Unthrottled authenticated work.** (The P3-D31 unpublished routes are throttled per workspace.) Reads (up to
   56,680 heads per proof page), staging, genesis and
   baseline refusals, and `ignored` lower-n publications (full stateless validation, uncharged; exact retries

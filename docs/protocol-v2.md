@@ -2581,7 +2581,9 @@ generation: a takeover continues from any stored position.
 `cursor_ahead`). Its only effect is `notices.unpublished` (§19.6): it is **not publication**, retires nothing, hides
 nothing (a fetch from the start after an ack returns every live item) and does not change retention. A new holder
 inherits it. There is no per-item acknowledgement (orch-52: the high-water mark is enough); the optional advisory
-`published` field is not implemented (an ack body with any other field is 400 `malformed`).
+`published` field is not implemented (an ack body with any other field is 400 `malformed`). A host MUST NOT send
+`published` (or any other field) until the relay announces support for it: the field set is exact, so today such an
+ack is refused.
 
 Order of checks: (1) 401 `unauthenticated`; (2) 403 `not_eligible` for any principal but this workspace's W session
 (a device session, another workspace's host), identical whether `{ws}` exists or not: nothing on either route
@@ -2593,7 +2595,11 @@ ack's 1 KiB JSON cap and an unknown query parameter are refused at the transport
 as on every §19.8 route. A fetch is one `query_only` snapshot: no lock, no write. The ack re-authorizes and re-checks
 the position under the lock in its write transaction. Each page costs O(|ever_devices(ws)|) primary-key lookups (the
 view is read from `ever_devices` outward, never from the relay-wide table), and membership publication caps
-ever-devices at **4 096 per workspace** (429 `quota_exceeded`, §19.2).
+ever-devices at **4 096 per workspace** (429 `quota_exceeded`, §19.2). Ever-devices never shrink, so this quota is
+**permanent**: despite the 429 and its `Retry-After`, a host MUST NOT retry a membership publication refused with
+`quota_exceeded` unchanged; only a list that names no device new to the workspace can succeed. One item is at most
+about 66 KiB (a registry certificate can arrive through `POST /v2/accounts`, whose body cap is 64 KiB, plus a
+fixed-shape revocation), well under the 256 KiB page bound, so "the first item always" stays bounded.
 
 **Host obligations (normative for the P3 bridge):**
 
