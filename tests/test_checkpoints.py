@@ -1010,3 +1010,206 @@ def test_unknown_device_cannot_be_self_certified_under_two_persons_in_one_restor
         assert result == {"status": 409, "error": "restore_invalid"}, result
         with closing(db.connect(path)) as con:
             assert not con.execute("SELECT 1 FROM devices WHERE device_id=?", (phone,)).fetchone()
+
+
+# --- round 3 (Opus re-check): N1-N3 ---------------------------------------------------------------
+
+
+def test_chain_pair_weaker_than_global_is_reported_unpublished(tmp_path):
+    # N1 (reviewer PoC): the chain holds (laptop, alice, lost), alice later revoked it compromised
+    # through §19.5; a restore carrying `lost` is accepted and must report the upgrade.
+    from directory_support import V
+
+    from orch_relay import proto as P
+
+    def prepare(con):
+        global_revocation(
+            con, ALICE, "compromised", "person_alice.sig", V["certs"]["signed"]["laptop"]
+        )
+        con.execute(
+            "INSERT INTO checkpoint_revocations VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                WS,
+                LAPTOP,
+                ALICE,
+                "lost",
+                P.cj(revocation_of(ALICE, "lost", "person_alice.sig")),
+                P.cj(V["certs"]["signed"]["laptop"]),
+                P.b64u(bytes.fromhex(V["keys"]["person_alice.sig"]["pub"])),
+                "seed",
+                "seed",
+            ),
+        )
+
+    result, tables = run_case(tmp_path, "B1_evidence_sorted_pair", prepare)
+    assert result["result"] == "accepted"
+    assert result.get("unpublished") == ["d_" + LAPTOP], result
+    assert [r[3:6] for r in tables["checkpoint_unpublished"]] == [(LAPTOP, ALICE, "compromised")]
+
+
+def test_revocation_carried_at_full_strength_is_not_unpublished(tmp_path):
+    # N3.2: an out-of-band revocation the restore carries at its strength is published by it.
+    from directory_support import V
+
+    result, tables = run_case(
+        tmp_path,
+        "B1_evidence_sorted_pair",
+        lambda con: global_revocation(
+            con, ALICE, "lost", "person_alice.sig", V["certs"]["signed"]["laptop"]
+        ),
+    )
+    assert result["result"] == "accepted" and "unpublished" not in result, result
+    assert tables["checkpoint_unpublished"] == []
+    assert (LAPTOP, ALICE, "lost") in [(r[1], r[2], r[3]) for r in tables["checkpoint_revocations"]]
+
+
+def test_another_workspaces_chain_pairs_create_no_obligation_here(tmp_path):
+    # N3.3: completeness reads only this workspace's chain (F1 #387, isolation).
+    from directory_support import V
+
+    from orch_relay import proto as P
+
+    other = "282193f85af5b8d07610fbb3a8448857"
+
+    def prepare(con):
+        con.execute(
+            "INSERT INTO checkpoint_revocations VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                other,
+                LAPTOP,
+                ALICE,
+                "compromised",
+                P.cj(revocation_of(ALICE, "compromised", "person_alice.sig")),
+                P.cj(V["certs"]["signed"]["laptop"]),
+                P.b64u(bytes.fromhex(V["keys"]["person_alice.sig"]["pub"])),
+                "seed",
+                "seed",
+            ),
+        )
+        con.execute("INSERT INTO checkpoint_ever_devices VALUES (?,?)", (WS, LAPTOP))
+
+    result, _ = run_case(tmp_path, "workspace_restore_and_exact_retry", prepare)
+    assert result["status"] == 200 and result["result"] == "accepted", result
+
+
+def test_precomputed_bad_signature_is_raised_after_the_budget(tmp_path):
+    # N3.4: a stateless refusal computed before the lock keeps its reference position: with the
+    # budget spent the answer is 429 (not 401) and no failure row is added.
+    from checkpoint_support import CORPUS, http, seed
+    from fastapi.testclient import TestClient
+
+    from orch_relay.app import create_app
+
+    case = next(
+        c
+        for c in CORPUS["suites"]["2"]["checkpoints"]["cases"]
+        if c["name"] == "checkpoint_bad_signature"
+    )
+    body = case["steps"][0]["input"]["body"]
+    with TestClient(create_app(tmp_path)) as client:
+        path = tmp_path / db.DB_NAME
+        seed(path, case["state"], case)
+        client.app.state.directory.clock = lambda: 1790000000000
+        with closing(db.connect(path)) as con, con:
+            con.executemany(
+                "INSERT INTO checkpoint_failures VALUES (?,1,?)", [(WS, 1790000000000 - 10)] * 16
+            )
+        host = {"Authorization": "Bearer FAKE-workspace", "Orch-Holder": "1"}
+        result = http(client, "PUT", f"/v2/workspaces/{WS}/checkpoint", host, body=body)
+        assert result == {"status": 429, "error": "quota_exceeded"}, result
+        with closing(db.connect(path)) as con:
+            assert con.execute("SELECT count(*) FROM checkpoint_failures").fetchone()[0] == 16
+
+
+def test_a_log_spread_over_several_pages_is_published(tmp_path):
+    # N3.1: R1's grouping must keep manifest order inside a (kind, log) group.
+    from checkpoint_support import CORPUS, seed
+    from directory_support import V
+
+    from orch_relay import proto as P
+    from orch_relay.checkpoints import Relay, checkpoint_hash, descriptor, log_acc, page_digest
+    from ref import orch_protocol_ref as R
+
+    case = next(
+        c
+        for c in CORPUS["suites"]["2"]["checkpoints"]["cases"]
+        if c["name"] == "first_checkpoint_full_proof"
+    )
+    path = tmp_path / db.DB_NAME
+    db.migrate(path)
+    seed(path, case["state"], case)
+    root = case["state"]["genesis"]["pin"]["o"]["genesis"]
+    heads = [root] + [digest(f"FAKE multi {i}".encode()) for i in range(5)]
+    pages, acc = [], ZERO
+    for k in range(0, 6, 2):
+        page = {
+            "kind": "appended",
+            "log": "workspace",
+            "after_seq": k,
+            "from_acc": acc,
+            "heads": heads[k : k + 2],
+        }
+        page["digest"] = page_digest(page)
+        pages.append(page)
+        for h in heads[k : k + 2]:
+            acc = log_acc(acc, h)
+    o = {
+        "v": 2,
+        "suite": 2,
+        "kind": "workspace_checkpoint",
+        "workspace_id": WS,
+        "genesis": root,
+        "n": 1,
+        "at": "2026-09-21T13:46:40Z",
+        "workspace_log": {"seq": 6, "head": heads[-1], "acc": acc},
+        "tickets": {},
+    }
+    wsk = R.SUITES[2].sig_key(bytes.fromhex(V["keys"]["wsk_a.sig"]["seed"]))
+    target = R.sign_object(R.SUITES[2], wsk, o)
+    h = checkpoint_hash(target)
+    with closing(db.connect(path)) as con, con:
+        relay = Relay(None, con, WS, 1790000000000)
+        for i, page in enumerate(pages):
+            relay.put_staging(None, h, i, page, P.cj(page), 1 << 40)
+        manifest = {"pages": [descriptor(i, p) for i, p in enumerate(pages)]}
+        relay.put_staging(None, h, None, manifest, P.cj(manifest), 1 << 40)
+        result = Relay(None, con, WS, 1790000000000).publish(
+            {"checkpoint": target, "source_hash": None}, 1
+        )
+        assert result == {"result": "accepted", "n": 1, "hash": h}
+
+
+def test_unpublished_scan_cost_does_not_grow_with_the_global_revocation_table(tmp_path):
+    # N2: a workspace restore looks up only the devices this workspace knows, never the whole
+    # relay-wide table (which any account holder grows with self-certified evidence).
+    import os
+
+    from orch_relay.checkpoints import Relay
+
+    path = tmp_path / db.DB_NAME
+    db.migrate(path)
+
+    def cost():
+        with closing(db.connect(path)) as con:
+            steps = [0]
+
+            def tick():
+                steps[0] += 1
+                return 0
+
+            con.set_progress_handler(tick, 64)
+            Relay(None, con, WS, 1790000000000).coverage({}, LAPTOP, "workspace")
+            return steps[0]
+
+    small = cost()
+    with closing(db.connect(path)) as con, con:
+        con.execute("PRAGMA foreign_keys=OFF")
+        con.executemany(
+            "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
+            (
+                (os.urandom(16).hex(), os.urandom(16).hex(), os.urandom(300), "lost", 0, i)
+                for i in range(1, 20_001)
+            ),
+        )
+    large = cost()
+    assert large <= small + 20, (small, large)
