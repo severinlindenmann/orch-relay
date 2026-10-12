@@ -1434,8 +1434,8 @@ HTTP fixture.
     - F5: no per-account fairness. An account with k workspaces (G3: 10 new ones per hour) can keep
       both admission slots busy with accepted publications, and each of its workspaces has its own
       refused-heads budget, so refused work per account scales with its workspaces. Only
-      publications wait; logins, the bridge and reads do not. To close with G3/G4 before a public
-      deployment.
+      publications wait; logins, the bridge and reads do not. Bounded since P3-D34 (at most 32
+      workspaces per account); not closed (see G3 in the gates).
     - Phase C still parses a changed manifest (at most 4 MiB) and checks completeness under the
       lock when the set was re-staged between A and C, as before P3-D33.
   - *Pinned by* `tests/test_publication_phases.py`: no fold and no staged page read under the lock
@@ -1450,6 +1450,81 @@ HTTP fixture.
     `sqlite3.Error` in phase A retried, work recorded on self-takeovers and across restart rounds,
     the renewed snapshot, the gate by heads, the reweigh, the environment knobs, the best-effort
     accounting. Every checkpoint vector and HTTP fixture passes unchanged through the phased path.
+- **P3-D34 (per-account and per-workspace caps; the G3 and G4 pre-public-deploy gates).** Protocol §19.8
+  "Storage caps (P3-D34)" states the observable rules; this is the decision record. Every cap answers 429
+  `quota_exceeded` (no new code), is checked after authorization (401, 403 `not_eligible`, 409 `fenced` come
+  first), is read and enforced inside the write transaction that would exceed it (so it is exact under
+  concurrency, like the global ceiling), and is configurable by environment (read once at start-up).
+  - *Staged bytes per owner person* (G3; `ORCH_RELAY_ACCOUNT_STAGE_BYTES`, default 512 MiB = 4 GiB / 8). The sum
+    of live staged bytes (pages and manifests of unexpired sets) over every workspace the owner person of this
+    workspace owns, checked where the per-workspace 64 MiB quota and the 4 GiB ceiling are checked (page and
+    manifest PUTs, in `charge_stage`): workspace quota, then this cap (429), then the ceiling (503 `overloaded`),
+    so an account that is over its own cap hears so before it hears about everyone else. Uncharged, like every
+    staging refusal (staging has no failure budget). Nothing is stored per account: the sum is computed from the
+    live rows (index `workspace_owner`, migration 0015), so expiry, deletion, the sweep and a committed
+    publication (which deletes its set) release the bytes with no bookkeeping that could drift. One account
+    now fills at most 512 MiB, eight full workspace quotas; eight accounts are needed to fill the ceiling.
+  - *Workspaces per account* (G3; `ORCH_RELAY_ACCOUNT_WORKSPACES`, default 32), at the first card: a person that
+    already owns 32 workspaces gets 429 `quota_exceeded`. Workspaces are never deleted, so "live" is every
+    workspace the person owns, and the cap is a lifetime cap until a workspace deletion route exists; the
+    operator can raise it. Judgement: the staging cap alone closes the G3 staging attack, but without a bound on
+    workspaces every per-workspace cap (the node quota, staging slots, the refused-heads budget, the admission
+    gate's fairness, F5) multiplies by an unbounded count (10 new workspaces per hour). The card route is the
+    only place workspaces are created and already runs per-owner checks, so the cap belongs there. It is a
+    read-only check, placed after the card and delegation signature checks and the side-effect-free
+    (`charge=False`) creation windows and before `authorized()`, so the P3-D32 pre-check refuses it without
+    `Directory.lock` and a refused card charges no creation window.
+  - *Stored nodes per workspace* (G4; `ORCH_RELAY_WORKSPACE_NODES`, default 4,000,000 ≈ 1.17 GB at 293 B per
+    node, about 4.4 full 64 MiB staging sets). The quota is on `checkpoint_node_usage.nodes`, which includes
+    orphans (never on `orphaned`, which is cumulative). Checked at the commit point of the publication, after
+    every fold and R0–R5 check: in phase A on its snapshot (stored nodes plus the new nodes it collected), so a
+    publication over the quota never reaches phase B and inserts nothing; and again in phase C live (stored
+    nodes, excluding nodes phase C inserted itself in this transaction, plus those inserted live and the new nodes
+    of reused phase A folds that phase B did not store). A publication that adds no new node (a retry over
+    orphans, a checkpoint whose nodes are all stored) is never refused by it. The refusal is uncharged like every
+    429 (no `checkpoint_failures` row), and its fold work is recorded as refused heads (`settle`), so repeating
+    it spends the P3-D33 refused-heads budget (about two full sets per workspace-hour) and then stops at the
+    budget check before any fold. Charging a failure row instead would let the quota consume the 16/48 refusal
+    slots that protect the holder generations, for a condition the host cannot fix by retrying. Exactness: the
+    nodes of a workspace are written only by that workspace's publications, which the per-workspace mutex
+    serializes through phases A to C, so phase A's check is exact; phase C re-checks it anyway.
+    Earlier refusal (before the folds) is not possible without a lower bound of the new nodes: a publication
+    whose nodes are all stored must pass at any usage.
+  - *Receipts and tombstones* (G4). `checkpoint_receipts` keeps the newest 256 rows per workspace and
+    `checkpoint_gone` the newest 4,096 (rowid order, evicted after an insert; neither is referenced by another
+    table). Safe: the newest receipt is always the held checkpoint's (only an acceptance writes one), and a host
+    retries only its last unanswered publication, so an evicted receipt is one with at least 256 later
+    acceptances; its exact retry is then judged live (an append is `ignored`, a restore
+    `restore_source_mismatch`), never wrongly accepted, because a checkpoint hash includes `n` and `n` only
+    grows. An evicted tombstone turns a 410 `checkpoint_gone` into a 404 `not_found` for an endpoint that was
+    superseded more than 24 hours and at least 4,096 purges ago; both are refusals, a device restarts its walk
+    (410) or reports `sync_incomplete` (404) and never accepts anything from either, and a gone hash cannot be
+    re-accepted (lower `n`).
+  - *Self-certified restore evidence per owner person* (`ORCH_RELAY_ACCOUNT_EVIDENCE`, default 50,000 pairs,
+    table `account_evidence_pairs`, migration 0015). A restore entry is counted when its device has no
+    association (self-certified, orch-core #397) and the global §19.5 table does not hold its `(device_id,
+    person_id)` pair yet, i.e. exactly the entries that add a global `revocations` row. Checked after R4
+    coverage and before any fold, in phase A (so phase B never runs) and live in phase C; charged to the
+    workspace's owner person (the restore signer's person, by `owner_policy`) only when the restore commits.
+    It cannot be used to block a victim: re-carrying a pair the table already holds (all of a workspace's chain
+    pairs, which R4 makes a victim carry, are in it, since every accepted restore writes them globally, and the
+    table never loses a pair) costs nothing and is never refused, and a victim's restores are charged to the
+    victim's own account only, which an attacker cannot spend (only the owner device signs a restore line, so
+    only the owner chooses its evidence). A reason upgrade of an existing pair is not new. Associated devices'
+    entries are not counted (their key is bound by the registry; bounded by registrations). Size: an entry is
+    about 1 KB (`cj`), so about 500 per 512 KiB line; 50,000 pairs is about 100 such restores and about 75 MB of
+    global and chain rows per account, far above honest use (an owner revoking its own unknown devices).
+    Migration 0015 backfills the count from each owner's chain pairs of unassociated devices (approximate: a
+    pair carried in several owners' workspaces counts for each).
+  - *Not modelled in `ref/checkpoints.py`:* like the 4 GiB ceiling, these are deployment limits, not protocol
+    state; no vector or fixture reaches them at the defaults, so no vector or fixture changed.
+  - *Pinned by* `tests/test_caps.py` (each cap refused over it, honest use exactly at it accepted,
+    authorization before it, the workspace cap in the pre-check without the lock, the staging cap exact under 12
+    concurrent PUTs, release on expiry and deletion, ceiling order, node quota in phase A with no phase B and in
+    phase C, orphans counted, no-new-node publications never refused, live inserts counted once, concurrent
+    publications, receipt and tombstone eviction keeping the newest, evidence counted only for new pairs and per
+    owner, the phase C live re-check, the 0015 backfill, the environment knobs). Targeted mutation (one at a time
+    on a scratch copy): 21 of 21 killed.
 - *Measured* (`uv run python tests/bench_checkpoint_capacity.py`, `docs/p3-checkpoint-capacity.md`).
 
 - *Round 2 (Opus review of PR #51).* R1: staged descriptors are grouped by `(kind, log)` once per
@@ -1500,26 +1575,36 @@ public deployment.
   - *Budget by work:* a per-workspace budget of refused heads per hour, or delete the staged set on every
     charged refusal after it was loaded. A per-publication head cap alone does not work: a first publication
     needs a full proof from acc_0.
-- **G3: one account can fill the global staging ceiling.** 4 GiB is 64 full workspaces; one account creates
-  10 per hour and keeps every other workspace at 503. Needs a per-account (owner-person) staging cap or a
-  limit on live workspaces per account.
-- **G4: storage amplification.** (`checkpoint_node_usage`, P3-D33, now counts stored and orphaned nodes per
-  workspace: the input for the quota.) An accepted 64 MiB publication adds ~900k nodes (~264 MB at 293 B/node),
-  about 4x the staged bytes, repeatable every ~25 s per workspace; `checkpoint_receipts` and
-  `checkpoint_gone` are never purged and restore-referenced checkpoints are permanent. `checkpoint_revocations`
-  and `checkpoint_unpublished` grow with restores x known devices (owner-gated). Self-certified restore evidence
-  adds a global revocation pair per entry (since the #397 re-pin no account or device), and any account holder can
-  cause it from their
-  own workspace (hundreds of entries per 512 KiB line); this is what made the round-2 unpublished scan
-  (review N2, now a per-device lookup) a cost for every workspace. Needs a per-workspace storage quota (429)
-  and a quota on self-certified evidence per account. The per-workspace ever-device quota (4 096, P3-D31) is
-  in place; `checkpoint_unpublished` no longer grows (P3-D31). The `unpublished` retrieval route is closed by
-  P3-D31.
-- **P3-D31 ever-device quota (review of PR #55).** The 4 096 cap is permanent, so a workspace that reaches it
-  can never list a new device. Before a public deploy: a host-side per-person device cap (so one member cannot
-  burn the workspace's budget with fresh device ids) and a way out for a workspace at the cap (e.g. migrating to a
-  new workspace, or an owner-signed retirement of ever-devices with no held pair). The per-item size bound (about
-  66 KiB, through the 64 KiB `POST /v2/accounts` body) is noted in P3-D31.
+- **G3: one account can fill the global staging ceiling. Closed by P3-D34.** 4 GiB was 64 full workspaces and
+  one account creates 10 per hour, so it could keep every other workspace at 503. Now each owner person stages at
+  most 512 MiB across its workspaces (429), and owns at most 32 workspaces (429 at the first card). Remaining:
+  F5 (per-account fairness in the admission gate) is bounded by the 32 workspaces but not closed: one account
+  can still keep both admission slots busy with accepted publications of its own workspaces, delaying other
+  accounts' publications (not logins, the bridge or reads) by about (k/2) x 13 s for k busy workspaces.
+- **G4: storage amplification. Closed by P3-D34 for nodes, receipts, tombstones and self-certified evidence.**
+  An accepted 64 MiB publication adds ~900k nodes (~264 MB at 293 B/node), repeatable every ~25 s per workspace.
+  Now: at most 4,000,000 stored nodes per workspace (orphans included; ~1.17 GB, about 4.4 full sets), checked
+  before phase B inserts (429); `checkpoint_receipts` (256) and `checkpoint_gone` (4,096) keep the newest rows
+  per workspace; at most 50,000 new self-certified global revocation pairs per owner person (429).
+  `checkpoint_unpublished` no longer grows and the per-workspace ever-device quota (4 096) is in place (P3-D31).
+  Remaining, listed honestly:
+  - *Per-account storage.* The node quota is per workspace, so one account can store up to 32 x 1.17 GB ≈
+    37.5 GB (about an hour of accepted full publications across its workspaces, plus the uploads). Invite-only
+    accounts bound who can; the deploy check (2) below sizes the knobs to the disk. A per-account node budget
+    (the sum of `checkpoint_node_usage.nodes` over the owner's workspaces, checked like the workspace quota) is
+    the follow-up if invites are opened.
+  - *A workspace at its node quota cannot append any more*: nodes are never pruned (history is O(history)
+    storage by design, P3-D19). At ~1,000 events a day 4,000,000 nodes is about 11 years; a workspace that
+    reaches it migrates to a new workspace (as for a wrong genesis pin). Node pruning below a permanent anchor is
+    not designed.
+  - *Restore-referenced checkpoints and transitions are permanent* (P3-D13/D19): each accepted restore keeps a
+    checkpoint of up to 2 MiB and a bundle of up to ~0.6 MiB. Owner-gated (only an owner device signs a
+    restore) and each restore is a full accepted publication; not capped yet. A per-workspace bound on
+    transitions needs a protocol decision (devices walk them; they cannot simply be evicted).
+  - *`checkpoint_revocations`* grows with chain pairs: self-certified ones are bounded by the per-account evidence
+    cap, associated ones by device registrations. Restores x known devices otherwise (owner-gated).
+- **P3-D31 ever-device quota: the way out (open item for orch-52 / orch-d6, not implemented).** See "Ever-device
+  quota: recovery design" below. The host-side per-person device cap stays a host/core item.
 - **Unthrottled authenticated work.** (The P3-D31 unpublished routes are throttled per workspace.) Reads (up to
   56,680 heads per proof page), staging, genesis and
   baseline refusals, and `ignored` lower-n publications (full stateless validation, uncharged; exact retries
@@ -1532,6 +1617,102 @@ public deployment.
   passes on the snapshot and `complete()` would change no row (no challenged request of the person matches), or
   charge a generous per-address replay window. Until then the Caddy per-IP limit covers it. Also listed there:
   requests on an unused invite (needs a live invite code) reach the lock before the challenge is checked.
+
+**Ever-device quota: recovery design (P3-D31 follow-up; for orch-52 / orch-d6 to rule on; not implemented).**
+
+*Problem.* A workspace may list at most 4,096 ever-devices (G2 `ever_devices`: every device ever in an accepted
+member list; P3-D31, 429 `quota_exceeded` on the membership publication). The set never shrinks, so a workspace
+that reaches the cap can never list a new device. One member that registers fresh device ids and gets them listed
+(or a host that lists them) can burn the budget. The host-side per-person device cap (host/core scope) prevents
+the burning; this note is about the relay-side way out for a workspace already at the cap.
+
+*What `ever_devices` protects (why rows cannot simply be dropped).* The relay reads it in six places:
+1. R4 completeness (`coverage`): every chain pair of a known device must be carried by each workspace restore,
+   at the same or a stronger reason. Dropping a device whose pair is in the chain lets a later restore omit that
+   revocation, and devices that initialize from the chain afterwards never learn it: the rollback R4 exists to
+   stop.
+2. The P3-D31 unpublished view: a global (§19.5) revocation of an ever-device that the chain lacks (or holds
+   weaker) is served to the host until it publishes it. Dropping the device silently ends that obligation.
+3. The host's access to the §19.5 feed (`person_access`, feed filtered to the workspace's ever-devices) and to
+   the device's certificate (`GET /v2/devices/{d}` for a W session).
+4. The bridge notice cursor and the wake keys of a revocation intake (a revocation of an ever-device wakes the
+   host).
+5. Grant retrieval of past epochs for a former member (`wk_grants` joined with `ever_devices`).
+6. `ever_persons` / person access for the host.
+So "revoked former members stay covered" is (1) and (2), and the host learning about a later revocation is (3)
+and (4). Any compaction must keep all four for every device that is, or may later become, revoked.
+
+*Options.*
+- (a) **Operator-run offline compaction of never-revoked former devices**, with re-admission. An admin CLI
+  command (`orch-relay compact-ever-devices <ws>`, relay stopped or under the write lock) moves a device from
+  `ever_devices` to a new `retired_ever_devices(workspace_id, device_id, first_epoch, retired_ms)` only if ALL
+  hold: not a current member; no revocation pair for the id in the global table (any person) and none in any
+  workspace's chain (`checkpoint_revocations`); not in `checkpoint_ever_devices` of the workspace (never restore
+  evidence or a restore signer) and never the signer of an accepted transition or genesis pin; not listed for at
+  least 30 days (its grant retrieval and pending certificate flows are over). And one intake rule: a later
+  revocation of a retired id (any route: `POST /v2/revocations`, restore evidence) re-inserts it into
+  `ever_devices` in the same transaction, bypassing the 4,096 check (the check only refuses new list
+  additions). Security: (1) and (2) are untouched for every device that has a pair, because such devices are
+  never compacted, and a device that gets a pair later is back before the revocation commits, so (3), (4) and
+  the unpublished item see it exactly as before; the only loss is (5), old grants of a device that left more than
+  30 days ago, and (6) for persons with no remaining ever-device (the host then cannot read that person's feed,
+  which holds no pair for the retired ids anyway). Residual: a member who burned ids can revoke them afterwards
+  (each a PK-signed revocation: `POST /v2/revocations` takes 32 per person per day, restore evidence only
+  through a workspace that person owns) and push the count back
+  over the cap; this is the same denial of service as before and is why the host-side cap is still needed.
+- (b) **Per-workspace operator override of the cap** (admin CLI, a `ever_device_limits(workspace_id, limit)`
+  row). Drops nothing, so it is safe for revoked burned ids too; the cost is that the unpublished page and the
+  coverage query grow linearly with the set (the reason for the cap). Suitable as the fallback when (a) cannot
+  compact enough because the burned ids are revoked.
+- (c) **Owner-signed retirement or a replacement list that resets ever status.** Rejected: a retirement signed by
+  an owner device moves the decision to the signer that R4 exists to constrain. A compromised owner device with
+  the WSK could retire a revoked device and then publish a restore that omits its revocation; restricting it to
+  never-revoked devices makes it (a) with a weaker trigger (no operator review) and still needs the re-admission
+  rule.
+- (d) **Migrate to a new workspace.** Always available, no relay change: new genesis, devices pair again, the
+  old workspace stays (and counts against the 32-workspace account cap). The guaranteed way out today.
+- Rejected outright: compacting *revoked* devices, even those "not referenced by chain pairs": a revoked device
+  whose pair is only in the global feed is exactly an unpublished item (2), and one whose pair is in the chain is
+  exactly what (1) covers.
+
+*Recommendation.* (a) as the relay way out, with (b) as the operator fallback for workspaces whose burned ids are
+revoked, and (d) documented for hosts; reject (c). Open for orch-52 / orch-d6: whether 30 days is the right
+grace for (5); whether the compaction may run online under the write lock or only offline; whether hosts must be
+told (a `notices` field or nothing: the retired devices hold no pair, so no host decision depends on them).
+Host side (orch-core, stays open): the per-person device cap that prevents burning, and the host's handling of
+429 `quota_exceeded` on a membership publication (do not retry unchanged; surface it to the owner).
+
+**Pre-public-deploy checklist (operator, per VPS).**
+
+1. **Memory fits the publication gate.** Phase A holds every new node of a publication, about 1.3 KB of peak
+   process memory per node, so a full 64 MiB staging set (~906,876 heads) needs about 1.2 GB. The gate admits
+   at most `ORCH_RELAY_PUBLISH_WIDTH` (default 2) publications whose reserved heads stay under
+   `ORCH_RELAY_PUBLISH_HEADS` (default 1,500,000, about 2 GB); a single publication above the heads cap still
+   runs alone, so one full set (1.2 GB) is the floor whatever the cap. Per relay instance:
+   `peak ≈ max(HEADS_CAP, 906,876) x 1.3 KB + baseline`, where the baseline is the Python process and SQLite
+   (about 150–250 MB measured, plus up to 48 pooled read connections' page caches, ~2 MB each by default, and
+   in-flight request bodies: staging pages up to 4 MiB, waiting publications up to 2.6 MiB each). The VPS needs
+   `Σ instances (peak) + other services (Caddy, orch-publish, hosts and agents on the box, the OS: about
+   0.5–0.8 GB) ≤ 75 % of RAM` (25 % headroom). Note that `provision.sh` defines two relay instances
+   (`orch-relay` and `orch-relay-int`), each with its own gate. Recommended settings (in `/etc/orch/relay.env`
+   and `/etc/orch/relay-int.env`, the units' `EnvironmentFile`):
+   - 2 GB VPS: width 1, heads 400,000 (≈ 0.5 GB). One full set still costs ~1.45 GB per instance, so two
+     instances publishing full sets at once do not fit: run the internal instance elsewhere or only one
+     publishing instance, add 2 GB swap as a stopgap, or take the follow-up below.
+   - 4 GB VPS: width 1, heads 900,000 on both instances (≈ 1.45 GB each, ~3.5 GB with the rest: tight).
+   - 8 GB VPS: the defaults (width 2, heads 1,500,000; ≈ 2.2 GB per instance, ~5 GB in all).
+   How to read it: on the VPS `free -m` (`total` and `available`), `systemctl show orch-relay -p MemoryCurrent
+   -p MemoryPeak` (and the same for `orch-relay-int`) after a large publication, and the bench
+   (`uv run python tests/bench_publication_lockhold.py`) for the per-node figure on the deployed Python. A
+   `MemoryMax=` in the units makes an overrun kill (and restart) the relay instead of a random process.
+   If it does not fit: the follow-up is to stop materialising every new node in phase A, either packing rows
+   compactly (raw 32-byte fields in arrays instead of dicts and tuples, roughly 4–5x less) or streaming them to a
+   temporary table in chunks that phase B copies; not implemented (P3-D33 residual).
+2. **Disk fits the storage caps.** Worst case is `accounts x ORCH_RELAY_ACCOUNT_WORKSPACES x
+   ORCH_RELAY_WORKSPACE_NODES x 293 B` of nodes (defaults: 32 x 1.17 GB ≈ 37.5 GB per account) plus the 4 GiB
+   staging ceiling plus the WAL and the self-certified evidence (≤ ~75 MB per account). Lower the workspace node
+   quota or the workspaces per account for the invited accounts and the disk (example: 10 accounts on 40 GB with
+   10 GB headroom and the 4 GiB staging: 10 x 32 x N x 293 B ≤ 26 GB gives N ≈ 270,000 nodes).
 
 ## 11. Open questions
 
@@ -1674,3 +1855,4 @@ No new decisions.
 | P3-D31 | Retrieval of unpublished revocation evidence: derived per-workspace view, W(g) `GET`/`POST ack`, `notices.unpublished`, refs as hints, 4 096 ever-devices per workspace (orch-52 decision point 7) | §10, proto §19.5 |
 | P3-D32 | Directory routes authorize first: read-only pre-check outside `Directory.lock`, bounded shared connection pool, side-effect-free window checks (G3 re-review D4) | §4, §10, proto §19.4 |
 | P3-D33 | Final publication outside the global write lock: phase A on renewed read snapshots (folds keyed by page digest and start), phase B node chunks, phase C live re-run and commit with bounded live work and restarts (503 after 3 rounds); per-workspace mutex and admission by width and heads on the event loop; refused-heads budget on every refusal; orphan accounting (G1 gate) | §10, proto §19.8 |
+| P3-D34 | Per-account and per-workspace caps (429 `quota_exceeded`): 512 MiB staged per owner person, 32 workspaces per account, 4,000,000 stored nodes per workspace before phase B, newest 256 receipts and 4,096 tombstones per workspace, 50,000 new self-certified evidence pairs per owner person; ever-device recovery design (G3, G4 gates) | §10, proto §19.8 |
