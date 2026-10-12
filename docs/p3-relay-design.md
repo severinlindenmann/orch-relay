@@ -1582,7 +1582,12 @@ HTTP fixture.
       and a first sync of that workspace (or of a full single-log set) completes at once without a 429. The refill
       of 10 tokens/s bounds sustained bandwidth to 10,000 heads/s (~740 kB/s) per device; a flood of full pages
       gets 104 pages, then one every 5.7 s. The first token is taken before the read; the rest of a page's weight
-      after it, as debt (the level may go below zero, so the next request waits for it).
+      after it, as debt (the level may go below zero, so the next request waits for it). *Limit of the
+      no-429 claim (delta review S2):* a new device proves every log from its start, so the cost grows with the
+      workspace's whole history, not with one staging set. It holds while the history is at most about 907,000
+      heads (one full set) across at most 5,001 logs; beyond, the walk waits about
+      (heads / 1,000 + logs - 5,914) / 10 seconds in all (2.5 million heads over 5,001 logs: about 158 s), obeying
+      `Retry-After`. Deployments with long histories raise `ORCH_RELAY_THROTTLE_PAGE_SESSION`.
     - *Staging.* A manifest is at most `PAGE_CAP`, and its smallest canonical descriptor is 150 bytes plus a
       comma, so one staging set has at most 27,776 pages; the burst is that plus the manifest, so the largest
       honest set (and a 5,001-page one) uploads without a 429 and never touches the host's session. Staging PUTs
@@ -1768,7 +1773,10 @@ public deployment.
   - *Per-workspace sharing.* A W session's workspace bucket and the workspace's staging bucket are shared by every
     W session of the workspace, so a delegated WSK holder can spend them and delay the owner's host sessions of
     that workspace (within the delegated trust, as P3-D34's staging cap). W sessions themselves are keyed by token,
-    so a WSK holder that logs in again gets a fresh session bucket, but never a fresh workspace bucket.
+    so a WSK holder that logs in again gets a fresh session bucket, but never a fresh workspace bucket. The
+    page-workspace bucket and its debt are shared the same way (delta review S3): a delegated host that walks
+    proofs can make the primary host's proof reads wait (each full page costs 57 tokens, about 3 s of its 20/s
+    refill; minutes for a long walk). Acceptable: only key holders can.
   - *Pair answers* of a workspace share one host-answer key: anonymous pair requests (60/min per workspace)
     can delay the host's pair answers for that workspace, never its bridge answers, polls or `hold`.
   - *Buckets reset on restart*, and an identity whose depleted bucket is evicted comes back full; this needs 64
@@ -1917,6 +1925,12 @@ handling of 429 `quota_exceeded` on a membership publication (do not retry uncha
    up to a 5,000-ticket workspace and a full staging set; a deployment expecting larger first syncs raises
    `ORCH_RELAY_THROTTLE_PAGE_SESSION` (one token per 1,000 heads plus one per log). Their tables add up to ~61 MB
    per instance (all 8 key classes full) to the memory baseline of item 1.
+8. **Staging refill (delta review S1; decide before a public deploy, code unchanged for now).** The staging
+   bucket refills 3,000/min (50/s) after its 27,777 burst, per workspace. Every staging PUT takes the global
+   write lock, and an identical 4 MiB re-PUT reads and compares 4 MiB while holding it; an account owns up to 32
+   workspaces, so one account can sustain about 1,600 such writes/s. Either lower the refill to 600–1,200/min
+   (`ORCH_RELAY_THROTTLE_STAGING=27777/600`; the burst already covers any honest set, so honest uploads are
+   unaffected) or weight the staging cost by body size.
 
 ## 11. Open questions
 

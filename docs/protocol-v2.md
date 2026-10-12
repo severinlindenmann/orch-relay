@@ -2498,7 +2498,10 @@ private half; the publicly derived reference key is only a test artifact.
 
   Overrides are `burst/per-minute`. Honest clients long-poll or poll at most every few seconds. A first sync walks
   one proof per grown log: a full 64 MiB set is 17 pages of at most 56 678 heads (913 tokens), and a
-  5 000-ticket workspace adds 5 001 one-page logs, so 5 914 tokens; a staging set has at most 27 776 pages (a
+  5 000-ticket workspace adds 5 001 one-page logs, so 5 914 tokens. A new device proves every log from its start,
+  so the cost grows with the workspace's whole history: a first sync waits on no 429 only while the history is at
+  most about 907 000 heads over at most 5 001 logs, and beyond it waits about (heads / 1 000 + logs − 5 914) / 10
+  seconds in all, obeying `Retry-After`. A staging set has at most 27 776 pages (a
   4 MiB manifest of 150-byte descriptors) plus its manifest. The public revocation-pair read (§19.5) is
   limited to 60 per minute per address and 960 per minute per IPv6 /56. A relay behind a reverse proxy MUST be
   configured with the proxy's address (`ORCH_RELAY_TRUSTED_PROXY`); otherwise every client shares one address,
