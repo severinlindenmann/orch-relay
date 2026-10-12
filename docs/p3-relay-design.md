@@ -180,7 +180,7 @@ The **Auth** column uses these codes:
 | `PUT /v2/devices/{device}` | none | `{cert}` → `{device_id}` | self-authenticating under the account `PK`; per address 30/h; per person 64/day, charged only after the signature verifies; an exact retry is free | 400 `cert_invalid`, `cert_expired`; 403 `revoked`, `other_person` (no account); 409 `cert_conflict` | §6.1, §8.3, §8.4 (P3-D5) |
 | `GET /v2/devices/{device}` | D(p), or W whose `ever_persons` contains the person | → `{cert}` | | 403 `not_eligible`; 404 `not_found` | §6.1 |
 | `POST /v2/revocations` | none | `{record}` → `{device_id}` | authority is `PK`; per address 10/min; per person 32/day, charged only after the signature verifies, with 8/day reserved for revocations of devices not yet revoked; an exact retry is free | 400 `malformed`; 401 `bad_signature`; 403 `other_person` | §6.2 (P3-D5) |
-| `GET /v2/devices/{device}/revocation` | none | → `{pairs: [{person_id, reason, revocation, device_cert, pk_pub, provenance}]}`, registered person first (P3-D30) | per address 60/min | 404; 429 | §6.2, gaps 24 |
+| `GET /v2/devices/{device}/revocation` | none | → `{pairs: [{person_id, reason, revocation, provenance}]}`, registered person first (P3-D30) | per address 60/min | 404; 429 | §6.2, gaps 24 |
 | `GET /v2/persons/{person}/revocations?after=&limit=` | D(p), or W whose `ever_persons` contains the person | → `{revocations, next}` | limit ≤ 256 | 403 | §6.2 |
 | `PUT /v2/workspaces/{ws}/card` | none for the first card; W(g) after | `{card}` → `{card_seq}` | first card: per address 10/h, per owner account 10/h, first writer wins in one transaction; same card → 200 | proto §7.1 codes: 400 `malformed`, `wrong_suite`, `delegation_mismatch`; 401 `bad_signature`; 403 `other_person`; 409 `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version` | §7.1 (P3-D4) |
 | `GET /v2/workspaces/{ws}/card` | D(m) or W | → `{card}` | | 403; 404 | §7.1 |
@@ -1184,10 +1184,18 @@ HTTP fixture.
   - *Bridge notice cursor.* `revocations_cursor` counts only registry pairs of ever-devices, excluding P3-D29
     evidence-only persons (the same filter as `unpublished` eligibility). Another person's pair cuts nothing off and
     obliges no rotation, so it must not wake the host.
-  - *Revocation list.* `GET /v2/devices/{device}/revocation` returns `{pairs}` built by joins, with no new column.
-    A `registry` pair (an association: the registry row, excluding evidence-only persons) carries `devices.cert` and
-    `accounts.pk_pub`. A `chain` pair carries the evidence of the first carrying workspace by id. A `feed` pair
-    carries null for both. The order is the registered person first, then `person_id`.
+  - *Revocation list.* `GET /v2/devices/{device}/revocation` returns `{pairs: [{person_id, reason, revocation,
+    provenance}]}` built by joins, with no new column. `registry` marks an association: the registry row, excluding
+    evidence-only persons. `chain` marks a pair that a `checkpoint_revocations` row holds; `feed` marks one that only
+    the global table holds. The order is the registered person first, then `person_id`.
+  - *Deviation from ruling 3, needs orch-52 confirmation.* Ruling 3 included `device_cert` and `pk_pub` where the
+    relay holds them. The security review of this change found that this discloses, on an unauthenticated route,
+    the registry certificate, which `GET /v2/devices/{device}` gates (scopes, `dk_kx_pub`, expiry, sealed label).
+    It also discloses the account key, and the evidence that another workspace's restore carried, which is otherwise
+    readable only through that workspace's routes. Both fields are therefore omitted. The response is the public
+    signed records plus the label. As a result, a consumer cannot verify a non-registry pair from this route alone.
+    That needs an authorized route (P3-D31, or a gated variant).
+    A `chain` label is not authentication: any workspace host can carry a self-certified pair.
   - *Exact account retry.* The exact same `POST /v2/accounts` body is answered 200 from the invite digest even after
     the device was revoked. It writes nothing and grants nothing.
   - *Pinned by* `P3_D30_*` checkpoint vectors (both routes, through `register_device` with `route`), the

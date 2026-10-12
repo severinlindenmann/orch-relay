@@ -2193,7 +2193,7 @@ Caps apply to streamed bytes as well as declared Content-Length; never buffer ab
 | `PUT /v2/devices/{device}` | none | `{cert}` → `{device_id}` | self-authenticating under the account `PK`; per address 30/h; per person 64/day, charged only on verified state changes; canonical retries and refused submissions are free (G0a review 3) (G0a review 5); JSON cap 16 KiB (G0a review 2) | 400 `cert_invalid`, `cert_expired`; 403 `revoked` (P3-D30: a registered device when its registry pair is revoked; a new registration when the id holds a chain-learned revocation of any person or the new pair is revoked), `other_person` (no account); 409 `cert_conflict` | §6.1, §8.3, §8.4 (P3-D5) |
 | `GET /v2/devices/{device}` | D(p), or W whose `ever_persons` contains the person and `ever_devices` contains the device (G0a review 1) | → `{cert}` | | 403 `not_eligible`; 404 `not_found` | §6.1 |
 | `POST /v2/revocations` | none | `{record}` → `{device_id}` | authority is `PK`; per address 10/min; per person 32/day, charged only on verified state changes (G0a review 5), with 8/day reserved for revocations of devices not yet revoked; an exact retry is free; JSON cap 16 KiB (G0a review 2) | 400 `malformed`; 401 `bad_signature`; 403 `other_person` | §6.2 (P3-D5) |
-| `GET /v2/devices/{device}/revocation` | none | → `{pairs: [{person_id, reason, revocation, device_cert, pk_pub, provenance}]}` (P3-D30): every held `(device, person)` pair, the registered person's first, then by `person_id`; `provenance` is `registry`, `chain` or `feed`; `device_cert`/`pk_pub` null where the relay holds none | per address 60/min | 404 (no pair); 429 | §6.2, gaps 24 |
+| `GET /v2/devices/{device}/revocation` | none | → `{pairs: [{person_id, reason, revocation, provenance}]}` (P3-D30): every held `(device, person)` pair, the registered person's first, then by `person_id`. `revocation` is the public signed record. `provenance` is `registry` (the relay's verified association), `chain` (some workspace's accepted restore carried it; not authenticated by that person) or `feed`. No certificate or account key is served: the route is unauthenticated | per address 60/min | 404 (no pair); 429 | §6.2, gaps 24 |
 | `GET /v2/persons/{person}/revocations?after=&limit=` | D(p), or W whose `ever_persons` contains the person | → `{revocations, next}` | W sees only `ever_devices`, filtered before pagination (G0a review 1); limit ≤ 256 | 403 | §6.2 |
 | `PUT /v2/workspaces/{ws}/card` | none for the first card; W(g) after | `{card}` → `{card_seq}` | first card: per address 10/h, per owner account 10/h charged only after delegation and card signatures verify; same-card retries are free (G0a review 5); first writer wins in one transaction; same card → 200; JSON cap 64 KiB (G0a review 2) | §7.1 codes: 400 `malformed`, `wrong_suite`, `delegation_mismatch`; 401 `bad_signature`; 403 `other_person`; 409 `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version` | §7.1 (P3-D4) |
 | `GET /v2/workspaces/{ws}/card` | D(m) or W | → `{card}` | | 403; 404 | §7.1 |
@@ -2523,6 +2523,13 @@ person the device authenticates as. The person always comes from the registry ro
 - Registry entries created under a verified person-signed certificate (`PUT /v2/devices/{device}`, account
   creation) are the associations (provenance `registry`); restores create none. Associations decide applicability
   and publication only (§19.8: which carried entries bind, `unpublished`), never refusal, retention or alarms.
+- `GET /v2/devices/{device}/revocation` is unauthenticated. Each pair it lists carries the public signed record and a
+  provenance label. It serves no device certificate and no account key. `GET /v2/devices/{device}` gates the registry
+  certificate. Evidence carried by a workspace's restore is readable only through that workspace's own routes. Only
+  `registry` is an association the relay verified. `chain` means that some workspace host carried the pair in an
+  accepted restore; any host can do that. A consumer MUST NOT treat a `chain` or `feed` pair as the registered
+  person's. The answer is 404 for an id with no revocation, whether the id is registered or unknown, so the route
+  reveals nothing about unrevoked registrations.
 - `notices.revocations_cursor` (§19.3) counts only registry pairs of the workspace's ever-devices, with the
   `unpublished` eligibility filter (evidence-only persons, P3-D29, excluded). Another person's pair never moves it.
 
@@ -3098,8 +3105,8 @@ rules and must be confirmed before G4 ships:
    self-authenticating: a correct host fetches the record (§19.5) and verifies it under the named person's key with
    a matching device certificate before acting. A ref goes stale when the revocation is later upgraded, because its
    cursor and digest change. The retrieval route for `unpublished_refs` is designed separately (P3-D31) and is not part of
-   P3-D30. `GET /v2/devices/{device}/revocation` already lists every pair of a device with the evidence the relay
-   holds (P3-D30).
+   P3-D30. `GET /v2/devices/{device}/revocation` lists every pair of a device, labelled, but
+   serves no evidence (P3-D30).
    Not reported (still retained and enforced): the signer's device (equivalent here, because a signer is a
    registered member), a pair whose device is registered to another person, and devices this workspace knows only
    through restore evidence (tombstones: `checkpoint_ever_devices` alone), which count as unknown for forwarding.

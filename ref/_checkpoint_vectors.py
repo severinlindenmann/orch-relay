@@ -905,6 +905,12 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     run(c, st, 'register_device', {'device_id': laptop_id, 'person_id': alice_id}, error='revoked')
     run(c, st, 'register_device', account(x['bob_id'], x['bob_pk']), error='revoked')
     run(c, st, 'register_device', account(q_id, q_pub), error='revoked')
+    # A registered device is cut off per registry pair only: another person's chain pair for its id (only reachable
+    # through the contradiction above) never refuses the registry person's own certificate retry.
+    registered = copy.deepcopy(selfcert)
+    registered['registry'][laptop_id] = alice_id
+    c, st = new('P3_D30_registered_device_cut_off_per_registry_pair', registered)
+    run(c, st, 'register_device', {'device_id': laptop_id, 'person_id': alice_id})
     oob_q = copy.deepcopy(accepted)
     oob_q['global_revocations'][q_key] = q_rev('compromised')
     c, st = new('P3_D30_out_of_band_pair_refuses_only_its_person', oob_q)

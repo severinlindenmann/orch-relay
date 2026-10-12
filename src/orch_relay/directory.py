@@ -666,42 +666,36 @@ class Directory:
 
         provenance: 'registry' when the pair's person is the device's association (its registry row,
         excluding P3-D29 evidence-only rows, which restores created); 'chain' when an accepted
-        restore of some workspace carried the pair (`checkpoint_revocations`); 'feed' otherwise
-        (the §19.5 table alone). `revocation` is the strongest record held (the §19.5 row);
-        `device_cert` and `pk_pub` are the registry certificate and account key for a registry
-        pair, the carried evidence for a chain pair (the first workspace by id), else null."""
+        restore of some workspace carried the pair (`checkpoint_revocations`: carried by some
+        workspace host, NOT authenticated by the device's person); 'feed' otherwise (the §19.5
+        table alone). Only 'registry' is an association the relay verified.
+
+        The route is unauthenticated, so each entry is only the public signed record (the strongest
+        held, the §19.5 row) and its label. Security review of P3-D30: no device certificate (the
+        registry one is gated by GET /v2/devices/{device}; a chain one came from another
+        workspace's restore, readable only through that workspace's routes) and no account key."""
         rows = con.execute(
-            "SELECT r.person_id, r.reason, r.record, d.cert, a.pk_pub FROM revocations r "
+            "SELECT r.person_id, r.reason, r.record, d.device_id IS NOT NULL, EXISTS ("
+            "SELECT 1 FROM checkpoint_revocations c WHERE c.device_id=r.device_id "
+            "AND c.person_id=r.person_id) FROM revocations r "
             "LEFT JOIN devices d ON d.device_id=r.device_id AND d.person_id=r.person_id "
             "AND NOT EXISTS (SELECT 1 FROM evidence_persons e WHERE e.person_id=d.person_id) "
-            "LEFT JOIN accounts a ON d.device_id IS NOT NULL AND a.person_id=r.person_id "
             "WHERE r.device_id=? ORDER BY d.device_id IS NULL, r.person_id",
             (device,),
         ).fetchall()
         if not rows:
             fail("not_found")
-        pairs = []
-        for person, reason, record, cert, pk_pub in rows:
-            provenance = "registry" if cert is not None else "feed"
-            if cert is None:
-                chain = con.execute(
-                    "SELECT device_cert, pk_pub FROM checkpoint_revocations "
-                    "WHERE device_id=? AND person_id=? ORDER BY workspace_id LIMIT 1",
-                    (device, person),
-                ).fetchone()
-                if chain is not None:
-                    provenance, (cert, pk_pub) = "chain", tuple(chain)
-            pairs.append(
+        return {
+            "pairs": [
                 {
                     "person_id": person,
                     "reason": reason,
                     "revocation": P.parse_json(record),
-                    "device_cert": P.parse_json(cert) if cert is not None else None,
-                    "pk_pub": pk_pub,
-                    "provenance": provenance,
+                    "provenance": "registry" if registry else "chain" if chain else "feed",
                 }
-            )
-        return {"pairs": pairs}
+                for person, reason, record, registry, chain in rows
+            ]
+        }
 
     def card_put(self, con, ws, body, headers, address, now):
         fields(body, "card")

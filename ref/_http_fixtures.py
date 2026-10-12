@@ -167,10 +167,10 @@ def build(vectors=None):
     cert, card = v["certs"]["signed"]["phone"], v["card"]["card"]
     revocation = v["revocations"][0]["signed"]
     publication = objs["publication"]
-    alice_pk = R.b64u(bytes.fromhex(v["keys"]["person_alice.sig"]["pub"]))
-    # P3-D30: GET /v2/devices/{device}/revocation lists every held pair, the registered person's first.
+    # P3-D30: GET /v2/devices/{device}/revocation lists every held pair, the registered person's first; public
+    # signed records and a provenance label only (no certificate or account key: security review).
     registry_pair = {"person_id": person, "reason": revocation["o"]["reason"], "revocation": revocation,
-                     "device_cert": cert, "pk_pub": alice_pk, "provenance": "registry"}
+                     "provenance": "registry"}
     def chunk(raw):
         h = R.Header.decode(raw)
         return {"id": h.rid.hex(), "idx": h.seq, "last": bool(h.flags & R.F_LAST), "stream": bool(h.flags & R.F_STREAM), "envelope": R.b64u(raw)}
@@ -339,7 +339,7 @@ def build(vectors=None):
             cases[-1]["request"]["headers"]["Authorization"] = "Bearer FAKE-workspace-token"
         if name == "revocation_get":
             # P3-D30: bob's out-of-band pair ('feed', no evidence held) and the intruder's restore-carried
-            # pair ('chain', with the carried certificate and key) for the same id; both sort before alice
+            # pair ('chain') for the same id; both sort before alice
             # by person_id, yet the registered person's pair comes first, then by person_id.
             S2 = R.SUITES[2]
             def key(name_):
@@ -350,18 +350,15 @@ def build(vectors=None):
                 rec = R.sign_object(S2, key(name_), {**revocation["o"], "person_id": pid, "reason": reason})
                 return pid, pk, rec
             bob_id, _, bob_rec = other("person_bob", "compromised")
-            q_id, q_pk, q_rec = other("intruder", "lost")
-            q_cert = R.sign_object(S2, key("intruder"), {**cert["o"], "person_id": q_id})
+            q_id, _, q_rec = other("intruder", "lost")
             pairs = [registry_pair] + sorted([
-                {"person_id": bob_id, "reason": "compromised", "revocation": bob_rec, "device_cert": None,
-                 "pk_pub": None, "provenance": "feed"},
-                {"person_id": q_id, "reason": "lost", "revocation": q_rec, "device_cert": q_cert,
-                 "pk_pub": R.b64u(q_pk), "provenance": "chain"}], key=lambda p: p["person_id"])
+                {"person_id": bob_id, "reason": "compromised", "revocation": bob_rec, "provenance": "feed"},
+                {"person_id": q_id, "reason": "lost", "revocation": q_rec, "provenance": "chain"}],
+                key=lambda p: p["person_id"])
             assert person > max(bob_id, q_id)
             extra("every_pair_registered_person_first", response_json={"pairs": pairs}, given="every_pair")
             cases[-1]["given"]["condition"] = ("The relay also holds every non-registry pair of the response: 'chain' pairs as "
-                                               "an accepted restore's evidence (certificate and key), 'feed' pairs in the "
-                                               "revocation table only.")
+                                               "an accepted restore's evidence too, 'feed' pairs in the revocation table only.")
         if name in {"device_put", "cert_challenge", "cert_rejection"}:
             action = {"device_put": "certificate", "cert_challenge": "challenge", "cert_rejection": "rejection"}[name]
             vec = next(c for c in v["p3"]["cases"] if c["name"] == action + "_resigned_identical")

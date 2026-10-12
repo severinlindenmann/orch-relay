@@ -163,8 +163,8 @@ def prepare_case(directory, name, case):
                             pair["person_id"],
                             pair["reason"],
                             P.cj(record),
-                            P.cj(pair["device_cert"]),
-                            pair["pk_pub"],
+                            b"{}",  # the carried evidence; the public route never serves it
+                            "fixture",
                             "fixture",
                             "fixture",
                         ),

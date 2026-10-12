@@ -519,14 +519,14 @@ def _own_row(con, did=DEVICE, reason="lost"):
 
 def test_revocation_route_lists_every_pair_registered_person_first(tmp_path):
     """P3-D30 (orch-52 ruling 3): one entry per held pair; the registered person's pair first even
-    though it sorts last by person_id and has the highest cursor, then by person_id; provenance and
-    the evidence the relay holds for each."""
+    though it sorts last by person_id and has the highest cursor, then by person_id; each with its
+    provenance label (no certificate or key: see the disclosure test below)."""
     intruder = R.person_id(S, P.unb64u(INTRUDER_PK)).hex()
     with TestClient(create_app(tmp_path)) as c:
         d = c.app.state.directory
         seed(d)
         with closing(db.connect(d.path)) as con, con:
-            chain, chain_cert = _chain_row(con, DEVICE, intruder, "intruder.sig", INTRUDER_PK)
+            chain, _ = _chain_row(con, DEVICE, intruder, "intruder.sig", INTRUDER_PK)
             feed = _other_person_row(con, DEVICE)
             own = _own_row(con)
         assert PERSON > max(BOB, intruder)
@@ -537,24 +537,18 @@ def test_revocation_route_lists_every_pair_registered_person_first(tmp_path):
                     "person_id": PERSON,
                     "reason": "lost",
                     "revocation": own,
-                    "device_cert": CERT,
-                    "pk_pub": PK,
                     "provenance": "registry",
                 },
                 {
                     "person_id": BOB,
                     "reason": "compromised",
                     "revocation": feed,
-                    "device_cert": None,
-                    "pk_pub": None,
                     "provenance": "feed",
                 },
                 {
                     "person_id": intruder,
                     "reason": "compromised",
                     "revocation": chain,
-                    "device_cert": chain_cert,
-                    "pk_pub": INTRUDER_PK,
                     "provenance": "chain",
                 },
             ]
@@ -569,7 +563,7 @@ def test_revocation_route_without_registry_orders_by_person(tmp_path):
         seed(d)
         with closing(db.connect(d.path)) as con, con:
             con.execute("INSERT INTO evidence_persons VALUES (?)", (PERSON,))
-            own, own_cert = _chain_row(con, DEVICE, PERSON, "person_alice.sig", PK, reason="lost")
+            own, _ = _chain_row(con, DEVICE, PERSON, "person_alice.sig", PK, reason="lost")
             bob = _other_person_row(con, DEVICE)
         pairs = c.get("/v2/devices/" + DEVICE + "/revocation").json()["pairs"]
         assert [(p["person_id"], p["provenance"]) for p in pairs] == [
@@ -577,7 +571,6 @@ def test_revocation_route_without_registry_orders_by_person(tmp_path):
             (PERSON, "chain"),
         ]
         assert pairs[0]["revocation"] == bob and pairs[1]["revocation"] == own
-        assert pairs[1]["pk_pub"] == PK and pairs[1]["device_cert"] == own_cert
         assert c.get("/v2/devices/" + PRIMARY + "/revocation").json() == {"error": "not_found"}
 
 
@@ -766,3 +759,24 @@ def test_bridge_notice_cursor_counts_registry_pairs_only(tmp_path, who):
             if who == "evidence_only":
                 con.execute("INSERT INTO evidence_persons VALUES (?)", (PERSON,))
             assert notices(con, WS)["revocations_cursor"] == (1 if who == "own" else 0)
+
+
+def test_revocation_route_discloses_no_certificate_or_account_key(tmp_path):
+    """P3-D30 security review: the route is unauthenticated, so it serves only the public signed
+    revocation records. It never serves the registry certificate (GET /v2/devices/{device} is
+    D(p)/W-gated: scopes, kx key, expiry, sealed label), an account key, or the evidence another
+    workspace's restore carried (readable only through that workspace's own routes)."""
+    intruder = R.person_id(S, P.unb64u(INTRUDER_PK)).hex()
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        with closing(db.connect(d.path)) as con, con:
+            _, chain_cert = _chain_row(con, DEVICE, intruder, "intruder.sig", INTRUDER_PK)
+            _own_row(con)
+        response = c.get("/v2/devices/" + DEVICE + "/revocation")
+        assert all(
+            set(p) == {"person_id", "reason", "revocation", "provenance"}
+            for p in response.json()["pairs"]
+        )
+        for secret in (CERT["o"]["dk_kx_pub"], CERT["sig"], PK, chain_cert["sig"], INTRUDER_PK):
+            assert secret not in response.text
