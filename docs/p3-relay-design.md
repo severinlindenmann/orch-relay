@@ -1469,8 +1469,8 @@ HTTP fixture.
   - *Workspaces per account* (G3; `ORCH_RELAY_ACCOUNT_WORKSPACES`, default 32), at the first card: a person that
     already owns 32 workspaces gets 429 `quota_exceeded`. Workspaces are never deleted, so "live" is every
     workspace the person owns, and the cap is a lifetime cap until a workspace deletion route exists; the
-    operator can raise it only globally (one environment variable for every account; no per-account override
-    yet). Migration to a new workspace, the documented exit for the node quota, the ever-device cap and a wrong
+    operator could raise it only globally (one environment variable for every account; the audited per-account
+    override came with P3-D36). Migration to a new workspace, the documented exit for the node quota, the ever-device cap and a wrong
     genesis pin, burns a slot each time (review F2; pre-public item in the checklist below). Judgement: the staging cap alone closes the G3 staging attack, but without a bound on
     workspaces every per-workspace cap (the node quota, staging slots, the refused-heads budget, the admission
     gate's fairness, F5) multiplies by an unbounded count (10 new workspaces per hour). The card route is the
@@ -1569,7 +1569,8 @@ HTTP fixture.
     seconds to the next token) in place of whatever the request would have answered; no new code, no shape change.
   - *Defaults* (burst, refill per minute; `ORCH_RELAY_THROTTLE_<NAME>="burst/per-minute"`): session 600, 600
     (10/s); person 1,200, 1,200; workspace 1,200, 1,200; page-session 5,914, 600; page-person and page-workspace
-    11,828, 1,200; staging 27,777, 3,000 (50/s); host-answer 1,200, 1,200. The arithmetic, round 2:
+    11,828, 1,200; staging 28,801, 600 (10/s), weighted by body size (P3-D36; was 27,777, 3,000 unweighted);
+    host-answer 1,200, 1,200. The arithmetic, round 2:
     - *Read.* Honest hosts and phones long-poll (`wait` up to 25 s) or poll at most every few seconds (≤ 0.5/s),
       and a directory sync reads the card, members, grants, a card key and a few certificates: 600 of burst and
       10/s per device are 20x above an honest client's peak. A person with 2 devices at full rate fits its 1,200.
@@ -1592,6 +1593,7 @@ HTTP fixture.
       comma, so one staging set has at most 27,776 pages; the burst is that plus the manifest, so the largest
       honest set (and a 5,001-page one) uploads without a 429 and never touches the host's session. Staging PUTs
       take the lock, so they stay bounded per workspace: 50/s after the burst (a full set again after ~9 min).
+      Superseded by P3-D36: one token per started 64 KiB of body, burst 28,801, refill 600/min.
     - *Host answer.* A member posts at most 20 requests/s (`bridge-post`) and 10/s on its device bucket; the host's
       answers to it are charged to (workspace, that device) at 1,200 burst and 20/s, the rate of the existing
       `bridge-host-post` window. A member therefore spends only the host's answers to itself; the host's polls,
@@ -1671,6 +1673,94 @@ HTTP fixture.
     scan of 1, clock going back). Survivors on the way (staging and answer keys shared, a pairing rid accepted,
     eviction under a clock going back) were killed by added tests.
 
+- **P3-D36 (pre-public limits: staging weighted by size, node-quota restore reserve, per-account workspaces
+  override).** Closes pre-public-deploy checklist items 8 (delta review S1), 3 (P3-D34 review F1) and 4 (review
+  F2). Protocol §19.4 (the staging bucket) and §19.8 (storage caps) state the observable rules.
+  - *Staging weighted by body size, refill 600/min* (`directory.STAGING_BURST`, `staging_tokens`). Before, every
+    staging PUT took one token of a 27,777 burst refilled at 3,000/min (50/s) per workspace; each PUT takes the
+    global write lock, and an identical 4 MiB re-PUT reads and compares 4 MiB under it, so one account (32
+    workspaces) sustained ~1,600 such writes/s (~6.4 GB/s of compares under the lock). Now a PUT costs one token
+    per started 64 KiB of its body (`STAGE_TOKEN_BYTES`), at least one, charged after authorization from the
+    length of the body the transport read. *Burst.* A set is at most `MANIFEST_PAGES` = 27,776 pages plus its
+    manifest and at most `STAGE_CAP` = 64 MiB in all (manifest included); a piece of `s` bytes costs
+    `1 + floor((s - 1) / 64 KiB)`, and the extra terms sum to at most `floor(64 MiB / 64 KiB)` = 1,024, so no
+    honest set costs more than 27,777 + 1,024 = **28,801**, the burst: it uploads with no 429 at one instant
+    (pinned with an injected clock). Worked: 5,001 one-head pages (~300 B each) plus their ~0.9 MB manifest =
+    5,001 + 14 = 5,015 tokens; a full 64 MiB set in 4 MiB pages = 15 x 64 + 64 + 1 = 1,025 tokens; the largest
+    set by count (27,776 small pages and a 4 MiB manifest) = 27,840. Weighting is safe for honest sets because
+    the burst carries the byte allowance; small pages pay what they paid before. *Refill: 600/min (10 tokens/s,
+    640 KiB/s per workspace).* A full burst comes back in 28,801 / 600 ≈ 48 min. Judgement: acceptable, because
+    only the pathological largest-by-count set drains it: a repeated full 64 MiB checkpoint in 4 MiB pages costs
+    1,025 tokens (back in ~1.7 min), a repeated 5,001-page set 5,015 (~8.4 min), and an incremental checkpoint a
+    handful; and the burst is not one set's worth but holds five 5,001-page sets or 28 full 4 MiB-page sets back
+    to back. A host that stages beyond it is paced by `Retry-After` (10 small pages/s), never failed.
+    1,200/min was not needed. What it bounds: per
+    workspace 10 tiny lock-taking writes/s or one 4 MiB re-PUT per 6.4 s (a flood of 4 MiB re-PUTs gets 450,
+    then one per 6.4 s; a flood of tiny PUTs 28,801, then 10/s); per account (32 workspaces) 320 writes/s or
+    20 MiB/s of compares, down from ~1,600/s and ~6.4 GB/s. Residual: the per-account burst is still 32 x 28,801
+    tiny lock-taking writes (~0.9 million) once per ~48 min; a per-account staging bucket would bound it if
+    invites open (not done: it needs sizing against honest accounts that stage several workspaces at once).
+  - *Node-quota restore reserve* (`Caps.reserve`, `ORCH_RELAY_WORKSPACE_NODES_RESERVE`; unset: 5 % of the
+    configured quota, **200,000** of the default 4,000,000). An ordinary publication (any final publication
+    without a verified owner-signed restore) is refused 429 `quota_exceeded` once stored + new nodes would
+    exceed `quota - reserve`; an owner-signed restore may fill up to the full quota. The flag is the restore
+    that `restore()` verified (owner policy, signatures, R0–R5) before the commit point, so a WSK holder cannot
+    claim it; `node_quota()` is the same call at phase A's commit point and in phase C, so both use it, and the
+    refusal keeps the P3-D34 treatment (uncharged, fold work recorded as refused heads; phase A inserts
+    nothing, phase C rolls back). *Why it holds against a hostile fill:* phase B inserts only after phase A
+    passed the ordinary limit, and one workspace's phases are serialized, so accepted publications and orphans
+    of refused ones (the hostile holder's two ways to store nodes) never take stored nodes above
+    `quota - reserve` (pinned). *A restore's node cost* (from `publish`/`restore`): its line head (1) plus every
+    head of its staged set that is not stored yet: retained pages of a branch the relay does not hold and
+    appended pages of other logs (abandoned pages re-prove the stored branch: 0). So 1 node for the recovery
+    case (roll back to a stored prefix, no other log growing), at most `STAGE_CAP / 74 + 1` = 906,877 for a
+    restore that carries a full set of new history. 200,000 fits 200,000 minimal restores, or, e.g., four that
+    each carry 50,000 new heads; a restore that must carry more new history than the reserve has left is
+    refused like an ordinary publication (sizing it for one full set would take 23 % of every workspace's
+    quota). Remaining: after a hostile fill, ordinary appends stay refused (nodes are never pruned), so the
+    restore's role is to abandon the hostile branch so devices follow the owner's chain; the owner then migrates
+    (one slot, see the override below). Validated at start-up: `0 <= reserve <= quota`.
+  - *Per-account override of the workspaces cap* (migration 0016). `account_workspace_override(person_id
+    PRIMARY KEY, cap 1..10,000 (CHECK), set_by, set_at_ms, note)` and the append-only
+    `account_workspace_override_audit(seq, person_id, old_cap, new_cap, set_by, set_at_ms, note)` (triggers
+    refuse UPDATE and DELETE), written together in one `BEGIN IMMEDIATE` by the operator command
+    `orch-relay account-cap set <person_id> <cap> --by <operator> [--note ...]` (JSON on stdout); `account-cap
+    show <person_id>` (owned workspaces, effective cap, override) and `account-cap audit [<person_id>]` (one
+    JSON row per line, oldest first) only read. No HTTP route: there is no remote admin surface. The person must
+    have an account; the cap must be an integer 1..10,000 (`MAX_ACCOUNT_WORKSPACES`; 10,000 x the default node
+    quota is far beyond any disk, so it is a typo guard); `--by` 1..128 and `--note` up to 1,024 characters, no
+    control characters. A lower override is allowed (it refuses new first cards, deletes nothing). *Locking:*
+    the command opens its own connection and takes SQLite's write lock with `BEGIN IMMEDIATE`, with the relay
+    running or stopped; while the relay holds the lock (each of its write transactions is short: a node chunk
+    ~0.2 s, a commit) the command waits up to `ORCH_RELAY_ADMIN_BUSY_MS` (default 5,000 ms), else exits 1 with
+    nothing written ("database busy"; retry); bad input exits 2 with nothing written. It never migrates
+    (a relay may be serving the database): migration 0016 must be applied (`orch-relay migrate` or a relay
+    start), else it exits 2. The relay caches nothing: the next first card's check reads the
+    row (`Directory.workspace_cap`, one primary-key read on the caller's connection), in the read-only P3-D32
+    pre-check (so an over-cap card is still refused without `Directory.lock`) and again in the transaction
+    under the lock (exact under concurrency, as P3-D34). An account without a row keeps the global
+    `ORCH_RELAY_ACCOUNT_WORKSPACES`. Not done: a workspace deletion or archival route (slots stay lifetime).
+  - *Still open:* checklist item 5 (the ever-device way out: offline compaction and the audited per-workspace
+    ever-device override, orch-d6 ruling) and item 6 (429 detail for permanent quotas).
+  - *Pinned by* `tests/test_throttle.py` (the defaults and their arithmetic; an honest 5,001-page set, a full
+    64 MiB set and the largest set by count with no 429 at one instant; tiny and 4 MiB floods cut off at exact
+    counts with exact refill; the HTTP route's weighting by body size, a 429 charging nothing),
+    `tests/test_caps.py` (ordinary publications refused at `quota - reserve` in phase A and re-checked in phase
+    C, uncharged with refused heads; a hostile fill by orphans stops at `quota - reserve`; a restore accepted
+    into the reserve, also after a fill and through phase C, refused at the full quota; the environment knob,
+    its 5 % default and its validation) and `tests/test_account_cap.py` (the override raises or lowers the cap
+    for one account only, read in the lock-free pre-check and re-read in the transaction; override and audit
+    written atomically, the audit append-only; bad caps and inputs refused, also by the schema; a busy database
+    writes nothing; the CLI's set, show, audit, bad input and busy exit).
+    Targeted mutation (one at a time on a scratch copy): 36 of 36 killed (staging: unweighted, size not passed,
+    floor instead of ceiling, no minimum token, refill 3,000 or 1,200, burst without the byte allowance, a
+    128 KiB token; reserve: ignored, applied to restores too, restores unlimited, the restore flag in phase A
+    only or phase C only, a strict comparison, the environment ignored, no upper-bound check, the default from
+    the default quota, a doubled reserve; override: ignored, of any account, only under the lock, no audit row,
+    audit in its own transaction, no upper, lower or type bound, no account check, old cap lost, control
+    characters, audit deletable or updatable, no schema CHECK, busy exit 0, `show` and `audit` filters, no
+    schema check).
+
 - *Round 2 (Opus review of PR #51).* R1: staged descriptors are grouped by `(kind, log)` once per
   publication; a refused 10,000-ticket x 2-page first publication held the lock 12.7 s (9.4 s in the
   review), now 1.1 s. G2: parsing and every check that needs no database state run after the read-only
@@ -1741,15 +1831,15 @@ public deployment.
     storage by design, P3-D19). At ~1,000 events a day 4,000,000 nodes is about 11 years; a workspace that
     reaches it migrates to a new workspace (as for a wrong genesis pin). Node pruning below a permanent anchor is
     not designed.
-  - *The node quota also blocks owner-signed restores (review F1, required before a public deploy).* Every restore
+  - *The node quota also blocked owner-signed restores (review F1). Closed by P3-D36* (a reserve of the quota,
+    200,000 nodes by default, that only owner-signed restores may use). The record of the problem: every restore
     adds at least one new node (its line head), so a workspace at the quota can never be restored. A hostile or
     compromised WSK holder can fill 4,000,000 nodes in minutes (about five accepted full sets, or refused
     publications whose orphans count too); the owner then cannot use a restore to abandon that host's branch,
     gets a permanent 429 that looks like the transient budget (P3-D34, "Permanent quotas look transient"), and
     the only exit, migrating, burns one of the account's 32 lifetime workspace slots. Before a public deploy:
-    a small restore reserve (accept an owner-signed restore while `stored + pending <= quota + RESTORE_RESERVE`,
-    the reserve a few full proof sets; restores are owner-gated and each is a full accepted publication) or a
-    per-workspace operator override of the node quota. Not implemented.
+    a small restore reserve or a per-workspace operator override of the node quota. P3-D36 implements the
+    reserve inside the quota (ordinary publications stop at `quota - reserve`).
   - *Restore-referenced checkpoints and transitions are permanent* (P3-D13/D19): each accepted restore keeps a
     checkpoint of up to 2 MiB and a bundle of up to ~0.6 MiB. Owner-gated (only an owner device signs a
     restore) and each restore is a full accepted publication; not capped yet. A per-workspace bound on
@@ -1900,17 +1990,17 @@ handling of 429 `quota_exceeded` on a membership publication (do not retry uncha
    compactly (raw 32-byte fields in arrays instead of dicts and tuples, roughly 4–5x less) or streaming them to a
    temporary table in chunks that phase B copies; not implemented (P3-D33 residual).
 2. **Disk fits the storage caps.** Worst case is `accounts x ORCH_RELAY_ACCOUNT_WORKSPACES x
-   ORCH_RELAY_WORKSPACE_NODES x 293 B` of nodes (defaults: 32 x 1.17 GB ≈ 37.5 GB per account) plus the 4 GiB
+   ORCH_RELAY_WORKSPACE_NODES x 293 B` of nodes (an account with a P3-D36 override counts with its own cap) (defaults: 32 x 1.17 GB ≈ 37.5 GB per account) plus the 4 GiB
    staging ceiling plus the WAL and the self-certified evidence (≤ ~75 MB per account). Lower the workspace node
    quota or the workspaces per account for the invited accounts and the disk (example: 10 accounts on 40 GB with
    10 GB headroom and the 4 GiB staging: 10 x 32 x N x 293 B ≤ 26 GB gives N ≈ 270,000 nodes).
-3. **Node-quota restore reserve (review F1; code, before a public deploy).** A small reserve of nodes for
-   owner-signed restores, so a hostile WSK holder that fills the node quota cannot starve the owner's restore
-   (G4 "Remaining"); or, at least, a per-workspace operator override of the node quota.
-4. **Per-account override of the 32-workspace lifetime cap (review F2; code, before invites open).** An audited
-   per-account override row, or a workspace deletion or archival route that frees the slot: every migration
-   (node quota, ever-device cap, wrong genesis pin) burns a slot, and today the operator can only raise the cap
-   for every account at once.
+3. **Node-quota restore reserve (review F1). Done (P3-D36).** Ordinary publications stop at `quota - reserve`;
+   owner-signed restores may use the reserve. Operator: keep `ORCH_RELAY_WORKSPACE_NODES_RESERVE` unset (5 % of
+   `ORCH_RELAY_WORKSPACE_NODES`) unless restores must carry more new history.
+4. **Per-account override of the 32-workspace lifetime cap (review F2). Done (P3-D36).** `orch-relay
+   account-cap set <person_id> <cap> --by <operator> [--note ...]` (audited, 1..10,000; `show`, `audit`). A
+   workspace deletion or archival route is still not designed; each migration still burns a slot unless the
+   operator raises that account's cap.
 5. **Ever-device way out (orch-d6 ruling above; code).** The offline compaction command, the audited
    per-workspace ever-device override, and (orch-52, host side) the per-person device cap.
 6. **429 detail for permanent quotas (follow-up for orch-52 to rule on).** `quota: "nodes"` and the like, or a
@@ -1925,12 +2015,9 @@ handling of 429 `quota_exceeded` on a membership publication (do not retry uncha
    up to a 5,000-ticket workspace and a full staging set; a deployment expecting larger first syncs raises
    `ORCH_RELAY_THROTTLE_PAGE_SESSION` (one token per 1,000 heads plus one per log). Their tables add up to ~61 MB
    per instance (all 8 key classes full) to the memory baseline of item 1.
-8. **Staging refill (delta review S1; decide before a public deploy, code unchanged for now).** The staging
-   bucket refills 3,000/min (50/s) after its 27,777 burst, per workspace. Every staging PUT takes the global
-   write lock, and an identical 4 MiB re-PUT reads and compares 4 MiB while holding it; an account owns up to 32
-   workspaces, so one account can sustain about 1,600 such writes/s. Either lower the refill to 600–1,200/min
-   (`ORCH_RELAY_THROTTLE_STAGING=27777/600`; the burst already covers any honest set, so honest uploads are
-   unaffected) or weight the staging cost by body size.
+8. **Staging refill (delta review S1). Done (P3-D36).** One token per started 64 KiB of body, burst 28,801,
+   refill 600/min per workspace (`ORCH_RELAY_THROTTLE_STAGING=28801/600`): any honest set uploads with no 429,
+   and one account sustains at most 320 lock-taking staging writes/s (20 MiB/s of compares), down from ~1,600/s.
 
 ## 11. Open questions
 
@@ -2075,3 +2162,4 @@ No new decisions.
 | P3-D33 | Final publication outside the global write lock: phase A on renewed read snapshots (folds keyed by page digest and start), phase B node chunks, phase C live re-run and commit with bounded live work and restarts (503 after 3 rounds); per-workspace mutex and admission by width and heads on the event loop; refused-heads budget on every refusal; orphan accounting (G1 gate) | §10, proto §19.8 |
 | P3-D34 | Per-account and per-workspace caps (429 `quota_exceeded`): 512 MiB staged per owner person, 32 workspaces per account, 4,000,000 stored nodes per workspace before phase B, newest 256 receipts and 4,096 tombstones per workspace, 50,000 new self-certified evidence pairs per owner person; ever-device recovery design (G3, G4 gates) | §10, proto §19.8 |
 | P3-D35 | Token buckets on every authenticated directory, bridge and checkpoint request, charged after authentication (refusals to the read class): read buckets per device (or W token) and person (or workspace), page buckets weighted by heads, a staging bucket per workspace, host answers per (workspace, target device); bounded LRU table; O(1) poll admission counters (N3); proxy misconfiguration warning (N4); revocation-read /56 window (blocker 4; round 2: review F1-F3) | §10, proto §19.4, §19.6 |
+| P3-D36 | Pre-public limits: staging weighted by body size (one token per started 64 KiB, burst 28,801, refill 600/min); a node-quota reserve (5 %, 200,000 nodes) only owner-signed restores may use; an audited per-account override of the workspaces cap (migration 0016, `orch-relay account-cap`, no HTTP route) (checklist items 3, 4, 8) | §10, proto §19.4, §19.8 |

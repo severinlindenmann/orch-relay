@@ -2195,7 +2195,7 @@ Caps apply to streamed bytes as well as declared Content-Length; never buffer ab
 | `POST /v2/revocations` | none | `{record}` → `{device_id}` | authority is `PK`; per address 10/min; per person 32/day, charged only on verified state changes (G0a review 5), with 8/day reserved for revocations of devices not yet revoked; an exact retry is free; JSON cap 16 KiB (G0a review 2) | 400 `malformed`; 401 `bad_signature`; 403 `other_person` | §6.2 (P3-D5) |
 | `GET /v2/devices/{device}/revocation?after=&limit=` | none | → `{pairs: [{person_id, reason, revocation, provenance}], next}` (P3-D30): every held `(device, person)` pair, the registered person's first on page 1, then `chain` before `feed`, then by §19.5 cursor (never by `person_id`). `next` is opaque and passed back as `after`. `revocation` is the public signed record. `provenance` is `registry` (the relay's verified association), `chain` (some workspace's accepted restore carried it; not authenticated by that person) or `feed`. No certificate or account key is served: the route is unauthenticated | per address 60/min; limit ≤ 32 (default 32); no cap on held pairs | 400 `malformed` (a bad limit or after token); 404 when a request without an after token finds no pair (a valid after token past the end, even for a device with no pairs, is an empty 200 page); 429 | §6.2, gaps 24 |
 | `GET /v2/persons/{person}/revocations?after=&limit=` | D(p), or W whose `ever_persons` contains the person | → `{revocations, next}` | W sees only `ever_devices`, filtered before pagination (G0a review 1); limit ≤ 256 | 403 | §6.2 |
-| `PUT /v2/workspaces/{ws}/card` | none for the first card; W(g) after | `{card}` → `{card_seq}` | first card: per address 10/h, per owner account 10/h charged only after delegation and card signatures verify; at most 32 workspaces per owner account (P3-D34, 429 `quota_exceeded`, checked after the signatures, before any window is charged); same-card retries are free (G0a review 5); first writer wins in one transaction; same card → 200; JSON cap 64 KiB (G0a review 2) | §7.1 codes: 400 `malformed`, `wrong_suite`, `delegation_mismatch`; 401 `bad_signature`; 403 `other_person`; 409 `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version` | §7.1 (P3-D4) |
+| `PUT /v2/workspaces/{ws}/card` | none for the first card; W(g) after | `{card}` → `{card_seq}` | first card: per address 10/h, per owner account 10/h charged only after delegation and card signatures verify; at most 32 workspaces per owner account, or the account's operator override (P3-D34/D36, 429 `quota_exceeded`, checked after the signatures, before any window is charged); same-card retries are free (G0a review 5); first writer wins in one transaction; same card → 200; JSON cap 64 KiB (G0a review 2) | §7.1 codes: 400 `malformed`, `wrong_suite`, `delegation_mismatch`; 401 `bad_signature`; 403 `other_person`; 409 `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version` | §7.1 (P3-D4) |
 | `GET /v2/workspaces/{ws}/card` | D(m) or W | → `{card}` | | 403; 404 | §7.1 |
 
 **P3-D3 (accounts; C5).** Accounts come only from single-use invite codes made by the admin CLI
@@ -2479,7 +2479,8 @@ private half; the publicly derived reference key is only a test artifact.
   the workspace's). Page class (proof and transition pages): the page buckets of the same identities, one token
   per started 1 000 heads returned (a transition page by its bytes at 74 per head), at least one; one token is
   taken before the read and the rest after it, which may leave the bucket below zero. Staging class (staging page
-  and manifest PUTs): the workspace's staging bucket. Host answers (a W session's direction-2 ORB2 post on the
+  and manifest PUTs): the workspace's staging bucket, one token per started 65 536 bytes of the request body, at
+  least one (P3-D36). Host answers (a W session's direction-2 ORB2 post on the
   bridge or a pair): the (workspace, target device) bucket when the target has a live request on that rid, all
   pair answers of a workspace one (workspace, pair) bucket, anything else the host's read buckets. A refusal
   after authentication takes one read-class token. An empty bucket answers 429 `rate_limited` with `Retry-After` (whole seconds until the tokens are
@@ -2493,7 +2494,7 @@ private half; the publicly derived reference key is only a test artifact.
   | page-session | as session (pages) | 5 914 | 600/min | `ORCH_RELAY_THROTTLE_PAGE_SESSION` |
   | page-person | as person (pages) | 11 828 | 1 200/min | `ORCH_RELAY_THROTTLE_PAGE_PERSON` |
   | page-workspace | as workspace (pages) | 11 828 | 1 200/min | `ORCH_RELAY_THROTTLE_PAGE_WORKSPACE` |
-  | staging | workspace (staging PUTs) | 27 777 | 3 000/min (50/s) | `ORCH_RELAY_THROTTLE_STAGING` |
+  | staging | workspace (staging PUTs, weighted by body size) | 28 801 | 600/min (10/s) | `ORCH_RELAY_THROTTLE_STAGING` |
   | host-answer | (workspace, requesting device) or (workspace, pair) | 1 200 | 1 200/min (20/s) | `ORCH_RELAY_THROTTLE_HOST_ANSWER` |
 
   Overrides are `burst/per-minute`. Honest clients long-poll or poll at most every few seconds. A first sync walks
@@ -2502,7 +2503,10 @@ private half; the publicly derived reference key is only a test artifact.
   so the cost grows with the workspace's whole history: a first sync waits on no 429 only while the history is at
   most about 907 000 heads over at most 5 001 logs, and beyond it waits about (heads / 1 000 + logs − 5 914) / 10
   seconds in all, obeying `Retry-After`. A staging set has at most 27 776 pages (a
-  4 MiB manifest of 150-byte descriptors) plus its manifest. The public revocation-pair read (§19.5) is
+  4 MiB manifest of 150-byte descriptors) plus its manifest and at most 64 MiB in all, so it costs at most
+  27 777 + 64 MiB / 64 KiB = 28 801 tokens: any set uploads at once without a 429 (5 001 small pages and their
+  manifest: about 5 015 tokens; 64 MiB in 4 MiB pages: 1 025). The refill bounds the lock-taking staging writes of
+  a workspace to 10 small PUTs or 640 KiB per second; a full burst is back after about 48 minutes. The public revocation-pair read (§19.5) is
   limited to 60 per minute per address and 960 per minute per IPv6 /56. A relay behind a reverse proxy MUST be
   configured with the proxy's address (`ORCH_RELAY_TRUSTED_PROXY`); otherwise every client shares one address,
   and the relay logs a warning.
@@ -2933,7 +2937,8 @@ never refused by it, and the fold work of a refused one counts toward the refuse
 restore: the distinct `(device_id, person_id)` revocation pairs of devices without association that the relay's
 §19.5 table does not hold yet (each would add a global row), counted per owner person over all its accepted
 restores (50,000); carrying a pair the relay already holds is never counted or refused. A first card: the
-workspaces the owner account already owns (32; workspaces are never deleted). Receipts of accepted publications
+workspaces the owner account already owns (32, or the account's operator override of 1 to 10,000, P3-D36, set
+by an audited operator command and never over HTTP; workspaces are never deleted). Receipts of accepted publications
 are kept for the newest 256 per workspace (an older exact retry is judged as a new request: `ignored` or a
 refusal, never a different acceptance), and an expired endpoint answers 410 `checkpoint_gone` for the newest 4,096
 expired per workspace, 404 `not_found` beyond. The node quota shares the code with the transient refused-heads
@@ -2941,10 +2946,11 @@ budget, so a host cannot tell them apart from one answer: it retries after `Retr
 the relay: once the budget is spent the answer comes before any fold) and surfaces a `quota_exceeded` that
 persists past an hour to the owner (a workspace at its node quota migrates to a new one). The permanent caps
 (nodes, workspaces, evidence) answer `Retry-After: 1` like the transient ones; each retry over the node quota
-costs the relay a full verification until the refused-heads budget is spent. The node quota applies to restores
-too: every restore adds at least one node (its line), so a workspace a hostile WSK holder filled to the quota can
-no longer be restored by its owner (P3-D34 residual; a restore reserve or an operator override is a
-pre-public-deploy item). These answers
+costs the relay a full verification until the refused-heads budget is spent. The last nodes of the node quota are a
+reserve (5 % of it, 200,000 by default; P3-D36) that only a workspace or ticket restore signed under the owner
+policy may use: any other publication is refused once the stored plus new nodes would exceed the quota minus the
+reserve, so a WSK holder that fills the workspace cannot prevent the owner's restore (a restore adds its line plus
+the heads of its staged set the relay does not hold yet: 1 node for a roll-back to a stored prefix). These answers
 need relay state far beyond any vector, so they are pinned by relay tests, not HTTP fixtures.
 
 **Restore rules (P3-D13/D23/D24/D25).** `restore` is `{line, cert, authz: {delegation}, log}`.
