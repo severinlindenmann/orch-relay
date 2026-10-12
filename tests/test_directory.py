@@ -425,3 +425,67 @@ def test_legacy_card_only_history_does_not_authorize_feed(tmp_path):
         assert r.status_code == 403 and r.json() == {"error": "not_eligible"}
         with closing(db.connect(d.path)) as con:
             assert con.execute("SELECT person_id FROM ever_persons").fetchone()[0] == PERSON
+
+
+# --- orch-core #397 (migration 0010): revocations retained per (device, person) ------------------
+
+
+def _other_person_row(con, did, reason="compromised"):
+    """Bob's verified-looking "revocation" of alice's device id, as restore evidence stores it."""
+    bob = V["ids"]["person_bob"]
+    record = signed({**RECORD["o"], "device_id": did, "person_id": bob, "reason": reason})
+    con.execute(
+        "INSERT INTO revocations VALUES (?,?,?,?,?,(SELECT coalesce(max(cursor),0)+1 FROM revocations))",
+        (did, bob, P.cj(record), reason, NOW),
+    )
+    return record
+
+
+def test_revoke_keeps_every_pair_and_upgrades_per_pair(tmp_path):
+    """Another person's revocation of a device id never drops or blocks the device's person's own: a
+    first-come row used to make alice's revocation a no-op (prior = bob's compromised row)."""
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        with closing(db.connect(d.path)) as con, con:
+            bob_record = _other_person_row(con, DEVICE)
+        stronger = signed({**RECORD["o"], "reason": "compromised"})
+        assert c.post("/v2/revocations", json={"record": stronger}).status_code == 200
+        with closing(db.connect(d.path)) as con:
+            rows = dict(
+                con.execute("SELECT person_id,record FROM revocations WHERE device_id=?", (DEVICE,))
+            )
+        assert rows == {PERSON: P.cj(stronger), V["ids"]["person_bob"]: P.cj(bob_record)}
+        # The registered person's record is the one GET /revocation names; bob's row stays.
+        assert c.get("/v2/devices/" + DEVICE + "/revocation").json()["record"] == stronger
+        with closing(db.connect(d.path)) as con, con:
+            con.row_factory = __import__("sqlite3").Row
+            d.revoke(con, RECORD, NOW)  # weaker for alice's pair: no change
+            assert (
+                con.execute(
+                    "SELECT reason FROM revocations WHERE device_id=? AND person_id=?",
+                    (DEVICE, PERSON),
+                ).fetchone()[0]
+                == "compromised"
+            )
+
+
+def test_revocation_route_falls_back_to_the_earliest_pair(tmp_path):
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        with closing(db.connect(d.path)) as con, con:
+            bob_record = _other_person_row(con, DEVICE)
+        # No pair of the registered person: the earliest held record.
+        assert c.get("/v2/devices/" + DEVICE + "/revocation").json()["record"] == bob_record
+
+
+def test_device_auth_cutoff_stays_by_device_id(tmp_path):
+    """The device-auth cutoff is a different concern from restore-signer refusal: any held revocation
+    of a device id ends its sessions and refuses its login, whatever the person (documented)."""
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        with closing(db.connect(d.path)) as con, con:
+            _other_person_row(con, DEVICE)
+        assert issue_login(c).json() == {"error": "revoked"}
