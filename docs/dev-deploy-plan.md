@@ -46,8 +46,7 @@ real phone (TestFlight build) and a real host can then run the phase-2 flows aga
 
 1. **The new build is live on both instances.** Do not rely on `/healthz` alone. It returns
    `{"ok": true, "version": "0.1.0", "instance": "public"|"int"}` (`src/orch_relay/app.py`), and `version` is the
-   wheel version `0.1.0`. That version does not change between commits and may equal the skeleton's (**UNKNOWN: to
-   verify read-only on the VPS**: the skeleton's `/healthz` body). The build counts as confirmed only when all three
+   wheel version `0.1.0`. That version does not change between commits and may equal the skeleton's (**ANSWERED (12 Oct 2026, read-only ssh/local): U3: both instances answer `{"ok":true,"version":"0.1.0","instance":"public"|"int"}`, so `version` is identical to the new build and proves nothing**). The build counts as confirmed only when all three
    of these hold:
    - `readlink /opt/orch/relay/current` names `/opt/orch/releases/relay-0.1.0-<sha>`, where `<sha>` is the
      deployed commit (`infra/dev/deploy.sh` names releases `relay-${version}-${short sha}`).
@@ -68,7 +67,7 @@ real phone (TestFlight build) and a real host can then run the phase-2 flows aga
      (`/v2/persons/{p}/cert-requests`, `/v2/cert-requests/{id}`, `.../challenge`, `.../rejection`) for a primary
      device.
    - §19.8 device reads (`GET .../checkpoint`, `GET .../transitions`, `GET .../proof`), only if the phase-2 phone
-     runs the checkpoint sync walk. **UNKNOWN: to verify with orch-f1 / orch-mobile.** The mobile vendored set has
+     runs the checkpoint sync walk. **ANSWERED (12 Oct 2026, read-only ssh/local): U12: the phone code has no real relay transport at all in this build (no `URLSession`; `PairingScreen` says "The relay isn't connected in this build") and no checkpoint walk outside the fake host, so §19.8 device reads are not exercised by the TestFlight build.** The mobile vendored set has
      no checkpoint fixtures.
    - The host routes (`host/hold`, `host/poll`, `membership`, `card` PUT, `card-keys`, `genesis`, `staging/*`,
      `checkpoint` PUT, `baselines`, `unpublished*`) are exercised by the host (orch-core), not by the phone. Mobile
@@ -163,10 +162,9 @@ Notes on the table:
 
 ### 3.2 An existing skeleton database compared with a fresh one
 
-- The skeleton was deployed from `246f3f3` or close to it. **UNKNOWN: to verify read-only on the VPS** (the
-  release dir name under `/opt/orch/releases/`). Its only migration is `0001_init` (the `meta` table), and
+- The skeleton was deployed from `246f3f3` or close to it. **ANSWERED (12 Oct 2026, read-only ssh/local): U2: not quite. `current` points to `/opt/orch/releases/relay-0.1.0-661302a` (commit `661302a`, "CI: pin python 3.14 ...", after the skeleton). Four release dirs exist: `relay-0.1.0-9aa1731`, `-110cded`, `-661302a`, `-dirty-f6539008`. All carry only the code of the skeleton era, 0001_init (the dirty one additionally has a `0002_bad.sql`, a leftover of a rollback test).** Its only migration is `0001_init` (the `meta` table), and
   `0001_init.sql` has never changed since (`git log` shows one commit). An existing skeleton database should
-  therefore list only `0001_init` (**UNKNOWN: to verify read-only on the VPS** with
+  therefore list only `0001_init` (**U4: NOT OBTAINABLE read-only: the data dirs `/srv/orch-relay` and `/srv/orch-relay-int` are `root:<service user> 0750`, so `deploy` cannot list them, and the live database was deliberately not opened. The running release `661302a` ships only `0001_init.sql`, so the database can hold nothing newer. The operator must check, as root with the unit stopped or on a copy,** with
   `sqlite3 -readonly /srv/orch-relay/data/relay.sqlite3 'SELECT version, applied_at FROM schema_migrations'`, and the
   same for the int database). On that database the new code would apply `0002` … `0015` (+`0016`) in order at
   startup.
@@ -179,8 +177,7 @@ Notes on the table:
   - A fresh database makes every later migration test start from a known point and makes the P3-D30 audit
     queries unnecessary.
   - Only the int database location is uncertain. `provision.sh` puts it at `/srv/orch-relay-int/data`, while the
-    read-only facts list only `/srv/orch-relay/data`. **UNKNOWN: to verify read-only on the VPS**
-    (`ls -la /srv/orch-relay/data /srv/orch-relay-int/data`).
+    read-only facts list only `/srv/orch-relay/data`. **ANSWERED (12 Oct 2026, read-only ssh/local): U5: the units set `ORCH_RELAY_DATA=/srv/orch-relay/data` (public) and `/srv/orch-relay-int/data` (int), `ReadWritePaths=/srv/orch-relay` and `/srv/orch-relay-int`, so the int database is under `/srv/orch-relay-int/data`. Both parents exist (`root:orch-relay 750`, `root:orch-relay-int 750`); the `data` dirs themselves are not listable by `deploy`, so file names and sizes are NOT OBTAINABLE read-only (operator: `sudo ls -la /srv/orch-relay*/data`).**
 - **Backup before the wipe** (§5 step B). With the unit stopped, **move** the data dir to a root-only timestamped
   backup and recreate it empty with the original owner and mode. The move is atomic and is itself the backup.
   Keep the backups outside `/srv/<svc>/data`: `orch-dev-reset` wipes the data dirs.
@@ -208,10 +205,10 @@ Notes on the table:
      1 s apart.
    - If that fails, it prints the last 50 log lines per unit, flips back to the previous target and restarts both.
      Otherwise it prunes to the 5 newest `relay-*` release dirs (keeping the current and the previous).
-4. **UNKNOWN: to verify read-only on the VPS:**
-   - which Python the venv uses (`command -v python3.14 python3; python3 --version`; `requires-python >= 3.11`);
-   - whether `uv` is on the deploy user's PATH (`ssh orch-dev 'command -v uv'`);
-   - the Ubuntu release (HANDOVER says 24.04; `e2e/CHECKLIST.md` says 26.04 in fact).
+4. **ANSWERED (12 Oct 2026, read-only ssh/local): U1, U9:**
+   - the venv uses `/usr/bin/python3.14`, CPython 3.14.4 (`pyvenv.cfg`: `home = /usr/bin`, `version_info = 3.14.4`); `/usr/bin/python3` is on the box too;
+   - `uv` 0.12.23 is at `/usr/local/bin/uv`, on the deploy user's PATH;
+   - the Ubuntu release is 26.04 LTS (kernel 7.0.0-14, x86_64), not 24.04.
 
 **Limitations of the deploy script for this plan:**
 
@@ -237,14 +234,12 @@ Points to know before running `provision.sh` for these changes:
   Caddyfile and reloads Caddy if it changed, and enables and starts `orch-limits`. It does **not** restart relay
   units (only `daemon-reload`), so the unit changes take effect at the deploy restart in step C/D.
 - It takes `<domain> <vapid-subject-email>`. Use **the same email as the first run**, or the Caddyfile global
-  `email` and `VAPID_SUBJECT` change too. **UNKNOWN: to verify read-only on the VPS**
-  (`grep -n email /etc/caddy/Caddyfile`).
+  `email` and `VAPID_SUBJECT` change too. **ANSWERED (12 Oct 2026, read-only ssh/local): U7: the Caddyfile global block has `email agent@severin.io`.** Check that value against what the run will pass.
 - **It overwrites `/etc/orch/relay.env` and `/etc/orch/relay-int.env`** with only the three `VAPID_*` lines
   (`vapid()` uses `write_if_changed`). Any `ORCH_RELAY_*` line added to those files is silently removed by the next
   provision run. The PR #27 README advice ("or the `ORCH_RELAY_*` variables in `/etc/orch/relay.env`") is therefore
   unsafe. Feed this back to PR #27. This plan puts relay settings in a separate file instead (§4.3).
-- How `provision.sh` gets onto the VPS: **UNKNOWN: to verify read-only on the VPS** (a kit checkout on the VPS, or
-  an scp of the reviewed PR head). Use exactly the reviewed commit (`48bf7b5` or its successor after the delta
+- How `provision.sh` gets onto the VPS: **ANSWERED (12 Oct 2026, read-only ssh/local): U14: there is no kit checkout visible to `deploy` (`/opt` holds only `orch`; `~deploy` holds only `.cache`, `.ssh`; `/root` and `/home/ubuntu` are unreadable). An installed copy exists: `/usr/local/sbin/orch-dev-provision` (root 0750, written by `provision.sh` itself, last modified 11 Oct 01:39 UTC, so the script was rerun then), plus `/usr/local/sbin/orch-dev-reset` and `orch-unit`. The earlier copy to the host was therefore a one-off copy by an admin. The reviewed head still has to be copied over (scp to the admin user) and its sha256 compared with the installed copy.** Use exactly the reviewed commit (`48bf7b5` or its successor after the delta
   review) and record its sha256 in the run log.
 
 ### 4.3 Relay settings (environment), from the code
@@ -275,8 +270,7 @@ All of these are read once at start-up. The list is complete for `develop` `601c
 
 **P4 interim cap (`ORCH_RELAY_GLOBAL_STAGE_BYTES`).** The ceiling counts every live staged byte relay-wide (503
 `overloaded` above it, `charge_stage`). No staged set can exceed it, so a publication's new heads are bounded by
-`cap / 74 B`. Figures from design §10 checklist 1 (measured on macOS, CPython 3.14; **UNKNOWN: to verify on the VPS
-Python** with `tests/bench_publication_lockhold.py`): ~1.3 KB of phase A memory per new node, and a baseline of
+`cap / 74 B`. Figures from design §10 checklist 1 (measured on macOS, CPython 3.14; **U10 NOT OBTAINABLE read-only (VPS Python is CPython 3.14.4, same minor as the measurement; the benchmark must still be run)** with `tests/bench_publication_lockhold.py`): ~1.3 KB of phase A memory per new node, and a baseline of
 ~150–250 MB plus up to 48 pooled read connections (~2 MB each) plus in-flight bodies. Allow ~350 MB for the
 baseline:
 
@@ -359,7 +353,7 @@ ROOT$ command -v python3.14 python3 uv; python3 --version
 - Resolves UNKNOWNs U1–U9 and U16 (§9).
 - **Go only if** the read-only facts still hold, nothing unexpected is running, and the RAM, disk and Ubuntu values
   match what §4.3 assumes.
-- `MemoryPeak` needs systemd ≥ 255 (**UNKNOWN: to verify read-only on the VPS**). If it is missing, use
+- `MemoryPeak` needs systemd ≥ 255 (**ANSWERED (12 Oct 2026, read-only ssh/local): U9: systemd 259 (259.5-0ubuntu3.4), nftables 1.1.6; `MemoryPeak` works and already reports ~50 MB per relay unit**). If it is missing, use
   `MemoryCurrent` sampling and the cgroup's `memory.peak`.
 
 ### Step A: Off-host validation of the nft ruleset (laptop or a throwaway VM; nothing on the VPS)
@@ -578,8 +572,7 @@ The `grep` must find nothing.
 3. The phone joins, then sends one bridge request and gets the answer.
 4. The host revokes a test device, and the phone sees 403 `revoked` on login.
 
-Whether a P3-capable host exists for this (orch-core bridge client, or `orch-host-ws2` on the VPS): **UNKNOWN: to
-verify with orch-52** (U11).
+Whether a P3-capable host exists for this (orch-core bridge client, or `orch-host-ws2` on the VPS): **ANSWERED (12 Oct 2026, read-only ssh/local): U11: no host exists on the VPS: `orch-host-ws2`, `orch-publish-api` and `orch-app@` are installed but `disabled` and `inactive`. A host-side bridge client on the dev laptop is not visible read-only (state/coordination.md of 11 Oct: "P3 core-side host bridge client waits for A"); NOT OBTAINABLE read-only: ask orch-52 whether it exists now.**
 
 **F7. Load sanity (optional, orch-d6 to decide):**
 
@@ -600,7 +593,7 @@ Watch at +1 h, +6 h and +24 h:
 - `nft list table inet orch_limits` counters, if (a) was applied. Hits from the testers' addresses mean that
   address belongs in `orch-limits-allow.nft`.
 - `curl -fsS https://relay.dev.severin.io/healthz` at each check.
-- Caddy 5xx and 429 rates, if Caddy access logs exist. **UNKNOWN: to verify read-only on the VPS** (U8): the
+- Caddy 5xx and 429 rates, if Caddy access logs exist. **ANSWERED (12 Oct 2026, read-only ssh/local): U8: Caddy has no `log` directive and `/var/log/caddy` is empty, so there are no access logs; the 5xx/429 watch must use relay journal lines or add a `log` block**: the
   provisioned Caddyfile has no `log` directive.
 
 **Stop the soak and roll back if** any OOM kill or unexpected restart occurs, if `MemoryPeak` > 85 % of
@@ -671,8 +664,7 @@ The certificates in `/var/lib/caddy` are never touched, which matters for the Le
 - **Applied migrations.** Restore the backup instead (§6.2); writes after the backup are lost.
 - **Invites, accounts and pairings handed to testers.** They live only in the database, so a restore invalidates
   them, and phones must re-pair. Mobile keychain state (device keys) survives on the phone. Whether the phone
-  recovers cleanly from a relay that "forgot" it (login 401 or 404, re-registration of the same device id): **UNKNOWN:
-  to verify with orch-f1** (U12).
+  recovers cleanly from a relay that "forgot" it (login 401 or 404, re-registration of the same device id): **NOT OBTAINABLE read-only (U12): the build has no relay client, so ask orch-f1 for the planned behaviour**.
 - **Throttle buckets and in-memory windows.** They reset on every restart (accepted, P3-D35).
 
 ---
@@ -721,7 +713,7 @@ Ordered by impact:
   phone requires the signed card's `relay_url` to be byte-equal to the reviewed origin. The relay's
   `ORCH_RELAY_ORIGIN` and the host's card must therefore carry exactly that string; a trailing slash breaks it.
   - Open: does the TestFlight build let a tester choose the relay (paste or QR origin review), or does it pin
-    `relay.dev`? (**UNKNOWN: to verify with orch-f1**, U15.)
+    `relay.dev`? (**ANSWERED (12 Oct 2026, read-only ssh/local): U15: the TestFlight build can NOT reach any relay yet (no real transport, "relay isn't connected in this build"; Demo mode only). Once connected, decisions D-3 and gaps 5/6 say pairing uses a pasted link or QR that carries the relay origin, shown before joining; the associated-domains file lists `relay.dev.severin.io` only**)
   - The internal instance (`relay-internal.`) is only reachable if the build accepts that origin.
 - **R10. TestFlight expectations.** Phase 2 needs a TestFlight build with the HTTPS `RequestSender` (orch-mobile
   `docs/plug-in.md` §A: "The HTTPS sender is not implemented"). Its build date and the commit it pins are orch-f1's.
@@ -819,23 +811,65 @@ testing, orch-d6 says "go" again.
 
 ---
 
-## 9. UNKNOWN list (to verify read-only on the VPS, or with the named session)
+## 9. UNKNOWN list (answered 12 Oct 2026 by a read-only check; open items marked)
 
 | # | Unknown | How to verify (read-only) |
 |---|---|---|
-| U1 | Python that `deploy.sh` uses on the VPS (`python3.14` or `python3`, version ≥ 3.11), and `uv` on the deploy user's PATH | `command -v python3.14 python3 uv; python3 --version` |
-| U2 | The skeleton's release name and commit (expected near `246f3f3`) | `readlink /opt/orch/relay/current; ls /opt/orch/releases` |
-| U3 | The skeleton's `/healthz` body (does it carry `version: 0.1.0`?) | `curl -fsS http://127.0.0.1:8101/healthz` |
-| U4 | `schema_migrations` of both existing databases (expected `0001_init` only) | `sqlite3 -readonly … 'SELECT * FROM schema_migrations'` |
-| U5 | Where the int database lives (`/srv/orch-relay-int/data` per `provision.sh`, while the given facts name only `/srv/orch-relay/data`) | `ls -la /srv/orch-relay*/data` |
-| U6 | Current `/etc/orch/relay.env` and `relay-int.env` contents (expected `VAPID_*` only) | `cat` |
-| U7 | The email of the first provision run (Caddyfile global `email`) | `grep -n email /etc/caddy/Caddyfile` |
-| U8 | Whether Caddy access logs exist (for the 5xx/429 watch) | `grep -n log /etc/caddy/Caddyfile; ls /var/log/caddy` |
-| U9 | Ubuntu release, nft and systemd versions (`MemoryPeak` needs systemd ≥ 255) | `lsb_release -ds; nft --version; systemctl --version` |
-| U10 | Phase A memory per node on the VPS Python (1.3 KB measured on macOS, CPython 3.14) | F7, or `tests/bench_publication_lockhold.py` on a VPS-like machine |
-| U11 | Whether a P3-capable orch-core host (bridge client) exists for pairing tests, and whether `orch-host-ws2` is enabled | ask orch-52; `systemctl is-enabled orch-host-ws2` |
-| U12 | Whether the phase-2 phone runs the checkpoint sync walk (§19.8 reads), and how it recovers after a relay restore | ask orch-f1 |
-| U13 | The remote e2e scenarios named in design §10 (they do not exist; who builds the G5 harness, and when) | orch-d6 / stream D |
-| U14 | How `provision.sh` reaches the VPS (a kit checkout there, or scp of the reviewed head) | `ls -la /root /opt` for a kit checkout |
-| U15 | Whether the TestFlight build allows choosing the relay origin (paste/QR) or pins `relay.dev` | ask orch-f1 |
-| U16 | Other services running on the VPS and their memory (orch-publish, `orch-app@`, host, agent) | `systemctl list-units 'orch-*'; systemctl show … -p MemoryCurrent` |
+| U1 | Python that `deploy.sh` uses on the VPS (`python3.14` or `python3`, version ≥ 3.11), and `uv` on the deploy user's PATH | `command -v python3.14 python3 uv; python3 --version` **ANSWERED (12 Oct 2026, read-only ssh/local): python3.14 = /usr/bin/python3.14 (CPython 3.14.4); uv 0.12.23 at /usr/local/bin/uv** |
+| U2 | The skeleton's release name and commit (expected near `246f3f3`) | `readlink /opt/orch/relay/current; ls /opt/orch/releases` **ANSWERED (12 Oct 2026, read-only ssh/local): current = relay-0.1.0-661302a; also -9aa1731, -110cded, -dirty-f6539008 (naming relay-<version>-<sha>, dirty = wheel hash)** |
+| U3 | The skeleton's `/healthz` body (does it carry `version: 0.1.0`?) | `curl -fsS http://127.0.0.1:8101/healthz` **ANSWERED (12 Oct 2026, read-only ssh/local): {"ok":true,"version":"0.1.0","instance":"public"} and ..."int"}; version equals the new build's** |
+| U4 | `schema_migrations` of both existing databases (expected `0001_init` only) | `sqlite3 -readonly … 'SELECT * FROM schema_migrations'` **NOT OBTAINABLE read-only: data dirs are root:svc 0750; running release ships only 0001_init; operator checks as root** |
+| U5 | Where the int database lives (`/srv/orch-relay-int/data` per `provision.sh`, while the given facts name only `/srv/orch-relay/data`) | `ls -la /srv/orch-relay*/data` **ANSWERED (12 Oct 2026, read-only ssh/local): int data = /srv/orch-relay-int/data (unit Environment); dir contents not listable by deploy** |
+| U6 | Current `/etc/orch/relay.env` and `relay-int.env` contents (expected `VAPID_*` only) | `cat` **ANSWERED (12 Oct 2026, read-only ssh/local): names only: VAPID_SUBJECT, VAPID_PRIVATE_KEY_FILE, VAPID_PUBLIC_KEY_FILE in both files (150 and 158 bytes, mode 644 root:root, so they hold paths and an address, not key bytes); no ORCH_RELAY_* lines** |
+| U7 | The email of the first provision run (Caddyfile global `email`) | `grep -n email /etc/caddy/Caddyfile` **ANSWERED (12 Oct 2026, read-only ssh/local): email agent@severin.io** |
+| U8 | Whether Caddy access logs exist (for the 5xx/429 watch) | `grep -n log /etc/caddy/Caddyfile; ls /var/log/caddy` **ANSWERED (12 Oct 2026, read-only ssh/local): no access logs (no log directive, /var/log/caddy empty)** |
+| U9 | Ubuntu release, nft and systemd versions (`MemoryPeak` needs systemd ≥ 255) | `lsb_release -ds; nft --version; systemctl --version` **ANSWERED (12 Oct 2026, read-only ssh/local): Ubuntu 26.04 LTS, nftables 1.1.6, systemd 259 (MemoryPeak OK)** |
+| U10 | Phase A memory per node on the VPS Python (1.3 KB measured on macOS, CPython 3.14) | F7, or `tests/bench_publication_lockhold.py` on a VPS-like machine **NOT OBTAINABLE read-only (VPS CPython is 3.14.4; run the benchmark / F7)** |
+| U11 | Whether a P3-capable orch-core host (bridge client) exists for pairing tests, and whether `orch-host-ws2` is enabled | ask orch-52; `systemctl is-enabled orch-host-ws2` **ANSWERED (12 Oct 2026, read-only ssh/local): no host on the VPS (orch-host-ws2, orch-publish-api, orch-app@ disabled and inactive); a local bridge client: ask orch-52** |
+| U12 | Whether the phase-2 phone runs the checkpoint sync walk (§19.8 reads), and how it recovers after a relay restore | ask orch-f1 **ANSWERED (12 Oct 2026, read-only ssh/local): build has no relay transport and no checkpoint walk outside the fake host; restore recovery: ask orch-f1** |
+| U13 | The remote e2e scenarios named in design §10 (they do not exist; who builds the G5 harness, and when) | orch-d6 / stream D **ANSWERED (12 Oct 2026, read-only ssh/local): design §10 G5 row (line 1137) names: P3 exit run, rotation race, restart during the outbox, a real-phone adapter; no remote harness or script exists in orch-relay/e2e or orch-relay/infra; owner and date still open** |
+| U14 | How `provision.sh` reaches the VPS (a kit checkout there, or scp of the reviewed head) | `ls -la /root /opt` for a kit checkout **ANSWERED (12 Oct 2026, read-only ssh/local): no kit checkout; installed copy /usr/local/sbin/orch-dev-provision (root 0750, 11 Oct 01:39 UTC); reviewed head must be copied by an admin** |
+| U15 | Whether the TestFlight build allows choosing the relay origin (paste/QR) or pins `relay.dev` | ask orch-f1 **ANSWERED (12 Oct 2026, read-only ssh/local): not yet: build has no relay transport (Demo only); later via pasted link or QR carrying the origin** |
+| U16 | Other services running on the VPS and their memory (orch-publish, `orch-app@`, host, agent) | `systemctl list-units 'orch-*'; systemctl show … -p MemoryCurrent` **ANSWERED (12 Oct 2026, read-only ssh/local): only caddy (15 MB), orch-relay (49 MB), orch-relay-int (50 MB) run; orch-host-ws2, orch-publish-api, orch-app@ disabled** |
+
+---
+
+## 10. Findings of the read-only check (12 Oct 2026)
+
+Done with read-only ssh as `deploy` plus local repo reads. Nothing was written on the VPS, the live databases were
+not opened, and no env file contents were read (variable names only).
+
+What changes the plan:
+
+- **The VPS is not a skeleton at `246f3f3`.** `current` is `relay-0.1.0-661302a`. The release naming is
+  `relay-<wheel version>-<short sha>`, or `relay-<version>-dirty-<wheel sha8>` for a dirty tree. Four releases are
+  kept (`KEEP=5`). The dirty release carries a `0002_bad.sql` from a failed-migration rollback test; the pruning
+  will drop it. Only `0001_init` exists in the running code, so the database is at `0001_init` at most.
+- **`/healthz` cannot prove a deploy**: `version` is `0.1.0` in the old and new builds. Keep the stronger checks
+  of §3.
+- **Toolchain is fine**: Ubuntu 26.04 LTS, Python 3.14.4 at `/usr/bin/python3.14`, `uv` 0.12.23, systemd 259,
+  nftables 1.1.6. HANDOVER's "24.04" is wrong for this host.
+- **Data dirs are invisible to `deploy`** (`/srv/orch-relay` and `/srv/orch-relay-int` are `root:svc 0750`). The
+  backup and wipe steps (§5) need root via the installed helpers, and the int database path comes from the unit
+  `Environment`, `/srv/orch-relay-int/data`. U4 stays with the operator.
+- **Env files**: `/etc/orch/relay.env` and `relay-int.env` hold exactly three names, `VAPID_SUBJECT`,
+  `VAPID_PRIVATE_KEY_FILE`, `VAPID_PUBLIC_KEY_FILE`, mode 0644 root:root (150 and 158 bytes: paths, not key
+  material). No `ORCH_RELAY_*` setting is there, so §4.3's separate settings file is still needed, and a
+  provision run would overwrite these two files.
+- **Caddy**: global `email agent@severin.io`; vhosts `relay.dev`, `relay-internal.dev`, `pub.dev` (to 8103) and
+  `apps.dev` (to 8104), all `*.severin.io`. The last two have no running backend (units disabled), so they answer
+  502. No `log` directive and an empty `/var/log/caddy`: there are no access logs for the 5xx/429 watch.
+- **Memory**: 1961 MB total, 529 MB used, 1432 MB available, no swap, 35 GB disk free. Each relay is ~50 MB
+  (peak ~51 MB), Caddy ~15 MB. That leaves room, but the §4.3 cap sizing (~350 MB per instance) still has to be
+  validated by the benchmark (U10).
+- **Provisioning**: `/usr/local/sbin/orch-dev-provision`, `orch-dev-reset` and `orch-unit` are installed, so
+  `provision.sh` was already run (the installed copy was refreshed 11 Oct 01:39 UTC). No kit checkout is visible.
+- **`deploy` cannot read the journal** (not in `adm` or `systemd-journal`), so log checks go through
+  `sudo orch-unit logs <unit> [lines]`.
+- **No host exists for pairing tests**: `orch-host-ws2`, `orch-publish-api` and `orch-app@` are `disabled`. The
+  TestFlight build has no relay client yet (Demo mode only), so F6 (phone against the dev relay) cannot run
+  until a build with a real transport exists. This is the largest surprise for the phone-side plan.
+
+Still open (NOT OBTAINABLE read-only): U4 (database `schema_migrations`), U5 file listing, U10 (benchmark on the
+VPS), U11 local bridge-client status (orch-52), U12 restore-recovery behaviour (orch-f1), U13 owner and date of the
+G5 remote harness.
