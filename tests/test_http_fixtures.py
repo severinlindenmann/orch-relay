@@ -282,6 +282,7 @@ def test_fixture_success_shapes():
                     "revocations_cursor",
                     "cert_requests",
                     "rotation_due",
+                    "unpublished",
                 }
                 for item in body["items"]:
                     assert set(item) == {"n", "route", "device", "rid", "offer", "envelope"}

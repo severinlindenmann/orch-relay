@@ -13,6 +13,7 @@ from .directory import (
     pair_revoked,
     usable_account,
 )
+from .unpublished import MAX_EVER_DEVICES
 
 ROUTES = {"membership", "members", "grants", "card_keys", "card_key"}
 MAX_EPOCH = 2**32 - 1  # §7.2 check 2: epochs are u32 (bridge header, commitments)
@@ -206,6 +207,20 @@ def publish(con, ws, body, raw, workspace, now):
         fail("other_person")
     if not previous and workspace["owner_person_id"] not in bound_persons:
         fail("other_person")
+    # P3-D31: at most MAX_EVER_DEVICES ever-devices per workspace, so an unpublished page costs
+    # O(|ever_devices|) bounded (the G4 storage gate's per-workspace quota for this route).
+    known = con.execute("SELECT count(*) FROM ever_devices WHERE workspace_id=?", (ws,)).fetchone()[
+        0
+    ]
+    fresh = sum(
+        1
+        for did in members
+        if not con.execute(
+            "SELECT 1 FROM ever_devices WHERE workspace_id=? AND device_id=?", (ws, did)
+        ).fetchone()
+    )
+    if known + fresh > MAX_EVER_DEVICES:
+        fail("quota_exceeded")
     if "card_key_wraps" in body:
         wraps_put(con, ws, body["card_key_wraps"], workspace, members, o["persons"], now)
     for did in old_ids - members.keys():

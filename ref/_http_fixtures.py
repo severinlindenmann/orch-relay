@@ -203,7 +203,7 @@ def build(vectors=None):
         "bridge_device_poll": (None, {"chunks": [chunk(bytes.fromhex(objs["bridge_response"]))]}),
         "host_hold": ({"gen": None, "take_over": False}, {"gen": 1, "lease_s": 40, "cursor": 0}),
         "host_poll": (None, {"items": [{"n": 1, "route": "bridge", "device": device, "rid": rid, "offer": None, "envelope": R.b64u(bridge)}],
-                            "notices": {"revocations_cursor": 0, "cert_requests": [], "rotation_due": []}, "next": None}),
+                            "notices": {"revocations_cursor": 0, "cert_requests": [], "rotation_due": [], "unpublished": None}, "next": None}),
         "pair_device_post": (preq, {}), "pair_host_post": (presp, {}), "pair_poll": (None, {"chunks": [chunk(presp)]}),
         "cert_requests_post": ({"request": objs["request"]}, {"request_id": crid}),
         "cert_requests_poll": (None, {"requests": [objs["request"]]}),
@@ -391,10 +391,20 @@ def build(vectors=None):
         if name in {"bridge_device_poll", "pair_poll"}:
             extra("after_first_chunk", {"query": {"after": "0", "wait": "0"}}, {"chunks": []})
         if name == "host_poll":
-            notices = {"revocations_cursor": 1, "cert_requests": [crid], "rotation_due": [{"device_id": device, "revocation_cursor": 1, "epoch": 1}]}
+            # P3-D31: notices.unpublished is the newest unpublished item's opaque position while it is above the
+            # workspace's ack (the phone's registered pair, held at cursor 1, no chain pair), else null.
+            position = R.b64u(R.cj({"v": 1, "ws": ws, "c": 1}))
+            notices = {"revocations_cursor": 1, "cert_requests": [crid], "rotation_due": [{"device_id": device, "revocation_cursor": 1, "epoch": 1}],
+                       "unpublished": position}
             extra("durable_notices", response_json={"items": [], "notices": notices, "next": None})
             extra("pair_item", response_json={"items": [{"n": 2, "route": "pair", "device": device, "rid": rid, "offer": offer, "envelope": R.b64u(preq)}],
-                                              "notices": {"revocations_cursor": 0, "cert_requests": [], "rotation_due": []}, "next": None})
+                                              "notices": {"revocations_cursor": 0, "cert_requests": [], "rotation_due": [], "unpublished": None}, "next": None})
+            for label, acked, value in (("unpublished_notice", 0, position), ("unpublished_notice_acked", 1, None)):
+                extra(label, response_json={"items": [], "notices": {"revocations_cursor": 1, "cert_requests": [], "rotation_due": [],
+                                                                     "unpublished": value}, "next": None})
+                cases[-1]["given"].update(scenario="unpublished_notice", acked=acked, condition=(
+                    "The relay holds the phone's registered (device, person) pair at §19.5 cursor 1; the workspace chain does "
+                    f"not; the workspace's unpublished ack is {acked} (P3-D31)."))
         if name == "session_logout":
             extra("expired_token_retry", given="token_expired_or_already_logged_out")
         output[name] = {"contract": "orch-relay-http-v2", "suite": 2, "route": {"method": method, "path": path, "role": role, "auth": auth},

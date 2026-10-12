@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import proto as P
+from . import unpublished as U
 from .bridge import refuse
 from .directory import Refusal, integer
 
@@ -907,8 +908,7 @@ class Relay:
                 need(root["head"] == o["genesis"], "genesis_mismatch", 409)
         need(used == {d["i"] for d in stage["manifest"]["pages"]}, "chain_diverged", 409)
         if self.unpublished:
-            # Provisional (orch-52, F1 #387 revocation.unpublished): hints and authenticated
-            # references to the evidence; stored durably in checkpoint_unpublished.
+            # Hints (P3-D31 U10): GET .../unpublished is authoritative and serves every ref.
             result["unpublished"] = sorted({"d_" + u["device_id"] for u in self.unpublished})
             result["unpublished_refs"] = self.unpublished
         con = self.con
@@ -1042,17 +1042,10 @@ class Relay:
     def coverage(self, listed, signer, log):
         """R4 completeness, per (device, person) pair, from this workspace's own chain only
         (F1 #387): each chain pair of a device in ever_devices (G2 and checkpoint) or in this
-        restore needs a carried entry of the same pair at the same or a stronger reason.
-
-        Returns the `unpublished` references, per pair (orch-core #397): revocations the relay
-        holds globally (out of band for this workspace) that the restore does not carry at their
-        strength under the same pair, for a device this workspace associates (its G2 ever-devices,
-        the list members). Not reported, still retained and enforced: the signer's device, a pair
-        whose device's association names another person, and tombstone-only devices (known to
-        this workspace only through restore evidence, so not known for forwarding). They never
-        refuse."""
+        restore needs a carried entry of the same pair at the same or a stronger reason. The
+        `unpublished` hints are the P3-D31 view after the restore (unpublished_refs)."""
         if log != "workspace":
-            return []
+            return
         carried = {
             pair: STRENGTH[item["revocation"]["o"]["reason"]] for pair, item in listed.items()
         }
@@ -1077,40 +1070,25 @@ class Relay:
             {d for (d, p), reason in chain.items() if carried.get((d, p), 0) < STRENGTH[reason]}
         )
         need(not missing, "restore_missing_revocation", 409, devices=missing)
-        unpublished = []
-        # Only the devices this workspace associates (review N2): never the relay-wide table, which
-        # any account holder grows with self-certified evidence. A chain pair whose global
-        # revocation is stronger than what the restore carries is reported too (review N1).
-        associated = {
-            r[0]
-            for r in self.con.execute(
-                "SELECT device_id FROM ever_devices WHERE workspace_id=?", (self.ws,)
-            )
-        } - {signer}
-        rows = []
-        for d in sorted(associated):
-            holder = self.association(d)
-            rows += [
-                row
-                for row in self.con.execute(
-                    "SELECT device_id,person_id,reason,cursor,record FROM revocations "
-                    "WHERE device_id=? ORDER BY person_id",
-                    (d,),
-                )
-                if holder is None or row[1] == holder[0]
-            ]
-        for d, p, reason, cursor, record in rows:
-            if carried.get((d, p), 0) < STRENGTH[reason]:
-                unpublished.append(
-                    {
-                        "device_id": d,
-                        "person_id": p,
-                        "reason": reason,
-                        "cursor": cursor,
-                        "digest": digest(bytes(record)),
-                    }
-                )
-        return unpublished
+
+    def unpublished_refs(self, signer):
+        """revocation.unpublished hints of an accepted workspace restore (P3-D31 U10): exactly the
+        items of the unpublished view after this restore's evidence is applied, minus the signer's
+        device, so every reference is retrievable through GET .../unpublished in the next
+        snapshot. The view reads only this workspace's G2 ever-devices (review N2), each device's
+        registry pair only (a device without association, or another person's pair, is never
+        reported: F1 keeps it pending), and includes a chain pair whose global row is stronger
+        (review N1). Not authoritative: the route is."""
+        return [
+            {
+                "device_id": i["device_id"],
+                "person_id": i["person_id"],
+                "reason": i["reason"],
+                **i["provenance"],
+            }
+            for i in U.view(self.con, self.ws)
+            if i["device_id"] != signer
+        ]
 
     def restore(self, w, genesis, body, target, held, stage, used):
         bundle = body["restore"]
@@ -1147,7 +1125,7 @@ class Relay:
         )
         listed = self.evidence(line, log)
         cert = self.owner_policy(w, bundle, {d for d, _ in listed})
-        self.unpublished = self.coverage(listed, cert["device_id"], log)
+        self.coverage(listed, cert["device_id"], log)
         at = timestamp(line["at"])
         need(
             (not held or timestamp(held["o"]["at"]) <= at) and at <= timestamp(target["o"]["at"]),
@@ -1198,20 +1176,9 @@ class Relay:
         target_hash = checkpoint_hash(target)
         self.apply_evidence(listed, line["id"], target_hash)
         con, ws = self.con, self.ws
-        for row in self.unpublished:
-            con.execute(
-                "INSERT INTO checkpoint_unpublished VALUES (?,?,?,?,?,?,?,?)",
-                (
-                    ws,
-                    line["id"],
-                    target_hash,
-                    row["device_id"],
-                    row["person_id"],
-                    row["reason"],
-                    row["cursor"],
-                    row["digest"],
-                ),
-            )
+        if log == "workspace":
+            # checkpoint_unpublished is no longer written (P3-D31): the view replaces it.
+            self.unpublished = self.unpublished_refs(cert["device_id"])
         for device in {d for d, _ in listed} | {cert["device_id"]}:
             con.execute("INSERT OR IGNORE INTO checkpoint_ever_devices VALUES (?,?)", (ws, device))
         transition = {
@@ -1378,12 +1345,15 @@ ROUTES = {
     "checkpoint_get": ("GET", "workspaces/{ws}/checkpoint", "R", 0),
     "transitions": ("GET", "workspaces/{ws}/transitions", "R", 0),
     "proof": ("GET", "workspaces/{ws}/proof", "R", 0),
+    "unpublished_get": ("GET", "workspaces/{ws}/unpublished", "W", 0),
+    "unpublished_ack": ("POST", "workspaces/{ws}/unpublished/ack", "W", U.ACK_CAP),
 }
 QUERY = {
     "checkpoint_get": {"hash"},
     "transitions": {"after_n", "to", "limit"},
     "proof": {"log", "from", "to", "limit"},
     "baseline_delete": {"offer_id"},
+    "unpublished_get": {"cursor", "limit"},
 }
 
 
@@ -1393,6 +1363,7 @@ class Checkpoints:
         self.global_stage_cap = int(
             os.environ.get("ORCH_RELAY_GLOBAL_STAGE_BYTES", GLOBAL_STAGE_CAP)
         )
+        self.budget = U.Budget()  # P3-D31 rate windows, after authorization only
 
     def authorize(self, con, route, ws, headers, now):
         """The route's principal: authenticated, authorized for this workspace, fenced."""
@@ -1460,6 +1431,45 @@ class Checkpoints:
             return Relay(self.d, con, params["ws"], now).read(route, query)
         finally:
             con.rollback()
+
+    def unpublished_read(self, ws, query, headers):
+        """GET .../unpublished (P3-D31): one query-only snapshot, no lock, no write. W(g) is checked
+        first (401, then 403 for any other principal, never 404, then 409 fenced); only then is the
+        workspace's fetch window charged; then the query and the position are parsed."""
+        con = self.bridge.connection("query")
+        con.execute("PRAGMA query_only=ON")
+        con.execute("BEGIN")
+        try:
+            now = self.d.clock()
+            self.authorize(con, "unpublished_get", ws, headers, now)
+            self.budget.charge("unpublished-get", ws, U.FETCH_WINDOWS, now)
+            return U.page(con, ws, query)
+        finally:
+            con.rollback()
+
+    def unpublished_ack(self, ws, headers, raw):
+        """POST .../unpublished/ack (P3-D31): authorized read-only first, then the ack window, then
+        the body; the raise itself runs under the lock, re-authorized and re-checked."""
+        try:
+            self.preauthorize("unpublished_ack", ws, headers)
+            early = True
+        except sqlite3.Error:
+            early = False  # the transaction authorizes on its own before anything is charged
+        if early:
+            self.budget.charge("unpublished-ack", ws, U.ACK_WINDOWS, self.d.clock())
+            c = U.parse_ack(ws, raw)
+        d = self.d
+        with d.lock:
+            con = self.bridge.connection("write")
+            con.execute("BEGIN IMMEDIATE")
+            with con:
+                now = d.clock()
+                self.authorize(con, "unpublished_ack", ws, headers, now)
+                if not early:
+                    self.budget.charge("unpublished-ack", ws, U.ACK_WINDOWS, now)
+                    c = U.parse_ack(ws, raw)
+                result, changed = U.ack(con, ws, c, integer(headers["orch-holder"]), now)
+        return result, [("ws", ws)] if changed else []
 
     def write(self, route, params, query, headers, raw, prepared=None):
         body, pre = prepared if prepared is not None else (None, None)
@@ -1578,6 +1588,18 @@ class Checkpoints:
                         pass  # not authorized or fenced: never charged
                 raise
             P.unhex(params["ws"])
+            if route == "unpublished_get":
+                result = await run_in_threadpool(
+                    self.unpublished_read, params["ws"], query, headers
+                )
+                return JSONResponse(result)
+            if route == "unpublished_ack":
+                result, wake = await run_in_threadpool(
+                    self.unpublished_ack, params["ws"], headers, raw
+                )
+                if wake and self.d.changed:
+                    self.d.changed(*wake)  # notices.unpublished may have changed
+                return JSONResponse(result)
             if method == "GET":
                 result = await run_in_threadpool(self.read, route, params, query, headers)
                 return JSONResponse(result)

@@ -27,6 +27,7 @@ from .directory import (
     ipv6_parent,
     token_hash,
 )
+from .unpublished import notice as unpublished_notice
 
 MIB = 1024 * 1024
 RESTORE_WINDOW = 900000  # P3-D27: restores only before first receipt + 900 s
@@ -80,7 +81,12 @@ def collect(con, now):
     con.execute("DELETE FROM cert_requests WHERE expires_ms+60000<=?", (now,))
 
 
-EMPTY_NOTICES = {"revocations_cursor": 0, "cert_requests": [], "rotation_due": []}
+EMPTY_NOTICES = {
+    "revocations_cursor": 0,
+    "cert_requests": [],
+    "rotation_due": [],
+    "unpublished": None,
+}
 
 
 def notices_stamp(updates):
@@ -119,6 +125,8 @@ def notices(con, ws):
                 (ws,),
             )
         ],
+        # P3-D31: the newest unpublished item's position while above the host's ack, else null.
+        "unpublished": unpublished_notice(con, ws),
     }
 
 

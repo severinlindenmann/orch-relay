@@ -1,5 +1,5 @@
 {
-  "aggregate": "2e6a5d2a2367e2b862d568044285356a08acb86dc55a52b200b8143527665588",
+  "aggregate": "b06adec38931a88ab7481f679853b59374b18eb974d42ded436c9bcba2357da4",
   "files": {
     "README.md": "a4a11f1d535366d9fd22bc2d9f913c79010fee55191bc46a361e99e88072be58",
     "accounts.json": "060776501099476673fa1026afa1256ec7c06f8c922c9b3542ee63ee6058d1c3",
@@ -24,7 +24,7 @@
     "genesis.json": "f769c7a11e16629f3600ef9592d86c641079988cca304cfa14374c90ccb20277",
     "grants.json": "accfe157b6b57fd72fc1b86697596343d6bdd68f2cf8680f26a64e4ef56e3591",
     "host_hold.json": "3e53d3d685b0beb747890b1ca83d4af506f75cffc787ee8948e56803b5925fc7",
-    "host_poll.json": "f354abc297b5c54491573e27f48f5a0fc6b0d98cf02ed7b80f65f4555cee460e",
+    "host_poll.json": "c34f4f1dbd75c5c85da32fa484727ce598ad087925c235a39fbbbd68e45af078",
     "manifest.py": "c637eee88eead136ff3082ea576c8e2af6db014fc6160cd188116c3ec0f37e68",
     "members.json": "7ab42fdbf9d9069015583a0139ccbad9d9a4eea1b8329787e77f7cd642a7a200",
     "membership.json": "c520c4e0c553fde643d636d381889cadd935077f7c7179228c308eb40bd85361",
@@ -42,5 +42,5 @@
     "staging_page.json": "e3aa4048ed1fa171954ccae68907b67085342b8eb88b66ba37d58f6746fd9545",
     "transitions.json": "f1e5f37a65ca8ebdf6d51c3cd92c6759f7e33b49b42d0440c01065a4159400e3"
   },
-  "revision": 10
+  "revision": 11
 }

@@ -184,3 +184,14 @@ def test_0012_drops_evidence_only_device_rows_and_keeps_revocations(tmp_path):
         ("da", "pa", "{}", "lost", 5, 8),
         ("da", "pe", "{}", "compromised", 5, 9),
     ]
+
+
+def test_0013_adds_the_unpublished_ack_table_and_keeps_checkpoint_unpublished(tmp_path):
+    """P3-D31: the view is derived; only the host's high-water mark is stored. The old
+    checkpoint_unpublished table stays (no destructive migration) but is no longer written."""
+    path = tmp_path / "relay.sqlite3"
+    assert "0013_unpublished_acks" in db.migrate(path)
+    con = sqlite3.connect(path)
+    columns = [r[1] for r in con.execute("PRAGMA table_info(unpublished_acks)")]
+    assert columns == ["workspace_id", "cursor", "gen", "at_ms"]
+    assert con.execute("SELECT count(*) FROM checkpoint_unpublished").fetchone() == (0,)

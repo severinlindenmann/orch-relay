@@ -852,8 +852,8 @@ def test_out_of_band_revocation_is_never_demanded_and_reported_unpublished(tmp_p
         assert result["unpublished"] == ["d_" + LAPTOP]
         (ref,) = result["unpublished_refs"]
         assert (ref["device_id"], ref["person_id"], ref["reason"]) == (LAPTOP, ALICE, "compromised")
-        (row,) = tables["checkpoint_unpublished"]
-        assert row[3:6] == (LAPTOP, ALICE, "compromised") and row[6] == ref["cursor"]
+        # P3-D31: the view replaces checkpoint_unpublished, which is no longer written.
+        assert tables["checkpoint_unpublished"] == []
     assert tables["checkpoint_revocations"] == []  # out of band never becomes a chain pair
 
 
@@ -1050,7 +1050,10 @@ def test_chain_pair_weaker_than_global_is_reported_unpublished(tmp_path):
     result, tables = run_case(tmp_path, "B1_evidence_sorted_pair", prepare)
     assert result["result"] == "accepted"
     assert result.get("unpublished") == ["d_" + LAPTOP], result
-    assert [r[3:6] for r in tables["checkpoint_unpublished"]] == [(LAPTOP, ALICE, "compromised")]
+    assert [(r["device_id"], r["person_id"], r["reason"]) for r in result["unpublished_refs"]] == [
+        (LAPTOP, ALICE, "compromised")
+    ]
+    assert tables["checkpoint_unpublished"] == []  # P3-D31: no longer written
 
 
 def test_revocation_carried_at_full_strength_is_not_unpublished(tmp_path):
@@ -1202,7 +1205,7 @@ def test_unpublished_scan_cost_does_not_grow_with_the_global_revocation_table(tm
                 return 0
 
             con.set_progress_handler(tick, 64)
-            Relay(None, con, WS, 1790000000000).coverage({}, LAPTOP, "workspace")
+            Relay(None, con, WS, 1790000000000).unpublished_refs(LAPTOP)
             return steps[0]
 
     small = cost()
@@ -1384,12 +1387,14 @@ def test_unpublished_suppressed_for_a_conflicting_association(tmp_path):
     assert [(r["device_id"], r["person_id"]) for r in result["unpublished_refs"]] == [
         (LAPTOP, ALICE)
     ]
-    assert [r[3:5] for r in tables["checkpoint_unpublished"]] == [(LAPTOP, ALICE)]
+    assert tables["checkpoint_unpublished"] == []  # P3-D31: no longer written
 
 
-def test_unpublished_reports_every_pair_of_an_unregistered_former_member(tmp_path):
-    """Without a registry association every held pair of an associated device is reported, each
-    with its own reference (per pair, not per device id)."""
+def test_unpublished_skips_a_former_member_without_registry_association(tmp_path):
+    """P3-D31 U10 (the `holder is None` branch removed): a G2 ever-device without a registry
+    association has no eligible pair, so none of its held pairs is reported (F1: no association
+    keeps evidence pending, never forwarded). Every reference is one the route serves.
+    (Unreachable for list members on the current relay: listing requires a registry row.)"""
 
     def prepare(con):
         held_row(con, LAPTOP, ALICE, "person_alice.sig", "lost")
@@ -1397,7 +1402,4 @@ def test_unpublished_reports_every_pair_of_an_unregistered_former_member(tmp_pat
         con.execute("INSERT INTO ever_devices VALUES (?,?,1)", (WS, LAPTOP))
 
     result, _ = run_case(tmp_path, "workspace_restore_and_exact_retry", prepare)
-    assert result["unpublished"] == ["d_" + LAPTOP], result
-    assert sorted((r["person_id"], r["reason"]) for r in result["unpublished_refs"]) == sorted(
-        [(ALICE, "lost"), (BOB, "compromised")]
-    )
+    assert result["result"] == "accepted" and "unpublished" not in result, result
