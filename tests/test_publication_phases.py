@@ -166,7 +166,8 @@ def failures(path):
 
 
 class Recorder:
-    """Directory.lock recording each outermost hold and the folds (log_acc) made while held."""
+    """Directory.lock recording each outermost hold (by thread) and the folds (log_acc) made while
+    held."""
 
     def __init__(self, lock):
         self.lock, self.depth, self.since, self.holds, self.folds = lock, 0, 0.0, [], 0
@@ -181,7 +182,7 @@ class Recorder:
     def __exit__(self, *exc):
         self.depth -= 1
         if self.depth == 0:
-            self.holds.append(time.perf_counter() - self.since)
+            self.holds.append((threading.get_ident(), time.perf_counter() - self.since))
         self.lock.release()
 
     def _is_owned(self):
@@ -205,6 +206,8 @@ def test_no_head_is_folded_under_the_lock_and_each_hold_inserts_one_chunk(relay,
         return real(acc, head)
 
     monkeypatch.setattr(checkpoints, "log_acc", counted)
+    publisher = []
+    relay.cps.hooks["phase_a"] = lambda **kw: publisher.append(threading.get_ident())
     relay.d.lock = recorder
     began = time.perf_counter()
     result = put(relay.client, body)
@@ -212,8 +215,9 @@ def test_no_head_is_folded_under_the_lock_and_each_hold_inserts_one_chunk(relay,
     relay.d.lock = recorder.lock
     assert result["result"] == "accepted", result
     assert recorder.folds == 0
-    assert len(recorder.holds) == 6 + 1, recorder.holds
-    assert max(recorder.holds) <= 0.25 * wall, (recorder.holds, wall)
+    holds = [held for thread, held in recorder.holds if thread == publisher[0]]
+    assert len(holds) == 6 + 1, recorder.holds  # the background sweeps hold it too, briefly
+    assert max(holds) <= 0.25 * wall, (holds, wall)
     assert proof(relay, body) == heads
 
 
@@ -313,7 +317,7 @@ def test_racing_publications_on_h_without_the_mutex_still_accept_once(relay):
     cps.phase_b(WS, LOWER, memos["two"])
     with pytest.raises(checkpoints.Refusal) as refused:
         cps.phase_c(params, LOWER, *prepared["two"], memos["two"])
-    cps.settle(WS, memos["two"], accepted=False)
+    cps.settle(WS, memos["two"])
     assert refused.value.code == "chain_diverged"
     assert sql(relay.path, "SELECT hash FROM checkpoint_heads")[0][0] == result["hash"]
     after = usage(relay.path)
@@ -439,7 +443,7 @@ def test_crash_between_b_and_c_leaves_no_checkpoint_and_a_retry_is_accepted(rela
     before = published(relay.path)
     raw = P.cj(body)
     pre = cps.prepare("checkpoint_put", WS, raw, cps.preauthorize("checkpoint_put", WS, LOWER))
-    memo = cps.phase_a(WS, LOWER, raw, pre[1])
+    memo = cps.phase_a(WS, LOWER, raw, pre)
     cps.phase_b(WS, LOWER, memo)  # the process dies here: phase C never runs
     assert published(relay.path) == before
     assert node_count(relay.path) >= 30
