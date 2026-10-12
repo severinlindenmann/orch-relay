@@ -80,10 +80,10 @@ THROTTLES = {
     "staging": (MANIFEST_PAGES + 1, 3000),
     "host-answer": (1200, 1200),
 }
-# Buckets kept (LRU-evicted beyond it; ORCH_RELAY_THROTTLE_TABLE). Only authenticated sessions and
-# their workspaces create entries, so a flood of bad tokens adds none; about 390 B per entry
-# (measured), ~25 MB when full.
-THROTTLE_TABLE = 65_536
+# Buckets kept per key class (8 classes; ORCH_RELAY_THROTTLE_TABLE), evicting full buckets first.
+# Only authenticated identities create entries (a flood of bad tokens adds none); about 400 B per
+# entry, ~6.5 MB per full class, ~50 MB if every class were full.
+THROTTLE_TABLE = 16_384
 # P3-D35 item 4: the unauthenticated revocation-pair read per IPv6 /56 (as challenges and pairing).
 REVOCATION_READ_PARENT = 960
 BODY_CAPS = {"accounts": 65536, "card": 65536, "card_keys": 65536, "membership": 2097152}
@@ -306,18 +306,35 @@ def window_rate(state, purpose, identity, duration, cap, now, charge=True):
 
 
 class Buckets:
-    """Token buckets with a bounded table (P3-D35); the caller holds Directory.budget.
+    """Token buckets with bounded tables (P3-D35); the caller holds Directory.budget.
 
     Levels are integers in 1/60,000 of a token, so a refill of `rate` tokens per minute adds
     exactly `rate` units per millisecond and every count is deterministic under an injected clock.
-    A missing entry is a full bucket, so evicting the least recently charged entry beyond `limit`
-    can only make that identity's next request more permissive, never refuse anyone else."""
+    A missing entry is a full bucket. Each key class (the key's first element: session, person,
+    workspace, page-*, staging, host-answer) has its own table of at most `limit` entries, so keys
+    of one class never evict another's. Beyond the limit the entry evicted is, among the EVICT_SCAN
+    least recently charged, the first that has refilled completely (evicting it loses nothing),
+    else the one closest to full: a depleted bucket is never reset by a flood of fresh identities
+    while fuller entries remain (security review of round 2)."""
 
     UNIT = 60_000
+    EVICT_SCAN = 64
 
     def __init__(self, limit=THROTTLE_TABLE):
         self.limit = limit
-        self.table = OrderedDict()  # key -> (level, ms of the level)
+        self.tables = {}  # class -> OrderedDict key -> (level, ms of the level, burst, rate)
+
+    @property
+    def table(self):
+        """Every entry (a read-only snapshot, for tests and diagnostics)."""
+        return {key: entry for table in self.tables.values() for key, entry in table.items()}
+
+    def clear(self):
+        self.tables.clear()
+
+    @staticmethod
+    def kind(key):
+        return key[0] if isinstance(key, tuple) else None
 
     def take(self, key, burst, rate, now, charge=True, cost=1, debt=False):
         """Refuse 429 `rate_limited` (Retry-After to when `cost` tokens are back, whole seconds)
@@ -326,15 +343,30 @@ class Buckets:
         go below zero: work measured after it was done (a proof page's heads) delays the next."""
         need = cost * self.UNIT
         full = burst * self.UNIT
-        level, at = self.table.get(key, (full, now))
+        table = self.tables.get(self.kind(key), {})
+        level, at = table.get(key, (full, now))[:2]
         level = min(full, level + max(0, now - at) * rate)
         if level < need and not debt:
             fail("rate_limited", max(1, math.ceil((need - level) / rate / 1000)))
         if charge:
-            self.table[key] = (level - need, max(now, at))
-            self.table.move_to_end(key)
-            while len(self.table) > self.limit:
-                self.table.popitem(last=False)
+            table = self.tables.setdefault(self.kind(key), OrderedDict())
+            table[key] = (level - need, max(now, at), burst, rate)
+            table.move_to_end(key)
+            while len(table) > self.limit:
+                del table[self.victim(table, now)]
+
+    def victim(self, table, now):
+        best, best_fill = None, None
+        for n, (key, (level, at, burst, rate)) in enumerate(table.items()):
+            if n == self.EVICT_SCAN:
+                break
+            full = burst * self.UNIT
+            fill = min(full, level + max(0, now - at) * rate) / full
+            if fill >= 1:
+                return key
+            if best_fill is None or fill > best_fill:
+                best, best_fill = key, fill
+        return best
 
 
 def throttle_settings(env):

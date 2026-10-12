@@ -130,7 +130,7 @@ def test_defaults_and_their_arithmetic():
         "staging": (27_777, 3000),
         "host-answer": (1200, 1200),
     }
-    assert D.THROTTLE_TABLE == 65_536
+    assert D.THROTTLE_TABLE == 16_384  # per key class
 
 
 def take(buckets, key, now, burst=3, rate=60, charge=True, cost=1, debt=False):
@@ -316,7 +316,8 @@ def test_bucket_table_bounded_under_many_valid_sessions(client):
             (token_hash(f"many-{i}"), "workspace", WS, NOW + 900_000),
         )
         assert get(client, CARD_PATH, {"Authorization": f"Bearer many-{i}"}).status_code == 200
-    assert len(d.buckets.table) == 8
+    # Per key class: 8 session buckets, and the one workspace bucket they share.
+    assert sorted(key[0] for key in d.buckets.table) == ["session"] * 8 + ["workspace"]
 
 
 def test_logout_and_login_do_not_refill_a_device(client):

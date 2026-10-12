@@ -785,16 +785,37 @@ class Bridge:
             if route == "bridge" and method == "GET" and session["kind"] != "device":
                 fail("not_eligible")
 
-    @staticmethod
-    def answer(route, method, session, raw):
-        """Is this an authorized host's ORB2 response (direction 2) on the bridge or a pair?"""
-        return (
-            route in ("bridge", "pair")
+    def answer_key(self, route, method, session, params, raw):
+        """The host-answer bucket of an authorized host's ORB2 response (direction 2), or None
+        (then the host's read buckets are charged). The key is never chosen freely by the poster
+        (security review of round 2): a bridge response is keyed by its target device only when
+        that device has a live request on the rid (rid_seen, written only by an eligible member
+        device's post), so the keys are bounded by the members' own requests; every pair answer
+        of a workspace shares one key (anonymous pair requests are windowed per workspace)."""
+        if not (
+            session
+            and route in ("bridge", "pair")
             and method == "POST"
             and session["kind"] == "workspace"
             and len(raw) >= 40
             and raw[5] == 2
-        )
+        ):
+            return None
+        ws = params["ws"]
+        if route == "pair":
+            return (ws, "pair")
+        device = bytes(raw[24:40]).hex()
+        try:
+            with self.reading() as con:
+                con.execute("BEGIN")
+                seen = con.execute(
+                    "SELECT 1 FROM rid_seen WHERE workspace_id=? AND device_id=? AND rid=? "
+                    "AND offer IS NULL",
+                    (ws, device, params["rid"]),
+                ).fetchone()
+        except sqlite3.Error:
+            return None
+        return (ws, device) if seen else None
 
     def admit(self, key):
         """Concurrency caps; callers run on the event loop, so no lock is needed. O(1): the
@@ -929,11 +950,11 @@ class Bridge:
                 if getattr(error, "session", None):
                     self.d.throttle(error.session, self.d.clock())
                 raise
-            if session and self.answer(route, request.method, session, raw):
+            target = self.answer_key(route, request.method, session, params, raw)
+            if target:
                 # A host's response or pair answer (P3-D35 F3): charged per (workspace, target
                 # device), never to the host's session or workspace, so a member that sends
                 # requests at its own limit can spend only the host's answers to itself.
-                target = (params["ws"], bytes(raw[24:40]).hex())
                 self.d.throttle(session, self.d.clock(), "host-answer", target)
             elif session:
                 self.d.throttle(session, self.d.clock())
