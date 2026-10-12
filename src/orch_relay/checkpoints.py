@@ -5,13 +5,24 @@ relay replays the same vectors (tests/test_checkpoint_vectors.py). Every request
 read-only before it takes the directory lock or a write transaction (G3 review 3); reads never
 take the lock at all. A refused write leaves the database unchanged; only a charged refusal of a
 final publication records its failure row (protocol-v2 §19.8 failure budget).
+
+A final publication runs in three phases (P3-D33, the G1 pre-public-deploy gate): phase A folds and
+checks it on a WAL read snapshot without Directory.lock, phase B inserts its new log_nodes in short
+chunks (each its own short transaction under the lock), and phase C re-runs the publication under
+the lock against live state, reusing phase A's folds, and commits it. Lock order: the per-workspace
+publication mutex, then the global publication semaphore (both awaited on the event loop), then
+Directory.lock, then Directory.budget; a pooled read connection is never held while taking the lock.
 """
 
 import asyncio
+import collections
 import hashlib
+import logging
 import os
 import re
 import sqlite3
+import weakref
+from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import Request
@@ -22,6 +33,8 @@ from . import proto as P
 from . import unpublished as U
 from .bridge import refuse
 from .directory import Refusal, integer
+
+log = logging.getLogger(__name__)
 
 ZERO = "sha256:" + "0" * 64
 EMPTY = {"seq": 0, "head": None, "acc": ZERO}
@@ -37,6 +50,21 @@ STAGE_SETS = 2
 BASELINES = 16
 FAILURE_BUDGET = 16  # charged refusals per holder generation per rolling hour
 WORKSPACE_FAILURE_CEILING = 48  # charged refusals per workspace per rolling hour
+# P3-D33 (G1): budget by work. Heads folded by charged refusals per workspace per rolling hour:
+# about two full 64 MiB staging sets (a head is 74 bytes on the wire).
+REFUSED_HEADS = 2 * (STAGE_CAP // 74)
+NODE_CHUNK = 20_000  # log_nodes rows per phase B transaction (one short hold of the lock each)
+# Publications in phases A to C at once, across all workspaces (ORCH_RELAY_PUBLISH_WIDTH), and the
+# staged heads they may reserve together (ORCH_RELAY_PUBLISH_HEADS; phase A needs roughly 1.3 KB
+# per new node, so 1.5 million heads is about 2 GB). A larger publication runs alone.
+PUBLISH_WIDTH = 2
+PUBLISH_HEADS = 1_500_000
+# P3-D33 round 2 (review F1): phase C may fold or parse at most this many heads live under the
+# lock (work phase A did not record); beyond it, it restarts from phase A, at most
+# PUBLISH_ROUNDS - 1 times, then answers 503 overloaded (retryable, uncharged).
+LIVE_FOLD_LIMIT = 5_000
+PUBLISH_ROUNDS = 3
+A_SNAPSHOT_HEADS = 20_000  # phase A re-opens its read snapshot after folding this many (F3)
 PROOF_LIMIT = 65536
 TRANSITION_LIMIT = 16
 # A head is 73 JSON bytes plus its comma; keep framing headroom inside the 4 MiB response.
@@ -87,12 +115,19 @@ def no(code, status=409, **details):
     refuse(code, status, 1 if status in (429, 503) else None, **details)
 
 
-def record_failure(con, ws, gen, now):
+def record_failure(con, ws, gen, now, heads=0):
     """Charge one refusal, unless the window is already full (review L1): rows never grow with
-    the request rate, and a full window refuses with 429 before any work either way."""
+    the request rate, and a full window refuses with 429 before any work either way. `heads` is
+    the fold work the refused publication did (P3-D33 budget by work); a refusal before the
+    staged set was folded did none."""
     con.execute(
         "DELETE FROM checkpoint_failures WHERE workspace_id=? AND at_ms<=?", (ws, now - HOUR)
     )
+    con.execute(
+        "DELETE FROM checkpoint_refused_heads WHERE workspace_id=? AND at_ms<=?", (ws, now - HOUR)
+    )
+    if heads:
+        con.execute("INSERT INTO checkpoint_refused_heads VALUES (?,?,?)", (ws, now, heads))
     total, mine = con.execute(
         "SELECT count(*), coalesce(sum(gen=?),0) FROM checkpoint_failures WHERE workspace_id=?",
         (gen, ws),
@@ -105,6 +140,15 @@ def refusal(code, status=409):
     error = Refusal(code)
     error.status = status
     return error
+
+
+def count_nodes(con, ws, nodes, orphaned=0):
+    """checkpoint_node_usage: stored log_nodes per workspace, and those orphaned (P3-D33)."""
+    con.execute(
+        "INSERT INTO checkpoint_node_usage VALUES (?,?,?) ON CONFLICT(workspace_id) DO UPDATE "
+        "SET nodes=nodes+excluded.nodes, orphaned=orphaned+excluded.orphaned",
+        (ws, nodes, orphaned),
+    )
 
 
 def need(ok, code="malformed", status=400, **details):
@@ -227,10 +271,12 @@ def text(b):
 
 
 class Nodes:
-    """log_nodes of one workspace log, with a per-request cache of the nodes it touched."""
+    """log_nodes of one workspace log, with a per-request cache of the nodes it touched. With a
+    `sink` (phase A, P3-D33) new nodes are collected there instead of inserted; the cache serves
+    them to the rest of the publication."""
 
-    def __init__(self, con, ws, log):
-        self.con, self.ws, self.log, self.cache = con, ws, log, {}
+    def __init__(self, con, ws, log, sink=None):
+        self.con, self.ws, self.log, self.cache, self.sink = con, ws, log, {}, sink
 
     def get(self, acc):
         if acc == ZERO:
@@ -270,7 +316,8 @@ class Nodes:
         """Insert every verified head (never cut back); the result entry, or chain_diverged.
 
         Folds in memory, checks which nodes exist in batches and inserts the rest with one
-        executemany: the directory lock is held for O(heads) work with few SQL round trips."""
+        executemany (or hands them to the sink, in fold order: a node's prev and skip ancestors
+        always precede it)."""
         previous = self.get(old["acc"])
         need(previous is not None and previous["seq"] == old["seq"], "chain_diverged", 409)
         accs, acc = [], old["acc"]
@@ -308,7 +355,11 @@ class Nodes:
                 )
             self.cache[acc] = found
             previous, prev_acc = found, acc
-        self.con.executemany("INSERT INTO log_nodes VALUES (?,?,?,?,?,?,?)", rows)
+        if self.sink is not None:
+            self.sink.extend(rows)
+        elif rows:
+            self.con.executemany("INSERT INTO log_nodes VALUES (?,?,?,?,?,?,?)", rows)
+            count_nodes(self.con, self.ws, len(rows))
         return (
             {"seq": seq, "head": heads[-1], "acc": prev_acc}
             if heads
@@ -478,20 +529,125 @@ def precheck_manifest(body, wire):
 # --- relay state -----------------------------------------------------------------------------------
 
 
-class Relay:
-    """One workspace's checkpoint state inside a caller-owned transaction."""
+class Restart(Exception):
+    """Phase C needs work phase A did not do: roll back, release the lock, rerun phase A."""
 
-    def __init__(self, directory, con, ws, now):
+
+class Reweigh(Exception):
+    """Phase A found more staged heads than the publication reserved in the gate."""
+
+    def __init__(self, heads):
+        super().__init__(heads)
+        self.heads = heads
+
+
+def again(exc):
+    """A fresh copy of a recorded refusal (same code, status, Retry-After and details)."""
+    error = Refusal(exc[0], exc[2])
+    error.status = exc[1]
+    if exc[3] is not None:
+        error.details = dict(exc[3])
+    return error
+
+
+class Memo:
+    """What phase A of a publication hands to phases B and C (P3-D33).
+
+    Every fold is recorded under what determines it: (log, key, start seq, start acc), where `key`
+    is the page's manifest digest (which binds the page's bytes, P3-D20) or the restore line's
+    head. A stored node is a function of its acc alone (nodes are immutable, hash-addressed and
+    branch-agnostic, and a stored start's branch is stored), so a recorded fold is the result a
+    live fold would give whenever phase C asks for the same key from the same start; phase C
+    re-checks the start node live. Everything else phase C re-reads live."""
+
+    def __init__(self):
+        self.folds = {}  # (log, key, start seq, start acc) -> result entry, or refusal tuple
+        self.pages = {}  # manifest digest -> {"after_seq", "from_acc"}
+        self.manifest = None  # (manifest bytes, parsed manifest, descriptor groups)
+        self.rows = []  # new log_nodes rows in fold order (phase B)
+        self.overlay = {}  # log -> phase A's node cache (phase C reads it when phase B did not run)
+        # Heads folded by this publication's phase A rounds so far, and live in phase C rounds
+        # that restarted (recorded on any refusal: budget by work, review F2).
+        self.heads = self.live = 0
+        self.accepted = False  # phase A reached the commit point: phase B inserts every new node
+        self.unsafe = False  # a staged page disagrees with its descriptor: restart
+        self.committed = False  # phase C committed the publication
+        self.charged = False  # phase C's charged refusal recorded the heads itself
+        self.reserved = None  # heads reserved in the gate (phase A reweighs beyond it)
+        self.carried = 0  # heads folded by earlier rounds of this request (budget check, N2)
+        self.refresh = None  # phase A: end the read snapshot and start a new one (review F3)
+        self.inserted = self.hits = 0
+
+
+class Relay:
+    """One workspace's checkpoint state inside a caller-owned transaction.
+
+    With a memo and `dry` (phase A, P3-D33), on a read snapshot: folds are recorded, new nodes
+    collected and nothing is written. With a memo and not `dry` (phase C), under the lock: the
+    recorded folds replace the work they did, and everything else runs live."""
+
+    def __init__(self, directory, con, ws, now, memo=None, dry=False):
         self.d, self.con, self.ws, self.now = directory, con, ws, now
+        self.memo, self.dry = memo, dry
         self.nodes = {}
         self.wake = set()
         self.visits = 0  # staged descriptors folded by this publication (work bound, review R1)
+        self.folded = 0  # heads this Relay folded itself
+        self.work = 0  # phase C: heads folded or parsed live (bounded by LIVE_FOLD_LIMIT)
+        self.since = 0  # phase A: heads folded since the read snapshot began
+        self.committed = False
         self.unpublished = []
 
     def log(self, name):
         if name not in self.nodes:
-            self.nodes[name] = Nodes(self.con, self.ws, name)
+            nodes = Nodes(self.con, self.ws, name, self.memo.rows if self.dry else None)
+            if self.memo is not None and not self.dry and name in self.memo.overlay:
+                nodes.cache = self.memo.overlay[name]
+            self.nodes[name] = nodes
         return self.nodes[name]
+
+    def live(self, count):
+        """Phase C's live work under the lock is bounded (review F1): beyond LIVE_FOLD_LIMIT
+        heads, restart from phase A, which does the work outside the lock."""
+        if self.memo is not None and not self.dry:
+            self.work += count
+            if self.work > LIVE_FOLD_LIMIT:
+                raise Restart
+
+    def fold(self, log, key, start, heads, count=1):
+        """Nodes.extend(start, heads()) for one staged page or the restore line (P3-D33): phase A
+        records the result or the refusal, phase C reuses it, so no head is folded under the
+        lock. A fold phase A never reached, or whose start node phase C cannot see, is done live,
+        within the live bound (`count` heads)."""
+        nodes, memo = self.log(log), self.memo
+        slot = (log, key, start["seq"], start["acc"])
+        if memo is not None and not self.dry and slot in memo.folds:
+            previous = nodes.get(start["acc"])
+            if previous is not None and previous["seq"] == start["seq"]:
+                memo.hits += 1
+                done = memo.folds[slot]
+                if isinstance(done, tuple):
+                    raise again(done)
+                return dict(done)
+        self.live(count)
+        batch = heads()
+        self.folded += len(batch)
+        try:
+            result = nodes.extend(start, batch)
+        except Refusal as exc:
+            if self.dry:
+                details = getattr(exc, "details", None)
+                memo.folds[slot] = (exc.code, exc.status, exc.retry, details)
+            raise
+        if self.dry:
+            memo.folds[slot] = dict(result)
+            self.since += len(batch)
+            if self.since >= A_SNAPSHOT_HEADS and memo.refresh is not None:
+                # Folds read only immutable nodes from here on (every mutable input and the
+                # staged pages were read already), so a newer snapshot is as good (review F3).
+                self.since = 0
+                memo.refresh()
+        return result
 
     def workspace(self):
         row = self.con.execute(
@@ -797,19 +953,67 @@ class Relay:
             raise pre["stage2"]
         return genesis
 
+    def load_stage(self, key):
+        """The staged set's manifest, grouped by (kind, log) once per publication (review R1).
+        Pages are read when a fold needs them (phase C: only if phase A did not fold them)."""
+        wire = self.staged("SELECT manifest FROM checkpoint_staging", key).fetchone()[0]
+        memo = self.memo
+        if memo is not None and memo.manifest is not None and memo.manifest[0] == wire:
+            manifest, groups = memo.manifest[1], memo.manifest[2]
+        else:
+            manifest, groups = P.parse_json(wire), {}
+            for d in manifest["pages"]:
+                groups.setdefault((d["kind"], d["log"]), []).append(d)  # manifest order
+            if self.dry:
+                memo.manifest = (wire, manifest, groups)
+        stage = {"key": key, "manifest": manifest, "groups": groups, "wire": None}
+        if self.dry:
+            heads = sum(d["count"] for d in manifest["pages"])
+            if memo.reserved is not None and heads > memo.reserved:
+                raise Reweigh(heads)
+            self.page_body(stage, None)  # every page in this snapshot (it is refreshed later)
+        return stage
+
+    def page_body(self, stage, d):
+        if self.memo is not None and not self.dry:  # phase C: one page, within the live bound
+            row = self.staged(
+                "SELECT body FROM checkpoint_staging_pages", stage["key"], "i", d["i"]
+            )
+            return P.parse_json(row.fetchone()[0])
+        if stage["wire"] is None:
+            stage["wire"] = dict(
+                self.staged("SELECT i,body FROM checkpoint_staging_pages", stage["key"])
+            )
+        return P.parse_json(stage["wire"][d["i"]]) if d is not None else None
+
+    def staged_page(self, stage, d):
+        """A staged page (phase C: its after_seq and from_acc, recorded by phase A)."""
+        memo = self.memo
+        if memo is not None and not self.dry and d["digest"] in memo.pages:
+            return memo.pages[d["digest"]]
+        self.live(d["count"])
+        p = self.page_body(stage, d)
+        if self.dry:
+            if p.get("digest") == d["digest"]:
+                memo.pages[d["digest"]] = {"after_seq": p["after_seq"], "from_acc": p["from_acc"]}
+            else:
+                memo.unsafe = True
+        return p
+
     def proof_pages(self, stage, kind, log, start, used):
         # Descriptors are grouped by (kind, log) once per publication (review R1): scanning the
         # manifest per log cost tickets x pages under the global lock.
         current = {k: start[k] for k in ("seq", "head", "acc")}
         for d in stage["groups"].get((kind, log), ()):
             self.visits += 1
-            p = stage["pages"][d["i"]]
+            p = self.staged_page(stage, d)
             need(
                 p["after_seq"] == current["seq"] and p["from_acc"] == current["acc"],
                 "chain_diverged",
                 409,
             )
-            current = self.log(log).extend(current, p["heads"])
+            heads = lambda p=p, d=d: p.get("heads") or self.page_body(stage, d)["heads"]
+            current = self.fold(log, d["digest"], current, heads, d["count"])
             used.add(d["i"])
         return current
 
@@ -833,8 +1037,17 @@ class Relay:
             "WHERE workspace_id=? AND at_ms>?",
             (gen, self.ws, self.now - HOUR),
         ).fetchone()
+        spent = self.con.execute(
+            "SELECT coalesce(sum(heads),0) FROM checkpoint_refused_heads "
+            "WHERE workspace_id=? AND at_ms>?",
+            (self.ws, self.now - HOUR),
+        ).fetchone()[0]
+        if self.memo is not None:  # earlier rounds of this request, recorded only after it (N2)
+            spent += self.memo.carried
         need(
-            window[1] < FAILURE_BUDGET and window[0] < WORKSPACE_FAILURE_CEILING,
+            window[1] < FAILURE_BUDGET
+            and window[0] < WORKSPACE_FAILURE_CEILING
+            and spent < REFUSED_HEADS,
             "quota_exceeded",
             429,
         )
@@ -876,18 +1089,7 @@ class Relay:
             "staging_incomplete",
             409,
         )
-        stage = {
-            "manifest": P.parse_json(
-                self.staged("SELECT manifest FROM checkpoint_staging", key).fetchone()[0]
-            ),
-            "pages": {
-                i: P.parse_json(b)
-                for i, b in self.staged("SELECT i,body FROM checkpoint_staging_pages", key)
-            },
-            "groups": {},
-        }
-        for d in stage["manifest"]["pages"]:
-            stage["groups"].setdefault((d["kind"], d["log"]), []).append(d)  # manifest order
+        stage = self.load_stage(key)
         used = set()
         old = entries(held) if held else {}
         offered = entries(target)
@@ -907,6 +1109,10 @@ class Relay:
                 root = self.log(log).at_seq(entry, 1)
                 need(root["head"] == o["genesis"], "genesis_mismatch", 409)
         need(used == {d["i"] for d in stage["manifest"]["pages"]}, "chain_diverged", 409)
+        if self.dry:  # phase A ends at the commit point: phase B inserts the nodes, C commits
+            self.memo.accepted = True
+            return result
+        self.committed = True
         if self.unpublished:
             # Hints (P3-D31 U10): GET .../unpublished is authoritative and serves every ref.
             result["unpublished"] = sorted({"d_" + u["device_id"] for u in self.unpublished})
@@ -1141,7 +1347,7 @@ class Relay:
             # A stored path needs no retained page; a supplied one must bind to that branch.
             pages = stage["groups"].get(("retained", log), [])
             if pages:
-                first = stage["pages"][pages[0]["i"]]
+                first = self.staged_page(stage, pages[0])
                 start = nodes.get(first["from_acc"])
                 need(
                     start is not None and start["seq"] == first["after_seq"], "restore_invalid", 409
@@ -1171,8 +1377,11 @@ class Relay:
         if log == "workspace":
             root = nodes.at_seq(retained, 1)
             need(root["head"] == genesis["pin"]["o"]["genesis"], "restore_invalid", 409)
-        result = nodes.extend(retained, [event_head(line)])
+        head = event_head(line)
+        result = self.fold(log, ("line", head), retained, lambda: [head])
         need(entries(target).get(log) == result, "restore_invalid", 409)
+        if self.dry:  # phase A writes nothing; phase C applies the evidence live
+            return log
         target_hash = checkpoint_hash(target)
         self.apply_evidence(listed, line["id"], target_hash)
         con, ws = self.con, self.ws
@@ -1357,6 +1566,80 @@ QUERY = {
 }
 
 
+class Gate:
+    """The per-workspace publication mutex, then admission (P3-D33).
+
+    Admission is first come, first served and bounded twice: at most `width` publications at
+    once, and their reserved staged heads together at most `cap` (review F4: phase A's memory is
+    about linear in heads); a publication above the cap is admitted only alone. Everything is
+    awaited on the event loop, so a publication that waits pins no worker thread (a blocked
+    worker would stall reads and /healthz). The mutex is taken first, so two publications to one
+    workspace never hold two slots. One set per running loop; a workspace's mutex is dropped
+    when nothing holds or awaits it."""
+
+    def __init__(self, width, heads=None):
+        self.width, self.cap = width, heads
+        self.loops = weakref.WeakKeyDictionary()  # loop -> ({ws: [lock, users]}, waiters)
+        self.active = self.peak = self.heads = 0
+
+    def fits(self, weight):
+        if self.active >= self.width:
+            return False
+        return self.active == 0 or self.cap is None or self.heads + weight <= self.cap
+
+    def admit(self, weight):
+        self.active += 1
+        self.heads += weight
+        self.peak = max(self.peak, self.active)
+
+    def release(self, weight, waiters):
+        self.active -= 1
+        self.heads -= weight
+        self.wake(waiters)
+
+    def wake(self, waiters):
+        while waiters and (waiters[0][1].done() or self.fits(waiters[0][0])):
+            weight, future = waiters.popleft()
+            if future.done():  # cancelled while queued (review N1): it gives up its place
+                continue
+            self.admit(weight)
+            future.set_result(None)
+
+    @asynccontextmanager
+    async def enter(self, ws, weight=0):
+        loop = asyncio.get_running_loop()
+        if loop not in self.loops:
+            self.loops[loop] = ({}, collections.deque())
+        mutexes, waiters = self.loops[loop]
+        mutex = mutexes.setdefault(ws, [asyncio.Lock(), 0])
+        mutex[1] += 1
+        try:
+            async with mutex[0]:
+                if not waiters and self.fits(weight):
+                    self.admit(weight)
+                else:
+                    waiter = (weight, loop.create_future())
+                    waiters.append(waiter)
+                    try:
+                        await waiter[1]
+                    except asyncio.CancelledError:
+                        if waiter[1].done() and not waiter[1].cancelled():
+                            self.release(weight, waiters)  # admitted, then cancelled
+                        else:  # never admitted; a leave may have dropped it already (N1)
+                            if waiter in waiters:
+                                waiters.remove(waiter)
+                            self.wake(waiters)
+                        raise
+                try:
+                    yield
+                finally:
+                    self.release(weight, waiters)
+        finally:
+            mutex[1] -= 1
+            if mutex[1] == 0:
+                del mutexes[ws]
+
+
 class Checkpoints:
     def __init__(self, directory, bridge):
         self.d, self.bridge = directory, bridge
@@ -1364,6 +1647,16 @@ class Checkpoints:
             os.environ.get("ORCH_RELAY_GLOBAL_STAGE_BYTES", GLOBAL_STAGE_CAP)
         )
         self.budget = U.Budget()  # P3-D31 rate windows, after authorization only
+        self.gate = Gate(
+            int(os.environ.get("ORCH_RELAY_PUBLISH_WIDTH", PUBLISH_WIDTH)),
+            int(os.environ.get("ORCH_RELAY_PUBLISH_HEADS", PUBLISH_HEADS)),
+        )
+        # Tests: phase_a, refresh, after_a, chunk, before_c, restart (P3-D33 phase boundaries).
+        self.hooks = {}
+
+    def hook(self, name, **info):
+        if name in self.hooks:
+            self.hooks[name](**info)
 
     def authorize(self, con, route, ws, headers, now):
         """The route's principal: authenticated, authorized for this workspace, fenced."""
@@ -1456,7 +1749,159 @@ class Checkpoints:
                 result, changed = U.ack(con, ws, c, integer(headers["orch-holder"]), now)
         return result, [("ws", ws)] if changed else []
 
-    def write(self, route, params, query, headers, raw, prepared=None):
+    # --- final publication in three phases (P3-D33, G1) ------------------------------------------
+
+    def weigh(self, ws, pre):
+        """The heads a publication will fold, estimated from its staged set's bytes (a head is 74
+        bytes on the wire), for its reservation in the gate; phase A reweighs (F4)."""
+        if pre is None or "hash" not in pre:
+            return 0
+        try:
+            key = stage_key(pre["body"]["source_hash"], pre["hash"])
+        except (Refusal, KeyError, TypeError, ValueError):
+            return 0
+        with self.bridge.reading("query") as con:
+            row = con.execute(
+                "SELECT bytes FROM checkpoint_staging WHERE workspace_id=? AND source=? "
+                "AND target=?",
+                (ws, *key),
+            ).fetchone()
+        return row[0] // 74 if row else 0
+
+    def publication(self, params, headers, raw, prepared, reserved=None):
+        """PUT checkpoint after authorization; the caller holds the gate for the workspace.
+
+        An exact retry and a body that does not parse need no fold and go straight to the
+        transaction, as before. Otherwise rounds of phase A, phase B (if phase A reached the
+        commit point) and phase C. A round restarts when phase C would do more than
+        LIVE_FOLD_LIMIT heads of work under the lock, would commit on folds phase B did not
+        store, or phase A hit a database error or an inconsistent page (review F1); after
+        PUBLISH_ROUNDS rounds the answer is 503 overloaded (retryable, never charged)."""
+        ws = params["ws"]
+        pre = prepared[1] if prepared is not None else None
+        if pre is not None and (pre.get("lazy") or pre["early"]):
+            return self.write("checkpoint_put", params, {}, headers, raw, prepared)
+        memo, refused = None, True
+        try:
+            for attempt in range(PUBLISH_ROUNDS):
+                if attempt:
+                    self.hook("restart", ws=ws, round=attempt)
+                try:
+                    carried = memo.heads + memo.live if memo is not None else 0
+                    fresh = self.phase_a(ws, headers, raw, prepared, reserved, carried)
+                except sqlite3.Error:
+                    continue
+                if memo is not None:  # the work and the nodes of earlier rounds
+                    fresh.heads += memo.heads + memo.live
+                    fresh.inserted += memo.inserted
+                memo = fresh
+                self.hook("after_a", ws=ws, memo=memo)
+                if memo.unsafe:
+                    continue
+                try:
+                    if memo.accepted:
+                        self.phase_b(ws, headers, memo)
+                    self.hook("before_c", ws=ws, memo=memo)
+                    answer = self.phase_c(params, headers, raw, prepared, memo)
+                except Restart:
+                    continue
+                refused = False
+                return answer
+            no("overloaded", 503)
+        finally:
+            if memo is not None:
+                self.settle(ws, memo, refused)
+
+    def phase_a(self, ws, headers, raw, prepared, reserved=None, carried=0):
+        """Authorize, then run the whole publication on WAL read snapshots, without the lock:
+        every fold, R0-R5 and the checks in their reference order. Nothing is written; the
+        outcome only prepares phase C, which answers (a refusal here is re-derived there). The
+        snapshot is renewed every A_SNAPSHOT_HEADS folded heads (review F3)."""
+        assert not self.d.lock._is_owned(), "phase A runs outside Directory.lock"
+        pre = prepared[1] if prepared is not None else None
+        memo = Memo()
+        memo.reserved, memo.carried = reserved, carried
+        with self.bridge.reading("query") as con:
+            con.execute("BEGIN")
+            now = self.d.clock()
+            self.authorize(con, "checkpoint_put", ws, headers, now)
+            self.hook("phase_a", ws=ws, memo=memo)
+
+            def refresh():
+                con.execute("ROLLBACK")
+                self.hook("refresh", ws=ws)
+                con.execute("BEGIN")
+
+            memo.refresh = refresh
+            relay = Relay(self.d, con, ws, now, memo, dry=True)
+            try:
+                relay.publish(raw, integer(headers["orch-holder"]), pre)
+            except (Refusal, KeyError, TypeError, ValueError, AttributeError, IndexError):
+                pass
+            finally:
+                memo.refresh = None
+            memo.heads = relay.folded
+            memo.overlay = {log: nodes.cache for log, nodes in relay.nodes.items()}
+        return memo
+
+    def phase_b(self, ws, headers, memo):
+        """Insert phase A's new nodes, NODE_CHUNK rows per short transaction under the lock, each
+        re-authorized (a takeover stops it). Nodes are immutable and nothing references them yet,
+        so a refusal or a crash after any chunk leaves only orphans (counted), and the inserts are
+        idempotent on a retry. Chunks follow fold order, so every committed prefix is also
+        branch-closed (not load-bearing: a later fold reaches a stored node only along a branch it
+        holds in its own cache or that is stored in full)."""
+        rows, memo.rows = memo.rows, []
+        d = self.d
+        for k in range(0, len(rows), NODE_CHUNK):
+            # Key order inside a chunk (it commits atomically) keeps the B-tree inserts local.
+            chunk = sorted(rows[k : k + NODE_CHUNK], key=lambda row: (row[1], row[2]))
+            self.hook("chunk", ws=ws, memo=memo, rows=len(chunk))
+            with d.lock:
+                con = self.bridge.connection("write")
+                con.execute("BEGIN IMMEDIATE")
+                with con:
+                    self.authorize(con, "checkpoint_put", ws, headers, d.clock())
+                    before = con.total_changes
+                    con.executemany("INSERT OR IGNORE INTO log_nodes VALUES (?,?,?,?,?,?,?)", chunk)
+                    added = con.total_changes - before
+                    if added:
+                        count_nodes(con, ws, added)
+            memo.inserted += added
+        memo.overlay = {}  # every node phase A made is stored now
+
+    def phase_c(self, params, headers, raw, prepared, memo):
+        """The publication under the lock against live state, with phase A's folds (write)."""
+        return self.write("checkpoint_put", params, {}, headers, raw, prepared, memo)
+
+    def settle(self, ws, memo, refused=True):
+        """After the answer: on a refusal not charged in phase C (fenced, 429, 503, a refusal in
+        phase B), record the fold work of every round (review F2: a takeover must not make phase
+        A free); count the nodes phase B inserted for a publication phase C did not commit
+        (`orphaned` only grows, also when a later publication commits on those nodes). Best
+        effort: a database error here is logged and never replaces the answer (review F6)."""
+        heads = memo.heads + memo.live if refused and not memo.charged else 0
+        orphans = 0 if memo.committed else memo.inserted
+        if heads or orphans:
+            try:
+                self.account(ws, heads, orphans)
+            except sqlite3.Error:
+                log.exception("publication accounting failed for workspace %s", ws)
+
+    def account(self, ws, heads, orphans):
+        with self.d.lock:
+            con = self.bridge.connection("write")
+            con.execute("BEGIN IMMEDIATE")
+            with con:
+                if heads:
+                    con.execute(
+                        "INSERT INTO checkpoint_refused_heads VALUES (?,?,?)",
+                        (ws, self.d.clock(), heads),
+                    )
+                if orphans:
+                    count_nodes(con, ws, 0, orphans)
+
+    def write(self, route, params, query, headers, raw, prepared=None, memo=None):
         body, pre = prepared if prepared is not None else (None, None)
         d = self.d
         with d.lock:
@@ -1469,22 +1914,42 @@ class Checkpoints:
                 session = self.authorize(con, route, ws, headers, now)
                 if prepared is None and route != "checkpoint_put":
                     body = P.parse_json(raw) if raw else None  # only after authorization (N5)
-                relay = Relay(d, con, ws, now)
+                relay = Relay(d, con, ws, now, memo if route == "checkpoint_put" else None)
                 if route == "checkpoint_put":
                     gen = integer(headers["orch-holder"])
                     con.execute("SAVEPOINT publication")
                     try:
                         try:
                             result = relay.publish(raw, gen, pre)
+                            if (
+                                memo is not None
+                                and relay.committed
+                                and not memo.accepted
+                                and memo.folds
+                            ):
+                                # Phase B did not store phase A's folds (or its overlay nodes):
+                                # never commit on them; restart from phase A (review F1).
+                                raise Restart
                         except (KeyError, TypeError, ValueError, AttributeError, IndexError) as exc:
                             raise refusal("malformed", 400) from exc
                         con.execute("RELEASE publication")
+                    except Restart:
+                        memo.live += relay.folded
+                        raise
                     except Refusal as exc:
                         con.execute("ROLLBACK TO publication")
                         con.execute("RELEASE publication")
                         relay.wake.clear()
+                        relay.committed = False
                         if exc.code != "quota_exceeded":
-                            record_failure(con, ws, gen, now)  # after W(g) and fencing (review 3)
+                            # After W(g) and fencing (review 3), with the fold work (P3-D33).
+                            heads = relay.folded
+                            if memo is not None:
+                                heads += memo.heads + memo.live
+                                memo.charged = True
+                            record_failure(con, ws, gen, now, heads)
+                        elif memo is not None:
+                            memo.live += relay.folded
                         refused = exc
                 else:
                     if route == "genesis":
@@ -1502,6 +1967,8 @@ class Checkpoints:
                     else:
                         role = "host" if session["kind"] == "workspace" else "member"
                         result = relay.baseline_delete(params["hash"], role, query.get("offer_id"))
+            if memo is not None:
+                memo.committed = relay.committed  # after the commit
             if refused is not None:
                 raise refused
             return result, sorted(relay.wake)
@@ -1595,9 +2062,27 @@ class Checkpoints:
                 # Not pre-authorized: nothing is parsed or validated before the transaction's own
                 # authorization (review N5).
                 prepared = None
-            result, wake = await run_in_threadpool(
-                self.write, route, params, query, headers, raw, prepared
-            )
+            if route == "checkpoint_put":
+                pre = prepared[1] if prepared is not None else None
+                weight = await run_in_threadpool(self.weigh, params["ws"], pre)
+                for attempt in range(3):
+                    async with self.gate.enter(params["ws"], weight):
+                        try:
+                            result, wake = await run_in_threadpool(
+                                self.publication,
+                                params,
+                                headers,
+                                raw,
+                                prepared,
+                                weight if attempt < 2 else None,
+                            )
+                            break
+                        except Reweigh as exc:
+                            weight = exc.heads
+            else:
+                result, wake = await run_in_threadpool(
+                    self.write, route, params, query, headers, raw, prepared
+                )
             if wake and self.d.changed:
                 self.d.changed(*wake)
             return JSONResponse(result)
