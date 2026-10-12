@@ -242,6 +242,12 @@ def test_eviction_keeps_depleted_buckets_and_classes_apart():
     take(b, ("c", "busy"), NOW + 60_000, burst=1)
     take(b, ("c", "new"), NOW + 60_000)
     assert list(b.table) == [("c", "busy"), ("c", "new")]
+    # A clock that goes back makes no depleted bucket look refilled.
+    b = Buckets(limit=2)
+    take(b, ("c", "depleted"), NOW + 60_000, burst=1)
+    take(b, ("c", "used"), NOW + 60_000)
+    take(b, ("c", "late"), NOW)
+    assert list(b.table) == [("c", "depleted"), ("c", "late")]
 
 
 # --- directory ---------------------------------------------------------------------------------
