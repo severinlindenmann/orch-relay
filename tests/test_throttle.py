@@ -432,6 +432,21 @@ def test_answers_without_a_request_are_charged_to_the_host(client):
     assert statuses == [410, 410, 410, 429]
 
 
+def test_a_pairing_request_does_not_open_a_bridge_answer_key(client):
+    from bridge_support import CRID
+
+    d = client.app.state.directory
+    stranger = "cd" * 16  # an id an anonymous pairing request may name
+    sql(
+        client,
+        "INSERT INTO rid_seen VALUES (?,?,?,'digest',0,?,0,?,?,?)",
+        (WS, stranger, RID, NOW, NOW, NOW + 900_000, CRID),
+    )
+    limit(client, session=(100, 60), workspace=(100, 60))
+    assert post(client, host_answer(stranger), {**HOST, "Orch-Holder": "1"}).status_code == 403
+    assert not [key for key in d.buckets.table if key[0] == "host-answer"]
+
+
 def test_answers_are_keyed_per_requesting_member(client):
     limit(client, host_answer=(2, 60))
     host = {**HOST, "Orch-Holder": "1"}
