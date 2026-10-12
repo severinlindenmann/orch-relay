@@ -1762,17 +1762,32 @@ class Checkpoints:
         if name in self.hooks:
             self.hooks[name](**info)
 
-    def authorize(self, con, route, ws, headers, now):
-        """The route's principal: authenticated, authorized for this workspace, fenced."""
+    def authorize(self, con, route, ws, headers, now, charge=False):
+        """The route's principal: authenticated, authorized for this workspace, fenced.
+
+        With `charge` (once per request, at its first authorization) the session's buckets are
+        charged after authentication (P3-D35), refused or not; proof and transition pages also
+        take a page token."""
+        session = self.d.authenticate(con, headers, now)
+        try:
+            self.authorize_session(con, session, route, ws, headers, now)
+        except Refusal:
+            if charge:
+                self.d.throttle(session, now)
+            raise
+        if charge:
+            self.d.throttle(session, now, page=route in ("proof", "transitions"))
+        return session
+
+    def authorize_session(self, con, session, route, ws, headers, now):
         d = self.d
-        session = d.authenticate(con, headers, now)
         auth = ROUTES[route][2]
         if auth == "R" or (auth == "WD" and session["kind"] == "device"):
             d.workspace_access(con, session, ws)
             return session
         d.workspace_access(con, session, ws, write=True)
         if route == "checkpoint_put" and "orch-holder" not in headers:
-            no("malformed", 400)  # the generation is required; never charged
+            no("malformed", 400)  # the generation is required; no failure is recorded
         d.fence(con, headers, ws, now)
         return session
 
@@ -1780,7 +1795,7 @@ class Checkpoints:
         """Read-only, before any lock, write transaction or failure window (G3 review 3)."""
         with self.bridge.reading() as con:
             con.execute("BEGIN")
-            self.authorize(con, route, ws, headers, self.d.clock())
+            self.authorize(con, route, ws, headers, self.d.clock(), charge=True)
             row = con.execute(
                 "SELECT wsk_pub FROM workspaces WHERE workspace_id=?", (ws,)
             ).fetchone()
@@ -1817,7 +1832,7 @@ class Checkpoints:
         with self.bridge.reading("query") as con:
             con.execute("BEGIN")
             now = self.d.clock()
-            self.authorize(con, route, params["ws"], headers, now)
+            self.authorize(con, route, params["ws"], headers, now, charge=True)
             return Relay(self.d, con, params["ws"], now).read(route, query)
 
     def unpublished_read(self, ws, query, headers):
@@ -1827,7 +1842,7 @@ class Checkpoints:
         with self.bridge.reading("query") as con:
             con.execute("BEGIN")
             now = self.d.clock()
-            self.authorize(con, "unpublished_get", ws, headers, now)
+            self.authorize(con, "unpublished_get", ws, headers, now, charge=True)
             self.budget.charge("unpublished-get", ws, U.FETCH_WINDOWS, now)
             return U.page(con, ws, query)
 
