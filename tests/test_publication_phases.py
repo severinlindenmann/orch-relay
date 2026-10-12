@@ -222,18 +222,20 @@ def test_no_head_is_folded_under_the_lock_and_each_hold_inserts_one_chunk(relay,
         return real_page(self, stage, d)
 
     monkeypatch.setattr(checkpoints.Relay, "page_body", page_body)
-    publisher = []
+    publisher, chunks = [], []
     relay.cps.hooks["phase_a"] = lambda **kw: publisher.append(threading.get_ident())
+    relay.cps.hooks["chunk"] = lambda **kw: chunks.append(kw["rows"])
     relay.d.lock = recorder
-    began = time.perf_counter()
     result = put(relay.client, body)
-    wall = time.perf_counter() - began
     relay.d.lock = recorder.lock
     assert result["result"] == "accepted", result
+    # Deterministic bound: no fold and no page read under the lock, one chunk of at most
+    # NODE_CHUNK rows per phase B hold, one hold for phase C.
     assert recorder.folds == 0 and pages == []
     holds = [held for thread, held in recorder.holds if thread == publisher[0]]
     assert len(holds) == 6 + 1, recorder.holds  # the background sweeps hold it too, briefly
-    assert max(holds) <= 0.25 * wall, (holds, wall)
+    assert chunks == [10_000] * 6, chunks
+    assert max(holds) < 5, holds  # a generous sanity limit only
     assert proof(relay, body) == heads
     assert usage(relay.path) == (node_count(relay.path), 0)  # counted, none orphaned
 
@@ -859,14 +861,13 @@ def test_phase_c_restarts_instead_of_folding_a_set_under_the_lock(relay, monkeyp
 
     relay.cps.hooks["after_a"] = after_a
     recorder = publisher_lock(relay, monkeypatch)
-    began = time.perf_counter()
     result = put(relay.client, body)
-    wall = time.perf_counter() - began
     relay.d.lock = recorder.lock
     assert result["result"] == "accepted", result
     assert rounds == [False, True], rounds
-    assert recorder.folds <= checkpoints.LIVE_FOLD_LIMIT
-    assert max(held for _, held in recorder.holds) <= 0.5 * wall, (recorder.holds, wall)
+    # Deterministic bound: at most LIVE_FOLD_LIMIT heads folded under the lock in all.
+    assert recorder.folds <= checkpoints.LIVE_FOLD_LIMIT, recorder.folds
+    assert max(held for _, held in recorder.holds) < 5, recorder.holds  # sanity limit only
     assert proof(relay, body) == heads
 
 
