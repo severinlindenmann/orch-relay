@@ -1453,6 +1453,21 @@ def admin_text(value, limit, name, required=True):
     return value
 
 
+def require_override_schema(path):
+    """The operator commands never change the schema of a database a relay may be serving (no
+    migration from the CLI here): migration 0016 must be applied (`orch-relay migrate`, or a relay
+    start). A plain read, no write lock."""
+    with closing(db.connect(path)) as con:
+        try:
+            done = con.execute(
+                "SELECT 1 FROM schema_migrations WHERE version LIKE '0016_%'"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            done = None
+    if not done:
+        raise ValueError("database not migrated to 0016: run `orch-relay migrate` first")
+
+
 def set_account_cap(path, person, cap, by, note=None, now_ms=None, timeout_ms=5000):
     """P3-D36: set an account's workspaces cap override (operator command, never HTTP) and append
     its audit row in ONE write transaction; returns (old cap or None, new cap).
@@ -1460,13 +1475,13 @@ def set_account_cap(path, person, cap, by, note=None, now_ms=None, timeout_ms=50
     Works with the relay running or stopped: BEGIN IMMEDIATE takes SQLite's write lock, waiting up
     to `timeout_ms` for the relay's own write transactions (each held well under a second); past
     that it raises sqlite3.OperationalError and writes nothing. The relay reads the row on the
-    next first card (no cache, no restart)."""
+    next first card (no cache, no restart). The schema must be migrated already."""
     P.unhex(person)
     if type(cap) is not int or not 1 <= cap <= MAX_ACCOUNT_WORKSPACES:
         raise ValueError(f"cap must be an integer in 1..{MAX_ACCOUNT_WORKSPACES}")
     by = admin_text(by, 128, "--by")
     note = admin_text(note, 1024, "--note", required=False)
-    db.migrate(path)
+    require_override_schema(path)
     now = time.time_ns() // 1_000_000 if now_ms is None else now_ms
     with closing(db.connect(path)) as con:
         con.execute(f"PRAGMA busy_timeout={int(timeout_ms)}")
@@ -1500,7 +1515,7 @@ def set_account_cap(path, person, cap, by, note=None, now_ms=None, timeout_ms=50
 def show_account_cap(path, person, global_cap):
     """The account's owned workspaces, effective cap and override row (read-only)."""
     P.unhex(person)
-    db.migrate(path)
+    require_override_schema(path)
     with closing(db.connect(path)) as con:
         owned = con.execute(
             "SELECT count(*) FROM workspaces WHERE owner_person_id=?", (person,)
@@ -1518,7 +1533,7 @@ def account_cap_audit(path, person=None):
     """The audit rows, oldest first (one account's, or all)."""
     if person is not None:
         P.unhex(person)
-    db.migrate(path)
+    require_override_schema(path)
     names = ("seq", "person_id", "old_cap", "new_cap", "set_by", "set_at_ms", "note")
     with closing(db.connect(path)) as con:
         rows = con.execute(

@@ -259,6 +259,25 @@ def test_cli_refuses_bad_input(app, monkeypatch, capsys, argv):
     assert rows(d.path, "SELECT count(*) FROM account_workspace_override_audit") == [(0,)]
 
 
+def test_commands_need_the_migrated_schema(tmp_path, monkeypatch):
+    """The operator commands never migrate a database a relay may be serving."""
+    path = tmp_path / db.DB_NAME
+    with closing(db.connect(path)):
+        pass
+    for call in (
+        lambda: D.set_account_cap(path, PERSON, 5, "op"),
+        lambda: D.show_account_cap(path, PERSON, 32),
+        lambda: D.account_cap_audit(path),
+    ):
+        with pytest.raises(ValueError, match="migrate"):
+            call()
+    monkeypatch.setenv("ORCH_RELAY_DATA", str(tmp_path))
+    with pytest.raises(SystemExit) as exited:
+        cli.main(["account-cap", "audit"])
+    assert exited.value.code == 2
+    assert rows(path, "SELECT name FROM sqlite_master") == []
+
+
 def test_cli_reports_a_busy_database(stopped, monkeypatch, capsys):
     monkeypatch.setenv("ORCH_RELAY_DATA", str(stopped.parent))
     monkeypatch.setenv("ORCH_RELAY_ADMIN_BUSY_MS", "50")
