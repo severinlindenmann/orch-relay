@@ -453,6 +453,59 @@ def test_a_pairing_request_does_not_open_a_bridge_answer_key(client):
     assert not [key for key in d.buckets.table if key[0] == "host-answer"]
 
 
+def test_only_a_hosts_response_uses_the_answer_key(client):
+    """Delta review T1: a member's host-direction frame naming another member's live request
+    charges only the member; a W session's request-direction frame is not an answer."""
+    d = client.app.state.directory
+    assert post(client, binary("bridge_device_post")).status_code == 202  # DEVICE's live request
+    d.buckets.clear()
+    assert post(client, host_answer(DEVICE), DEV2).status_code == 400  # a member, direction 2
+    assert ("host-answer", (WS, DEVICE)) not in d.buckets.table
+    assert ("session", ("device", PRIMARY)) in d.buckets.table
+    d.buckets.clear()
+    host = {**HOST, "Orch-Holder": "1"}
+    assert post(client, binary("bridge_device_post"), host).status_code == 400  # W, direction 1
+    assert ("host-answer", (WS, DEVICE)) not in d.buckets.table
+    assert ("session", ("token", token_hash("FAKE-workspace"))) in d.buckets.table
+
+
+def test_answer_key_pins_pair_rid_and_snapshot_errors(client, monkeypatch):
+    """Delta review T3: one pair key per workspace, the rid must match, and a snapshot error
+    falls back to the host's read buckets (as the pre-check's own sqlite3.Error fallback, which
+    charges nothing)."""
+    import sqlite3
+
+    bridge, d = client.app.state.bridge, client.app.state.directory
+    host = {"kind": "workspace", "subject_id": WS, "token_hash": token_hash("FAKE-workspace")}
+    assert post(client, binary("bridge_device_post")).status_code == 202
+    answer = host_answer(DEVICE)
+    params = {"ws": WS, "rid": RID}
+    assert bridge.answer_key("bridge", "POST", host, params, answer) == (WS, DEVICE)
+    assert bridge.answer_key("bridge", "POST", host, {"ws": WS, "rid": "ee" * 16}, answer) is None
+    for target in (DEVICE, PRIMARY, "cd" * 16):
+        pair = {"ws": WS, "offer": "aa" * 16, "rid": RID}
+        assert bridge.answer_key("pair", "POST", host, pair, host_answer(target)) == (WS, "pair")
+
+    class Broken:
+        def __enter__(self):
+            raise sqlite3.OperationalError("database is locked")
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(bridge, "reading", lambda purpose="read": Broken())
+    assert bridge.answer_key("bridge", "POST", host, params, answer) is None
+    monkeypatch.undo()
+
+    def broken(*args):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(bridge, "preauthorize", broken)
+    d.buckets.clear()
+    assert get(client, f"/v2/workspaces/{WS}/bridge/{RID}", DEV).status_code == 200
+    assert dict(d.buckets.table) == {}  # documented: the fallback charges nothing
+
+
 def test_answers_are_keyed_per_requesting_member(client):
     limit(client, host_answer=(2, 60))
     host = {**HOST, "Orch-Holder": "1"}
@@ -518,6 +571,24 @@ def test_proof_pages_are_weighted_by_heads(client, monkeypatch):
     heads["n"] = 1
     client.app.state.directory.clock = lambda: NOW + 2_000
     assert get(client, proof, DEV).status_code == 200  # a small page costs one token
+
+
+def test_transition_pages_are_weighted_by_bytes(client, monkeypatch):
+    """Delta review T2: a transition page weighs its canonical bytes at 74 per head."""
+    from orch_relay import checkpoints as C
+    from orch_relay import proto as P
+
+    bundle = "x" * (2_500 * 74)  # 2,500 heads' worth of bytes: 3 tokens
+    monkeypatch.setattr(
+        C.Relay, "read", lambda self, route, query: {"transitions": [bundle], "next": None}
+    )
+    assert len(P.cj([bundle])) // 74 == 2_500
+    limit(client, page_session=(5, 60))
+    transitions = f"/v2/workspaces/{WS}/transitions"
+    assert get(client, transitions, DEV).status_code == 200  # 3 tokens
+    assert get(client, transitions, DEV).status_code == 200  # 2 left: served, now -1
+    r = get(client, transitions, DEV)
+    assert r.status_code == 429 and r.headers["retry-after"] == "2"
 
 
 def test_default_page_burst_covers_a_first_sync_and_throttles_full_pages(client):
