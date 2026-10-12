@@ -485,9 +485,12 @@ def test_staging_byte_quota_counts_pages_and_manifest_and_retries_are_free(tmp_p
     wire = P.cj(page)
     manifest = {"pages": [descriptor(0, page)]}
     target = digest(b"FAKE quota target")
+    # The default P3-D37 maximum (16 MiB), read before the workspace quota is lowered below it:
+    # this test pins the workspace quota, not the per-set maximum (tests/test_max_publication.py).
+    caps = checkpoints.Caps()
     monkeypatch.setattr(checkpoints, "STAGE_CAP", len(wire) + len(P.cj(manifest)) - 1)
     with closing(db.connect(path)) as con, con:
-        relay = Relay(None, con, WS, 1790000000000)
+        relay = Relay(None, con, WS, 1790000000000, caps=caps)
         relay.put_staging(None, target, 0, page, wire, 1 << 40)
         relay.put_staging(None, target, 0, page, wire, 1 << 40)  # identical retry: not charged
         with pytest.raises(Refusal) as refused:

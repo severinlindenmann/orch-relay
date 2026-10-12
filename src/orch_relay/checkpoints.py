@@ -59,8 +59,9 @@ WORKSPACE_NODES = 4_000_000
 # WSK holder that fills the workspace cannot starve the owner's restore. A restore adds its line
 # head plus every head of its staged set not stored yet (retained pages of an unstored branch,
 # appended pages of other logs): 1 node for a roll-back to a stored prefix with no other log
-# growing, at most STAGE_CAP // 74 + 1 = 906,877. 200,000 fits 200,000 minimal restores, or
-# several carrying tens of thousands of new heads each.
+# growing, at most max publication // 74 + 1 (P3-D37: 226,720 at the 16 MiB default; 906,877 at
+# STAGE_CAP). 200,000 fits 200,000 minimal restores, or several carrying tens of thousands of new
+# heads each.
 WORKSPACE_NODES_RESERVE_SHARE = 20  # reserve = quota // 20 when unset
 # and distinct self-certified revocation pairs an owner person's restores may add to the global
 # table (ORCH_RELAY_ACCOUNT_EVIDENCE). All three answer 429 quota_exceeded.
@@ -73,14 +74,25 @@ BASELINES = 16
 FAILURE_BUDGET = 16  # charged refusals per holder generation per rolling hour
 WORKSPACE_FAILURE_CEILING = 48  # charged refusals per workspace per rolling hour
 # P3-D33 (G1): budget by work. Heads folded by charged refusals per workspace per rolling hour:
-# about two full 64 MiB staging sets (a head is 74 bytes on the wire).
+# about two full 64 MiB staging sets (a head is 74 bytes on the wire). Kept with P3-D37: a CPU
+# budget, and each refused publication is now at most one maximal set (eight at the default).
 REFUSED_HEADS = 2 * (STAGE_CAP // 74)
 NODE_CHUNK = 20_000  # log_nodes rows per phase B transaction (one short hold of the lock each)
+# P3-D37: the hard maximum of one publication's staged set, manifest plus pages, as charged to
+# checkpoint_staging.bytes (ORCH_RELAY_MAX_PUBLICATION_BYTES, 1..STAGE_CAP). Phase A holds every new
+# node of a publication (about 1.3 KB each, measured on macOS), and the gate admits a set above its
+# heads cap alone, so only this bounds one publication's memory: 16 MiB is at most 226,719 heads,
+# ~295 MB (+25 % margin ~370 MB) over a ~250 MB baseline, ~620 MB under the public unit's 900M
+# MemoryMax. Refused as too_large: 413 at a staging PUT, 400 at the final publication (its route's
+# too_large status), never a retryable 429.
+MAX_PUBLICATION = 16 * 1024 * 1024
 # Publications in phases A to C at once, across all workspaces (ORCH_RELAY_PUBLISH_WIDTH), and the
 # staged heads they may reserve together (ORCH_RELAY_PUBLISH_HEADS; phase A needs roughly 1.3 KB
-# per new node, so 1.5 million heads is about 2 GB). A larger publication runs alone.
+# per new node). A larger publication runs alone. Unset, the heads cap is the heads the maximum
+# implies (max // 74): one maximal set always fits alone, and publications in flight together
+# never reserve more than one maximal set (P3-D37; was 1,500,000, about 2 GB).
 PUBLISH_WIDTH = 2
-PUBLISH_HEADS = 1_500_000
+PUBLISH_HEADS = MAX_PUBLICATION // 74
 # P3-D33 round 2 (review F1): phase C may fold or parse at most this many heads live under the
 # lock (work phase A did not record); beyond it, it restarts from phase A, at most
 # PUBLISH_ROUNDS - 1 times, then answers 503 overloaded (retryable, uncharged).
@@ -188,6 +200,13 @@ class Caps:
         if not 0 <= self.reserve <= self.nodes:
             raise ValueError("ORCH_RELAY_WORKSPACE_NODES_RESERVE must be in 0..the node quota")
         self.evidence = int(env.get("ORCH_RELAY_ACCOUNT_EVIDENCE", ACCOUNT_EVIDENCE))
+        # P3-D37: a decimal integer in 1..STAGE_CAP, validated at start-up (the app refuses to start).
+        raw = env.get("ORCH_RELAY_MAX_PUBLICATION_BYTES", MAX_PUBLICATION)
+        if not (type(raw) is int or (isinstance(raw, str) and re.fullmatch(r"[0-9]+", raw))):
+            raise ValueError("ORCH_RELAY_MAX_PUBLICATION_BYTES must be a decimal integer")
+        self.max_publication = int(raw)
+        if not 1 <= self.max_publication <= STAGE_CAP:
+            raise ValueError(f"ORCH_RELAY_MAX_PUBLICATION_BYTES must be in 1..{STAGE_CAP}")
 
 
 def evict_oldest(con, table, ws, kept):
@@ -901,11 +920,17 @@ class Relay:
     def stage(self, key):
         """The set's metadata only: page PUTs never re-read the set (no O(n^2) staging)."""
         row = self.con.execute(
-            "SELECT expires_ms,manifest IS NOT NULL FROM checkpoint_staging "
+            "SELECT expires_ms,manifest IS NOT NULL,bytes FROM checkpoint_staging "
             "WHERE workspace_id=? AND source=? AND target=?",
             (self.ws, *key),
         ).fetchone()
-        return {"expires_ms": row[0], "manifest": bool(row[1])} if row else None
+        return {"expires_ms": row[0], "manifest": bool(row[1]), "bytes": row[2]} if row else None
+
+    def within_max(self, stage, size):
+        """P3-D37: the set's staged bytes plus `size` (bytes about to be staged, or a lower bound of
+        what the set will hold) stay within the maximum publication size; a permanent refusal,
+        before the transient staging quotas, and nothing is written."""
+        need(stage["bytes"] + size <= self.caps.max_publication, "too_large", 413)
 
     def staged(self, sql, key, *args):
         return self.con.execute(
@@ -950,7 +975,7 @@ class Relay:
                 "INSERT INTO checkpoint_staging VALUES (?,?,?,?,NULL,0)",
                 (self.ws, *key, self.now + HOUR),
             )
-            stage = {"expires_ms": self.now + HOUR, "manifest": False}
+            stage = {"expires_ms": self.now + HOUR, "manifest": False, "bytes": 0}
         if i is not None:
             if pre["refusal"]:
                 raise pre["refusal"]
@@ -969,6 +994,7 @@ class Relay:
                     "staging_conflict",
                     409,
                 )
+            self.within_max(stage, len(wire))  # the running total
             self.charge_stage(key, len(wire), global_cap)
             self.con.execute(
                 "INSERT INTO checkpoint_staging_pages VALUES (?,?,?,?,?)", (self.ws, *key, i, wire)
@@ -993,6 +1019,11 @@ class Relay:
         if pre["refusal"]:
             raise pre["refusal"]
         need(staged <= {d["i"] for d in pages}, "staging_conflict", 409)
+        # Before any page is uploaded: a page of n heads is at least 74 n bytes (each head 73 JSON
+        # bytes plus a separator, then its framing), so what is staged, this manifest and 74 bytes
+        # per head of every page still missing is a lower bound of the whole set.
+        missing = sum(d["count"] for d in pages if d["i"] not in staged)
+        self.within_max(stage, len(wire) + 74 * missing)
         self.charge_stage(key, len(wire), global_cap)
         self.con.execute(
             "UPDATE checkpoint_staging SET manifest=? WHERE workspace_id=? AND source=? AND target=?",
@@ -1159,6 +1190,9 @@ class Relay:
             "staging_incomplete",
             409,
         )
+        # P3-D37, defence in depth (a set staged under an older, larger maximum): before any page
+        # is read or folded; charged like the route's other too_large (400), with no fold work.
+        need(meta["bytes"] <= self.caps.max_publication, "too_large", 400)
         stage = self.load_stage(key)
         used = set()
         old = entries(held) if held else {}
@@ -1782,7 +1816,7 @@ class Checkpoints:
         self.budget = U.Budget()  # P3-D31 rate windows, after authorization only
         self.gate = Gate(
             int(os.environ.get("ORCH_RELAY_PUBLISH_WIDTH", PUBLISH_WIDTH)),
-            int(os.environ.get("ORCH_RELAY_PUBLISH_HEADS", PUBLISH_HEADS)),
+            int(os.environ.get("ORCH_RELAY_PUBLISH_HEADS", self.caps.max_publication // 74)),
         )
         # Tests: phase_a, refresh, after_a, chunk, before_c, restart (P3-D33 phase boundaries).
         self.hooks = {}
@@ -1930,7 +1964,9 @@ class Checkpoints:
                 "AND target=?",
                 (ws, *key),
             ).fetchone()
-        return row[0] // 74 if row else 0
+        if not row or row[0] > self.caps.max_publication:
+            return 0  # refused before any fold (P3-D37): nothing to reserve
+        return row[0] // 74
 
     def publication(self, params, headers, raw, prepared, reserved=None):
         """PUT checkpoint after authorization; the caller holds the gate for the workspace.
