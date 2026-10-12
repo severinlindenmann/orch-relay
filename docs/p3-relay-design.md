@@ -869,7 +869,7 @@ commit atomically: H = E, record the restore ids, apply the bundles' revocations
   applied signers) or locally revoked (orch-52 #377), and a local `compromised` revocation alarms when learned.
   At the relay, device→person comes from the live global device registry (or a verified restore signer), not a
   snapshot. Round 4: a held revocation is never discarded; self-certified evidence registers the device globally in
-  the same transaction, so the first accepted binding wins at the relay and on devices alike. The
+  the same transaction, so the first accepted binding wins at the relay and on devices alike (reverted in round 6). The
   failed-publication budget is 16 per holder generation and 48 per workspace-hour: takeovers stay unlimited
   (P3-D10), so the workspace ceiling, not a takeover limit, bounds a WSK holder taking over from itself.
   Round 5 (orch-core #387, F1 §5.10 at e9a26d95, decision rows 149–151): the chain-learned/out-of-band split is now
@@ -1218,7 +1218,8 @@ public deployment.
   about 4x the staged bytes, repeatable every ~25 s per workspace; `checkpoint_receipts` and
   `checkpoint_gone` are never purged and restore-referenced checkpoints are permanent. `checkpoint_revocations`
   and `checkpoint_unpublished` grow with restores x known devices (owner-gated). Self-certified restore evidence
-  adds an account, a device and a global revocation per entry, and any account holder can cause it from their
+  adds a global revocation pair per entry (since the #397 re-pin no account or device), and any account holder can
+  cause it from their
   own workspace (hundreds of entries per 512 KiB line); this is what made the round-2 unpublished scan
   (review N2, now a per-device lookup) a cost for every workspace. Needs a per-workspace storage quota (429)
   and a quota on self-certified evidence per account. The `unpublished` retrieval or poll route (orch-52

@@ -2775,7 +2775,7 @@ in that one context only, never by trying T's entries.
   carry `[]`. Validate every `{revocation, device_cert, pk_pub}` first; the certificate's `person_id` must equal
   `H(h_person_id || suite || pk_pub)`. **Evidence identity (review N1/F3, per pair since orch-core #397, as F1
   `model/workspace.restore`):** only an *association* binds a carried entry's person and key: the relay's global
-  device registry (§19.1/§6.2, written by `PUT /v2/devices` or account creation under the person's account key, live
+  device registry (§19.1/§6.2, written by `PUT /v2/devices/{device}` or account creation under the person's account key, live
   at check time, so a member added later is bound) or a restore signer it verified under the owner PK; the person's
   key is the directory account key. Evidence for an associated device MUST carry that person and key, otherwise
   `restore_invalid`. Held revocations bind nothing: neither this workspace's chain pairs nor the global §19.5 set (a
@@ -3025,10 +3025,11 @@ rules and must be confirmed before G4 ships:
    the relay accepted in this workspace's own restores (chain-learned for the workspace, with their restore id and
    target checkpoint as provenance, never removed), not the global §19.5 revocation table; a global (out-of-band)
    revocation of an ever-device that a restore omits or carries weaker is accepted and reported as
-   `revocation.unpublished`, while R1 keeps refusing a signer revoked in any revocation the relay holds. **In G4**
+   `revocation.unpublished`, while R1 keeps refusing a signer pair revoked in any revocation the relay holds. **In G4**
    the production relay emits `unpublished` and `unpublished_refs` in the accepted result (transport detail 8),
    pinned by production unit tests (`tests/test_checkpoints.py`) only: there is no shared vector yet, and the
-   reference relay model (`ref/checkpoints.py`) has no `unpublished` and no per-pair chain table.
+   reference relay model (`ref/checkpoints.py`) keys chain and global revocations by pair (since the #397 re-pin) but
+   has no `unpublished`.
    **Status (G4):** (a) `log_nodes` stores a deterministic skip pointer per node (the ancestor at
    `skip_height(seq)`, as Bitcoin's block index), so a page finds its endpoint node and checks that `from` is
    on E's branch in O(log N) and then reads `limit` nodes: O(limit + log N) per page and O(N) for a full walk
@@ -3043,19 +3044,25 @@ rules and must be confirmed before G4 ships:
    Parsing and the checks that need no database state run after authorization and before the directory lock;
    their refusals are raised in the transaction at the position above, so codes and charging are unchanged.
    Failure rows stop at the budget.
-8. **Workspace revocations and `unpublished` (G4 round 2; provisional against orch-core's coming F1 PR after
-   #387 and orch-52's decision of 11 Oct).** R4 completeness uses only revocations learned through this
+8. **Workspace revocations and `unpublished` (G4 round 2; per pair since the orch-core #397 re-pin, F1 row
+   152).** R4 completeness uses only revocations learned through this
    workspace's own accepted restores: the relay keeps them in `checkpoint_revocations`, one row per verified
    `(device_id, person_id)` pair at its strongest reason with the carried evidence and the carrying restore and
    target, written in the restore's transaction and never deleted. Each pair of a device in this workspace's
    ever-devices or in the restore needs a carried entry of the **same pair** at the same or a stronger reason;
    another person's entry never satisfies it. A restore's `revocations` are unique and sorted per
-   `(device_id, person_id)`. Bindings for carried evidence come from this workspace's pairs, then the device
-   registry. Known difference from orch-core #397, to be removed in the #397 re-pin: the registry fallback means
-   out-of-band knowledge does bind (a device registered by its person binds evidence to that person), whereas
-   #397 lets only workspace associations constrain carried entries. A revocation the relay holds globally (the §19.5 feed, another
-   workspace's restore) never causes `restore_missing_revocation`: when an accepted workspace restore omits it
-   or carries it weaker under the same pair, and the device is known to this workspace, the result carries
+   `(device_id, person_id)`. Only associations bind carried evidence (R4): the device registry, excluding rows of
+   evidence-only persons (P3-D29 rows written by restore evidence before migration 0010); never this workspace's
+   chain pairs and never the global table, so another person's pair is accepted beside a chain pair and two persons'
+   pairs for one unregistered device in one restore are both accepted (the round-2 "one person per unknown device"
+   rule is reverted). **Open (orch-52):** whether §19.1 registry entries count as workspace associations; the relay
+   assumes they do for devices registered through `PUT /v2/devices/{device}` or account creation with a verified
+   certificate, and do not for evidence created by restores (which no longer registers anything). The global
+   `revocations` table is keyed by `(device_id, person_id)` (migration 0010, rows and feed cursors kept), so a
+   first-come row never drops another person's genuine revocation. A revocation the relay holds globally (the §19.5
+   feed, another workspace's restore) never causes `restore_missing_revocation`: when an accepted workspace restore
+   omits it or carries it weaker under the same pair, and the workspace associates the device (a G2 ever-device: a
+   current or former list member) with that person or with none, the result carries
    `unpublished: ["d_<device>", ...]` and `unpublished_refs: [{device_id, person_id, reason, cursor, digest}]`
    (the §19.5 revocation cursor and the record's digest), stored durably in `checkpoint_unpublished`. Both
    fields are additive and absent when empty; ticket restores report none. A stronger global revocation of a pair
@@ -3063,8 +3070,17 @@ rules and must be confirmed before G4 ships:
    workspace knows are looked up (never the relay-wide table). `unpublished_refs` are relay claims, not
    self-authenticating: a correct host fetches the record (§19.5) and verifies it under the named person's key with
    a matching device certificate before acting. A ref goes stale when the revocation is later upgraded, because its
-   cursor and digest change. The retrieval route is designed separately. The signer refusal still uses every
-   revocation the relay holds, by device id.
-   **P3-D29:** self-certified evidence for a person the relay has no account for creates an evidence-only
-   account row (needed to store the device and its revocation); it registers no device, owns no card and
-   joins no list until the person redeems an invite, which turns it into the account.
+   cursor and digest change. The retrieval route is designed separately; until it exists, the certificate and person
+   key of an evidence pair without a registered device are in the carrying workspace's `checkpoint_revocations`.
+   Not reported (still retained and enforced): the signer's device (equivalent here, because a signer is a
+   registered member), a pair whose device is registered to another person, and devices this workspace knows only
+   through restore evidence (tombstones: `checkpoint_ever_devices` alone), which count as unknown for forwarding.
+   The signer refusal (R1) uses every revocation the relay holds of the signer's **pair**; the device-auth cutoff
+   (sessions, login, member certificates, registration of a new certificate) stays by device id, which is a
+   different concern: any held revocation of a device id ends its authentication. `GET
+   /v2/devices/{device}/revocation` names one record: the registered person's pair first, else the earliest.
+   **P3-D29 (narrowed by #397):** restore evidence no longer creates an account, an evidence-only person or a device
+   row; only its revocation is retained (global pair and chain pair). Rows created before migration 0010 stay; an
+   evidence-only person's device row is not an association, and redeeming an invite still turns such a row into the
+   account. Pre-0010 device rows written by evidence for persons that already had an account cannot be told apart
+   from registrations and keep binding (a dev-relay-only residue).
