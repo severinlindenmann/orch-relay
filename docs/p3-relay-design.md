@@ -1319,8 +1319,10 @@ HTTP fixture.
     (review G2), the publication runs in full on one pooled `query` WAL snapshot: it re-authorizes,
     then runs `Relay.publish` in the reference order, with every fold, skip pointer and R0–R5 check
     (H, genesis, the staged set, the restore evidence and owner policy, the budget). Nothing is
-    written: new `log_nodes` rows are collected in fold order and restore effects are skipped. Pages
-    are parsed one at a time when folded, not all at once. The output (`Memo`) is every fold's
+    written: new `log_nodes` rows are collected in fold order and restore effects are skipped. The
+    staged pages are read with the manifest and parsed one at a time when folded. After that only
+    immutable nodes are read, so the snapshot is renewed every `A_SNAPSHOT_HEADS` (20,000) folded
+    heads (round 2, F3). The output (`Memo`) is every fold's
     result or refusal, the pages' `(after_seq, from_acc)`, the manifest, the new rows, the heads
     folded, and whether phase A reached the commit point.
   - *The fingerprint is the fold key.* A fold is recorded under `(log, key, start seq, start acc)`,
@@ -1343,20 +1345,31 @@ HTTP fixture.
   - *Phase C, a short commit.* The publication under the lock in its savepoint, as before, with
     phase A's folds: no head is folded and no staged page is read (pinned by counting both under
     the lock). A fold phase A did not reach, or for a page whose digest it did not see (a set
-    re-staged under the same key), is done live. Phase C never commits an acceptance on recorded
-    folds whose nodes phase B did not insert (phase A not at the commit point): it then re-runs
-    the publication fully live. Exact retries and unparsable bodies skip phases A and B (as
+    re-staged under the same key), is done live, but only up to `LIVE_FOLD_LIMIT` (5,000) heads of
+    fold or page parse per round (round 2, F1). Beyond that, or when phase C would commit an
+    acceptance on recorded folds whose nodes phase B did not insert, or when phase A hit an
+    `sqlite3.Error` or a page that disagrees with its descriptor, the round rolls back, releases
+    the lock and restarts from phase A, which does the work outside the lock. After
+    `PUBLISH_ROUNDS` (3) rounds the answer is 503 `overloaded` with `Retry-After`, never charged.
+    There is no fully locked fallback any more. Exact retries and unparsable bodies skip phases A and B (as
     today); `ignored` publications pass through phase A (no fold) and are answered by phase C.
-  - *Concurrency and lock order.* A publication waits on a per-workspace `asyncio.Lock`, then a
-    global `asyncio.Semaphore(2)`, both on the event loop (`Gate`): a waiting publication pins no
-    worker thread, so reads and `/healthz` keep their threads. Order: workspace mutex → semaphore →
+  - *Concurrency and lock order.* A publication waits on a per-workspace `asyncio.Lock`, then on
+    first-come-first-served admission, both on the event loop (`Gate`): a waiting publication pins
+    no worker thread, so reads and `/healthz` keep their threads. Admission allows at most
+    `ORCH_RELAY_PUBLISH_WIDTH` (default 2) publications whose reserved heads together stay under
+    `ORCH_RELAY_PUBLISH_HEADS` (default 1.5 million, about 2 GB of phase A memory at ~1.3 KB per new
+    node; round 2, F4); a publication above the cap runs alone. The reservation is estimated from
+    the staged set's bytes (74 B per head); phase A stops at the manifest and re-enters the gate
+    with the real count if the estimate was short. Order: workspace mutex → admission →
     `Directory.lock` → `Directory.budget`. Phase A returns its pooled read connection before phase
     B takes the lock, and nothing borrows a pooled connection while holding the lock in a way that
     waits (the write connection is the lock's). Same-workspace publications serialize through
     phases A–C; two publications from one H give exactly one acceptance even without the mutex,
     because phase C re-reads H (pinned by an interleaved A1 A2 B1 C1 B2 C2 test).
-  - *Budget by work.* Charged refusals also record the heads they folded (phase A's and any live
-    ones) in `checkpoint_refused_heads` (migration 0014). The existing budget check (after the exact
+  - *Budget by work.* Every refusal records the heads its rounds folded (phase A's of every round and
+    any live ones) in `checkpoint_refused_heads` (migration 0014): a charged refusal in its own
+    transaction, any other (`fenced` after a takeover, 429, 503, a refusal in phase B) right after
+    the answer, without a failure row (round 2, F2: a self-takeover no longer makes phase A free). The existing budget check (after the exact
     retry, before any work, 429 `quota_exceeded`, uncharged) also refuses once a workspace's rolling
     hour holds `REFUSED_HEADS` = 2 x (64 MiB / 74 B) ≈ 1.81 million refused heads, so refused fold
     work is bounded by about three full staging sets per workspace-hour instead of 48. A refusal
@@ -1368,19 +1381,45 @@ HTTP fixture.
     phase B inserted for a publication phase C did not commit. Orphans are verified heads: phase
     B runs only when phase A matched every log's proof to the WSK-signed checkpoint. The counter
     is the input for the G4 per-workspace storage quota; a crash between B and C is counted in
-    `nodes`, not in `orphaned`.
+    `nodes`, not in `orphaned`. `orphaned` is cumulative: it never decreases, also when a later
+    publication commits on those nodes, so the G4 quota must use `nodes`. The accounting after the
+    answer is best effort: a database error there is logged and never replaces the answer (F6).
   - *Measured* (`uv run python tests/bench_publication_lockhold.py`, in process, one run each before
     and after): an accepted 200,000-head append held `Directory.lock` 3.18 s in one hold, now at
     most 0.22 s per hold (10 chunks plus the commit, 1.6 s in total, other writers interleave);
     wall 3.19 s → 2.81 s; peak RSS 408 → 484 MB (phase A keeps its new rows until phase B). A
     refused 10,000-ticket x 2-page first publication held it 0.40 s, now 0.066 s (wall 0.57 s →
     0.60 s). A full 64 MiB set (~900,000 heads) needs about 45 chunks of ~0.2 s each.
-  - *Residual.* Phase A still materialises every new node of the publication (the fold cache needs
-    them for skip pointers, and nodes must not be stored before their log's proof matches the
-    signed checkpoint), so peak memory per publication is unchanged in kind; the semaphore bounds
-    it to two at a time. Compact row packing is a possible follow-up. The per-workspace waiters
-    are not capped (each holds its request body, at most 2.6 MiB); they were not capped before
-    either (they waited on the lock in worker threads).
+  - *Round 2 (Opus review of PR #57, "pass with required changes").*
+    - F1: a WSK holder could force the fully locked path, doubled: phase A refuses before any fold
+      (`at` just past now+5 min, the last page uploaded between A and C, an owner-policy change),
+      then phase C folded the set under the lock and re-ran it live. Review PoC: 40,000 folds under
+      the lock for 20,000 heads (estimated ~40 s for a full set). Now: the bounded phase C and the
+      restarts above; the same PoCs fold 0 heads under the lock (longest hold 0.08 s).
+    - F2: a self-takeover during phase A made its work uncharged and repeatable (PoC: 4 rounds,
+      0 heads recorded). Now every refusal records the work.
+    - F3: WAL starvation from overlapping long phase A snapshots: renewed every 20,000 heads (a
+      `wal_checkpoint(TRUNCATE)` completes while phase A runs, tested). A single fold (at most one
+      4 MiB page, ~56,000 heads, well under a second) still runs on one snapshot.
+    - F4: memory roughly doubles with two big publications in flight: the gate by heads and the
+      environment knobs above.
+    - F6: post-answer accounting is best effort; `orphaned` is cumulative.
+    - F7: pins for membership removed between A and C, an unused page re-staged between A and C,
+      and the mutex taken before admission.
+  - *Residual.*
+    - Phase A still materialises every new node of the publication. The fold cache needs them for
+      skip pointers, and nodes must not be stored before their log's proof matches the signed
+      checkpoint. So peak memory per publication is unchanged in kind (~1.2 GB for a full set);
+      the gate bounds the total. Compact row packing is a possible follow-up.
+    - The per-workspace waiters are not capped (each holds its request body, at most 2.6 MiB);
+      they were not capped before either (they waited on the lock in worker threads).
+    - F5: no per-account fairness. An account with k workspaces (G3: 10 new ones per hour) can keep
+      both admission slots busy with accepted publications, and each of its workspaces has its own
+      refused-heads budget, so refused work per account scales with its workspaces. Only
+      publications wait; logins, the bridge and reads do not. To close with G3/G4 before a public
+      deployment.
+    - Phase C still parses a changed manifest (at most 4 MiB) and checks completeness under the
+      lock when the set was re-staged between A and C, as before P3-D33.
   - *Pinned by* `tests/test_publication_phases.py`: no fold and no staged page read under the lock
     and one hold per chunk; lock order; the gate (mutex, width, cleanup, used by the route);
     same-workspace serialization and the interleaved race on H; takeover before phase C and inside
@@ -1388,8 +1427,11 @@ HTTP fixture.
     delegation changed and WSK changed between A and C; a refusal after folds answered on phase A's
     nodes; idempotent phase B; crashes between and inside phase B; the commit-on-unstored-folds
     guard; the refused-heads budget; `/healthz`, login and a bridge host poll served while a
-    publication is paused in phase A or between phase B chunks. Every checkpoint vector and HTTP
-    fixture passes unchanged through the phased path.
+    publication is paused in phase A or between phase B chunks; round 2: restarts for the clock,
+    staging and owner-policy triggers with no fold under the lock, 503 after the rounds, an
+    `sqlite3.Error` in phase A retried, work recorded on self-takeovers and across restart rounds,
+    the renewed snapshot, the gate by heads, the reweigh, the environment knobs, the best-effort
+    accounting. Every checkpoint vector and HTTP fixture passes unchanged through the phased path.
 - *Measured* (`uv run python tests/bench_checkpoint_capacity.py`, `docs/p3-checkpoint-capacity.md`).
 
 - *Round 2 (Opus review of PR #51).* R1: staged descriptors are grouped by `(kind, log)` once per
@@ -1416,13 +1458,16 @@ HTTP fixture.
 **Pre-public-deploy gates.** Acceptable on the invite-only dev relay; each must be closed before any
 public deployment.
 
-- **G1: publication work inside the global write lock. Closed by P3-D33.** A full 64 MiB / ~900,000-head
+- **G1: publication work inside the global write lock. Closed for honest load and bounded against a WSK
+  holder as of P3-D33 round 2** (the review's re-check of F1 and F2 is pending; F3 to F5 residuals are
+  listed in P3-D33). A full 64 MiB / ~900,000-head
   publication held `directory.lock` (shared by every write: logins, bridge, membership, recovery) for
   21.4 s with peak RSS about 836 MB, and a refusal at the end of the fold cost the same; refused
   publications repeated 48 times per workspace-hour without re-staging, and blocked writes pinned the
-  worker threads, so reads and `/healthz` stalled too. Now: no fold under the lock, holds of one
-  20,000-row chunk (~0.2 s) or the commit, waits on the event loop, a refused-heads budget, and orphan
-  accounting. The recommended design, as implemented with the deviations P3-D33 records (the
+  worker threads, so reads and `/healthz` stalled too. Now: no fold under the lock (at most 5,000 heads of
+  live work per round when state changed between phases, then a restart), holds of one 20,000-row chunk
+  (~0.2 s) or the commit, waits on the event loop, a refused-heads budget charged on every refusal, and
+  orphan accounting. The recommended design, as implemented with the deviations P3-D33 records (the
   fingerprint is the fold key plus live re-reads; the semaphore covers phases A to C):
   - *Phase A, outside the lock:* parse and verify on a WAL read snapshot (H, genesis, the staged set, every
     fold, skip pointers against the snapshot's nodes, R0–R5), under a per-workspace mutex and a global
@@ -1610,4 +1655,4 @@ No new decisions.
 | P3-D30 | Per-pair device cutoff under the registry person; new registration refused on any chain-learned revocation; per-pair `GET /revocation` list; registry-pair notice cursor (orch-52 rulings 1 to 4) | §10, proto §19.5 |
 | P3-D31 | Retrieval of unpublished revocation evidence: derived per-workspace view, W(g) `GET`/`POST ack`, `notices.unpublished`, refs as hints, 4 096 ever-devices per workspace (orch-52 decision point 7) | §10, proto §19.5 |
 | P3-D32 | Directory routes authorize first: read-only pre-check outside `Directory.lock`, bounded shared connection pool, side-effect-free window checks (G3 re-review D4) | §4, §10, proto §19.4 |
-| P3-D33 | Final publication outside the global write lock: phase A on a read snapshot (folds keyed by page digest and start), phase B node chunks, phase C live re-run and commit; per-workspace mutex and global semaphore on the event loop; refused-heads budget; orphan accounting (G1 gate) | §10, proto §19.8 |
+| P3-D33 | Final publication outside the global write lock: phase A on renewed read snapshots (folds keyed by page digest and start), phase B node chunks, phase C live re-run and commit with bounded live work and restarts (503 after 3 rounds); per-workspace mutex and admission by width and heads on the event loop; refused-heads budget on every refusal; orphan accounting (G1 gate) | §10, proto §19.8 |

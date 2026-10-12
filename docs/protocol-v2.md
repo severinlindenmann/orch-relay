@@ -2799,7 +2799,7 @@ F1 defines event/checkpoint bytes; the relay adds storage, transport and present
 | `PUT /v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/manifest` | W(g) | `{pages: [{i, kind, log, after_seq, count, digest}]}` → `{complete, missing}` | JSON cap 4 MiB; immutable terminal marker | 409 `staging_conflict`; 429 `quota_exceeded` | P3-D20 |
 | `POST /v2/workspaces/{ws}/baselines` | W(g) | `{hash, offer_id}` → `{until_ms}` | JSON cap 16 KiB; 7 days, at most 16 pins | 404 `not_found`; 410 `checkpoint_gone`; 429 `quota_exceeded` | P3-D13/D20 |
 | `DELETE /v2/workspaces/{ws}/baselines/{hash}[?offer_id=o]` | W(g), or D(m) after initialization naming `offer_id` | no body → `{}` | idempotent release; W(g) releases any pin, D(m) only the pin whose `offer_id` it names, otherwise a no-op | — | P3-D13/D20 |
-| `PUT /v2/workspaces/{ws}/checkpoint` | W(g) | `{checkpoint, source_hash, restore?}` with `restore = {line, cert, authz, log}` → `{result: "accepted" or "ignored", n, hash}` | JSON cap 2624 KiB; atomic; exact retry returns prior result; `Orch-Holder` required; at most 16 refusals per holder generation and 48 per workspace in any rolling hour | 400 `wrong_suite`, `too_large`; 401 `bad_signature`; 409 `fenced`, `no_genesis`, `genesis_mismatch`, `chain_diverged`, `checkpoint_time`, `staging_incomplete`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation`; 429 `quota_exceeded` | P3-D13/D20/D24/D25 |
+| `PUT /v2/workspaces/{ws}/checkpoint` | W(g) | `{checkpoint, source_hash, restore?}` with `restore = {line, cert, authz, log}` → `{result: "accepted" or "ignored", n, hash}` | JSON cap 2624 KiB; atomic; exact retry returns prior result; `Orch-Holder` required; at most 16 refusals per holder generation and 48 per workspace in any rolling hour | 400 `wrong_suite`, `too_large`; 401 `bad_signature`; 409 `fenced`, `no_genesis`, `genesis_mismatch`, `chain_diverged`, `checkpoint_time`, `staging_incomplete`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation`; 429 `quota_exceeded`; 503 `overloaded` (P3-D33, retryable) | P3-D13/D20/D24/D25 |
 | `GET /v2/workspaces/{ws}/checkpoint[?hash=h]` | D(m) or W | `{genesis: {pin, cert}, checkpoint, transitions_head}` | held H or immutable hash h | 404 `not_found`; 410 `checkpoint_gone` | P3-D18/D19 |
 | `GET /v2/workspaces/{ws}/transitions?after_n=k&to=E&limit=` | D(m) or W | `{transitions: [bundle], next}` | ascending target_n; default/max 16, at most 4 MiB | 404 `not_found`; 410 `checkpoint_gone` | P3-D13/D19 |
 | `GET /v2/workspaces/{ws}/proof?log=L&from=acc&to=E&limit=` | D(m) or W | `{heads: [head], next}` | default/max 65 536, at most 4 MiB | 404 `not_found`; 410 `checkpoint_gone` | P3-D19 |
@@ -2875,13 +2875,16 @@ charged; they cost one signature check and one canonicalisation of at most 2 MiB
 and the budget check above also answers 429 `quota_exceeded` (not charged) once the workspace's refusals of
 the rolling hour have folded about 1.81 million heads (twice the heads of a full 64 MiB staging set). A refusal
 before the staged set is folded (for example `restore_source_mismatch`, `checkpoint_time`,
-`staging_incomplete`) folds nothing. No new refusal code; the staged set is kept on a refusal. A relay verifies
+`staging_incomplete`) folds nothing. Every refusal records the fold work done for it, also the uncharged
+ones (`fenced` after a takeover, 429, 503). No new refusal code; the staged set is kept on a refusal. A relay verifies
 a publication outside its global write transaction and may store the verified nodes of a publication it then
 refuses (for example after a takeover between verification and commit); such nodes are immutable, referenced
 by nothing and invisible to every route, and count toward the workspace's storage. The answer is always the
 check order above evaluated at commit time: a takeover, a changed H, staging set, WSK, owner policy or
 revocation between verification and commit is answered as if the request had arrived after it. Concurrent
-final publications to one workspace are processed one at a time.
+final publications to one workspace are processed one at a time. When state keeps changing between
+verification and commit, the relay may answer 503 `overloaded` with `Retry-After` (never charged); the host
+retries the same request unchanged.
 
 **Restore rules (P3-D13/D23/D24/D25).** `restore` is `{line, cert, authz: {delegation}, log}`.
 `line` is the full F1 event object, with its payload fields at the top level, not an interim nested payload.
