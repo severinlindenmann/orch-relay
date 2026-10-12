@@ -512,3 +512,31 @@ def test_account_creation_refuses_a_revoked_device_id(tmp_path):
             assert not con.execute("SELECT 1 FROM accounts").fetchone()
             assert con.execute("SELECT used_ms FROM invites").fetchone()[0] is None
 
+
+@pytest.mark.parametrize("who", ["own", "other"])
+def test_member_certificate_cutoff_is_by_device_id(tmp_path, who):
+    """PR #53 review R3: membership refuses a member certificate whose device id holds a revocation of
+    any person (the device-auth cutoff, by device id); the same device is accepted without one."""
+    import sqlite3
+
+    from orch_relay.directory import Refusal
+    from orch_relay.members import certificate
+
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        member = {"device_id": DEVICE, "person_id": PERSON, "scopes": ["look"]}
+        with closing(db.connect(d.path)) as con:
+            con.row_factory = sqlite3.Row
+            certificate(con, member, PERSON, [], NOW)  # control: no revocation, accepted
+            if who == "own":
+                con.execute(
+                    "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
+                    (DEVICE, PERSON, P.cj(RECORD), "lost", NOW, 1),
+                )
+            else:
+                _other_person_row(con, DEVICE)
+            with pytest.raises(Refusal) as refused:
+                certificate(con, member, PERSON, [], NOW)
+            assert refused.value.code == "revoked"
+            con.rollback()
