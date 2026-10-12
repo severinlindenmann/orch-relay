@@ -283,7 +283,7 @@ def prune_device(con, did, ws=None):
     )
 
 
-def dispatch(directory, con, route, ws, body, raw, query, headers, now):
+def dispatch(directory, con, route, ws, body, raw, query, headers, now, state=None):
     allowed = {"epoch"} if route == "grants" else {"card_seq"} if route == "card_key" else set()
     if set(query) - allowed:
         fail("malformed")
@@ -294,6 +294,7 @@ def dispatch(directory, con, route, ws, body, raw, query, headers, now):
         directory.fence(con, headers, ws, now)
     if route in {"grants", "card_key"} and session["kind"] != "device":
         fail("not_eligible")
+    directory.authorized(state)  # P3-D32: a pre-check stops here
     workspace = con.execute("SELECT * FROM workspaces WHERE workspace_id=?", (ws,)).fetchone()
     if workspace is None:
         fail("not_found")

@@ -248,6 +248,15 @@ def window_rate(state, purpose, identity, duration, cap, now, charge=True):
         state.windows[key] = (end, count + 1)
 
 
+class Proceed(Exception):
+    """A pre-check reached the route's authorization point: the transaction decides the rest."""
+
+
+# Pre-check steps that are the whole, read-only answer (P3-D32): a challenge (no database), a logout
+# of no stored session, a revocation receipt replay and the public revocation-pair read.
+FINAL = "final"
+
+
 class Directory:
     def __init__(self, path, origin, trusted_proxy=None):
         self.path, self.origin, self.trusted_proxy = path, origin, trusted_proxy
@@ -301,6 +310,28 @@ class Directory:
                 con.close()
             self.connections.clear()
         self.local = threading.local()
+
+    @staticmethod
+    def authorized(state):
+        """A route's authorization point: everything before it is read-only (no write, no window
+        charge, no in-memory change but the once-only steps in `state`). A pre-check stops here."""
+        if state and state.get("pre"):
+            raise Proceed
+
+    @staticmethod
+    def final(state):
+        """The pre-check's result is the whole answer (read-only routes only, see FINAL)."""
+        if state is not None:
+            state[FINAL] = True
+
+    def consume_once(self, challenge, now, state):
+        """Consume the request's challenge exactly once: a pre-check consumes it (it is removed
+        whatever follows, §19.4) and the transaction reuses the consumed bytes."""
+        if state is None:
+            return self.consume(challenge, now)
+        if "challenge" not in state:
+            state["challenge"] = self.consume(challenge, now)
+        return state["challenge"]
 
     def assert_can_wait(self):
         """G3 must call before a long-poll wait, outside its database transaction."""
@@ -489,7 +520,7 @@ class Directory:
         except sqlite3.IntegrityError:
             fail("cert_conflict")
 
-    def account(self, con, body, raw, now):
+    def account(self, con, body, raw, now, state=None):
         fields(body, "invite pk_pub device_cert challenge sig")
         if not isinstance(body["invite"], str) or not body["invite"]:
             fail("malformed")
@@ -497,7 +528,12 @@ class Directory:
         invite = con.execute("SELECT * FROM invites WHERE code_hash=?", (invite_hash,)).fetchone()
         if invite and invite["request_digest"] == digest(raw):
             return {"person_id": invite["used_by"]}
-        challenge = self.consume(body["challenge"], now)
+        if invite:
+            # P3-D32: an existing invite may be redeemed by a concurrent identical request, whose
+            # retry must see the replay, not a challenge this pre-check consumed: only the
+            # transaction consumes it. Without an invite the request is refused below in any case.
+            self.authorized(state)
+        challenge = self.consume_once(body["challenge"], now, state)
         if invite is None or invite["used_ms"] is not None or now >= invite["expires_ms"]:
             fail("not_eligible")
         check_suite(body["device_cert"])
@@ -528,6 +564,7 @@ class Directory:
             fail("bad_signature")
         if usable_account(con, o["person_id"]):
             fail("account_exists")
+        self.authorized(state)
         # P3-D29: redeeming an invite turns an evidence-only row (same person_id, so the same
         # pk_pub) into the account; its revocations stay. P3-D30 round 2 (review R1): its device
         # rows, written by pre-0010 restore evidence, are deleted first. Restores create no
@@ -566,11 +603,11 @@ class Directory:
             prune_device(con, did)
         con.execute("DELETE FROM devices WHERE person_id=?", (person,))
 
-    def login(self, con, body, now):
+    def login(self, con, body, now, state=None):
         # Consume a recognizable challenge even if other fields are malformed.
         if not isinstance(body, dict) or "challenge" not in body:
             fail("malformed")
-        challenge = self.consume(body["challenge"], now)
+        challenge = self.consume_once(body["challenge"], now, state)
         fields(body, "challenge kind id sig")
         kind, ident = body["kind"], body["id"]
         if kind not in ("device", "workspace"):
@@ -605,6 +642,7 @@ class Directory:
             ).fetchone()
             if live[0] >= 8:
                 fail("quota_exceeded", max(1, math.ceil((live[1] - now) / 1000)))
+        self.authorized(state)
         token = P.b64u(self.random(32))
         con.execute("DELETE FROM sessions WHERE expires_ms<=?", (now,))
         con.execute(
@@ -612,7 +650,7 @@ class Directory:
         )
         return {"token": token, "expires_ms": now + 900_000}
 
-    def recovery(self, con, body, raw, address, now, device=None):
+    def recovery(self, con, body, raw, address, now, device=None, state=None):
         """Verify and apply recovery; handle() has already enforced the address budget."""
         from .cert_queue import complete
 
@@ -635,10 +673,13 @@ class Directory:
             (kind, digest(raw)),
         ).fetchone()
         if receipt:
-            if not revocation:
-                stored = con.execute("SELECT * FROM devices WHERE device_id=?", (did,)).fetchone()
-                self.device_status(con, stored, now)
-                complete(con, P.parse_json(stored["cert"]), now)
+            if revocation:
+                self.final(state)  # a read-only replay: answered from the pre-check's snapshot
+                return {"device_id": did}
+            self.authorized(state)
+            stored = con.execute("SELECT * FROM devices WHERE device_id=?", (did,)).fetchone()
+            self.device_status(con, stored, now)
+            complete(con, P.parse_json(stored["cert"]), now)
             return {"device_id": did}
         account = con.execute("SELECT pk_pub FROM accounts WHERE person_id=?", (person,)).fetchone()
         if account is None or (not revocation and usable_account(con, person) is None):
@@ -671,6 +712,7 @@ class Directory:
             and prior
             and (prior["reason"] == "compromised" or o["reason"] != "compromised")
         ):
+            self.authorized(state)
             # Cache accepted no-ops too: a byte-identical retry must bypass address budgets.
             con.execute("INSERT INTO recovery_receipts VALUES (?,?,?)", (kind, digest(raw), did))
             if not revocation:
@@ -679,6 +721,7 @@ class Directory:
         self.rate(kind + "-person", person, DAY, 32 if revocation else 64, now, False)
         if revocation and prior:
             self.rate("revocation-repeat", person, DAY, 24, now, False)
+        self.authorized(state)
         self.rate(kind + "-person", person, DAY, 32 if revocation else 64, now)
         if revocation and prior:
             self.rate("revocation-repeat", person, DAY, 24, now)
@@ -804,7 +847,7 @@ class Directory:
             else None,
         }
 
-    def card_put(self, con, ws, body, headers, address, now):
+    def card_put(self, con, ws, body, headers, address, now, state=None):
         fields(body, "card")
         card = body["card"]
         check_suite(card)
@@ -833,10 +876,13 @@ class Directory:
         if old_card and P.cj(old_card["delegation"]) != P.cj(card["delegation"]):
             fail("delegation_changed")
         if old_card and old_card["o"] == o:
+            self.authorized(state)
             return {"card_seq": o["card_seq"]}
         if not stored:
             self.rate("card-address", address, HOUR, 10, now, False)
             self.rate("card-owner", owner, HOUR, 10, now, False)
+        self.authorized(state)
+        if not stored:
             self.rate("card-address", address, HOUR, 10, now)
             self.rate("card-owner", owner, HOUR, 10, now)
         con.execute(
@@ -856,12 +902,16 @@ class Directory:
         )
         return {"card_seq": o["card_seq"]}
 
-    def dispatch(self, con, route, ident, method, body, raw, query, headers, address, now):
+    def dispatch(
+        self, con, route, ident, method, body, raw, query, headers, address, now, state=None
+    ):
+        """Route dispatch. With state["pre"] it is the read-only pre-check: it stops at the route's
+        authorization point (Proceed) or, for FINAL steps, is the whole answer (P3-D32)."""
         from . import members
 
         if route in members.ROUTES:
             P.unhex(ident)
-            return members.dispatch(self, con, route, ident, body, raw, query, headers, now)
+            return members.dispatch(self, con, route, ident, body, raw, query, headers, now, state)
         allowed = {
             "feed": {"after", "limit", "next"},
             "revocation": {"after", "limit"},
@@ -872,26 +922,38 @@ class Directory:
             P.unhex(ident)
         if route == "challenge":
             fields(body, "")
+            self.final(state)  # no database state; the budget mutex guards the windows
             return self.issue(address, now)
         if route == "login":
-            return self.login(con, body, now)
+            return self.login(con, body, now, state)
         if route == "logout":
             fields(body, "")
             auth = headers.get("authorization", "")
             if auth.startswith("Bearer "):
-                con.execute("DELETE FROM sessions WHERE token_hash=?", (token_hash(auth[7:]),))
+                hashed = token_hash(auth[7:])
+                if not (state and state.get("pre")):
+                    con.execute("DELETE FROM sessions WHERE token_hash=?", (hashed,))
+                elif con.execute("SELECT 1 FROM sessions WHERE token_hash=?", (hashed,)).fetchone():
+                    raise Proceed
+            self.final(state)  # nothing stored under this token: nothing to delete or wake
             return {}
         if route == "accounts":
-            return self.account(con, body, raw, now)
+            return self.account(con, body, raw, now, state)
         if route == "revocations":
-            return self.recovery(con, body, raw, address, now)
+            return self.recovery(con, body, raw, address, now, state=state)
         if route == "device" and method == "PUT":
-            return self.recovery(con, body, raw, address, now, ident)
+            return self.recovery(con, body, raw, address, now, ident, state)
         if route == "revocation":
-            self.rate("revocation-read", address, MINUTE, 60, now)
-            return self.revocation_pairs(con, ident, query)
+            # Public and read-only after its address window (charged once per request).
+            if not (state and "revocation-read" in state):
+                self.rate("revocation-read", address, MINUTE, 60, now)
+            if state is not None:
+                state["revocation-read"] = True
+            result = self.revocation_pairs(con, ident, query)
+            self.final(state)
+            return result
         if route == "card" and method == "PUT":
-            return self.card_put(con, ident, body, headers, address, now)
+            return self.card_put(con, ident, body, headers, address, now, state)
         session = self.authenticate(con, headers, now)
         if route == "device":
             row = con.execute("SELECT * FROM devices WHERE device_id=?", (ident,)).fetchone()
@@ -906,6 +968,7 @@ class Directory:
                 ).fetchone()
             ):
                 fail("not_eligible")
+            self.authorized(state)
             return {"cert": P.parse_json(row["cert"])}
         if route == "card":
             row = con.execute(
@@ -914,8 +977,10 @@ class Directory:
             if row is None:
                 fail("not_found")
             self.workspace_access(con, session, ident)
+            self.authorized(state)
             return {"card": P.parse_json(row["card"])}
         self.person_access(con, session, ident)
+        self.authorized(state)
         after, limit = integer(query.get("after", "0")), integer(query.get("limit", "256"), 256)
         if limit == 0:
             fail("malformed")
@@ -957,49 +1022,103 @@ class Directory:
         )
         return {"revocations": entries, "next": next_value}
 
+    def steps(self, con, route, ident, method, raw, query, headers, address, now, state):
+        """The request in order: the recovery address budget, the body, then dispatch. Shared by the
+        pre-check (read connection, state["pre"]) and the transaction, so both refuse in the same
+        order with the same codes. Returns (result, body, logout subject row)."""
+        if route == "revocations" or (route == "device" and method == "PUT"):
+            # Charged before authentication by design (throttles guessing).
+            revocation = route == "revocations"
+            kind = "revocation" if revocation else "certificate"
+            receipt = con.execute(
+                "SELECT subject_id FROM recovery_receipts WHERE kind=? AND request_digest=?",
+                (kind, digest(raw)),
+            ).fetchone()
+            if not receipt or (not revocation and receipt["subject_id"] != ident):
+                duration, cap = (MINUTE, 10) if revocation else (HOUR, 30)
+                window = (kind + "-address", address, duration, cap, now)
+                if state.get("pre"):
+                    # Checked here, charged only if the pre-check refuses (preauthorize): a request
+                    # that proceeds is charged by the transaction, which re-reads the receipt, so a
+                    # concurrent identical retry stays free as before.
+                    self.rate(*window, False)
+                    state["deferred"] = window
+                else:
+                    self.rate(*window)
+        if method == "GET":
+            if raw:
+                fail("malformed")
+            body = None
+        else:
+            if headers.get("content-type", "").split(";")[0].strip() != "application/json":
+                fail("malformed")
+            body = P.parse_json(raw)
+        logout = (
+            con.execute(
+                "SELECT subject_id FROM sessions WHERE token_hash=?",
+                (token_hash(headers.get("authorization", "")[7:]),),
+            ).fetchone()
+            if route == "logout"
+            else None
+        )
+        result = self.dispatch(
+            con, route, ident, method, body, raw, query, headers, address, now, state
+        )
+        return result, body, logout
+
+    def preauthorize(self, route, ident, method, raw, query, headers, address, state):
+        """Read-only pre-check before Directory.lock and any write transaction (P3-D32, G3
+        re-review D4): the same steps on a query-only WAL snapshot, up to the route's
+        authorization point. Raises the refusal the transaction would raise, in the same order;
+        returns the whole answer for FINAL steps, else None (the transaction re-checks everything).
+        sqlite3.Error propagates: the caller falls back to the transaction alone."""
+        con = self.connection("read")
+        state["pre"] = True
+        try:
+            con.execute("BEGIN")
+            result = self.steps(
+                con, route, ident, method, raw, query, headers, address, self.clock(), state
+            )[0]
+            return result if state.get(FINAL) else None
+        except Proceed:
+            return None
+        except (Refusal, ValueError, TypeError, KeyError, AttributeError):
+            if "deferred" in state:
+                # The recovery address window precedes every other check (charged even when the
+                # request is refused): charge it now, atomically re-checked, as the transaction
+                # would have before refusing. A full window answers 429 instead.
+                self.rate(*state.pop("deferred"))
+            raise
+        finally:
+            state["pre"] = False
+            con.rollback()
+
     def handle(self, route, ident, method, raw, query, headers, peer):
         try:
             if len(raw) > body_cap(route):
                 fail("too_large")
             address = canonical_address(peer, headers.get("x-forwarded-for"), self.trusted_proxy)
+            # Authorize first: a refused request takes no lock and no write transaction, and is
+            # charged only what the transaction would charge before refusing it.
+            state = {}
+            try:
+                result = self.preauthorize(
+                    route, ident, method, raw, query, headers, address, state
+                )
+            except sqlite3.Error:
+                result = None  # the transaction authorizes on its own
+            if result is not None:
+                response = JSONResponse(result)
+                response.wake = []  # FINAL steps change no row
+                return response
             with self.lock:
                 con = self.connection("write")
                 now = self.clock()
                 con.execute("BEGIN IMMEDIATE")
                 with con:
                     changes = con.total_changes
-                    if route == "revocations" or (route == "device" and method == "PUT"):
-                        revocation = route == "revocations"
-                        kind = "revocation" if revocation else "certificate"
-                        receipt = con.execute(
-                            "SELECT subject_id FROM recovery_receipts "
-                            "WHERE kind=? AND request_digest=?",
-                            (kind, digest(raw)),
-                        ).fetchone()
-                        if not receipt or (not revocation and receipt["subject_id"] != ident):
-                            duration, cap = (MINUTE, 10) if revocation else (HOUR, 30)
-                            self.rate(kind + "-address", address, duration, cap, now)
-                    if method == "GET":
-                        if raw:
-                            fail("malformed")
-                        body = None
-                    else:
-                        if (
-                            headers.get("content-type", "").split(";")[0].strip()
-                            != "application/json"
-                        ):
-                            fail("malformed")
-                        body = P.parse_json(raw)
-                    logout = (
-                        con.execute(
-                            "SELECT subject_id FROM sessions WHERE token_hash=?",
-                            (token_hash(headers.get("authorization", "")[7:]),),
-                        ).fetchone()
-                        if route == "logout"
-                        else None
-                    )
-                    result = self.dispatch(
-                        con, route, ident, method, body, raw, query, headers, address, now
+                    result, body, logout = self.steps(
+                        con, route, ident, method, raw, query, headers, address, now, state
                     )
                     # Any row change (incl. triggers) on this connection since BEGIN came from this
                     # commit. Unthrottled receipt replays change nothing and so wake nothing.
