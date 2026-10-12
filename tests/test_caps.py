@@ -543,3 +543,82 @@ def test_migration_0015_backfills_evidence_pairs_per_owner(tmp_path):
             shutil.copy(str(e), mdir / e.name)
     assert db.migrate(path, mdir)[0].startswith("0015")
     assert sql(path, "SELECT person_id, pairs FROM account_evidence_pairs") == [("aa", 2)]
+
+
+# --- review of PR #58 (F4): other owners, other workspaces, associated evidence -------------------
+
+
+def test_the_workspace_cap_counts_only_the_owners_workspaces(tmp_path):
+    """Review mutant O2: another person's workspaces never count against this owner's cap."""
+    from directory_support import seed as dseed
+
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        dseed(d, card=False)
+        d.account_workspaces = 2
+        with closing(db.connect(d.path)) as con, con:
+            con.execute("INSERT INTO accounts VALUES (?,?,?)", ("ab" * 16, "FAKE-pk", NOW))
+            for i in range(5):
+                con.execute(
+                    "INSERT INTO workspaces VALUES (?,?,'k',x'00',x'00',1,1,0)",
+                    (f"{100 + i:032x}", "ab" * 16),
+                )
+        for i in range(2):
+            ws = f"{i:032x}"
+            r = c.put(f"/v2/workspaces/{ws}/card", json={"card": card_for(ws)})
+            assert r.status_code == 200, r.text
+        ws = f"{2:032x}"
+        r = c.put(f"/v2/workspaces/{ws}/card", json={"card": card_for(ws)})
+        assert (r.status_code, r.json()) == (429, {"error": "quota_exceeded"})
+
+
+def test_eviction_never_crosses_workspaces(relay, monkeypatch):
+    """Review mutant O12: evict_oldest keeps the newest rows of ONE workspace; another
+    workspace's older receipts and tombstones (lower rowids) stay untouched."""
+    monkeypatch.setattr(checkpoints, "RECEIPTS_KEPT", 2)
+    monkeypatch.setattr(checkpoints, "GONE_KEPT", 1)
+    others = {
+        t: [(WS_B, digest(f"FAKE {t} {k}".encode())) for k in range(3)]
+        for t in ("checkpoint_receipts", "checkpoint_gone")
+    }
+    with closing(db.connect(relay.path)) as con, con:
+        con.executemany(
+            "INSERT INTO checkpoint_receipts VALUES (?,?,'{}')", others["checkpoint_receipts"]
+        )
+        con.executemany("INSERT INTO checkpoint_gone VALUES (?,?)", others["checkpoint_gone"])
+    chain(relay, 4)
+    relay.d.clock = lambda: NOW + checkpoints.DAY + 1
+    relay.cps.sweep()
+    for table, rows in others.items():
+        assert (
+            sql(
+                relay.path,
+                f"SELECT workspace_id, {'digest' if 'receipt' in table else 'hash'} "
+                f"FROM {table} WHERE workspace_id=? ORDER BY rowid",
+                (WS_B,),
+            )
+            == rows
+        )
+    assert sql(
+        relay.path, "SELECT count(*) FROM checkpoint_receipts WHERE workspace_id=?", (WS,)
+    ) == [(2,)]
+    assert sql(relay.path, "SELECT count(*) FROM checkpoint_gone WHERE workspace_id=?", (WS,)) == [
+        (1,)
+    ]
+
+
+def test_associated_evidence_is_never_counted(tmp_path):
+    """Review mutant O4: an entry for a device with an association (its registry person and key)
+    is not self-certified, so it is not counted even when the global table lacks its pair."""
+    c = case("B1_registry_same_person_accepts_its_pair")
+    with TestClient(create_app(tmp_path)) as client:
+        path = tmp_path / db.DB_NAME
+        replay(client, path, c, upto=1)
+        body = c["steps"][1]["input"]["body"]
+        (item,) = body["restore"]["line"]["revocations"]
+        pair = (item["revocation"]["o"]["device_id"], item["revocation"]["o"]["person_id"])
+        sql(path, "DELETE FROM revocations WHERE device_id=? AND person_id=?", pair)
+        client.app.state.checkpoints.caps.evidence = 0
+        assert put(client, body)["result"] == "accepted"
+        owner = c["state"]["delegation"]["o"]["owner_person_id"]
+        assert evidence_used(path, owner) == 0
