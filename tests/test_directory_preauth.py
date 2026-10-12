@@ -164,6 +164,16 @@ REFUSED = [
         "malformed",
         (),
     ),
+    (
+        "membership_bad_token_bad_body",  # the body is checked before authentication
+        "PUT",
+        f"/v2/workspaces/{WS}/membership",
+        {**BAD, "Content-Type": "text/plain"},
+        "{}",
+        400,
+        "malformed",
+        (),
+    ),
     # Person session (feed) and device reads.
     ("feed_no_session", "GET", f"/v2/persons/{PERSON}/revocations", {}, None, 401, None, ()),
     ("feed_other_person", "GET", f"/v2/persons/{STRANGER}/revocations", DEV, None, 403, None, ()),
@@ -576,3 +586,43 @@ def test_fixture_bytes_identical_without_precheck(tmp_path, monkeypatch, name, c
     alone = replay(tmp_path / "alone", monkeypatch, name, case, False)
     assert pre == alone
     assert pre[0][-1][0] == case["response"]["status"]
+
+
+def test_reused_connection_never_carries_an_open_transaction(tmp_path):
+    """A connection handed out again is rolled back first: a pre-check never reads an old snapshot
+    and the transaction never inherits an open one."""
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        for purpose in ("read", "write"):
+            con = d.connection(purpose)
+            con.execute("BEGIN")
+            con.execute("SELECT count(*) FROM sessions").fetchone()
+            assert con.in_transaction
+            assert d.connection(purpose) is con and not con.in_transaction
+
+
+def test_windows_and_challenges_are_guarded_by_the_budget_mutex(tmp_path):
+    """Pre-checks touch windows and challenges without Directory.lock, so every access takes the
+    budget mutex (and only that)."""
+    from orch_relay.directory import Directory
+
+    d = Directory(tmp_path / "unused", "https://relay.example")
+    real, held = d.budget, []
+
+    class Budget:
+        def __enter__(self):
+            held.append(True)
+            return real.__enter__()
+
+        def __exit__(self, *exc):
+            return real.__exit__(*exc)
+
+    d.budget = Budget()
+    d.rate("x", "a", MINUTE, 5, NOW, False)
+    d.rate("x", "a", MINUTE, 5, NOW)
+    assert len(held) == 2
+    challenge = d.issue("198.51.100.1", NOW)["challenge"]
+    assert len(held) > 2
+    count = len(held)
+    d.consume(challenge, NOW)
+    assert len(held) > count
