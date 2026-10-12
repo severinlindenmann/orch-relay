@@ -45,7 +45,8 @@
           "notices": {
             "revocations_cursor": 0,
             "cert_requests": [],
-            "rotation_due": []
+            "rotation_due": [],
+            "unpublished": null
           },
           "next": null
         }
@@ -233,7 +234,8 @@
                 "revocation_cursor": 1,
                 "epoch": 1
               }
-            ]
+            ],
+            "unpublished": "eyJjIjoxLCJ2IjoxLCJ3cyI6IjcwNWQ0MGFiYmI4YzFjOTAzNTRhMWFjYWE5NGM5MzVjIn0"
           },
           "next": null
         }
@@ -276,7 +278,82 @@
           "notices": {
             "revocations_cursor": 0,
             "cert_requests": [],
-            "rotation_due": []
+            "rotation_due": [],
+            "unpublished": null
+          },
+          "next": null
+        }
+      }
+    },
+    {
+      "name": "unpublished_notice",
+      "given": {
+        "scenario": "unpublished_notice",
+        "now_ms": 1790000000000,
+        "acked": 0,
+        "condition": "The relay holds the phone's registered (device, person) pair at \u00a719.5 cursor 1; the workspace chain does not; the workspace's unpublished ack is 0 (P3-D31)."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/poll",
+        "query": {
+          "after": "0",
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "items": [],
+          "notices": {
+            "revocations_cursor": 1,
+            "cert_requests": [],
+            "rotation_due": [],
+            "unpublished": "eyJjIjoxLCJ2IjoxLCJ3cyI6IjcwNWQ0MGFiYmI4YzFjOTAzNTRhMWFjYWE5NGM5MzVjIn0"
+          },
+          "next": null
+        }
+      }
+    },
+    {
+      "name": "unpublished_notice_acked",
+      "given": {
+        "scenario": "unpublished_notice",
+        "now_ms": 1790000000000,
+        "acked": 1,
+        "condition": "The relay holds the phone's registered (device, person) pair at \u00a719.5 cursor 1; the workspace chain does not; the workspace's unpublished ack is 1 (P3-D31)."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/poll",
+        "query": {
+          "after": "0",
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "items": [],
+          "notices": {
+            "revocations_cursor": 1,
+            "cert_requests": [],
+            "rotation_due": [],
+            "unpublished": null
           },
           "next": null
         }

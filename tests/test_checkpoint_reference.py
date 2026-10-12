@@ -238,6 +238,7 @@ def test_checkpoint_request_caps_match_http_registry():
         "manifest": "staging_manifest",
         "baseline": "baseline_post",
         "publish": "checkpoint_put",
+        "unpublished_ack": "unpublished_ack",
     }
     assert C.REQUEST_CAPS == {op: CAPS[route] for op, route in routes.items()}
 

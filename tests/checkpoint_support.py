@@ -27,7 +27,7 @@ WS_B = V["ids"]["workspace_b"]
 DEVICE = V["ids"]["device_phone"]
 CARD = V["card"]["card"]
 LEASE = 1 << 52
-SECTIONS = ("checkpoints", "checkpoints_g4")
+SECTIONS = ("checkpoints", "checkpoints_g4", "unpublished")
 BOB_PHONE = V["ids"]["device_bob_phone"]
 # Per workspace: its W token, a member device token and that device (§19.8 detail 6 (b)).
 TOKENS = {
@@ -138,7 +138,8 @@ def seed(path, state, case, now=None, ws=WS):
         for person, pk in persons.items():
             con.execute("INSERT OR IGNORE INTO accounts VALUES (?,?,?)", (person, pk, 0))
         for d, person in devices.items():
-            cert = certificate(pool, d, person)
+            # P3-D31 states name each registry certificate (the unpublished items serve it).
+            cert = state.get("certs", {}).get(d) or certificate(pool, d, person)
             o = cert["o"]
             con.execute(
                 "INSERT OR IGNORE INTO devices VALUES (?,?,?,?,?,?,?)",
@@ -169,15 +170,23 @@ def seed(path, state, case, now=None, ws=WS):
         for d, scopes in state["members"].items():
             con.execute("INSERT INTO members VALUES (?,?,?,?)", (ws, d, devices[d], P.cj(scopes)))
             con.execute("INSERT OR IGNORE INTO ever_persons VALUES (?,?)", (ws, devices[d]))
-            if d in state["ever_devices"]:
-                con.execute("INSERT INTO ever_devices VALUES (?,?,1)", (ws, d))
+        # As in production: list members (current or former: `list_devices` when the state names
+        # them) are G2 ever_devices only; restore evidence and signers outside the list are
+        # checkpoint_ever_devices only (review R2).
+        listed = C.list_devices(state)
+        for d in listed:
+            con.execute("INSERT OR IGNORE INTO ever_persons VALUES (?,?)", (ws, devices[d]))
+            con.execute("INSERT INTO ever_devices VALUES (?,?,1)", (ws, d))
         for d in state["ever_devices"]:
-            # As in production: list members are G2 ever_devices only; restore evidence and
-            # signers outside the list are checkpoint_ever_devices only (review R2).
-            if d not in state["members"]:
+            if d not in listed:
                 con.execute("INSERT INTO checkpoint_ever_devices VALUES (?,?)", (ws, d))
-        for cursor, key in enumerate(sorted(revs), 1):
-            rev = revs[key]
+        if "unpublished_ack" in state:
+            con.execute(
+                "INSERT INTO unpublished_acks VALUES (?,?,1,0)", (ws, state["unpublished_ack"])
+            )
+        cursors = C.cursor_table(state)
+        for key in sorted(revs, key=cursors.get):
+            rev, cursor = revs[key], cursors[key]
             con.execute(
                 "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
                 (
@@ -407,7 +416,35 @@ def step(client, path, inp, case, ws=WS):
                 return {"status": 400, "error": "malformed"}
     if op == "device_sync":
         return device_sync(client, inp, ws)
+    if op == "unpublished_get":
+        return http(client, "GET", prefix + "/unpublished", host, inp.get("query", {}))
+    if op == "unpublished_ack":
+        return http(client, "POST", prefix + "/unpublished/ack", host, body=body)
+    if op == "notices":
+        poll = http(client, "GET", prefix + "/host/poll", host, {"after": "0"})
+        if poll["status"] != 200:
+            return poll
+        return {"status": 200, "unpublished": poll["notices"]["unpublished"]}
+    if op == "revoke":
+        result = http(client, "POST", "/v2/revocations", {}, body=body)
+        return {k: v for k, v in result.items() if k in ("status", "error", "device_id")}
+    if op == "restart":
+        restart(client)
+        return {"status": 200}
     return SKIPPED  # device_learn: a device-only state change
+
+
+def restart(client):
+    """A new relay process on the same database: every in-memory window, connection and waiter
+    is gone; only durable state remains."""
+    from orch_relay.unpublished import Budget
+
+    d, bridge = client.app.state.directory, client.app.state.bridge
+    d.windows.clear()
+    d.window_expiry.clear()
+    d.challenges.clear()
+    bridge.close()
+    client.app.state.checkpoints.budget = Budget()
 
 
 def device_sync(client, inp, ws=WS):
@@ -501,6 +538,7 @@ def project_state(state, now):
         },
         "receipts": set(state["receipts"]),
         "failures": sorted(tuple(f) for f in state["failures"] if f[1] > now - HOUR),
+        "ack": state.get("unpublished_ack", 0),
     }
 
 
@@ -599,12 +637,23 @@ def project_db(path, now, ws=WS):
                     (ws, now - HOUR),
                 )
             ),
+            "ack": con.execute(
+                "SELECT coalesce(max(cursor),0) FROM unpublished_acks WHERE workspace_id=?", (ws,)
+            ).fetchone()[0],
         }
 
 
 def registry(path):
     with closing(db.connect(path)) as con:
         return dict(con.execute("SELECT device_id,person_id FROM devices"))
+
+
+def cursors(path):
+    with closing(db.connect(path)) as con:
+        return {
+            (d, p): c
+            for d, p, c in con.execute("SELECT device_id,person_id,cursor FROM revocations")
+        }
 
 
 def replay(client, path, case, upto=None):
@@ -664,6 +713,16 @@ def prepare_fixture(client, path, case, success):
                 con.execute(
                     "UPDATE devices SET expires_ms=? WHERE device_id=?", (given["now_ms"], DEVICE)
                 )
+            elif scenario == "rate_limited":
+                # P3-D31: the workspace's fetch or ack window is full (charged after W(g)).
+                from orch_relay.unpublished import ACK_WINDOWS, FETCH_WINDOWS
+
+                post = case["request"]["method"] == "POST"
+                duration, cap = (ACK_WINDOWS if post else FETCH_WINDOWS)[0]
+                now = given["now_ms"]
+                budget = client.app.state.checkpoints.budget
+                key = ("unpublished-ack" if post else "unpublished-get", WS, duration)
+                budget.windows[key] = ((now // duration + 1) * duration, cap)
             elif scenario == "revoked":
                 con.execute(
                     "INSERT OR IGNORE INTO revocations VALUES (?,?,?,?,?,"

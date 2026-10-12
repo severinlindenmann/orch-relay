@@ -24,7 +24,7 @@ ROUTES = [
     ("revocation_feed", "GET", "/v2/persons/{person}/revocations", "client", "D(p)|W", "403:not_eligible"),
     ("card_put", "PUT", "/v2/workspaces/{ws}/card", "host", "first|W(g)", "400:wrong_suite,delegation_mismatch 401:bad_signature 403:other_person 409:other_workspace,wsk_changed,delegation_changed,stale_card,wxk_changed_without_version,bad_wxk_version 429:rate_limited"),
     ("card_get", "GET", "/v2/workspaces/{ws}/card", "client", "D(m)|W", "403:not_eligible 404:not_found"),
-    ("membership", "PUT", "/v2/workspaces/{ws}/membership", "host", "W(g)", "400:cert_invalid 401:bad_signature 403:revoked,other_person,scope_exceeded,cert_expired,not_for_this_device 409:other_workspace,stale_list,bad_epoch,rotation_required,wk_commit_changed,missing_grant,grant_conflict,stale_card,wrap_conflict,fenced"),
+    ("membership", "PUT", "/v2/workspaces/{ws}/membership", "host", "W(g)", "400:cert_invalid 401:bad_signature 403:revoked,other_person,scope_exceeded,cert_expired,not_for_this_device 409:other_workspace,stale_list,bad_epoch,rotation_required,wk_commit_changed,missing_grant,grant_conflict,stale_card,wrap_conflict,fenced 429:quota_exceeded"),
     ("card_keys", "PUT", "/v2/workspaces/{ws}/card-keys", "host", "W(g)", "403:not_eligible,not_for_this_device 409:stale_card,wrap_conflict,fenced"),
     ("grants", "GET", "/v2/workspaces/{ws}/grants", "device", "D(m)", "403:not_eligible 404:not_found"),
     ("members", "GET", "/v2/workspaces/{ws}/members", "client", "D(m)|W", "403:not_eligible 404:not_found"),
@@ -137,6 +137,8 @@ def condition_for(name, code):
         return f"The target device for {name} is revoked." if name in {"membership", "bridge_host_post", "device_put", "accounts"} else f"The device authenticating {name} is revoked."
     if code == "quota_exceeded" and name == "session_login":
         return "Eight live device tokens exist; the earliest expires in 20 seconds."
+    if code == "quota_exceeded" and name == "membership":
+        return "The workspace has 4096 ever-devices and this list names a device it never listed (P3-D31 page-cost bound)."
     if code == "expired":
         return {"bridge_host_post": "Response rid is unknown or its keep_until_ms has elapsed, or an identical chunk's copy expired after first receipt + 900 s (P3-D27).",
                 "accounts": "The fresh login challenge has expired.",
@@ -203,7 +205,7 @@ def build(vectors=None):
         "bridge_device_poll": (None, {"chunks": [chunk(bytes.fromhex(objs["bridge_response"]))]}),
         "host_hold": ({"gen": None, "take_over": False}, {"gen": 1, "lease_s": 40, "cursor": 0}),
         "host_poll": (None, {"items": [{"n": 1, "route": "bridge", "device": device, "rid": rid, "offer": None, "envelope": R.b64u(bridge)}],
-                            "notices": {"revocations_cursor": 0, "cert_requests": [], "rotation_due": []}, "next": None}),
+                            "notices": {"revocations_cursor": 0, "cert_requests": [], "rotation_due": [], "unpublished": None}, "next": None}),
         "pair_device_post": (preq, {}), "pair_host_post": (presp, {}), "pair_poll": (None, {"chunks": [chunk(presp)]}),
         "cert_requests_post": ({"request": objs["request"]}, {"request_id": crid}),
         "cert_requests_poll": (None, {"requests": [objs["request"]]}),
@@ -391,10 +393,20 @@ def build(vectors=None):
         if name in {"bridge_device_poll", "pair_poll"}:
             extra("after_first_chunk", {"query": {"after": "0", "wait": "0"}}, {"chunks": []})
         if name == "host_poll":
-            notices = {"revocations_cursor": 1, "cert_requests": [crid], "rotation_due": [{"device_id": device, "revocation_cursor": 1, "epoch": 1}]}
+            # P3-D31: notices.unpublished is the newest unpublished item's opaque position while it is above the
+            # workspace's ack (the phone's registered pair, held at cursor 1, no chain pair), else null.
+            position = R.b64u(R.cj({"v": 1, "ws": ws, "c": 1}))
+            notices = {"revocations_cursor": 1, "cert_requests": [crid], "rotation_due": [{"device_id": device, "revocation_cursor": 1, "epoch": 1}],
+                       "unpublished": position}
             extra("durable_notices", response_json={"items": [], "notices": notices, "next": None})
             extra("pair_item", response_json={"items": [{"n": 2, "route": "pair", "device": device, "rid": rid, "offer": offer, "envelope": R.b64u(preq)}],
-                                              "notices": {"revocations_cursor": 0, "cert_requests": [], "rotation_due": []}, "next": None})
+                                              "notices": {"revocations_cursor": 0, "cert_requests": [], "rotation_due": [], "unpublished": None}, "next": None})
+            for label, acked, value in (("unpublished_notice", 0, position), ("unpublished_notice_acked", 1, None)):
+                extra(label, response_json={"items": [], "notices": {"revocations_cursor": 1, "cert_requests": [], "rotation_due": [],
+                                                                     "unpublished": value}, "next": None})
+                cases[-1]["given"].update(scenario="unpublished_notice", acked=acked, condition=(
+                    "The relay holds the phone's registered (device, person) pair at §19.5 cursor 1; the workspace chain does "
+                    f"not; the workspace's unpublished ack is {acked} (P3-D31)."))
         if name == "session_logout":
             extra("expired_token_retry", given="token_expired_or_already_logged_out")
         output[name] = {"contract": "orch-relay-http-v2", "suite": 2, "route": {"method": method, "path": path, "role": role, "auth": auth},

@@ -15,9 +15,13 @@ ROUTES = [
     ('checkpoint_get', 'GET', PREFIX+'/checkpoint', 'client', 'D(m)|W', '404:not_found 410:checkpoint_gone'),
     ('transitions', 'GET', PREFIX+'/transitions', 'client', 'D(m)|W', '404:not_found 410:checkpoint_gone'),
     ('proof', 'GET', PREFIX+'/proof', 'client', 'D(m)|W', '404:not_found 410:checkpoint_gone'),
+    # P3-D31: retrieval of unpublished revocation evidence; never 404 or 410 (no oracle).
+    ('unpublished_get', 'GET', PREFIX+'/unpublished', 'host', 'W(g)', '409:cursor_ahead 429:rate_limited'),
+    ('unpublished_ack', 'POST', PREFIX+'/unpublished/ack', 'host', 'W(g)', '409:cursor_ahead 429:rate_limited'),
 ]
 CAPS = {'genesis': 65536, 'staging_page': C.PAGE_CAP, 'staging_manifest': C.PAGE_CAP,
-        'baseline_post': 16384, 'checkpoint_put': C.REQUEST_CAP}
+        'baseline_post': 16384, 'checkpoint_put': C.REQUEST_CAP,
+        'unpublished_ack': C.REQUEST_CAPS['unpublished_ack']}
 CONDITIONS = {
     'genesis_mismatch': 'Pinned genesis or card WSK/workspace disagrees; established pins never change.',
     'no_genesis': 'Workspace has no accepted owner-device genesis pin.',
@@ -31,6 +35,7 @@ CONDITIONS = {
     'restore_reused': 'This restore ID was applied by a prior accepted transition.',
     'restore_missing_revocation': 'The restore omits or weakens held revocations for ever-devices.',
     'checkpoint_gone': 'The requested immutable checkpoint endpoint expired after supersession.',
+    'cursor_ahead': "The position names a §19.5 cursor above the relay's newest revocation; restart from the beginning.",
 }
 
 
@@ -51,6 +56,9 @@ def shapes(v):
         'transitions': (None, {'transitions': [bundle], 'next': None}),
         'proof': (None, {'heads': o['page']['heads'], 'next': None}),
     }
+    # P3-D31: placeholders, replaced by their bound vector steps in unpublished() below.
+    shapes['unpublished_get'] = (None, {'items': [], 'cursor': '', 'more': False})
+    shapes['unpublished_ack'] = ({'cursor': ''}, {'acked': ''})
     queries = {'checkpoint_get': {'hash': h}, 'transitions': {'after_n': '0', 'to': th, 'limit': '16'},
                'proof': {'log': 'workspace', 'from': C.ZERO, 'to': h, 'limit': '65536'}}
     paths = {'source_hash': 'null', 'target_hash': h, 'hash': h, 'i': '0'}
@@ -144,8 +152,90 @@ def enrich(output, v):
                 c['given'].update(vector={'section': 'checkpoints', 'name': vector['name'], 'step': i})
                 c['response']['json'] = {k: value for k, value in step['expect'].items() if k != 'status'}
                 fixture['cases'].append(c)
+    unpublished(output, v)
     isolation(output, v)
     return output
+
+
+def unpublished(output, v):
+    """P3-D31: bind the unpublished route fixtures to the `unpublished` vector group's steps (states and exact
+    responses replay in the reference and in production). Transport and authorization refusals keep the success
+    case's state: 401 without a session, 403 for another workspace's host or a device session (never 404), 409
+    fenced for a stale or missing Orch-Holder, 429 when the workspace's window is full."""
+    if 'unpublished' not in v:
+        return
+    cases = {c['name']: c for c in v['unpublished']['cases']}
+
+    def bind(fixture, label, vector, index, condition=None):
+        step = cases[vector]['steps'][index]
+        inp = step['input']
+        if label in {c['name'] for c in fixture['cases']}:
+            c = next(c for c in fixture['cases'] if c['name'] == label)
+        else:
+            c = copy.deepcopy(fixture['cases'][0])
+            c['name'] = label
+            fixture['cases'].append(c)
+        c['given'] = {**({'scenario': c['given']['scenario']} if 'scenario' in c['given'] else {}),
+                      'now_ms': inp['now_ms'], 'vector': {'section': 'unpublished', 'name': vector, 'step': index}}
+        if condition:
+            c['given']['condition'] = condition
+        if inp['op'] == 'unpublished_get':
+            c['request']['query'] = dict(inp.get('query', {}))
+        else:
+            c['request']['json'] = copy.deepcopy(inp['body'])
+        c['response']['status'] = step['expect']['status']
+        c['response']['json'] = {k: x for k, x in step['expect'].items() if k != 'status'}
+        return c
+
+    get, ack = output['unpublished_get'], output['unpublished_ack']
+    bind(get, 'success', 'restore_omits_member_pair', 2,
+         "A restore omitted the laptop's registered pair (held at cursor 1): one item, as its unpublished_refs named.")
+    bind(get, 'empty', 'restore_carries_pair_retires', 3, 'A restore carried the only held pair: an empty view.')
+    bind(get, 'paged_more', 'paging_limit_walk', 0, 'Two items, limit=1: the first page and more.')
+    bind(get, 'resume_from_cursor', 'paging_limit_walk', 1, "Resumed from the first page's cursor.")
+    bind(get, 'chain_upgrade_item', 'weaker_carriage_is_item', 2,
+         'The chain holds the pair as lost, the relay as compromised: an upgrade item (chain_reason).')
+    bind(get, 'refusal_409_cursor_ahead', 'cursor_ahead_fetch', 0)
+    bind(get, 'refusal_400_malformed_other_workspace_cursor', 'cursor_other_workspace', 0,
+         "Workspace B's position on workspace A's route.")
+    for i, label in enumerate(('bad_cursor', 'limit_zero', 'limit_above_64')):
+        bind(get, 'refusal_400_malformed_' + label, 'query_malformed', i)
+    bind(ack, 'success', 'ack_lower_is_noop', 0, 'Two items held at cursors 1 and 2; nothing acknowledged yet.')
+    # The publication whose response names the item that unpublished_get.json `success` serves (U10: hints).
+    put = output['checkpoint_put']
+    step = cases['restore_omits_member_pair']['steps'][1]
+    c = copy.deepcopy(put['cases'][0])
+    c['name'] = 'restore_with_unpublished_refs'
+    c['request']['json'] = copy.deepcopy(step['input']['body'])
+    c['given'] = {'now_ms': step['input']['now_ms'],
+                  'vector': {'section': 'unpublished', 'name': 'restore_omits_member_pair', 'step': 1},
+                  'condition': ("The relay holds the laptop's registered pair; the restore omits it. The refs are hints: "
+                                'unpublished_get.json `success` serves the same item (cursor and digest).')}
+    c['response']['json'] = {k: x for k, x in step['expect'].items() if k != 'status'}
+    put['cases'].append(c)
+    bind(ack, 'lower_noop', 'ack_lower_is_noop', 1, 'A lower position after an ack at 2 is a no-op.')
+    bind(ack, 'refusal_409_cursor_ahead', 'ack_ahead_refused', 0)
+    bind(ack, 'refusal_400_malformed_other_workspace_cursor', 'ack_ahead_refused', 1)
+    bind(ack, 'refusal_400_malformed_unknown_field', 'ack_ahead_refused', 2)
+    for fixture in (get, ack):
+        for c in fixture['cases']:
+            if c['name'] == 'refusal_409_fenced':
+                c['given']['condition'] = 'The current holder generation is 1; the request names generation 0.'
+                missing = copy.deepcopy(c)
+                missing['name'] = 'refusal_409_fenced_missing_holder'
+                missing['request']['headers'].pop('Orch-Holder')
+                missing['given']['condition'] = 'The Orch-Holder header is absent (never malformed: fenced).'
+            if c['name'] == 'refusal_403_not_eligible':
+                device = copy.deepcopy(c)
+                device['name'] = 'refusal_403_not_eligible_device_session'
+                device['request']['headers'] = {**device['request']['headers'], 'Authorization': 'Bearer FAKE-device'}
+                device['request']['headers'].pop('Orch-Holder')
+                device['given'] = {'scenario': 'device_session', 'now_ms': c['given']['now_ms'],
+                                   'condition': "A member device's session: the route is the fenced host's only."}
+            if c['name'] == 'refusal_429_rate_limited':
+                c['given']['condition'] = ("The workspace's " + ('fetch window (120 per minute)' if fixture is get
+                                                                  else 'ack window (30 per minute)') + ' is full.')
+        fixture['cases'] += [missing, device]
 
 
 def isolation(output, v):

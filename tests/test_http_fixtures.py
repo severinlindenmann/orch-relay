@@ -276,12 +276,15 @@ def test_fixture_success_shapes():
                         bool(h.flags & R.F_LAST),
                         bool(h.flags & R.F_STREAM),
                     )
-            if "items" in body:
+            if "items" in body and f["route"]["path"].endswith("/unpublished"):
+                assert set(body) == {"items", "cursor", "more"}  # P3-D31
+            elif "items" in body:
                 assert set(body) == {"items", "notices", "next"}
                 assert set(body["notices"]) == {
                     "revocations_cursor",
                     "cert_requests",
                     "rotation_due",
+                    "unpublished",
                 }
                 for item in body["items"]:
                     assert set(item) == {"n", "route", "device", "rid", "offer", "envelope"}

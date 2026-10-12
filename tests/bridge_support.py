@@ -127,6 +127,15 @@ def prepare_fixture(client, name, case):
         if name == "host_poll":
             if case["name"] == "pair_item":
                 queue_body(con, binary("pair_device_post"), 2)
+            elif scenario == "unpublished_notice":
+                con.execute(
+                    "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
+                    (DEVICE, PERSON, P.cj(RECORD), "lost", NOW, 1),
+                )
+                con.execute(
+                    "INSERT INTO unpublished_acks VALUES (?,?,1,?)",
+                    (WS, case["given"]["acked"], NOW),
+                )
             elif case["name"] != "durable_notices":
                 queue_body(con, binary("bridge_device_post"), 1)
             else:

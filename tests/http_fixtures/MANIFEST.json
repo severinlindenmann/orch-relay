@@ -1,7 +1,7 @@
 {
-  "aggregate": "2e6a5d2a2367e2b862d568044285356a08acb86dc55a52b200b8143527665588",
+  "aggregate": "8da79c77340347fec895513980113df5f7671990b769880d50c378d47b80c6ec",
   "files": {
-    "README.md": "a4a11f1d535366d9fd22bc2d9f913c79010fee55191bc46a361e99e88072be58",
+    "README.md": "1cc7bd998132c507afa9c0e2f23c90838d478ea3811b47482958da3943f8056b",
     "accounts.json": "060776501099476673fa1026afa1256ec7c06f8c922c9b3542ee63ee6058d1c3",
     "baseline_delete.json": "d463dc15149dc8ed0669ffc1cad74f53e9d841957f3e91de0bc91b9582f0dd1f",
     "baseline_post.json": "595b7d56c266ca88888c7c2c32cc9444838e9b3879ddc2391f367a8078f8bcec",
@@ -18,16 +18,16 @@
     "cert_requests_poll.json": "6a0678af2f4eda9f451dc2bc6f88d0595fdaa7a84ea0e9d0a3750a1ff7acfb10",
     "cert_requests_post.json": "ff6b90d1b7bcf552503358e6a42352e80e91de5401f93b4041eedc72967651f6",
     "checkpoint_get.json": "905d1f32b2f8803f0e4aadb87349d5e7abf1ef44fc960854258b5c308f2bfa07",
-    "checkpoint_put.json": "bd552b59d8d6bf90eca1faae5856ba1be53c993271f2fcff9c5938978fbcce3f",
+    "checkpoint_put.json": "c12b4fd42db5be943fb9c6d836df4fe284c37e6f07be64f60fc041b5001ca5e3",
     "device_get.json": "ff37825adf657c46cc4c0b380a86838b16a67875ecabd417901681fc794196a1",
     "device_put.json": "448656fea7366cd8e61fbbaaa2f8e39a28c6b6ba81fe7c53b9b2555916e10187",
     "genesis.json": "f769c7a11e16629f3600ef9592d86c641079988cca304cfa14374c90ccb20277",
     "grants.json": "accfe157b6b57fd72fc1b86697596343d6bdd68f2cf8680f26a64e4ef56e3591",
     "host_hold.json": "3e53d3d685b0beb747890b1ca83d4af506f75cffc787ee8948e56803b5925fc7",
-    "host_poll.json": "f354abc297b5c54491573e27f48f5a0fc6b0d98cf02ed7b80f65f4555cee460e",
+    "host_poll.json": "c34f4f1dbd75c5c85da32fa484727ce598ad087925c235a39fbbbd68e45af078",
     "manifest.py": "c637eee88eead136ff3082ea576c8e2af6db014fc6160cd188116c3ec0f37e68",
     "members.json": "7ab42fdbf9d9069015583a0139ccbad9d9a4eea1b8329787e77f7cd642a7a200",
-    "membership.json": "c520c4e0c553fde643d636d381889cadd935077f7c7179228c308eb40bd85361",
+    "membership.json": "fe440581cea552ddad737b9a30658c5b706b9b29577cceee736eb7a8ef0affc2",
     "pair_device_post.json": "1b7a756952f1419a0dd1a8334834559c32af1f17aa76ea4a0c9fa321597ac98f",
     "pair_host_post.json": "8b10f584a8b3b5c594fb7753e619745d9e2eb55184b92685b1b094880a189297",
     "pair_poll.json": "e5b146b13447e6ca5b570ed11ed3c53eec11e81d091812c719327ccf8854307e",
@@ -40,7 +40,9 @@
     "session_logout.json": "bdbdf700befc2a7872322b8f72d4d022ee1225ed69c81c6680dc1b4c182f9a28",
     "staging_manifest.json": "141abc3129f415d60a440a00098f16f155a34171b08762d982e2cae9bc8ee5e9",
     "staging_page.json": "e3aa4048ed1fa171954ccae68907b67085342b8eb88b66ba37d58f6746fd9545",
-    "transitions.json": "f1e5f37a65ca8ebdf6d51c3cd92c6759f7e33b49b42d0440c01065a4159400e3"
+    "transitions.json": "f1e5f37a65ca8ebdf6d51c3cd92c6759f7e33b49b42d0440c01065a4159400e3",
+    "unpublished_ack.json": "b9eb82d048df7dc44c9b351fee3c491701f010ee86d57d40782c5adf8f054fd8",
+    "unpublished_get.json": "73ee9247010acb848870bd0e21a476ec36f883ae4c5c6ceacb31cdd6d6245768"
   },
-  "revision": 10
+  "revision": 11
 }

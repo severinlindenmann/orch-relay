@@ -172,6 +172,12 @@ def prepare_fixture(d, name, case):
             o["members"] = [m for m in o["members"] if m["device_id"] != DEVICE]
             con.execute("UPDATE member_lists SET list=?", (P.cj(signed(o, "wsk_a.sig")),))
             con.execute("DELETE FROM members WHERE device_id=?", (DEVICE,))
+        elif scenario == "quota_exceeded":
+            # P3-D31: 4096 ever-devices, none of them in this list.
+            con.executemany(
+                "INSERT INTO ever_devices VALUES (?,?,1)",
+                [(WS, f"{i:032x}") for i in range(4096)],
+            )
         elif scenario == "grant_conflict":
             con.execute("INSERT INTO wk_grants VALUES (?,?,?,?)", (WS, DEVICE, 1, b"{}"))
         elif scenario == "stale_card":

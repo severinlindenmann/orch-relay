@@ -6,6 +6,8 @@ from checkpoint_support import S, cases
 from ref._checkpoint_vectors import replay
 
 
-@pytest.mark.parametrize("case", cases("checkpoints_g4"), ids=lambda c: c["name"])
+@pytest.mark.parametrize(
+    "case", cases("checkpoints_g4") + cases("unpublished"), ids=lambda c: c["name"]
+)
 def test_g4_vector_replays_in_the_reference(case):
     assert replay(S, case) == case["expect"]
