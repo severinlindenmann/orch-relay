@@ -939,3 +939,22 @@ def test_judge_bounds_the_line_before_any_signature_check(monkeypatch):
     monkeypatch.setattr(C, "LINE_CAP", len(R.cj(c["restore"]["event"])))
     assert judge(F1, c["held"], c["offered"], c["now"], **view(c)) == REFUSED
     assert calls == []
+
+
+def test_a_pending_pair_is_never_forwarded_once_the_device_is_anothers():
+    """Reporting is not eligibility (F1 §5.10, orch-core #397): a pair kept pending while its device
+    was unknown is not forwarded once the workspace associates the device with another person; it is
+    dropped from both lists and stays held (and enforced) in `local`."""
+    case = CASES["walk_growth_keeps_forwarding"]
+    step = copy.deepcopy(case["steps"][0]["input"])
+    dev = step["body"]
+    ((key, item),) = dev["local"].items()
+    device = key.split(":")[0]
+    dev["forward"], dev["pending"] = [], [key]
+    dev["devices"].pop(device, None)
+    got = C.dispatch(S, copy.deepcopy(case["state"]), **step)
+    assert got["device"]["pending"] == [key] and got["device"]["forward"] == []
+    dev["devices"][device] = {"person_id": "ee" * 16}
+    got = C.dispatch(S, copy.deepcopy(case["state"]), **step)
+    assert got["device"]["pending"] == [] and got["device"]["forward"] == []
+    assert got["device"]["local"] == {key: item}

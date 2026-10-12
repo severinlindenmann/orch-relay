@@ -3462,3 +3462,31 @@ def test_restore_note_must_be_a_string(note):
     e = local_transition()["restore"]["event"]
     e["note"] = note
     assert restore_schema_ok(e, "workspace") is False
+
+
+def test_host_signer_refusal_is_per_pair():
+    """orch-core #397 host rule: durable evidence refuses a restore whose signer pair (actor device,
+    actor person) it holds (`device.invalid`); another person's evidence for the signer's device id is
+    another pair, never that refusal (it is still a completeness duty the restore cannot carry: its
+    own signer's device id, so `validation.restore`)."""
+    from copy import deepcopy
+
+    scenario = load("restore")["scenarios"][0]
+    event = deepcopy(next(x["event"] for x in scenario["steps"] if x["event"]["type"] == "restore"))
+    signer = event["actor"]["device"]
+    cert = next(
+        x["event"]["device_cert"]
+        for x in scenario["steps"]
+        if "d_" + x["event"].get("device_cert", {"o": {"device_id": ""}})["o"]["device_id"]
+        == signer
+    )
+    target = CP["workspace_n_held"]
+    own = local_revocation_evidence(cert, reason="lost")
+    other_cert = reissue_cert(cert, "pk_mara", person_id=person_hex("pk_mara"))
+    other = local_revocation_evidence(other_cert, pk_name="pk_mara", reason="lost")
+    assert revocation_evidence_ok(own) and revocation_evidence_ok(other)
+    base = {pair_of(x): x for x in event["revocations"]}
+    store = RestoreCommit(None, {**base, pair_of(own): own})
+    assert store.commit(event, target) == "device.invalid"
+    store = RestoreCommit(None, {**base, pair_of(other): other})
+    assert store.commit(event, target) == "validation.restore"
