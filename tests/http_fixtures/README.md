@@ -30,5 +30,9 @@ uv run python -m ref._http_fixtures
 uv run pytest tests/test_vectors.py tests/test_http_fixtures.py -q
 ```
 
-Checkpoint/restore/genesis/staging/baseline/proof routes are intentionally deferred to the next
-contract group. There is no HTTP invite-management route and no rotation-abandon route.
+Checkpoint/restore/genesis/staging/baseline/proof routes bind their cases to the `checkpoints` and
+`checkpoints_g4` vector states (`given.vector`). `unpublished_get.json` and `unpublished_ack.json`
+(P3-D31, retrieval of unpublished revocation evidence) bind to the `unpublished` vector group; the
+`host_poll.json` cases `unpublished_notice` and `unpublished_notice_acked` show `notices.unpublished`, and
+`checkpoint_put.json` `restore_with_unpublished_refs` names the item `unpublished_get.json` `success`
+serves. There is no HTTP invite-management route and no rotation-abandon route.

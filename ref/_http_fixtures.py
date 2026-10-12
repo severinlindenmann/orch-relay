@@ -24,7 +24,7 @@ ROUTES = [
     ("revocation_feed", "GET", "/v2/persons/{person}/revocations", "client", "D(p)|W", "403:not_eligible"),
     ("card_put", "PUT", "/v2/workspaces/{ws}/card", "host", "first|W(g)", "400:wrong_suite,delegation_mismatch 401:bad_signature 403:other_person 409:other_workspace,wsk_changed,delegation_changed,stale_card,wxk_changed_without_version,bad_wxk_version 429:rate_limited"),
     ("card_get", "GET", "/v2/workspaces/{ws}/card", "client", "D(m)|W", "403:not_eligible 404:not_found"),
-    ("membership", "PUT", "/v2/workspaces/{ws}/membership", "host", "W(g)", "400:cert_invalid 401:bad_signature 403:revoked,other_person,scope_exceeded,cert_expired,not_for_this_device 409:other_workspace,stale_list,bad_epoch,rotation_required,wk_commit_changed,missing_grant,grant_conflict,stale_card,wrap_conflict,fenced"),
+    ("membership", "PUT", "/v2/workspaces/{ws}/membership", "host", "W(g)", "400:cert_invalid 401:bad_signature 403:revoked,other_person,scope_exceeded,cert_expired,not_for_this_device 409:other_workspace,stale_list,bad_epoch,rotation_required,wk_commit_changed,missing_grant,grant_conflict,stale_card,wrap_conflict,fenced 429:quota_exceeded"),
     ("card_keys", "PUT", "/v2/workspaces/{ws}/card-keys", "host", "W(g)", "403:not_eligible,not_for_this_device 409:stale_card,wrap_conflict,fenced"),
     ("grants", "GET", "/v2/workspaces/{ws}/grants", "device", "D(m)", "403:not_eligible 404:not_found"),
     ("members", "GET", "/v2/workspaces/{ws}/members", "client", "D(m)|W", "403:not_eligible 404:not_found"),
@@ -137,6 +137,8 @@ def condition_for(name, code):
         return f"The target device for {name} is revoked." if name in {"membership", "bridge_host_post", "device_put", "accounts"} else f"The device authenticating {name} is revoked."
     if code == "quota_exceeded" and name == "session_login":
         return "Eight live device tokens exist; the earliest expires in 20 seconds."
+    if code == "quota_exceeded" and name == "membership":
+        return "The workspace has 4096 ever-devices and this list names a device it never listed (P3-D31 page-cost bound)."
     if code == "expired":
         return {"bridge_host_post": "Response rid is unknown or its keep_until_ms has elapsed, or an identical chunk's copy expired after first receipt + 900 s (P3-D27).",
                 "accounts": "The fresh login challenge has expired.",

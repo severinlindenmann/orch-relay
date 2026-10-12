@@ -713,6 +713,16 @@ def prepare_fixture(client, path, case, success):
                 con.execute(
                     "UPDATE devices SET expires_ms=? WHERE device_id=?", (given["now_ms"], DEVICE)
                 )
+            elif scenario == "rate_limited":
+                # P3-D31: the workspace's fetch or ack window is full (charged after W(g)).
+                from orch_relay.unpublished import ACK_WINDOWS, FETCH_WINDOWS
+
+                post = case["request"]["method"] == "POST"
+                duration, cap = (ACK_WINDOWS if post else FETCH_WINDOWS)[0]
+                now = given["now_ms"]
+                budget = client.app.state.checkpoints.budget
+                key = ("unpublished-ack" if post else "unpublished-get", WS, duration)
+                budget.windows[key] = ((now // duration + 1) * duration, cap)
             elif scenario == "revoked":
                 con.execute(
                     "INSERT OR IGNORE INTO revocations VALUES (?,?,?,?,?,"
