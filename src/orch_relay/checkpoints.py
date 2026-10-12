@@ -54,6 +54,14 @@ ACCOUNT_STAGE_CAP = GLOBAL_STAGE_CAP // 8
 # stored log_nodes per workspace, orphans included (ORCH_RELAY_WORKSPACE_NODES; ~1.2 GB at 293 B
 # per node, about 4.4 full 64 MiB staging sets),
 WORKSPACE_NODES = 4_000_000
+# P3-D36 (review F1): the last nodes of that quota are a reserve that only an owner-signed restore
+# may use (ORCH_RELAY_WORKSPACE_NODES_RESERVE; unset: 5 % of the quota, 200,000 by default), so a
+# WSK holder that fills the workspace cannot starve the owner's restore. A restore adds its line
+# head plus every head of its staged set not stored yet (retained pages of an unstored branch,
+# appended pages of other logs): 1 node for a roll-back to a stored prefix with no other log
+# growing, at most STAGE_CAP // 74 + 1 = 906,877. 200,000 fits 200,000 minimal restores, or
+# several carrying tens of thousands of new heads each.
+WORKSPACE_NODES_RESERVE_SHARE = 20  # reserve = quota // 20 when unset
 # and distinct self-certified revocation pairs an owner person's restores may add to the global
 # table (ORCH_RELAY_ACCOUNT_EVIDENCE). All three answer 429 quota_exceeded.
 ACCOUNT_EVIDENCE = 50_000
@@ -172,6 +180,13 @@ class Caps:
         env = env if env is not None else {}
         self.account_stage = int(env.get("ORCH_RELAY_ACCOUNT_STAGE_BYTES", ACCOUNT_STAGE_CAP))
         self.nodes = int(env.get("ORCH_RELAY_WORKSPACE_NODES", WORKSPACE_NODES))
+        self.reserve = int(
+            env.get(
+                "ORCH_RELAY_WORKSPACE_NODES_RESERVE", self.nodes // WORKSPACE_NODES_RESERVE_SHARE
+            )
+        )
+        if not 0 <= self.reserve <= self.nodes:
+            raise ValueError("ORCH_RELAY_WORKSPACE_NODES_RESERVE must be in 0..the node quota")
         self.evidence = int(env.get("ORCH_RELAY_ACCOUNT_EVIDENCE", ACCOUNT_EVIDENCE))
 
 
@@ -1164,7 +1179,7 @@ class Relay:
                 root = self.log(log).at_seq(entry, 1)
                 need(root["head"] == o["genesis"], "genesis_mismatch", 409)
         need(used == {d["i"] for d in stage["manifest"]["pages"]}, "chain_diverged", 409)
-        self.node_quota()
+        self.node_quota(restored is not None)
         if self.dry:  # phase A ends at the commit point: phase B inserts the nodes, C commits
             self.memo.accepted = True
             return result
@@ -1198,11 +1213,13 @@ class Relay:
         )
         return result
 
-    def node_quota(self):
+    def node_quota(self, restore=False):
         """P3-D34 (G4): at the commit point of phase A (before phase B inserts anything) and of
         phase C, the workspace's stored nodes (orphans included: `nodes`, never `orphaned`) plus
         the new nodes this publication adds must stay within the quota. A publication that adds
-        no node is never refused by it."""
+        no node is never refused by it. P3-D36: only an owner-signed restore (`restore`, verified
+        by restore() before this point) may use the reserve; any other publication must stay
+        within quota - reserve. The same 429, uncharged."""
         added = sum(n.added for n in self.nodes.values())
         pending = added + self.reused
         if pending:
@@ -1211,7 +1228,8 @@ class Relay:
             ).fetchone()
             # Live inserts (phase C, or no memo) are counted in this transaction already.
             stored = (row[0] if row else 0) - (0 if self.dry else added)
-            need(stored + pending <= self.caps.nodes, "quota_exceeded", 429)
+            limit = self.caps.nodes - (0 if restore else self.caps.reserve)
+            need(stored + pending <= limit, "quota_exceeded", 429)
 
     def fresh_evidence(self, listed):
         """The self-certified pairs (device without association) this restore would add to the
