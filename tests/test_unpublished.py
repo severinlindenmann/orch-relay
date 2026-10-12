@@ -418,3 +418,127 @@ def test_the_first_item_is_always_served(relay, monkeypatch):
     assert len(first["items"]) == 1 and first["more"]
     rest = http(relay, "GET", GET, host(), {"cursor": first["cursor"]})
     assert len(rest["items"]) == 1 and not rest["more"]
+
+
+# --- review of PR #55: cross-workspace isolation (RC1), retired chain (S1), in-lock auth (S2),
+# --- per-workspace windows and the quota's fresh-device count (S3) ------------------------------
+
+
+def items(client):
+    return {(i["device_id"], i["person_id"]): i for i in http(client, "GET", GET, host())["items"]}
+
+
+def test_another_workspaces_chain_never_retires_an_item(relay):
+    before = items(relay)
+    (d, p) = next(iter(before))
+    sql(
+        relay,
+        "INSERT INTO checkpoint_revocations VALUES (?,?,?,?,?,?,?,?,?)",
+        (WS_B, d, p, "compromised", b"{}", b"{}", "pk", "r", "t"),
+    )
+    assert items(relay) == before
+
+
+def test_another_workspaces_ever_device_is_never_served(relay):
+    before = items(relay)
+    (d, p) = next(iter(before))
+    # Move the ever-device to workspace B only: A must stop serving it.
+    sql(
+        relay,
+        "UPDATE ever_devices SET workspace_id=? WHERE workspace_id=? AND device_id=?",
+        (WS_B, WS, d),
+    )
+    after = items(relay)
+    assert (d, p) not in after and len(after) == len(before) - 1
+    with closing(db.connect(relay.app.state.directory.path)) as con:
+        assert U.notice(con, WS) is not None
+
+
+def test_retired_chain_upgraded_to_compromised_is_an_item(relay):
+    before = items(relay)
+    (d, p) = next(iter(before))
+    sql(
+        relay,
+        "INSERT INTO checkpoint_revocations VALUES (?,?,?,?,?,?,?,?,?)",
+        (WS, d, p, "retired", b"{}", b"{}", "pk", "r", "t"),
+    )
+    assert (d, p) not in items(relay)  # global lost == chain retired: equal strength
+    sql(
+        relay,
+        "UPDATE revocations SET reason='compromised' WHERE device_id=? AND person_id=?",
+        (d, p),
+    )
+    assert items(relay)[(d, p)]["chain_reason"] == "retired"
+
+
+def workspace_b(client):
+    sql(
+        client,
+        "INSERT INTO workspaces SELECT ?,owner_person_id,wsk_pub,delegation,card,card_seq,"
+        "wxk_version,client_hosted FROM workspaces WHERE workspace_id=?",
+        (WS_B, WS),
+    )
+    sql(client, "INSERT INTO holders VALUES (?,1,?,0,NULL)", (WS_B, NOW + 40_000))
+    sql(
+        client,
+        "INSERT INTO sessions VALUES (?,?,?,?)",
+        (token_hash("FAKE-workspace-b"), "workspace", WS_B, NOW + 900_000),
+    )
+    return {"Authorization": "Bearer FAKE-workspace-b", "Orch-Holder": "1"}
+
+
+@pytest.mark.parametrize("name,headers,status,code", REFUSED, ids=[r[0] for r in REFUSED])
+def test_ack_authorizes_under_the_lock_when_the_pre_check_is_unavailable(
+    relay, monkeypatch, name, headers, status, code
+):
+    """On the sqlite3.Error fallback the transaction's re-authorization is the only one: every
+    refusal still holds and writes nothing; an authorized ack then succeeds."""
+    import sqlite3
+
+    from orch_relay import checkpoints
+
+    if name == "other_workspace_host":
+        workspace_b(relay)
+    if name == "expired_lease":
+        sql(relay, "UPDATE holders SET lease_until_ms=? WHERE workspace_id=?", (NOW, WS))
+
+    def unavailable(self, route, ws, headers):
+        raise sqlite3.OperationalError("FAKE database is locked")
+
+    monkeypatch.setattr(checkpoints.Checkpoints, "preauthorize", unavailable)
+    assert ack(relay, 2, headers) == {"status": status, "error": code or "not_eligible"}
+    assert sql(relay, "SELECT * FROM unpublished_acks") == []
+    assert relay.app.state.checkpoints.budget.windows == {}
+    if name != "expired_lease":
+        assert ack(relay, 2)["acked"] == U.token(WS, 2)
+
+
+def test_one_workspaces_fetch_window_never_spends_anothers(relay):
+    other = workspace_b(relay)
+    path = f"/v2/workspaces/{WS_B}/unpublished"
+    for _ in range(120):
+        assert http(relay, "GET", path, other)["status"] == 200
+    assert http(relay, "GET", path, other) == {"status": 429, "error": "rate_limited"}
+    assert http(relay, "GET", GET, host())["status"] == 200
+
+
+def test_the_quota_counts_only_devices_new_to_the_workspace(tmp_path):
+    """A list re-naming devices that are already ever-devices adds nothing to the count: at exactly
+    4096 ever-devices, republishing the same members is accepted."""
+    from members_support import BODY, HEADERS, load_state
+
+    members = {m["device_id"] for m in BODY["member_list"]["o"]["members"]}
+    with TestClient(create_app(tmp_path)) as client:
+        d = client.app.state.directory
+        load_state(d)
+        with closing(db.connect(d.path)) as con, con:
+            for did in members:
+                con.execute("INSERT OR IGNORE INTO ever_devices VALUES (?,?,1)", (WS, did))
+            known = con.execute("SELECT count(*) FROM ever_devices").fetchone()[0]
+            con.executemany(
+                "INSERT INTO ever_devices VALUES (?,?,1)",
+                [(WS, f"{i:032x}") for i in range(U.MAX_EVER_DEVICES - known)],
+            )
+        r = client.put(f"/v2/workspaces/{WS}/membership", content=P.cj(BODY), headers=HEADERS)
+        assert r.status_code == 200, r.text
+        assert len(sql(client, "SELECT * FROM ever_devices")) == U.MAX_EVER_DEVICES
