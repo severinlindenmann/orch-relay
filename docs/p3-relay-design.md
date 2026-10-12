@@ -1723,7 +1723,7 @@ HTTP fixture.
   - *Per-account override of the workspaces cap* (migration 0016). `account_workspace_override(person_id
     PRIMARY KEY, cap 1..10,000 (CHECK), set_by, set_at_ms, note)` and the append-only
     `account_workspace_override_audit(seq, person_id, old_cap, new_cap, set_by, set_at_ms, note)` (triggers
-    refuse UPDATE and DELETE), written together in one `BEGIN IMMEDIATE` by the operator command
+    refuse UPDATE, DELETE and an insert naming an existing `seq`, which closes REPLACE: round 2), written together in one `BEGIN IMMEDIATE` by the operator command
     `orch-relay account-cap set <person_id> <cap> --by <operator> [--note ...]` (JSON on stdout); `account-cap
     show <person_id>` (owned workspaces, effective cap, override) and `account-cap audit [<person_id>]` (one
     JSON row per line, oldest first) only read. No HTTP route: there is no remote admin surface. The person must
@@ -1735,11 +1735,45 @@ HTTP fixture.
     ~0.2 s, a commit) the command waits up to `ORCH_RELAY_ADMIN_BUSY_MS` (default 5,000 ms), else exits 1 with
     nothing written ("database busy"; retry); bad input exits 2 with nothing written. It never migrates
     (a relay may be serving the database): migration 0016 must be applied (`orch-relay migrate` or a relay
-    start), else it exits 2. The relay caches nothing: the next first card's check reads the
+    start), else it exits 2. *Operations (round 2):* run it as the relay's user, `sudo -u orch-relay env
+    ORCH_RELAY_DATA=<the unit's data directory> orch-relay account-cap ...`; it opens the database with
+    `mode=rw` (a wrong or unset `ORCH_RELAY_DATA` gets exit 2 "no database", never a new empty database), and
+    refuses (exit 2) unless the effective user owns both the database file and its directory, since SQLite may
+    create `-wal`/`-shm` files there that a killed command would leave owned by another user, after which the
+    relay fails with "readonly database". The relay caches nothing: the next first card's check reads the
     row (`Directory.workspace_cap`, one primary-key read on the caller's connection), in the read-only P3-D32
     pre-check (so an over-cap card is still refused without `Directory.lock`) and again in the transaction
     under the lock (exact under concurrency, as P3-D34). An account without a row keeps the global
     `ORCH_RELAY_ACCOUNT_WORKSPACES`. Not done: a workspace deletion or archival route (slots stay lifetime).
+  - *Round 2 (Opus review of PR #61: pass with required changes).* F1: the audit's DELETE trigger does not
+    fire for the delete inside `REPLACE` / `INSERT OR REPLACE` (`recursive_triggers` is off), so a row naming an
+    existing `seq` silently overwrote an audit row; 0016 (applied nowhere yet, so edited in place) gains a
+    `BEFORE INSERT ... WHEN EXISTS (... seq = NEW.seq)` trigger. F2: the account-cap commands opened the
+    database through `db.connect`, which makes the directory and creates the file; they now use
+    `db.connect_existing` (`mode=rw`) and the ownership check above. `invite create` gets the ownership check
+    for an existing database; it still creates a missing one (a fresh deployment's first invite relies on it;
+    a wrong `ORCH_RELAY_DATA` there still makes a stray database: left open). F3 (pre-existing): stopping the
+    relay while a maintenance sweep waited in `BEGIN IMMEDIATE` on another process's lock crashed it (SIGSEGV):
+    the lifespan's `cancel()` returns at once while the anyio worker thread keeps running, and `Bridge.close()`
+    closed the shared write connection under its statement. `Bridge.close()` now closes the pool under
+    `Directory.lock` (both sweeps hold it for their whole run), and both maintenance loops log a
+    `sqlite3.Error` and continue (one busy sweep used to end the loop for the process's life and make the
+    lifespan's `await task` re-raise and skip `close()`). Data were never at risk (the transaction had not
+    begun). F4: test gap only; the staging weight is the bytes the transport read, never the declared
+    `Content-Length` (a chunked body now pins it). F5 (noted, accepted): a restore publication's reserve
+    covers the whole publication, including appended pages of other logs in the same restore, not only the
+    restore line; that needs an owner-signed, single-use restore line bound to the held checkpoint plus the
+    WSK signature, so a delegated host cannot use it, while a compromised owner device can burn the reserve
+    (it can do far worse). *Pinned by* `tests/test_account_cap.py` (both REPLACE forms and an explicit
+    existing `seq` refused, fresh rows allowed; a missing database and its directory never created; another
+    user's file or directory refused, also by `invite create` and the CLI with exit 2; `mode=rw` never
+    creates), `tests/test_shutdown.py` (the app in a subprocess shut down while its sweep waits on another
+    connection's lock exits 0, asserted by exit code; a busy sweep keeps both loops running) and
+    `tests/test_throttle.py` (a chunked staging body charged by the bytes read). Mutation, one at a time on a
+    scratch copy: 13 of 13 killed (the REPLACE trigger; `mode=rwc`; no existence check; no owner check; file
+    or directory owner only; the account-cap and invite owner checks skipped; the CLI's invite error; close
+    without the lock; either loop dying on a busy sweep; the declared length charged), two of them (`rwc`,
+    directory owner only) after added tests.
   - *Still open:* checklist item 5 (the ever-device way out: offline compaction and the audited per-workspace
     ever-device override, orch-d6 ruling) and item 6 (429 detail for permanent quotas).
   - *Pinned by* `tests/test_throttle.py` (the defaults and their arithmetic; an honest 5,001-page set, a full
