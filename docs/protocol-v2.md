@@ -2195,7 +2195,7 @@ Caps apply to streamed bytes as well as declared Content-Length; never buffer ab
 | `POST /v2/revocations` | none | `{record}` → `{device_id}` | authority is `PK`; per address 10/min; per person 32/day, charged only on verified state changes (G0a review 5), with 8/day reserved for revocations of devices not yet revoked; an exact retry is free; JSON cap 16 KiB (G0a review 2) | 400 `malformed`; 401 `bad_signature`; 403 `other_person` | §6.2 (P3-D5) |
 | `GET /v2/devices/{device}/revocation?after=&limit=` | none | → `{pairs: [{person_id, reason, revocation, provenance}], next}` (P3-D30): every held `(device, person)` pair, the registered person's first on page 1, then `chain` before `feed`, then by §19.5 cursor (never by `person_id`). `next` is opaque and passed back as `after`. `revocation` is the public signed record. `provenance` is `registry` (the relay's verified association), `chain` (some workspace's accepted restore carried it; not authenticated by that person) or `feed`. No certificate or account key is served: the route is unauthenticated | per address 60/min; limit ≤ 32 (default 32); no cap on held pairs | 400 `malformed` (a bad limit or after token); 404 when a request without an after token finds no pair (a valid after token past the end, even for a device with no pairs, is an empty 200 page); 429 | §6.2, gaps 24 |
 | `GET /v2/persons/{person}/revocations?after=&limit=` | D(p), or W whose `ever_persons` contains the person | → `{revocations, next}` | W sees only `ever_devices`, filtered before pagination (G0a review 1); limit ≤ 256 | 403 | §6.2 |
-| `PUT /v2/workspaces/{ws}/card` | none for the first card; W(g) after | `{card}` → `{card_seq}` | first card: per address 10/h, per owner account 10/h charged only after delegation and card signatures verify; same-card retries are free (G0a review 5); first writer wins in one transaction; same card → 200; JSON cap 64 KiB (G0a review 2) | §7.1 codes: 400 `malformed`, `wrong_suite`, `delegation_mismatch`; 401 `bad_signature`; 403 `other_person`; 409 `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version` | §7.1 (P3-D4) |
+| `PUT /v2/workspaces/{ws}/card` | none for the first card; W(g) after | `{card}` → `{card_seq}` | first card: per address 10/h, per owner account 10/h charged only after delegation and card signatures verify; at most 32 workspaces per owner account (P3-D34, 429 `quota_exceeded`, checked after the signatures, before any window is charged); same-card retries are free (G0a review 5); first writer wins in one transaction; same card → 200; JSON cap 64 KiB (G0a review 2) | §7.1 codes: 400 `malformed`, `wrong_suite`, `delegation_mismatch`; 401 `bad_signature`; 403 `other_person`; 409 `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version` | §7.1 (P3-D4) |
 | `GET /v2/workspaces/{ws}/card` | D(m) or W | → `{card}` | | 403; 404 | §7.1 |
 
 **P3-D3 (accounts; C5).** Accounts come only from single-use invite codes made by the admin CLI
@@ -2664,7 +2664,8 @@ on membership and host bridge posts still apply. A wrong principal or inaccessib
 holder authority. Signature objects of another deployment suite are 400 `wrong_suite`.
 Route-table bare statuses mean: 400 `malformed`, 401 `unauthenticated`, 403 `not_eligible`,
 404 `not_found`, 410 `expired`, 429 `rate_limited` or `quota_exceeded`. Rate windows return
-429 `rate_limited`; storage/concurrency caps return 429 `quota_exceeded`; shared global bridge
+429 `rate_limited`; storage/concurrency caps return 429 `quota_exceeded` (also the P3-D34 caps: staged bytes per owner account,
+workspaces per account, stored log nodes per workspace, self-certified restore evidence per owner account, §19.8); shared global bridge
 budgets return 503 `overloaded`. Each 429/503 includes integer delta-seconds `Retry-After`.
 Challenges' global cap specifically uses 429 `rate_limited`.
 
@@ -2795,8 +2796,8 @@ F1 defines event/checkpoint bytes; the relay adds storage, transport and present
 | Method, path | Auth | Request → response | Idempotency, limits | Refusals | Decision |
 |---|---|---|---|---|---|
 | `PUT /v2/workspaces/{ws}/genesis` | W(g) | `{pin, cert}` → `{}` | JSON cap 64 KiB; once, identical pin is a retry | 401 `bad_signature`; 409 `genesis_mismatch`, `restore_not_owner` | P3-D18 |
-| `PUT /v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/pages/{i}` | W(g) | `{kind, log, after_seq, from_acc, heads, digest}` → `{}` | JSON cap 4 MiB; immutable page; 1 h set expiry | 409 `staging_conflict`; 429 `quota_exceeded` | P3-D20 |
-| `PUT /v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/manifest` | W(g) | `{pages: [{i, kind, log, after_seq, count, digest}]}` → `{complete, missing}` | JSON cap 4 MiB; immutable terminal marker | 409 `staging_conflict`; 429 `quota_exceeded` | P3-D20 |
+| `PUT /v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/pages/{i}` | W(g) | `{kind, log, after_seq, from_acc, heads, digest}` → `{}` | JSON cap 4 MiB; immutable page; 1 h set expiry; 64 MiB per workspace and 512 MiB per owner account across its workspaces (429), 4 GiB per deployment (503 `overloaded`) | 409 `staging_conflict`; 429 `quota_exceeded` | P3-D20 |
+| `PUT /v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/manifest` | W(g) | `{pages: [{i, kind, log, after_seq, count, digest}]}` → `{complete, missing}` | JSON cap 4 MiB; immutable terminal marker; same staging caps as pages | 409 `staging_conflict`; 429 `quota_exceeded` | P3-D20 |
 | `POST /v2/workspaces/{ws}/baselines` | W(g) | `{hash, offer_id}` → `{until_ms}` | JSON cap 16 KiB; 7 days, at most 16 pins | 404 `not_found`; 410 `checkpoint_gone`; 429 `quota_exceeded` | P3-D13/D20 |
 | `DELETE /v2/workspaces/{ws}/baselines/{hash}[?offer_id=o]` | W(g), or D(m) after initialization naming `offer_id` | no body → `{}` | idempotent release; W(g) releases any pin, D(m) only the pin whose `offer_id` it names, otherwise a no-op | — | P3-D13/D20 |
 | `PUT /v2/workspaces/{ws}/checkpoint` | W(g) | `{checkpoint, source_hash, restore?}` with `restore = {line, cert, authz, log}` → `{result: "accepted" or "ignored", n, hash}` | JSON cap 2624 KiB; atomic; exact retry returns prior result; `Orch-Holder` required; at most 16 refusals per holder generation and 48 per workspace in any rolling hour | 400 `wrong_suite`, `too_large`; 401 `bad_signature`; 409 `fenced`, `no_genesis`, `genesis_mismatch`, `chain_diverged`, `checkpoint_time`, `staging_incomplete`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation`; 429 `quota_exceeded` | P3-D13/D20/D24/D25 |
@@ -2886,6 +2887,30 @@ final publications to one workspace are processed one at a time. When state keep
 verification and commit, the relay may answer 503 `overloaded` with `Retry-After` (never charged); the host
 retries the same request unchanged. (This answer needs a race between verification and commit, so it is
 pinned by relay tests, not by an HTTP fixture, and is not listed in the route table above.)
+
+**Storage caps (P3-D34).** All are 429 `quota_exceeded` with `Retry-After`, checked after authorization (401,
+403 `not_eligible` and 409 `fenced` come first), never charged to the failure budget, and deployment-configurable
+(defaults in parentheses). Staging: the live staged bytes of all workspaces of the workspace's owner person
+(512 MiB), checked after the per-workspace 64 MiB quota and before the 503 deployment ceiling. A final
+publication: the workspace's stored log nodes, including nodes stored for publications that were then refused,
+plus the new nodes this publication adds (4,000,000), judged at commit; a publication that adds no new node is
+never refused by it, and the fold work of a refused one counts toward the refused-heads budget above. A workspace
+restore: the distinct `(device_id, person_id)` revocation pairs of devices without association that the relay's
+§19.5 table does not hold yet (each would add a global row), counted per owner person over all its accepted
+restores (50,000); carrying a pair the relay already holds is never counted or refused. A first card: the
+workspaces the owner account already owns (32; workspaces are never deleted). Receipts of accepted publications
+are kept for the newest 256 per workspace (an older exact retry is judged as a new request: `ignored` or a
+refusal, never a different acceptance), and an expired endpoint answers 410 `checkpoint_gone` for the newest 4,096
+expired per workspace, 404 `not_found` beyond. The node quota shares the code with the transient refused-heads
+budget, so a host cannot tell them apart from one answer: it retries after `Retry-After` with backoff (cheap for
+the relay: once the budget is spent the answer comes before any fold) and surfaces a `quota_exceeded` that
+persists past an hour to the owner (a workspace at its node quota migrates to a new one). The permanent caps
+(nodes, workspaces, evidence) answer `Retry-After: 1` like the transient ones; each retry over the node quota
+costs the relay a full verification until the refused-heads budget is spent. The node quota applies to restores
+too: every restore adds at least one node (its line), so a workspace a hostile WSK holder filled to the quota can
+no longer be restored by its owner (P3-D34 residual; a restore reserve or an operator override is a
+pre-public-deploy item). These answers
+need relay state far beyond any vector, so they are pinned by relay tests, not HTTP fixtures.
 
 **Restore rules (P3-D13/D23/D24/D25).** `restore` is `{line, cert, authz: {delegation}, log}`.
 `line` is the full F1 event object, with its payload fields at the top level, not an interim nested payload.

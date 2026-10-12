@@ -81,5 +81,26 @@ No head is folded and no staged page is read while the lock is held (pinned by
 200,000-node table (it grows slowly with the table); a full 64 MiB set is about 45 such holds, between which
 every other writer runs. Peak RSS rose because phase A keeps the new rows until phase B; phase A still holds
 every new node of the publication (as before), and the gate bounds the publications in phases A to C. The
-per-account staging cap and the per-workspace storage quota remain pre-public-deploy gates (G3, G4 in
-docs/p3-relay-design.md §10); `checkpoint_node_usage` now counts stored and orphaned nodes for the latter.
+per-account staging cap and the per-workspace storage quota are in place since P3-D34 (below);
+`checkpoint_node_usage` counts stored and orphaned nodes and is the quota's input.
+
+## P3-D34: per-account and per-workspace caps (G3, G4)
+
+Defaults, each overridable from the environment (read once at start-up); every cap answers 429
+`quota_exceeded` after authorization. 293 B per stored node and ~906,876 heads per full 64 MiB staging set
+are the G4 measurements above.
+
+| Cap | Default | Variable | Arithmetic |
+|---|---:|---|---|
+| Staged bytes per owner person (all its workspaces) | 512 MiB | `ORCH_RELAY_ACCOUNT_STAGE_BYTES` | 4 GiB ceiling / 8: eight full 64 MiB workspace quotas; at least 8 accounts to fill the ceiling (was 1) |
+| Workspaces per account (first card) | 32 | `ORCH_RELAY_ACCOUNT_WORKSPACES` | reached in 3.2 h at 10 cards/hour (was unbounded); lifetime (no workspace deletion) |
+| Stored nodes per workspace (orphans included) | 4,000,000 | `ORCH_RELAY_WORKSPACE_NODES` | 4,000,000 x 293 B ≈ 1.17 GB ≈ 4.4 full sets; ~11 years at 1,000 events a day |
+| Receipts kept per workspace (newest) | 256 | constant `RECEIPTS_KEPT` | ~100 B each (a restore's up to ~0.8 MB with 4,096 refs) |
+| `checkpoint_gone` kept per workspace (newest) | 4,096 | constant `GONE_KEPT` | ~100 B each; one per purged checkpoint |
+| New self-certified evidence pairs per owner person | 50,000 | `ORCH_RELAY_ACCOUNT_EVIDENCE` | ~1 KB per entry (`cj`), ~500 per 512 KiB line: ~100 restores, ~75 MB of global and chain rows |
+
+Worst cases with the defaults: one account stores at most 32 x 1.17 GB ≈ 37.5 GB of nodes (by accepted
+publications, each refused one costing the refused-heads budget instead) and stages at most 512 MiB. A
+publication over the node quota is refused at phase A's commit point, after its folds (whose work is recorded as
+refused heads: about two full sets per workspace-hour), and inserts nothing. Sizing the knobs to a VPS (memory
+for the publication gate, disk for the node quota): docs/p3-relay-design.md §10, "Pre-public-deploy checklist".

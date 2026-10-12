@@ -28,6 +28,9 @@ from . import db
 from . import proto as P
 
 MINUTE, HOUR, DAY = 60_000, 3_600_000, 86_400_000
+# P3-D34 (G3): workspaces one account (owner person) may own; a first card beyond it is 429
+# quota_exceeded. Bounds per-account staging fairness and storage (x the per-workspace node quota).
+ACCOUNT_WORKSPACES = 32
 MAX_RESPONSE = 4 * 1024 * 1024
 BODY_CAPS = {"accounts": 65536, "card": 65536, "card_keys": 65536, "membership": 2097152}
 
@@ -260,6 +263,7 @@ FINAL = "final"
 class Directory:
     def __init__(self, path, origin, trusted_proxy=None):
         self.path, self.origin, self.trusted_proxy = path, origin, trusted_proxy
+        self.account_workspaces = ACCOUNT_WORKSPACES  # P3-D34; ORCH_RELAY_ACCOUNT_WORKSPACES
         origin.encode("ascii")
         self.lock = threading.RLock()
         # In-memory challenges and rate windows. Taken alone by pre-checks (P3-D32) and inside
@@ -870,6 +874,13 @@ class Directory:
         if not stored:
             self.rate("card-address", address, HOUR, 10, now, False)
             self.rate("card-owner", owner, HOUR, 10, now, False)
+            # P3-D34 (G3): live workspaces per account. Workspaces are never deleted, so this is
+            # every workspace the person owns; read-only, so the pre-check refuses it unlocked.
+            owned = con.execute(
+                "SELECT count(*) FROM workspaces WHERE owner_person_id=?", (owner,)
+            ).fetchone()[0]
+            if owned >= self.account_workspaces:
+                fail("quota_exceeded")
         self.authorized(state)
         if not stored:
             self.rate("card-address", address, HOUR, 10, now)
@@ -1134,6 +1145,9 @@ def install(app, data):
         data / db.DB_NAME,
         os.environ.get("ORCH_RELAY_ORIGIN", "http://localhost:8101"),
         os.environ.get("ORCH_RELAY_TRUSTED_PROXY"),
+    )
+    directory.account_workspaces = int(
+        os.environ.get("ORCH_RELAY_ACCOUNT_WORKSPACES", ACCOUNT_WORKSPACES)
     )
     app.state.directory = directory
 

@@ -46,6 +46,19 @@ REQUEST_CAP = CP_CAP + LINE_CAP + 65536
 PAGE_CAP = 4 * 1024 * 1024
 STAGE_CAP = 64 * 1024 * 1024
 GLOBAL_STAGE_CAP = 4 * 1024 * 1024 * 1024  # deployment-wide staged bytes (503 overloaded)
+# P3-D34 (the G3 and G4 pre-public-deploy gates), each overridable from the environment (Caps):
+# staged bytes per owner person across its workspaces (ORCH_RELAY_ACCOUNT_STAGE_BYTES; 512 MiB is
+# eight full workspace quotas, so at least eight accounts are needed to fill the global ceiling),
+ACCOUNT_STAGE_CAP = GLOBAL_STAGE_CAP // 8
+# stored log_nodes per workspace, orphans included (ORCH_RELAY_WORKSPACE_NODES; ~1.2 GB at 293 B
+# per node, about 4.4 full 64 MiB staging sets),
+WORKSPACE_NODES = 4_000_000
+# and distinct self-certified revocation pairs an owner person's restores may add to the global
+# table (ORCH_RELAY_ACCOUNT_EVIDENCE). All three answer 429 quota_exceeded.
+ACCOUNT_EVIDENCE = 50_000
+# Retention bounds per workspace (newest kept): exact-retry receipts and 410 tombstones (P3-D34).
+RECEIPTS_KEPT = 256
+GONE_KEPT = 4096
 STAGE_SETS = 2
 BASELINES = 16
 FAILURE_BUDGET = 16  # charged refusals per holder generation per rolling hour
@@ -148,6 +161,26 @@ def count_nodes(con, ws, nodes, orphaned=0):
         "INSERT INTO checkpoint_node_usage VALUES (?,?,?) ON CONFLICT(workspace_id) DO UPDATE "
         "SET nodes=nodes+excluded.nodes, orphaned=orphaned+excluded.orphaned",
         (ws, nodes, orphaned),
+    )
+
+
+class Caps:
+    """The P3-D34 deployment caps; Checkpoints reads them from the environment once."""
+
+    def __init__(self, env=None):
+        env = env if env is not None else {}
+        self.account_stage = int(env.get("ORCH_RELAY_ACCOUNT_STAGE_BYTES", ACCOUNT_STAGE_CAP))
+        self.nodes = int(env.get("ORCH_RELAY_WORKSPACE_NODES", WORKSPACE_NODES))
+        self.evidence = int(env.get("ORCH_RELAY_ACCOUNT_EVIDENCE", ACCOUNT_EVIDENCE))
+
+
+def evict_oldest(con, table, ws, kept):
+    """Keep the newest `kept` rows of one workspace in `table` (rowid is insertion order: the
+    newest row is never deleted, so SQLite never reuses a rowid here)."""
+    con.execute(
+        f"DELETE FROM {table} WHERE workspace_id=?1 AND rowid<=(SELECT rowid FROM {table} "
+        "WHERE workspace_id=?1 ORDER BY rowid DESC LIMIT 1 OFFSET ?2)",
+        (ws, kept),
     )
 
 
@@ -277,6 +310,7 @@ class Nodes:
 
     def __init__(self, con, ws, log, sink=None):
         self.con, self.ws, self.log, self.cache, self.sink = con, ws, log, {}, sink
+        self.added = 0  # new nodes this object inserted or handed to the sink (P3-D34 quota)
 
     def get(self, acc):
         if acc == ZERO:
@@ -355,6 +389,7 @@ class Nodes:
                 )
             self.cache[acc] = found
             previous, prev_acc = found, acc
+        self.added += len(rows)
         if self.sink is not None:
             self.sink.extend(rows)
         elif rows:
@@ -562,6 +597,7 @@ class Memo:
 
     def __init__(self):
         self.folds = {}  # (log, key, start seq, start acc) -> result entry, or refusal tuple
+        self.fresh = {}  # the same key -> new nodes that fold produced (the P3-D34 node quota)
         self.pages = {}  # manifest digest -> {"after_seq", "from_acc"}
         self.manifest = None  # (manifest bytes, parsed manifest, descriptor groups)
         self.rows = []  # new log_nodes rows in fold order (phase B)
@@ -586,9 +622,11 @@ class Relay:
     collected and nothing is written. With a memo and not `dry` (phase C), under the lock: the
     recorded folds replace the work they did, and everything else runs live."""
 
-    def __init__(self, directory, con, ws, now, memo=None, dry=False):
+    def __init__(self, directory, con, ws, now, memo=None, dry=False, caps=None):
         self.d, self.con, self.ws, self.now = directory, con, ws, now
         self.memo, self.dry = memo, dry
+        self.caps = caps if caps is not None else Caps()
+        self.reused = 0  # phase C: new nodes of recorded folds that phase B did not store
         self.nodes = {}
         self.wake = set()
         self.visits = 0  # staged descriptors folded by this publication (work bound, review R1)
@@ -628,10 +666,13 @@ class Relay:
                 done = memo.folds[slot]
                 if isinstance(done, tuple):
                     raise again(done)
+                if not memo.accepted:  # phase B did not run: these nodes are not stored
+                    self.reused += memo.fresh.get(slot, 0)
                 return dict(done)
         self.live(count)
         batch = heads()
         self.folded += len(batch)
+        added = nodes.added
         try:
             result = nodes.extend(start, batch)
         except Refusal as exc:
@@ -641,6 +682,7 @@ class Relay:
             raise
         if self.dry:
             memo.folds[slot] = dict(result)
+            memo.fresh[slot] = nodes.added - added
             self.since += len(batch)
             if self.since >= A_SNAPSHOT_HEADS and memo.refresh is not None:
                 # Folds read only immutable nodes from here on (every mutable input and the
@@ -726,6 +768,8 @@ class Relay:
         for h in gone:
             con.execute("DELETE FROM checkpoints WHERE workspace_id=? AND hash=?", (ws, h))
             con.execute("INSERT OR IGNORE INTO checkpoint_gone VALUES (?,?)", (ws, h))
+        if gone:  # P3-D34: an evicted tombstone answers 404 instead of 410, a refusal either way
+            evict_oldest(con, "checkpoint_gone", ws, GONE_KEPT)
 
     # --- genesis (P3-D18) --------------------------------------------------------------------------
 
@@ -818,6 +862,16 @@ class Relay:
 
     def charge_stage(self, key, size, global_cap):
         need(self.staged_bytes() + size <= STAGE_CAP, "quota_exceeded", 429)
+        # P3-D34 (G3): the owner person's live staged bytes across all of its workspaces, in this
+        # write transaction (exact under concurrency, like the ceiling below); expired, deleted
+        # and committed sets no longer count. Before the shared ceiling: the account's own cap.
+        account = self.con.execute(
+            "SELECT coalesce(sum(bytes),0) FROM checkpoint_staging WHERE expires_ms>?1 AND "
+            "workspace_id IN (SELECT workspace_id FROM workspaces WHERE owner_person_id=("
+            "SELECT owner_person_id FROM workspaces WHERE workspace_id=?2) UNION SELECT ?2)",
+            (self.now, self.ws),
+        ).fetchone()[0]
+        need(account + size <= self.caps.account_stage, "quota_exceeded", 429)
         # The deployment ceiling across workspaces: a refusal, never an eviction (§19.8, P3-D17).
         total = self.con.execute(
             "SELECT coalesce(sum(bytes),0) FROM checkpoint_staging WHERE expires_ms>?", (self.now,)
@@ -1030,7 +1084,7 @@ class Relay:
         ).fetchone()
         if stored:
             return P.parse_json(stored[0])  # served even with the budget spent (review N5)
-        if pre.get("lazy"):  # a retry seen before the lock is never un-stored; validate anyway
+        if pre.get("lazy"):  # its receipt was seen before the lock, then evicted (P3-D34)
             pre = precheck_publication(body, w["wsk_pub"])
         window = self.con.execute(
             "SELECT count(*), coalesce(sum(gen=?),0) FROM checkpoint_failures "
@@ -1109,6 +1163,7 @@ class Relay:
                 root = self.log(log).at_seq(entry, 1)
                 need(root["head"] == o["genesis"], "genesis_mismatch", 409)
         need(used == {d["i"] for d in stage["manifest"]["pages"]}, "chain_diverged", 409)
+        self.node_quota()
         if self.dry:  # phase A ends at the commit point: phase B inserts the nodes, C commits
             self.memo.accepted = True
             return result
@@ -1135,11 +1190,45 @@ class Relay:
             "INSERT INTO checkpoint_receipts VALUES (?,?,?)",
             (self.ws, pre["receipt"], P.cj(result)),
         )
+        evict_oldest(con, "checkpoint_receipts", self.ws, RECEIPTS_KEPT)  # P3-D34
         con.execute(
             "DELETE FROM checkpoint_staging WHERE workspace_id=? AND source=? AND target=?",
             (self.ws, *key),
         )
         return result
+
+    def node_quota(self):
+        """P3-D34 (G4): at the commit point of phase A (before phase B inserts anything) and of
+        phase C, the workspace's stored nodes (orphans included: `nodes`, never `orphaned`) plus
+        the new nodes this publication adds must stay within the quota. A publication that adds
+        no node is never refused by it."""
+        added = sum(n.added for n in self.nodes.values())
+        pending = added + self.reused
+        if pending:
+            row = self.con.execute(
+                "SELECT nodes FROM checkpoint_node_usage WHERE workspace_id=?", (self.ws,)
+            ).fetchone()
+            # Live inserts (phase C, or no memo) are counted in this transaction already.
+            stored = (row[0] if row else 0) - (0 if self.dry else added)
+            need(stored + pending <= self.caps.nodes, "quota_exceeded", 429)
+
+    def fresh_evidence(self, listed):
+        """The self-certified pairs (device without association) this restore would add to the
+        global table: a pair the table already holds is never counted (P3-D34)."""
+        return [
+            pair
+            for pair in listed
+            if self.association(pair[0]) is None
+            and not self.con.execute(
+                "SELECT 1 FROM revocations WHERE device_id=? AND person_id=?", pair
+            ).fetchone()
+        ]
+
+    def evidence_used(self, person):
+        row = self.con.execute(
+            "SELECT pairs FROM account_evidence_pairs WHERE person_id=?", (person,)
+        ).fetchone()
+        return row[0] if row else 0
 
     # --- restores (R0-R5) --------------------------------------------------------------------------
 
@@ -1332,6 +1421,14 @@ class Relay:
         listed = self.evidence(line, log)
         cert = self.owner_policy(w, bundle, {d for d, _ in listed})
         self.coverage(listed, cert["device_id"], log)
+        # P3-D34: new self-certified pairs are charged to the owner person (the signer, by
+        # owner_policy), in phase A (before any fold) and live in phase C.
+        fresh = self.fresh_evidence(listed)
+        need(
+            not fresh or self.evidence_used(w["owner"]) + len(fresh) <= self.caps.evidence,
+            "quota_exceeded",
+            429,
+        )
         at = timestamp(line["at"])
         need(
             (not held or timestamp(held["o"]["at"]) <= at) and at <= timestamp(target["o"]["at"]),
@@ -1385,6 +1482,12 @@ class Relay:
         target_hash = checkpoint_hash(target)
         self.apply_evidence(listed, line["id"], target_hash)
         con, ws = self.con, self.ws
+        if fresh:
+            con.execute(
+                "INSERT INTO account_evidence_pairs VALUES (?,?) ON CONFLICT(person_id) "
+                "DO UPDATE SET pairs=pairs+excluded.pairs",
+                (w["owner"], len(fresh)),
+            )
         if log == "workspace":
             # checkpoint_unpublished is no longer written (P3-D31): the view replaces it.
             self.unpublished = self.unpublished_refs(cert["device_id"])
@@ -1646,6 +1749,7 @@ class Checkpoints:
         self.global_stage_cap = int(
             os.environ.get("ORCH_RELAY_GLOBAL_STAGE_BYTES", GLOBAL_STAGE_CAP)
         )
+        self.caps = Caps(os.environ)  # P3-D34
         self.budget = U.Budget()  # P3-D31 rate windows, after authorization only
         self.gate = Gate(
             int(os.environ.get("ORCH_RELAY_PUBLISH_WIDTH", PUBLISH_WIDTH)),
@@ -1687,8 +1791,10 @@ class Checkpoints:
         lock (review G2). A body that does not parse is refused here, except a final
         publication's, which is charged in the transaction like every refusal after W(g).
 
-        An exact retry of an accepted publication (its receipt in a read snapshot; receipts are
-        never deleted) skips the signature and entry checks entirely (review N4)."""
+        An exact retry of an accepted publication (its receipt in a read snapshot) skips the
+        signature and entry checks entirely (review N4). Only receipts older than the newest
+        RECEIPTS_KEPT of the workspace are evicted (P3-D34); the transaction re-validates a
+        retry whose receipt is gone by then."""
         if route == "checkpoint_put":
             pre = precheck_publication(raw, wsk_pub, stages=False)
             if pre["early"]:
@@ -1833,7 +1939,7 @@ class Checkpoints:
                 con.execute("BEGIN")
 
             memo.refresh = refresh
-            relay = Relay(self.d, con, ws, now, memo, dry=True)
+            relay = Relay(self.d, con, ws, now, memo, dry=True, caps=self.caps)
             try:
                 relay.publish(raw, integer(headers["orch-holder"]), pre)
             except (Refusal, KeyError, TypeError, ValueError, AttributeError, IndexError):
@@ -1914,7 +2020,9 @@ class Checkpoints:
                 session = self.authorize(con, route, ws, headers, now)
                 if prepared is None and route != "checkpoint_put":
                     body = P.parse_json(raw) if raw else None  # only after authorization (N5)
-                relay = Relay(d, con, ws, now, memo if route == "checkpoint_put" else None)
+                relay = Relay(
+                    d, con, ws, now, memo if route == "checkpoint_put" else None, caps=self.caps
+                )
                 if route == "checkpoint_put":
                     gen = integer(headers["orch-holder"])
                     con.execute("SAVEPOINT publication")
