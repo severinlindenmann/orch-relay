@@ -25,6 +25,13 @@ Shared authorization methods:
 - `rate(purpose, identity, duration_ms, cap, now, charge=True)` supports shared
   refusal windows. Check multiple budgets with charge=False before charging.
   Keep distinct operation names and never evict live windows to admit new ones.
+- `throttle(session, now, page=False)` takes one token of an authenticated
+  request's session (and W workspace) buckets, or refuses 429 (P3-D35). Call it
+  once per request, after authentication and before any lock, slot or write,
+  also when the request is then refused; never for a request without a valid
+  session. `authenticate(..., state)` records the session in `state["session"]`.
+- `client_address(peer, headers)` is the canonical client address; it warns once
+  when `X-Forwarded-For` arrives while `ORCH_RELAY_TRUSTED_PROXY` is unset.
 
 Migration 0002 owns the directory tables and shared authorization tables:
 `members`, `member_lists`, `ever_devices`, `ever_persons`, `wk_grants`,

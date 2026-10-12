@@ -2472,6 +2472,26 @@ private half; the publicly derived reference key is only a test artifact.
   gets its replay; one on a used invite (or one expired for over a minute) is refused by the first
   check, its challenge consumed. Window checks never charge. Relay operators SHOULD also rate-limit per client
   address at the reverse proxy.
+- **Session buckets (P3-D35).** Every request with a valid session on a directory (§19.1, §19.2, §19.5), bridge
+  (§19.3, certificate queues included) or checkpoint (§19.8, unpublished included) route takes one token of
+  that session's bucket, and of its workspace's bucket for a W session; proof and transition pages also take one
+  token of the page buckets. Tokens are taken after authentication and before any lock, write transaction,
+  poll slot or waiter, also when the request is then refused (a valid session's refusals are charged to it);
+  a request without a valid session takes none. An empty bucket answers 429 `rate_limited` with `Retry-After`
+  in place of the request's answer. Long polls take one token per request. In memory, reset on restart.
+
+  | Bucket | Key | Burst | Refill | Override |
+  |---|---|---|---|---|
+  | session | session token | 600 | 600/min (10/s) | `ORCH_RELAY_THROTTLE_SESSION` |
+  | workspace | workspace of a W session | 1 200 | 1 200/min (20/s) | `ORCH_RELAY_THROTTLE_WORKSPACE` |
+  | page-session | session token (proof, transitions) | 256 | 120/min (2/s) | `ORCH_RELAY_THROTTLE_PAGE_SESSION` |
+  | page-workspace | workspace of a W session (proof, transitions) | 512 | 240/min (4/s) | `ORCH_RELAY_THROTTLE_PAGE_WORKSPACE` |
+
+  Overrides are `burst/per-minute`. Honest clients long-poll or poll at most every few seconds and walk at most a
+  few dozen proof pages, far below these. The public revocation-pair read (§19.5) is
+  limited to 60 per minute per address and 960 per minute per IPv6 /56. A relay behind a reverse proxy MUST be
+  configured with the proxy's address (`ORCH_RELAY_TRUSTED_PROXY`); otherwise every client shares one address,
+  and the relay logs a warning.
 - **Waiting long polls** hold no lock, transaction or worker thread. Commits that insert or change
   rows wake only the affected polls (new requests → that workspace's host; responses → that rid;
   revocation, logout, certificate store → that device's polls and the hosts of its workspaces;
@@ -2663,7 +2683,8 @@ on membership and host bridge posts still apply. A wrong principal or inaccessib
 403 `not_eligible`. W(g) routes additionally refuse 409 `fenced` for missing, stale or expired
 holder authority. Signature objects of another deployment suite are 400 `wrong_suite`.
 Route-table bare statuses mean: 400 `malformed`, 401 `unauthenticated`, 403 `not_eligible`,
-404 `not_found`, 410 `expired`, 429 `rate_limited` or `quota_exceeded`. Rate windows return
+404 `not_found`, 410 `expired`, 429 `rate_limited` or `quota_exceeded`. Every authenticated route can
+also refuse 429 `rate_limited` from its session's buckets (P3-D35, §19.4). Rate windows return
 429 `rate_limited`; storage/concurrency caps return 429 `quota_exceeded` (also the P3-D34 caps: staged bytes per owner account,
 workspaces per account, stored log nodes per workspace, self-certified restore evidence per owner account, §19.8); shared global bridge
 budgets return 503 `overloaded`. Each 429/503 includes integer delta-seconds `Retry-After`.
