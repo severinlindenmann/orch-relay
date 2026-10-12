@@ -491,6 +491,10 @@ def test_pair_ceiling_uses_the_running_count(client):
         client.app.state.bridge.admit(("pair", "192.0.2.77"))
     assert refused.value.code == "overloaded"
     polls.clear()
+    # Only pair polls count against the pair share.
+    polls[("device", "y")] = B.PAIR_POLL_CEILING + 10
+    client.app.state.bridge.admit(("pair", "192.0.2.77"))
+    client.app.state.bridge.release(("pair", "192.0.2.77"))
     polls[("device", "y")] = B.POLL_CEILING
     with pytest.raises(Refusal) as refused:
         client.app.state.bridge.admit(("device", DEVICE))
