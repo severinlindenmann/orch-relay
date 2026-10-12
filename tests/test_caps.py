@@ -314,6 +314,20 @@ def test_orphans_count_toward_the_node_quota(relay):
     assert put(relay.client, again)["result"] == "accepted"
 
 
+def test_node_quota_counts_live_inserts_once(relay):
+    """Without phase A (the live path: no memo, e.g. a lazy retry whose receipt was evicted), the
+    nodes are inserted and counted in the transaction before the commit-point check; they are
+    this publication's new nodes, not stored ones."""
+    stored = usage(relay.path)[0]
+    body, _ = append(relay, 30, 10)
+    caps = checkpoints.Caps()
+    caps.nodes = stored + 30
+    with closing(db.connect(relay.path)) as con, con:
+        result = checkpoints.Relay(relay.d, con, WS, NOW, caps=caps).publish(P.cj(body), 1)
+    assert result["result"] == "accepted"
+    assert usage(relay.path) == (stored + 30, 0) == (node_count(relay.path), 0)
+
+
 def test_node_quota_refuses_only_after_authorization(relay):
     body, _ = append(relay, 30, 10)
     relay.cps.caps.nodes = 0
