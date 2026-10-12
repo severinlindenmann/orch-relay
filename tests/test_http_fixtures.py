@@ -68,16 +68,23 @@ def signed_objects(value):
             yield from signed_objects(child)
 
 
-def check_signatures(value, *, card_refusal=None, cert_refusal=None, genesis_refusal=False, checkpoint_refusal=False):
+def check_signatures(
+    value, *, card_refusal=None, cert_refusal=None, genesis_refusal=False, checkpoint_refusal=False
+):
     for signed in signed_objects(value):
         o = signed["o"]
         corpus = CORPUS[str(o["suite"])]
         suite = R.SUITES[o["suite"]]
         if o["kind"] == "workspace_checkpoint" and checkpoint_refusal:
-            assert R.verify_object(
-                suite, bytes.fromhex(corpus["keys"]["wsk_a.sig"]["pub"]), signed,
-                "workspace_checkpoint",
-            ) is None
+            assert (
+                R.verify_object(
+                    suite,
+                    bytes.fromhex(corpus["keys"]["wsk_a.sig"]["pub"]),
+                    signed,
+                    "workspace_checkpoint",
+                )
+                is None
+            )
             continue
         if o["kind"] == "card":
             result = R.verify_card(
@@ -102,10 +109,15 @@ def check_signatures(value, *, card_refusal=None, cert_refusal=None, genesis_ref
             )
         elif o["kind"] == "genesis_pin":
             if genesis_refusal:
-                assert R.verify_object(
-                    suite, bytes.fromhex(corpus["keys"]["phone.sig"]["pub"]), signed,
-                    "genesis_pin",
-                ) is None
+                assert (
+                    R.verify_object(
+                        suite,
+                        bytes.fromhex(corpus["keys"]["phone.sig"]["pub"]),
+                        signed,
+                        "genesis_pin",
+                    )
+                    is None
+                )
                 continue
             owner = "phone"
         elif o["kind"] == "ws_delegation":
@@ -165,7 +177,19 @@ def test_http_fixture(path):
     for c in f["cases"]:
         request, response = c["request"], c["response"]
         assert request["method"] == f["route"]["method"]
-        pattern = re.sub(r"\{[a-z_]+\}", lambda m: ("(?:null|sha256:[0-9a-f]{64})" if m[0] == "{source_hash}" else "sha256:[0-9a-f]{64}" if m[0] in {"{hash}", "{target_hash}"} else "[0-9]+" if m[0] == "{i}" else "[0-9a-f]{32}"), f["route"]["path"])
+        pattern = re.sub(
+            r"\{[a-z_]+\}",
+            lambda m: (
+                "(?:null|sha256:[0-9a-f]{64})"
+                if m[0] == "{source_hash}"
+                else "sha256:[0-9a-f]{64}"
+                if m[0] in {"{hash}", "{target_hash}"}
+                else "[0-9]+"
+                if m[0] == "{i}"
+                else "[0-9a-f]{32}"
+            ),
+            f["route"]["path"],
+        )
         assert re.fullmatch(pattern, request["path"])
         assert "Orch-Host-API" not in request["headers"]
         assert "host_api" not in json.dumps(c)
@@ -177,7 +201,11 @@ def test_http_fixture(path):
             code = response["json"]["error"]
             assert code in allowed[response["status"]], (response["status"], code)
             assert set(response["json"]) == (
-                {"error", "epoch"} if code == "stale_epoch" else {"error", "devices"} if code == "restore_missing_revocation" else {"error"}
+                {"error", "epoch"}
+                if code == "stale_epoch"
+                else {"error", "devices"}
+                if code == "restore_missing_revocation"
+                else {"error"}
             )
         if response["status"] in (429, 503):
             assert re.fullmatch(r"[0-9]+", response["headers"]["Retry-After"])
@@ -308,10 +336,11 @@ def test_checkpoint_fixture_state_machine_bindings():
             binding = case["given"].get("vector")
             if binding is None:
                 continue
-            vector = next(c for c in V["checkpoints"]["cases"] if c["name"] == binding["name"])
+            vector = next(c for c in V[binding["section"]]["cases"] if c["name"] == binding["name"])
             import copy
+
             state = copy.deepcopy(vector["state"])
-            for step in vector["steps"][:binding["step"] + 1]:
+            for step in vector["steps"][: binding["step"] + 1]:
                 result = C.dispatch(S, state, **step["input"])
             assert result["status"] == case["response"]["status"]
             assert {k: v for k, v in result.items() if k != "status"} == case["response"]["json"]

@@ -67,9 +67,7 @@
       "request": {
         "method": "PUT",
         "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/staging/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155/sha256:98eaa7ce81c3f624c4a8e90f918b3f3c8a44450c24e100c1c3a5b5d9864b5190/manifest",
-        "query": {
-          "unexpected": "1"
-        },
+        "query": {},
         "headers": {
           "Authorization": "Bearer FAKE-workspace",
           "Orch-Holder": "1",
@@ -323,6 +321,112 @@
         },
         "json": {
           "error": "quota_exceeded"
+        }
+      }
+    },
+    {
+      "name": "cross_workspace_host_b_on_a",
+      "given": {
+        "scenario": "cross_workspace",
+        "now_ms": 1790000000000,
+        "isolation": {
+          "a": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_a"
+          },
+          "b": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_b"
+          }
+        },
+        "condition": "A principal of workspace B on workspace A's route."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/staging/null/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155/manifest",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace-b",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pages": [
+            {
+              "kind": "appended",
+              "log": "workspace",
+              "after_seq": 0,
+              "digest": "sha256:2d59421a7142b87e0ea55337953f616a67d4c7924115ccdb445cbf6ee789d18b",
+              "i": 0,
+              "count": 4
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "workspace_b_names_a_staging_key",
+      "given": {
+        "scenario": "cross_workspace",
+        "now_ms": 1790000000000,
+        "isolation": {
+          "a": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_a"
+          },
+          "b": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_b"
+          }
+        },
+        "vector": {
+          "section": "checkpoints_g4",
+          "name": "isolation_workspace_b",
+          "step": 5
+        },
+        "condition": "Workspace B's host names workspace A's checkpoint, baseline or staging key."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/282193f85af5b8d07610fbb3a8448857/staging/sha256:7aac7108398f8567958a377d00c79e6dc7a43fc55ccfdf787a457b91abb12155/sha256:98eaa7ce81c3f624c4a8e90f918b3f3c8a44450c24e100c1c3a5b5d9864b5190/manifest",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace-b",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pages": [
+            {
+              "kind": "appended",
+              "log": "workspace",
+              "after_seq": 4,
+              "digest": "sha256:bbca783e7a0eadf4c91ae011cb5c025a394c776e0957c2e00a89c480ffb7a260",
+              "i": 0,
+              "count": 1
+            }
+          ]
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "complete": false,
+          "missing": [
+            0
+          ]
         }
       }
     }

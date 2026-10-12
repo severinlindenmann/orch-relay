@@ -172,6 +172,16 @@ def check_response_budget(device_bytes, workspace_bytes, incoming_bytes):
         fail("quota_exceeded")
 
 
+def usable_account(con, person):
+    """The person's account row, or None while it exists only from restore evidence (P3-D29):
+    such a person registers no device and owns no card until it redeems an invite."""
+    return con.execute(
+        "SELECT pk_pub FROM accounts a WHERE person_id=? AND NOT EXISTS ("
+        "SELECT 1 FROM evidence_persons e WHERE e.person_id=a.person_id)",
+        (person,),
+    ).fetchone()
+
+
 class Directory:
     def __init__(self, path, origin, trusted_proxy=None):
         self.path, self.origin, self.trusted_proxy = path, origin, trusted_proxy
@@ -409,14 +419,16 @@ class Directory:
             P.auth_bytes(self.origin, challenge, "device", o["device_id"]),
         ):
             fail("bad_signature")
-        if con.execute("SELECT 1 FROM accounts WHERE person_id=?", (o["person_id"],)).fetchone():
+        if usable_account(con, o["person_id"]):
             fail("account_exists")
-        try:
-            con.execute(
-                "INSERT INTO accounts VALUES (?,?,?)", (o["person_id"], body["pk_pub"], now)
-            )
-        except sqlite3.IntegrityError:
-            fail("account_exists")
+        # P3-D29: redeeming an invite turns an evidence-only row (same person_id, so the same
+        # pk_pub) into the account; its revoked devices stay revoked.
+        con.execute("DELETE FROM evidence_persons WHERE person_id=?", (o["person_id"],))
+        con.execute(
+            "INSERT INTO accounts VALUES (?,?,?) ON CONFLICT(person_id) DO UPDATE SET "
+            "created_ms=excluded.created_ms",
+            (o["person_id"], body["pk_pub"], now),
+        )
         self.store_device(con, body["device_cert"])
         con.execute(
             "UPDATE invites SET used_ms=?, used_by=?, request_digest=? WHERE code_hash=?",
@@ -499,7 +511,7 @@ class Directory:
                 complete(con, P.parse_json(stored["cert"]), now)
             return {"device_id": did}
         account = con.execute("SELECT pk_pub FROM accounts WHERE person_id=?", (person,)).fetchone()
-        if account is None:
+        if account is None or (not revocation and usable_account(con, person) is None):
             fail("other_person")
         pub = P.unb64u(account["pk_pub"])
         stored = con.execute("SELECT * FROM devices WHERE device_id=?", (did,)).fetchone()
@@ -580,7 +592,7 @@ class Directory:
             fail("malformed")
         owner = card["o"].get("owner_person_id")
         P.unhex(owner)
-        account = con.execute("SELECT pk_pub FROM accounts WHERE person_id=?", (owner,)).fetchone()
+        account = usable_account(con, owner)
         if account is None:
             fail("other_person")
         old_card = P.parse_json(stored["card"]) if stored else None

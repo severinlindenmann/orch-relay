@@ -673,7 +673,8 @@ def test_pair_accounting_migrates_retained_bodies(tmp_path):
             (WS, DEVICE, RID, NOW, NOW, NOW),
         )
         con.execute("INSERT INTO rid_chunks VALUES (?,?,?,0,'d')", (WS, DEVICE, RID))
-    assert db.migrate(path) == [
+    # Later migrations (0008 pairing binding, 0009 checkpoints, ...) may follow.
+    assert db.migrate(path)[:3] == [
         "0005_pair_accounting",
         "0006_holder_notices",
         "0007_chunk_restores",

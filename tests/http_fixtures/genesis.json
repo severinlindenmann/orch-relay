@@ -544,6 +544,77 @@
           "error": "too_large"
         }
       }
+    },
+    {
+      "name": "cross_workspace_host_b_on_a",
+      "given": {
+        "scenario": "cross_workspace",
+        "now_ms": 1790000000000,
+        "isolation": {
+          "a": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_a"
+          },
+          "b": {
+            "section": "checkpoints_g4",
+            "name": "isolation_workspace_b"
+          }
+        },
+        "condition": "A principal of workspace B on workspace A's route."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/genesis",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace-b",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pin": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "genesis_pin",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "genesis": "sha256:0b8218975f6951f4eeec4fb4913c0818dbd79faa78e0cfef0712b3422031cc4c"
+            },
+            "sig": "m1b-uVHeP3iUTp9wFbG29CMgQaKkjP0BceaMjPkvKt_zU86bc_vV1IHFPrQh782qQ76F1cAjQpfoU8Jc_UwzBg"
+          },
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
     }
   ]
 }
