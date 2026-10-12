@@ -2871,6 +2871,18 @@ an exact retry of an accepted publication returns its stored result (also with t
 check (429 `quota_exceeded`, not charged), then signature and fold work. `ignored` lower-n publications are not
 charged; they cost one signature check and one canonicalisation of at most 2 MiB.
 
+**Publication cost (P3-D33).** Fold work is bounded too: a charged refusal also records the heads it folded,
+and the budget check above also answers 429 `quota_exceeded` (not charged) once the workspace's refusals of
+the rolling hour have folded about 1.81 million heads (twice the heads of a full 64 MiB staging set). A refusal
+before the staged set is folded (for example `restore_source_mismatch`, `checkpoint_time`,
+`staging_incomplete`) folds nothing. No new refusal code; the staged set is kept on a refusal. A relay verifies
+a publication outside its global write transaction and may store the verified nodes of a publication it then
+refuses (for example after a takeover between verification and commit); such nodes are immutable, referenced
+by nothing and invisible to every route, and count toward the workspace's storage. The answer is always the
+check order above evaluated at commit time: a takeover, a changed H, staging set, WSK, owner policy or
+revocation between verification and commit is answered as if the request had arrived after it. Concurrent
+final publications to one workspace are processed one at a time.
+
 **Restore rules (P3-D13/D23/D24/D25).** `restore` is `{line, cert, authz: {delegation}, log}`.
 `line` is the full F1 event object, with its payload fields at the top level, not an interim nested payload.
 `log` is `workspace` or the restored ticket's ULID; it is required (review 3), and the relay verifies the signatures
