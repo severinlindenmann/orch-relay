@@ -221,6 +221,48 @@ def test_no_head_is_folded_under_the_lock_and_each_hold_inserts_one_chunk(relay,
     assert proof(relay, body) == heads
 
 
+def test_lock_order_gate_then_lock_and_no_pooled_read_connection_held_while_locking(
+    relay, monkeypatch
+):
+    """Lock order (P3-D33): the workspace mutex and the semaphore (the gate) are held whenever the
+    publishing thread takes Directory.lock, and it never waits for the lock while it holds a
+    pooled read connection (phase A's snapshot is returned before phase B)."""
+    from contextlib import contextmanager
+
+    monkeypatch.setattr(checkpoints, "NODE_CHUNK", 10)
+    body, _ = append(relay, 40, 20)
+    pool, borrowed, taken = relay.d.pool, {}, []
+    real_borrow = pool.borrow
+
+    @contextmanager
+    def borrow(purpose="read"):
+        me = threading.get_ident()
+        borrowed[me] = borrowed.get(me, 0) + 1
+        try:
+            with real_borrow(purpose) as con:
+                yield con
+        finally:
+            borrowed[me] -= 1
+
+    monkeypatch.setattr(pool, "borrow", borrow)
+    publisher = []
+    relay.cps.hooks["phase_a"] = lambda **kw: publisher.append(threading.get_ident())
+
+    class Ordered(Recorder):
+        def __enter__(self):
+            me = threading.get_ident()
+            if publisher and me == publisher[0] and self.depth == 0:
+                taken.append((relay.cps.gate.active, borrowed.get(me, 0)))
+            return super().__enter__()
+
+    recorder = Ordered(relay.d.lock)
+    relay.d.lock = recorder
+    result = put(relay.client, body)
+    relay.d.lock = recorder.lock
+    assert result["result"] == "accepted", result
+    assert taken == [(1, 0)] * (4 + 1), taken  # 4 chunks and phase C, all inside the gate
+
+
 # --- the per-workspace mutex and the global semaphore --------------------------------------------
 
 

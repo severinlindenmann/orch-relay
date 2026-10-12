@@ -1699,7 +1699,8 @@ class Checkpoints:
         rows, memo.rows = memo.rows, []
         d = self.d
         for k in range(0, len(rows), NODE_CHUNK):
-            chunk = rows[k : k + NODE_CHUNK]
+            # Key order inside a chunk (it commits atomically) keeps the B-tree inserts local.
+            chunk = sorted(rows[k : k + NODE_CHUNK], key=lambda row: (row[1], row[2]))
             self.hook("chunk", ws=ws, memo=memo, rows=len(chunk))
             with d.lock:
                 con = self.bridge.connection("write")
