@@ -2155,7 +2155,10 @@ class Checkpoints:
     async def maintenance(self, interval=60):
         while True:
             await asyncio.sleep(interval)
-            await run_in_threadpool(self.sweep)
+            try:
+                await run_in_threadpool(self.sweep)
+            except sqlite3.Error:  # busy past the timeout: try again next round (review F3)
+                log.warning("checkpoint sweep failed", exc_info=True)
 
     async def transport(self, request, route):
         """Size cap, strict query and content type: refused before any parsing or lock."""

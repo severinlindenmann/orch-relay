@@ -28,3 +28,11 @@ BEFORE DELETE ON account_workspace_override_audit
 BEGIN
     SELECT RAISE(ABORT, 'account_workspace_override_audit is append-only');
 END;
+-- REPLACE (and INSERT OR REPLACE) deletes a conflicting row without firing a DELETE trigger
+-- (recursive_triggers is off), so a row naming an existing seq is refused here (review F1).
+CREATE TRIGGER account_workspace_override_audit_no_replace
+BEFORE INSERT ON account_workspace_override_audit
+WHEN EXISTS (SELECT 1 FROM account_workspace_override_audit WHERE seq = NEW.seq)
+BEGIN
+    SELECT RAISE(ABORT, 'account_workspace_override_audit is append-only');
+END;

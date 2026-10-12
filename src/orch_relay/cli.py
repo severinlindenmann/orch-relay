@@ -44,7 +44,10 @@ def main(argv: list[str] | None = None) -> int:
         if match is None:
             p.error("--ttl must be a positive duration, e.g. 7d")
         ttl = int(match[1]) * {"s": 1000, "m": 60_000, "h": 3_600_000, "d": 86_400_000}[match[2]]
-        print(create_invite(app_mod.data_dir_from_env() / db.DB_NAME, ttl))
+        try:
+            print(create_invite(app_mod.data_dir_from_env() / db.DB_NAME, ttl))
+        except ValueError as exc:  # another user's database (P3-D36 review F2)
+            p.error(str(exc))
         return 0
 
     if args.cmd == "migrate":

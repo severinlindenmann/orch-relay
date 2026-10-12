@@ -1430,6 +1430,8 @@ def install(app, data):
 def create_invite(path, ttl_ms):
     if type(ttl_ms) is not int or ttl_ms <= 0:
         raise ValueError("positive invite TTL required")
+    if os.path.exists(path):  # a fresh deployment's first invite still creates the database
+        require_owner(path)
     db.migrate(path)
     code = P.b64u(secrets.token_bytes(32))
     with closing(db.connect(path)) as con, con:
@@ -1453,11 +1455,34 @@ def admin_text(value, limit, name, required=True):
     return value
 
 
+def require_owner(path):
+    """P3-D36 round 2 (review F2): an operator command runs as the user that owns the relay's
+    database and its directory, or SQLite's -wal/-shm files it may create (and leave behind if
+    killed) would belong to another user and lock the relay out ("readonly database")."""
+    me = os.geteuid()
+    for target in (path, os.path.dirname(os.path.abspath(path))):
+        owner = os.stat(target).st_uid
+        if owner != me:
+            raise ValueError(
+                f"{target} belongs to uid {owner}, not {me}: run as the relay's user "
+                "(e.g. sudo -u orch-relay orch-relay ...)"
+            )
+
+
+def admin_connection(path):
+    """The account-cap commands' connection: the database must exist (never created, review F2)
+    and belong to the effective user."""
+    if not os.path.isfile(path):
+        raise ValueError(f"no database at {path}: check ORCH_RELAY_DATA")
+    require_owner(path)
+    return closing(db.connect_existing(path))
+
+
 def require_override_schema(path):
     """The operator commands never change the schema of a database a relay may be serving (no
     migration from the CLI here): migration 0016 must be applied (`orch-relay migrate`, or a relay
     start). A plain read, no write lock."""
-    with closing(db.connect(path)) as con:
+    with admin_connection(path) as con:
         try:
             done = con.execute(
                 "SELECT 1 FROM schema_migrations WHERE version LIKE '0016_%'"
@@ -1483,7 +1508,7 @@ def set_account_cap(path, person, cap, by, note=None, now_ms=None, timeout_ms=50
     note = admin_text(note, 1024, "--note", required=False)
     require_override_schema(path)
     now = time.time_ns() // 1_000_000 if now_ms is None else now_ms
-    with closing(db.connect(path)) as con:
+    with admin_connection(path) as con:
         con.execute(f"PRAGMA busy_timeout={int(timeout_ms)}")
         con.isolation_level = None
         con.execute("BEGIN IMMEDIATE")
@@ -1516,7 +1541,7 @@ def show_account_cap(path, person, global_cap):
     """The account's owned workspaces, effective cap and override row (read-only)."""
     P.unhex(person)
     require_override_schema(path)
-    with closing(db.connect(path)) as con:
+    with admin_connection(path) as con:
         owned = con.execute(
             "SELECT count(*) FROM workspaces WHERE owner_person_id=?", (person,)
         ).fetchone()[0]
@@ -1535,7 +1560,7 @@ def account_cap_audit(path, person=None):
         P.unhex(person)
     require_override_schema(path)
     names = ("seq", "person_id", "old_cap", "new_cap", "set_by", "set_at_ms", "note")
-    with closing(db.connect(path)) as con:
+    with admin_connection(path) as con:
         rows = con.execute(
             f"SELECT {','.join(names)} FROM account_workspace_override_audit "
             "WHERE ?1 IS NULL OR person_id=?1 ORDER BY seq",

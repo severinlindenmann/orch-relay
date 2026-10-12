@@ -2,6 +2,7 @@
 
 import asyncio
 import ipaddress
+import logging
 import math
 import random
 import secrets
@@ -228,7 +229,12 @@ class Bridge:
         return self.d.reader(purpose)
 
     def close(self):
-        self.d.close()  # the shared pool (P3-D32 round 2)
+        # The shared pool (P3-D32 round 2). Under Directory.lock: a cancelled maintenance task
+        # leaves its worker thread running, and both sweeps hold the lock for their whole run, so
+        # this waits for one still in BEGIN IMMEDIATE instead of closing its connection under the
+        # running statement (SIGSEGV at shutdown, P3-D36 review F3).
+        with self.d.lock:
+            self.d.close()
 
     def wake(self, *keys):
         for key in keys:
@@ -245,7 +251,10 @@ class Bridge:
     async def maintenance(self):
         while True:
             await asyncio.sleep(1)
-            await run_in_threadpool(self.sweep)
+            try:
+                await run_in_threadpool(self.sweep)
+            except sqlite3.Error:  # busy past the timeout: try again next round (review F3)
+                logging.getLogger(__name__).warning("bridge sweep failed", exc_info=True)
 
     def budget(self, con, ws, device, direction, size):
         total = con.execute("SELECT coalesce(sum(bodies),0) FROM queue_totals").fetchone()[0]
