@@ -17,7 +17,8 @@ ROUTES = [
     ('proof', 'GET', PREFIX+'/proof', 'client', 'D(m)|W', '404:not_found 410:checkpoint_gone'),
 ]
 CAPS = {'genesis': 65536, 'staging_page': C.PAGE_CAP, 'staging_manifest': C.PAGE_CAP,
-        'baseline_post': 16384, 'checkpoint_put': C.REQUEST_CAP}
+        'baseline_post': 16384, 'checkpoint_put': C.REQUEST_CAP,
+        'unpublished_ack': C.REQUEST_CAPS['unpublished_ack']}
 CONDITIONS = {
     'genesis_mismatch': 'Pinned genesis or card WSK/workspace disagrees; established pins never change.',
     'no_genesis': 'Workspace has no accepted owner-device genesis pin.',

@@ -86,6 +86,8 @@ def build() -> dict:
     add_g3b(out)
     from ref._checkpoint_g4_vectors import add_checkpoints_g4
     add_checkpoints_g4(out)
+    from ref._unpublished_vectors import add_unpublished
+    add_unpublished(out)
     return out
 
 

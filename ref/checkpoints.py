@@ -20,7 +20,10 @@ REQUEST_CAP = CP_CAP + LINE_CAP + 65536
 PAGE_CAP = 4 * 1024 * 1024
 STAGE_CAP = 64 * 1024 * 1024
 REQUEST_CAPS = {'genesis': 65536, 'page': PAGE_CAP, 'manifest': PAGE_CAP,
-                'baseline': 16384, 'publish': REQUEST_CAP}
+                'baseline': 16384, 'publish': REQUEST_CAP, 'unpublished_ack': 1024}
+# P3-D31: the unpublished view's page bounds (items and bytes of cj(response)).
+UNPUBLISHED_LIMIT = 64
+UNPUBLISHED_BYTES = 256 * 1024
 STRENGTH = {'lost': 1, 'retired': 1, 'compromised': 2}
 # Failed final publications per workspace per hour (§19.8, P3-D17 style refusal, never eviction).
 FAILURE_BUDGET = 16
@@ -380,6 +383,161 @@ def register_device(state, body):
     return {}
 
 
+# ---------------------------------------------------------------------------------------------
+# P3-D31: retrieval of unpublished revocation evidence (GET/POST /v2/workspaces/{ws}/unpublished[/ack]).
+# The view is derived, never materialized. Optional state fields, present in the `unpublished` vector group and
+# read with defaults elsewhere: `cursors` ('device:person' -> §19.5 cursor of the global row; without it cursors
+# follow the sorted keys, as the production seed numbers them), `list_devices` (G2 ever-devices: current or former
+# list members; without it the members among ever_devices), `certs` (device -> registry certificate) and
+# `unpublished_ack` (the workspace's acknowledged high-water mark, 0 when absent).
+# ---------------------------------------------------------------------------------------------
+
+
+def global_table(state):
+    """The relay's §19.5 table per pair: the strongest of the global set and this workspace's chain pairs (an accepted
+    restore writes both, and a chain pair is never stronger than its global row)."""
+    out = {}
+    for source in (state['revocations'], state['global_revocations']):
+        for key, rev in source.items():
+            if key not in out or STRENGTH[rev['o']['reason']] > STRENGTH[out[key]['o']['reason']]:
+                out[key] = rev
+    return out
+
+
+def cursor_table(state):
+    if 'cursors' in state:
+        return state['cursors']
+    return {key: i for i, key in enumerate(sorted(global_table(state)), 1)}
+
+
+def max_cursor(state):
+    return max(cursor_table(state).values(), default=0)
+
+
+def intake(state, rev):
+    """§19.5 intake of one verified revocation (Directory.revoke): insert or upgrade only, a new or upgraded pair at
+    MAX(cursor) + 1. Returns whether the global row changed."""
+    key = pair_key({'revocation': rev})
+    old = global_table(state).get(key)
+    changed = old is None or STRENGTH[rev['o']['reason']] > STRENGTH[old['o']['reason']]
+    if changed and 'cursors' in state:
+        state['cursors'][key] = max_cursor(state) + 1
+    held = state['global_revocations'].get(key)
+    if held is None or STRENGTH[rev['o']['reason']] > STRENGTH[held['o']['reason']]:
+        state['global_revocations'][key] = rev
+    return changed
+
+
+def list_devices(state):
+    """G2 ever-devices: devices named in some accepted member list (never restore-only checkpoint ever-devices)."""
+    if 'list_devices' in state:
+        return list(state['list_devices'])
+    return sorted(d for d in state['ever_devices'] if d in state['members'])
+
+
+def unpublished_items(state):
+    """U1/U2: for each G2 ever-device d with a registry association p, the global pair (d, p) while its reason is
+    stronger than this workspace's chain pair (a missing chain pair counts 0). Another person's pair of the device is
+    never served; neither is a pair of a device known only through restore evidence, nor of an unknown device.
+    Ascending §19.5 cursor."""
+    table, cursors = global_table(state), cursor_table(state)
+    items = []
+    for d in list_devices(state):
+        person = authority(state, d)
+        key = f'{d}:{person}'
+        rev = table.get(key) if person is not None else None
+        if rev is None:
+            continue
+        chain = state['revocations'].get(key)
+        if STRENGTH[rev['o']['reason']] <= (STRENGTH[chain['o']['reason']] if chain else 0):
+            continue
+        items.append({'device_id': d, 'person_id': person, 'reason': rev['o']['reason'], 'revocation': rev,
+                      'device_cert': state.get('certs', {}).get(d), 'pk_pub': state['person_keys'].get(person),
+                      'provenance': {'cursor': cursors[key], 'digest': digest(R.cj(rev))},
+                      'chain_reason': chain['o']['reason'] if chain else None})
+    return sorted(items, key=lambda i: i['provenance']['cursor'])
+
+
+def unpublished_token(ws, c):
+    """The opaque position: b64u(cj({v: 1, ws, c})), bound to the workspace (never to the holder generation)."""
+    return R.b64u(R.cj({'v': 1, 'ws': ws, 'c': c}))
+
+
+def unpublished_position(state, token):
+    """Strict decoding: §2.3 JSON, the exact field set, v 1, this workspace, a safe integer c >= 0 (else 400
+    malformed; another workspace's cursor included). A position above the relay's newest §19.5 cursor is 409
+    cursor_ahead: it names state that does not exist (a bug, a forgery or a rolled-back relay)."""
+    need(isinstance(token, str))
+    try:
+        o = R.parse_json(R.unb64u(token))
+    except (ValueError, TypeError) as exc:
+        raise Refusal('malformed', 400) from exc
+    need(isinstance(o, dict) and set(o) == {'v', 'ws', 'c'} and type(o['v']) is int and o['v'] == 1)
+    need(o['ws'] == state['ws'])
+    integer(o['c'])
+    need(o['c'] <= max_cursor(state), 'cursor_ahead', 409)
+    return o['c']
+
+
+def unpublished_get(state, query):
+    """GET /v2/workspaces/{ws}/unpublished?cursor=&limit= (after W(g) and the rate window). `query` is the exact
+    string map of the HTTP query. A page holds at most `limit` (default and maximum 64) items and at most
+    UNPUBLISHED_BYTES of cj(response) as sent; the first item is always included. `cursor` is the position after
+    the last item (the request's own position on an empty page); `more` says items exist after it."""
+    need(isinstance(query, dict) and set(query) <= {'cursor', 'limit'})
+    limit = UNPUBLISHED_LIMIT
+    if 'limit' in query:
+        need(isinstance(query['limit'], str) and re.fullmatch(r'[0-9]+', query['limit']))
+        limit = int(query['limit'])
+        need(1 <= limit <= UNPUBLISHED_LIMIT)
+    position = unpublished_position(state, query['cursor']) if 'cursor' in query else 0
+    after = [i for i in unpublished_items(state) if i['provenance']['cursor'] > position]
+    # An eligible pair always has its registry certificate and account key (U8).
+    assert all(i['device_cert'] is not None and i['pk_pub'] is not None for i in after)
+    page = []
+    for k, item in enumerate(after[:limit]):
+        framed = {'items': page + [item], 'cursor': unpublished_token(state['ws'], item['provenance']['cursor']),
+                  'more': k + 1 < len(after)}
+        if page and len(R.cj(framed)) > UNPUBLISHED_BYTES:
+            break
+        page.append(item)
+    last = page[-1]['provenance']['cursor'] if page else position
+    return {'items': page, 'cursor': unpublished_token(state['ws'], last), 'more': len(page) < len(after)}
+
+
+def unpublished_ack(state, body):
+    """POST /v2/workspaces/{ws}/unpublished/ack {cursor}: the high-water mark only moves up (a lower or equal cursor
+    is a no-op). It drives the host-poll notice and nothing else: never publication, never hides an item."""
+    need(isinstance(body, dict) and set(body) == {'cursor'})
+    c = unpublished_position(state, body['cursor'])
+    state['unpublished_ack'] = max(state.get('unpublished_ack', 0), c)
+    return {'acked': unpublished_token(state['ws'], state['unpublished_ack'])}
+
+
+def unpublished_notice(state):
+    """host/poll notices.unpublished: the newest item's position while it is above the ack, else null."""
+    newest = max((i['provenance']['cursor'] for i in unpublished_items(state)), default=0)
+    return unpublished_token(state['ws'], newest) if newest > state.get('unpublished_ack', 0) else None
+
+
+def revoke(S, state, body):
+    """POST /v2/revocations as far as the view needs it: only the registered person's pair enters (verified against
+    the registry certificate under the account key), then §19.5 intake (insert or upgrade, new cursor)."""
+    need(isinstance(body, dict) and set(body) == {'record'})
+    rec = body['record']
+    o = rec.get('o') if isinstance(rec, dict) else None
+    need(isinstance(o, dict))
+    d, person = o.get('device_id'), o.get('person_id')
+    need(person in state['person_keys'], 'other_person', 403)
+    cert = state.get('certs', {}).get(d) if authority(state, d) is not None else None
+    checked = R.verify_revocation(S, rec, R.unb64u(state['person_keys'][person]), cert['o'] if cert else None)
+    if 'refuse' in checked:
+        code = checked['refuse']
+        raise Refusal(code, {'bad_signature': 401, 'other_person': 403}.get(code, 400))
+    intake(state, rec)
+    return {'device_id': d}
+
+
 def revocation_evidence(S, state, line, log):
     """F1 B1 entries, keyed by (device, person): unique and sorted by pair (orch-core #397). Evidence for a device
     the relay associates with a person (registry, earlier signer) must come from that person and its stored key, as
@@ -502,16 +660,25 @@ def restore_check(S, state, body, target, held, stage, used, now):
         rev, key = item['revocation'], d + ':' + person
         # Restore evidence never registers its device (no first-come association, orch-core #397): it is retained
         # per pair, globally (§19.5 intake, upgrade only) and as this workspace's chain pair (monotonic).
-        for store in (state['global_revocations'], state['revocations']):
-            if key not in store or STRENGTH[rev['o']['reason']] > STRENGTH[store[key]['o']['reason']]:
-                store[key] = rev
+        intake(state, rev)
+        if key not in state['revocations'] or \
+                STRENGTH[rev['o']['reason']] > STRENGTH[state['revocations'][key]['o']['reason']]:
+            state['revocations'][key] = rev
     state['bound'][cert['device_id']] = cert['person_id']
     state['ever_devices'] = sorted(set(state['ever_devices']) | {d for d, _ in listed} | {cert['device_id']})
     state['transitions'].append({'restore_id': line['id'], 'source_hash': body['source_hash'],
                                  'target_hash': checkpoint_hash(target), 'target_n': target['o']['n'], **bundle})
     if held:
         state['checkpoints'][checkpoint_hash(held)]['permanent'] = True
-    return log
+    # revocation.unpublished hints (P3-D31 U10): exactly the view's items after this restore, minus the signer's
+    # device. Each one is retrievable through the unpublished route in the next snapshot.
+    refs = []
+    if log == 'workspace':
+        for item in unpublished_items(state):
+            if item['device_id'] != cert['device_id']:
+                refs.append({'device_id': item['device_id'], 'person_id': item['person_id'],
+                             'reason': item['reason'], **item['provenance']})
+    return log, refs
 
 
 def publish(S, state, body, now):
@@ -546,7 +713,7 @@ def publish(S, state, body, now):
     offered = entries(target)
     need(not old.keys() - offered.keys(), 'chain_diverged', 409)
     try:
-        restored = restore_check(S, state, body, target, held, stage, used, now) if 'restore' in body else None
+        restored, refs = restore_check(S, state, body, target, held, stage, used, now) if 'restore' in body else (None, [])
     except (KeyError, TypeError, ValueError, AttributeError, IndexError) as exc:
         raise Refusal('restore_invalid') from exc
     for log, entry in offered.items():
@@ -558,6 +725,9 @@ def publish(S, state, body, now):
         if log == 'workspace':
             need(at_seq(state, log, entry, 1)['head'] == target['o']['genesis'], 'genesis_mismatch', 409)
     need(used == {d['i'] for d in stage['manifest']['pages']}, 'chain_diverged', 409)
+    if refs:
+        result['unpublished'] = sorted({'d_' + r['device_id'] for r in refs})
+        result['unpublished_refs'] = refs
     if held:
         state['checkpoints'][checkpoint_hash(held)]['superseded_ms'] = now
     state['held'] = target
@@ -1304,6 +1474,16 @@ def _dispatch(S, state, op, body, now_ms, **args):
             result = device_learn(S, body['device'], body['evidence'])
         elif op == 'device_sync':
             result = sync_walk(S, body, trial, now_ms, args.get('endpoint'), args.get('script'), args.get('max_heads'))
+        elif op == 'unpublished_get':  # P3-D31, after W(g) and the rate window
+            result = unpublished_get(trial, args.get('query', {}))
+        elif op == 'unpublished_ack':
+            result = unpublished_ack(trial, body)
+        elif op == 'notices':  # the host-poll notice field this group adds
+            result = {'unpublished': unpublished_notice(trial)}
+        elif op == 'revoke':  # POST /v2/revocations: out-of-band §19.5 intake
+            result = revoke(S, trial, body)
+        elif op == 'restart':  # a new relay process on the same database: durable state only
+            result = {}
         else:
             raise ValueError('unknown operation')
     except Refusal as exc:
