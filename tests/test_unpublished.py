@@ -408,3 +408,13 @@ def test_membership_publication_bounds_ever_devices(tmp_path):
                 assert r.json() == {"error": "quota_exceeded"} and snapshot(d) == before
             else:
                 assert len(sql(client, "SELECT * FROM ever_devices")) == U.MAX_EVER_DEVICES
+
+
+def test_the_first_item_is_always_served(relay, monkeypatch):
+    """A page never comes back empty while items exist after the position, even when one item
+    alone exceeds the byte bound (the host's walk would otherwise never advance)."""
+    monkeypatch.setattr(U, "PAGE_BYTES", 100)
+    first = http(relay, "GET", GET, host())
+    assert len(first["items"]) == 1 and first["more"]
+    rest = http(relay, "GET", GET, host(), {"cursor": first["cursor"]})
+    assert len(rest["items"]) == 1 and not rest["more"]
