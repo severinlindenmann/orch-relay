@@ -911,6 +911,22 @@ def add_walks(S, v, keys, cases, new, run, staged, page, restore, offer_restore,
     registered['registry'][laptop_id] = alice_id
     c, st = new('P3_D30_registered_device_cut_off_per_registry_pair', registered)
     run(c, st, 'register_device', {'device_id': laptop_id, 'person_id': alice_id})
+    # Round 2 (review S2, A13): a registered device is judged by its REGISTRY person's pair, never the request's. With
+    # only alice's pair revoked, bob's PUT for alice's laptop is refused as revoked; with only bob's pair held, it is
+    # the plain cert_conflict.
+    for name, held_key, held_rev, error in [
+            ('P3_D30_registered_device_registry_pair_revoked', alice_laptop, x['rev']('compromised'), 'revoked'),
+            ('P3_D30_registered_device_request_pair_ignored', laptop_id + ':' + x['bob_id'], bob_rev_l,
+             'cert_conflict')]:
+        held = copy.deepcopy(accepted)
+        held['registry'][laptop_id] = alice_id
+        held['global_revocations'][held_key] = held_rev
+        c, st = new(name, held)
+        run(c, st, 'register_device', {'device_id': laptop_id, 'person_id': x['bob_id']}, error=error)
+    # Round 2 (review S2, A14): the account route is always a new registration, even for an id with a registry row:
+    # another person's chain pair refuses it (revoked) before account_exists or cert_conflict.
+    c, st = new('P3_D30_account_route_is_always_a_new_registration', registered)
+    run(c, st, 'register_device', account(x['bob_id'], x['bob_pk']), error='revoked')
     oob_q = copy.deepcopy(accepted)
     oob_q['global_revocations'][q_key] = q_rev('compromised')
     c, st = new('P3_D30_out_of_band_pair_refuses_only_its_person', oob_q)
