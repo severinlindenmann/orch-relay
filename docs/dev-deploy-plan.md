@@ -115,7 +115,7 @@ kernel OOM killer picking `sshd`, Caddy or the other relay instance.
 | P2 | **Proxy env** `ORCH_RELAY_BEHIND_PROXY=1`, `ORCH_RELAY_TRUSTED_PROXY=127.0.0.1` (checklist 7, P3-D35 N4). Without it every client has Caddy's address, so all anonymous pairing shares 4 concurrent polls and one set of address windows relay-wide. Phone pairing tests would hit 429 | **Yes** | dev kit (PR #27) | In PR #27 (unit `Environment=`); not applied |
 | P3 | **Unit memory limits** `MemoryMax=900M` (public) / `450M` (int), `TasksMax=256`, `LimitNOFILE=4096`, no `MemoryHigh` (PR #27 round 2). Without them an overrun kills a random process | **Yes** | dev kit (PR #27) | Draft; Opus review "safe to apply after fixes", fixes in `48bf7b5`; Opus delta of `48bf7b5` running (automated flag: possible ordering cycle in `orch-limits.service`, `Before=network-pre.target` without `DefaultDependencies=no`) |
 | P4 | **Hard maximum publication size** (new relay item: refuse a publication above a configured heads limit). With `PUBLISH_WIDTH=1`, `Gate.fits()` admits any single publication when nothing else runs (`checkpoints.py` `Gate.fits`: `self.active == 0 or …`), so the heads cap does not bound a full 64 MiB set: ~1.2 GB phase A plus ~250 MB baseline per instance, above both `MemoryMax` values | **Yes: the code item, or the interim env cap in §4.3** (`ORCH_RELAY_GLOBAL_STAGE_BYTES`, which bounds every staged set and so every publication's new heads) | stream D (relay code) | Not started (tracked by orch-d6 after P3-D36); interim cap is env-only and needs no code |
-| P5 | **nftables per-IP limits** on 443 (checklist 7; PR #27: table `inet orch_limits`, 100 concurrent / 60 new per s, burst 120, IPv6 per /64; Caddy `request_body max_size 8MB`). This is the only bound on unauthenticated 401 floods and on the P3-D32 residuals (exact certificate receipt replays, unused-invite account requests) | **Yes**, after `nft -c` passes on a throwaway Ubuntu 24.04 (or `unshare -rn nft -c -f …`) and the Opus delta of `48bf7b5` passes. Fallback only if orch-d6 accepts it in writing: deploy with the Caddy body cap and memory limits and no nft table, as a known DoS exposure of a dev box | dev kit (PR #27); owner applies | Draft; `nft -c` **not yet run** |
+| P5 | **nftables per-IP limits** on 443 (checklist 7; PR #27: table `inet orch_limits`, 100 concurrent / 60 new per s, burst 120, IPv6 per /64; Caddy `request_body max_size 8MB`). This is the only bound on unauthenticated 401 floods and on the P3-D32 residuals (exact certificate receipt replays, unused-invite account requests) | **Yes**, after `nft -c` passes on a throwaway Ubuntu 26.04 VM (the real VPS OS) and the Opus delta of `48bf7b5` passes. Fallback only if orch-d6 accepts it in writing: deploy with the Caddy body cap and memory limits and no nft table, as a known DoS exposure of a dev box | dev kit (PR #27); owner applies | Draft; `nft -c` **not yet run** |
 | P6 | **Disk fits the storage caps** (checklist 2). The defaults allow 32 × 1.17 GB ≈ 37.5 GB per account, about the whole 38 GB disk | **Yes** (env only, §4.3) | stream D | Values proposed in §4.3 |
 | P7 | **P3-D36 limits PR**: staging refill 600/min weighted by body size (checklist 8), node-quota restore reserve (checklist 3), audited per-account workspace-cap override (checklist 4, migration 0016, CLI `orch-relay account-cap`) | **No.** Preferred if merged by deploy time (one deploy, one wipe), but migration 0016 is additive and can follow later without a wipe. If deploying **without** it, set `ORCH_RELAY_THROTTLE_STAGING=27777/600` (checklist 8's interim). If deploying **with** it, do **not** set that variable: P3-D36 changes the staging burst and weights tokens by size, and the old override would undo that | stream D | Implemented locally (6 commits, `3e345cf`), not pushed, no PR; Opus review pending |
 | P8 | **Ever-device way out** (checklist 5: offline compaction, audited override; orch-d6 ruling 12 Oct) | No. Invite-only testers; a workspace at 4,096 ever-devices is unreachable in dev; migration (d) is the exit | stream D | Ruled, not implemented |
@@ -359,7 +359,7 @@ ROOT$ command -v python3.14 python3 uv; python3 --version
 ### Step A: Off-host validation of the nft ruleset (laptop or a throwaway VM; nothing on the VPS)
 
 ```
-laptop$ (throwaway Ubuntu 24.04 VM or container)  apt-get install -y nftables
+laptop$ (throwaway Ubuntu 26.04 VM (local, cloud-init))  apt-get install -y nftables
         nft -c -f orch-limits.nft        # or, without root: unshare -rn nft -c -f orch-limits.nft
 ```
 
@@ -753,7 +753,7 @@ testing, orch-d6 says "go" again.
 
 - [ ] P1 `ORCH_RELAY_ORIGIN` values agreed (`https://relay.dev.severin.io`, `https://relay-internal.dev.severin.io`)
 - [ ] P2/P3 PR #27: Opus delta of the head passed, the ordering-cycle flag resolved, head sha recorded
-- [ ] P5 `nft -c -f orch-limits.nft` passed on a throwaway Ubuntu 24.04 (step A), if nft is in scope
+- [ ] P5 `nft -c -f orch-limits.nft` passed on a throwaway Ubuntu 26.04 (step A), if nft is in scope
 - [ ] P4 interim `ORCH_RELAY_GLOBAL_STAGE_BYTES` values agreed (16 MiB public, 4 MiB int), or P4 code merged
 - [ ] P6 disk values agreed for the number of invited accounts
 - [ ] P7 release includes P3-D36, or `ORCH_RELAY_THROTTLE_STAGING=27777/600` is in both env files (never both)
