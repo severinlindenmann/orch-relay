@@ -20,7 +20,7 @@ import hashlib
 import threading
 
 from . import proto as P
-from .directory import Directory, Refusal, fields, integer
+from .directory import Refusal, fields, integer, window_rate
 
 LIMIT = 64  # items per page (default and maximum)
 PAGE_BYTES = 256 * 1024  # of cj(response), the first item always included
@@ -171,7 +171,7 @@ def ack(con, ws, c, gen, now):
 
 class Budget:
     """Per-workspace rate windows under their own small mutex, never directory.lock, so a read never
-    queues behind writes (U12). Same windows as Directory.rate; reset on restart (accepted)."""
+    queues behind writes (U12). Same windows as Directory.rate (window_rate); reset on restart (accepted)."""
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -182,4 +182,4 @@ class Budget:
         with self.lock:
             for charge in (False, True):
                 for duration, cap in windows:
-                    Directory.rate(self, purpose, ws, duration, cap, now, charge)
+                    window_rate(self, purpose, ws, duration, cap, now, charge)

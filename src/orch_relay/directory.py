@@ -222,11 +222,40 @@ def registration_refused(con, device_id, person_id):
     return chain_revoked(con, device_id) or pair_revoked(con, device_id, person_id)
 
 
+def window_rate(state, purpose, identity, duration, cap, now, charge=True):
+    """Fixed-window budget on `state.windows`/`state.window_expiry` (the caller holds its mutex).
+
+    A check (charge=False) has no side effects at all, not even the lazy cleanup: pre-checks run it
+    outside Directory.lock (P3-D32). Refusal: 429 `rate_limited` with Retry-After to the window end.
+    """
+    if charge:
+        # Bounded lazy cleanup avoids scanning all live windows or a restart-sized backlog.
+        for _ in range(64):
+            if not state.window_expiry or state.window_expiry[0][0] > now:
+                break
+            old_end, old_key = heapq.heappop(state.window_expiry)
+            if state.windows.get(old_key, (None,))[0] == old_end:
+                del state.windows[old_key]
+    key = (purpose, identity, duration)
+    end, count = state.windows.get(key, ((now // duration + 1) * duration, 0))
+    if now >= end:
+        end, count = (now // duration + 1) * duration, 0
+    if count >= cap:
+        fail("rate_limited", max(1, math.ceil((end - now) / 1000)))
+    if charge:
+        if key not in state.windows or state.windows[key][0] != end:
+            heapq.heappush(state.window_expiry, (end, key))
+        state.windows[key] = (end, count + 1)
+
+
 class Directory:
     def __init__(self, path, origin, trusted_proxy=None):
         self.path, self.origin, self.trusted_proxy = path, origin, trusted_proxy
         origin.encode("ascii")
         self.lock = threading.RLock()
+        # In-memory challenges and rate windows. Taken alone by pre-checks (P3-D32) and inside
+        # self.lock by transactions, never the other way round; held only for dict/heap updates.
+        self.budget = threading.RLock()
         self.challenges = {}  # challenge -> (expires_ms, canonical address, /56 parent)
         self.challenge_expiry = []
         self.challenge_addresses = Counter()
@@ -247,27 +276,13 @@ class Directory:
         assert not self.lock._is_owned(), "long poll cannot wait while holding directory.lock"
 
     def rate(self, purpose, identity, duration, cap, now, charge=True):
-        # Bounded lazy cleanup avoids scanning all live windows or a restart-sized backlog.
-        for _ in range(64):
-            if not self.window_expiry or self.window_expiry[0][0] > now:
-                break
-            old_end, old_key = heapq.heappop(self.window_expiry)
-            if self.windows.get(old_key, (None,))[0] == old_end:
-                del self.windows[old_key]
-        key = (purpose, identity, duration)
-        end, count = self.windows.get(key, ((now // duration + 1) * duration, 0))
-        if now >= end:
-            end, count = (now // duration + 1) * duration, 0
-        if count >= cap:
-            fail("rate_limited", max(1, math.ceil((end - now) / 1000)))
-        if charge:
-            if key not in self.windows or self.windows[key][0] != end:
-                heapq.heappush(self.window_expiry, (end, key))
-            self.windows[key] = (end, count + 1)
+        with self.budget:
+            window_rate(self, purpose, identity, duration, cap, now, charge)
 
     def consume(self, challenge, now):
         P.unb64u(challenge, 32)
-        state = self.remove_challenge(challenge)
+        with self.budget:
+            state = self.remove_challenge(challenge)
         if state is None:
             fail("unknown_challenge")
         if now >= state[0]:
@@ -275,26 +290,33 @@ class Directory:
         return P.unb64u(challenge, 32)
 
     def add_challenge(self, challenge, expires, address, parent):
-        self.challenges[challenge] = (expires, address, parent)
-        self.challenge_addresses[address] += 1
-        if parent:
-            self.challenge_parents[parent] += 1
-        heapq.heappush(self.challenge_expiry, (expires, challenge))
+        with self.budget:
+            self.challenges[challenge] = (expires, address, parent)
+            self.challenge_addresses[address] += 1
+            if parent:
+                self.challenge_parents[parent] += 1
+            heapq.heappush(self.challenge_expiry, (expires, challenge))
 
     def remove_challenge(self, challenge):
-        state = self.challenges.pop(challenge, None)
-        if state is not None:
-            for counts, key in (
-                (self.challenge_addresses, state[1]),
-                (self.challenge_parents, state[2]),
-            ):
-                if key is not None:
-                    counts[key] -= 1
-                    if not counts[key]:
-                        del counts[key]
-        return state
+        with self.budget:
+            state = self.challenges.pop(challenge, None)
+            if state is not None:
+                for counts, key in (
+                    (self.challenge_addresses, state[1]),
+                    (self.challenge_parents, state[2]),
+                ):
+                    if key is not None:
+                        counts[key] -= 1
+                        if not counts[key]:
+                            del counts[key]
+            return state
 
     def issue(self, address, now):
+        # No database state: runs under the budget mutex alone, never Directory.lock (P3-D32).
+        with self.budget:
+            return self.issue_unguarded(address, now)
+
+    def issue_unguarded(self, address, now):
         # Bound cleanup after clock jumps; stale counts conservatively retain capacity.
         for _ in range(64):
             if not self.challenge_expiry or self.challenge_expiry[0][0] > now:

@@ -325,3 +325,29 @@ def test_rate_window_expiry_is_lazy_and_keeps_live_person_budget(tmp_path):
     # Fixed windows refresh even when an expired key is behind the cleanup batch.
     d.rate("new", "0", MINUTE, 1, next_minute + MINUTE)
     assert d.windows[("new", "0", MINUTE)][1] == 1
+
+
+def test_rate_check_without_charge_has_no_side_effects(tmp_path):
+    """P3-D32: a pre-check (charge=False) runs outside Directory.lock, so it must not touch the
+    windows or the expiry heap, not even the lazy cleanup of expired windows."""
+    d = Directory(tmp_path / "unused", "https://relay.example")
+    for i in range(8):
+        d.rate("old", str(i), MINUTE, 1, NOW)
+    d.rate("live", PERSON, DAY, 2, NOW)
+    later = (NOW // MINUTE + 2) * MINUTE  # every "old" window has expired
+    windows, heap = dict(d.windows), list(d.window_expiry)
+    d.rate("live", PERSON, DAY, 2, later, False)  # allowed: one of two used
+    d.rate("fresh", PERSON, MINUTE, 1, later, False)  # allowed: never charged
+    d.rate("old", "0", MINUTE, 1, later, False)  # allowed: its window expired
+    assert d.windows == windows and d.window_expiry == heap
+    d.rate("live", PERSON, DAY, 2, later)
+    with pytest.raises(Refusal) as refused:
+        d.rate("live", PERSON, DAY, 2, later, False)
+    assert refused.value.code == "rate_limited" and refused.value.retry >= 1
+    windows, heap = dict(d.windows), list(d.window_expiry)
+    with pytest.raises(Refusal):
+        d.rate("live", PERSON, DAY, 2, later, False)
+    assert d.windows == windows and d.window_expiry == heap
+    # Charging still cleans up lazily.
+    d.rate("fresh", PERSON, MINUTE, 1, later)
+    assert not any(key[0] == "old" for key in d.windows)
