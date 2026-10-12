@@ -1066,3 +1066,202 @@ def test_every_rounds_work_and_nodes_are_recorded_when_restarts_end_in_503(relay
     spent = sql(relay.path, "SELECT coalesce(sum(heads),0) FROM checkpoint_refused_heads")
     assert spent[0][0] == 3 * count and failures(relay.path) == 0
     assert usage(relay.path) == (before[0] + count, before[1] + count)
+
+
+# --- round 2 delta check: N1 gate cancellation, N2 budget across rounds, pins --------------------
+
+
+def gate_run(gate, script):
+    """Run `script(gate)` and then check the gate is empty and still admits."""
+
+    async def run():
+        await script()
+        third = asyncio.create_task(enter_once(gate, "z"))
+        done, _ = await asyncio.wait({third}, timeout=1)
+        assert done and third.result() is None
+        assert gate.active == 0 and gate.heads == 0
+        assert not gate.loops or not next(iter(gate.loops.values()))[1]  # no queued waiter
+
+    asyncio.run(run())
+
+
+async def enter_once(gate, ws, weight=1):
+    async with gate.enter(ws, weight):
+        pass
+
+
+async def steps(n=10):
+    for _ in range(n):
+        await asyncio.sleep(0)
+
+
+def test_gate_waiter_cancelled_while_queued():
+    gate = checkpoints.Gate(1)
+
+    async def script():
+        go = asyncio.Event()
+
+        async def holder():
+            async with gate.enter("a", 1):
+                await go.wait()
+
+        t1 = asyncio.create_task(holder())
+        await steps()
+        t2 = asyncio.create_task(enter_once(gate, "b"))
+        await steps()
+        t2.cancel()
+        await steps()
+        assert gate.active == 1 and gate.heads == 1
+        go.set()
+        await t1
+        with pytest.raises(asyncio.CancelledError):
+            await t2
+
+    gate_run(gate, script)
+
+
+def test_gate_waiter_cancelled_in_the_same_step_as_a_leave():
+    """N1: the queued waiter's future is cancelled, then the holder leaves before the waiter runs:
+    the leave must neither admit the cancelled waiter nor raise in the leaving request."""
+    gate = checkpoints.Gate(1)
+
+    async def script():
+        go, box = asyncio.Event(), {}
+
+        async def holder():
+            async with gate.enter("a", 1):
+                await go.wait()
+                box["waiter"].cancel()  # lands right before this release
+
+        t1 = asyncio.create_task(holder())
+        await steps()
+        box["waiter"] = asyncio.create_task(enter_once(gate, "b"))
+        await steps()
+        go.set()
+        await t1  # no InvalidStateError in the leaving publication
+        with pytest.raises(asyncio.CancelledError):
+            await box["waiter"]
+
+    gate_run(gate, script)
+
+
+def test_gate_waiter_cancelled_after_being_admitted_before_running():
+    """Admitted by a leave (its future resolved), then cancelled before it resumes: its slot and
+    heads are given back and the next waiter is admitted."""
+    gate = checkpoints.Gate(1)
+
+    async def script():
+        go, box = asyncio.Event(), {}
+
+        async def holder():
+            async with gate.enter("a", 1):
+                await go.wait()
+
+        t1 = asyncio.create_task(holder())
+        await steps()
+        box["waiter"] = asyncio.create_task(enter_once(gate, "b"))
+        await steps()
+        after = asyncio.create_task(enter_once(gate, "c"))
+        await steps()
+
+        def cancel_after_release():
+            box["waiter"].cancel()
+
+        go.set()
+        asyncio.get_running_loop().call_soon(cancel_after_release)
+        await t1
+        with pytest.raises(asyncio.CancelledError):
+            await box["waiter"]
+        await asyncio.wait_for(after, 1)  # the next waiter is served
+
+    gate_run(gate, script)
+
+
+def swap_staging(relay, h, count, body_bytes):
+    sql(relay.path, "UPDATE checkpoint_staging_pages SET body=? WHERE target=?", (body_bytes, h))
+    d = P.parse_json(body_bytes)
+    slot = {k: d[k] for k in ("kind", "log", "after_seq", "digest")} | {"i": 0, "count": count}
+    sql(
+        relay.path,
+        "UPDATE checkpoint_staging SET manifest=? WHERE target=?",
+        (P.cj({"pages": [slot]}), h),
+    )
+
+
+def test_restart_rounds_count_earlier_rounds_against_the_refused_heads_budget(relay, monkeypatch):
+    """N2: work carried from earlier rounds of the same request counts in the budget check, so a
+    request folds at most the remaining budget plus one set (here: round 2 answers 429)."""
+    count = checkpoints.LIVE_FOLD_LIMIT + 1_000
+    monkeypatch.setattr(checkpoints, "REFUSED_HEADS", count)  # one set's worth
+    body, _ = append(relay, count, count)
+    h = C.checkpoint_hash(body["checkpoint"])
+    original = sql(relay.path, "SELECT body FROM checkpoint_staging_pages WHERE target=?", (h,))
+    other = [C.digest(f"FAKE swap {i}".encode()) for i in range(count)]
+    swapped = P.cj(page("workspace", relay.tip, other))
+    relay.cps.hooks.update(
+        before_c=lambda **kw: swap_staging(relay, h, count, swapped),
+        restart=lambda **kw: swap_staging(relay, h, count, original[0][0]),
+    )
+    r = relay.client.put(URL, content=P.cj(body), headers=HOST)
+    assert (r.status_code, r.json()) == (429, {"error": "quota_exceeded"}), r.text
+    spent = sql(relay.path, "SELECT coalesce(sum(heads),0) FROM checkpoint_refused_heads")
+    assert spent[0][0] == count and failures(relay.path) == 0
+
+
+def test_phase_c_live_work_of_a_restarted_round_is_recorded(relay, monkeypatch):
+    """Pin (review R5): phase C folds some pages live, then restarts; on the final 503 those live
+    heads are recorded with phase A's (zero here: phase A never sees a complete set)."""
+    body, _ = append(relay, 6_000, 1_000)
+    h = C.checkpoint_hash(body["checkpoint"])
+    last = sql(
+        relay.path,
+        "SELECT i, body FROM checkpoint_staging_pages WHERE target=? ORDER BY i DESC",
+        (h,),
+    )[0]
+
+    def drop(**kw):
+        sql(relay.path, "DELETE FROM checkpoint_staging_pages WHERE target=? AND i=?", (h, last[0]))
+
+    def add(**kw):
+        sql(
+            relay.path,
+            "INSERT INTO checkpoint_staging_pages SELECT workspace_id,source,target,?,? "
+            "FROM checkpoint_staging WHERE target=?",
+            (*last, h),
+        )
+
+    drop()
+    relay.cps.hooks.update(after_a=add, restart=lambda **kw: drop())
+    r = relay.client.put(URL, content=P.cj(body), headers=HOST)
+    assert r.status_code == 503, r.text
+    spent = sql(relay.path, "SELECT coalesce(sum(heads),0) FROM checkpoint_refused_heads")
+    # Each round: pages of 1,000 count twice (parse and fold) against 5,000: 2 folded live.
+    assert spent[0][0] == 3 * 2_000
+
+
+def test_phase_a_reads_no_staged_page_after_renewing_its_snapshot(relay, monkeypatch):
+    """Pin (review R16): every staged page is read in phase A's first snapshot; after a renewal
+    only log_nodes are read."""
+    from contextlib import contextmanager
+
+    monkeypatch.setattr(checkpoints, "A_SNAPSHOT_HEADS", 1)
+    ticket = "01" + "2" * 24
+    heads = [C.digest(f"FAKE pin {i}".encode()) for i in range(3)]
+    body, _ = append(relay, 6, 2, tickets={ticket: (heads, entry(heads))})
+    trace, real = [], relay.cps.bridge.reading
+
+    @contextmanager
+    def reading(purpose="read"):
+        with real(purpose) as con:
+            if purpose == "query":
+                con.set_trace_callback(trace.append)
+            try:
+                yield con
+            finally:
+                con.set_trace_callback(None)
+
+    monkeypatch.setattr(relay.cps.bridge, "reading", reading)
+    assert put(relay.client, body)["result"] == "accepted"
+    renewed = [i for i, q in enumerate(trace) if q.strip().upper() == "ROLLBACK"]
+    assert renewed, trace
+    assert not [q for q in trace[renewed[0] :] if "checkpoint_staging" in q], trace
