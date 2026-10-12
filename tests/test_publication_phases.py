@@ -1031,3 +1031,38 @@ def test_a_settle_error_does_not_replace_the_refusal(relay, monkeypatch):
 
     monkeypatch.setattr(checkpoints.Checkpoints, "account", broken)
     assert put(relay.client, body) == {"status": 409, "error": "staging_incomplete"}
+
+
+def test_every_rounds_work_and_nodes_are_recorded_when_restarts_end_in_503(relay):
+    """Security re-check of the budgets: each round's phase A folds the whole set and phase B
+    stores it; phase C restarts every time (the set is swapped for a larger, different one just
+    before phase C). The final 503 records the heads of all three rounds and the round-1 nodes
+    as orphans: restarts never make fold work or node inserts free."""
+    count = checkpoints.LIVE_FOLD_LIMIT + 1_000
+    body, _ = append(relay, count, count)
+    h = C.checkpoint_hash(body["checkpoint"])
+    original = sql(relay.path, "SELECT i, body FROM checkpoint_staging_pages WHERE target=?", (h,))
+    other = [C.digest(f"FAKE swap {i}".encode()) for i in range(count)]
+    swapped = P.cj(page("workspace", relay.tip, other))
+    before = usage(relay.path)
+
+    def swap(body_bytes):
+        sql(
+            relay.path, "UPDATE checkpoint_staging_pages SET body=? WHERE target=?", (body_bytes, h)
+        )
+        d = P.parse_json(body_bytes)
+        slot = {k: d[k] for k in ("kind", "log", "after_seq", "digest")} | {"i": 0, "count": count}
+        sql(
+            relay.path,
+            "UPDATE checkpoint_staging SET manifest=? WHERE target=?",
+            (P.cj({"pages": [slot]}), h),
+        )
+
+    relay.cps.hooks.update(
+        before_c=lambda **kw: swap(swapped), restart=lambda **kw: swap(original[0][1])
+    )
+    r = relay.client.put(URL, content=P.cj(body), headers=HOST)
+    assert (r.status_code, r.json()) == (503, {"error": "overloaded"}), r.text
+    spent = sql(relay.path, "SELECT coalesce(sum(heads),0) FROM checkpoint_refused_heads")
+    assert spent[0][0] == 3 * count and failures(relay.path) == 0
+    assert usage(relay.path) == (before[0] + count, before[1] + count)
