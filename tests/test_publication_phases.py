@@ -314,6 +314,94 @@ def test_gate_serializes_one_workspace_and_admits_at_most_width_across_workspace
     assert not gate.loops or not next(iter(gate.loops.values()))[0]  # no per-workspace residue
 
 
+def test_gate_takes_the_workspace_mutex_before_a_semaphore_slot():
+    """Review O10: two publications to one workspace queued first must not hold both slots (the
+    second waits on its mutex without a slot), so another workspace still gets in."""
+    gate = checkpoints.Gate(2)
+    inside = []
+
+    async def run():
+        release = asyncio.Event()
+
+        async def one(ws, tag):
+            async with gate.enter(ws):
+                inside.append(tag)
+                await release.wait()
+
+        tasks = [asyncio.create_task(one(ws, tag)) for ws, tag in [("a", 1), ("a", 2), ("b", 3)]]
+        for _ in range(20):
+            await asyncio.sleep(0)
+        assert sorted(inside) == [1, 3], inside
+        release.set()
+        await asyncio.gather(*tasks)
+
+    asyncio.run(run())
+
+
+def test_gate_admits_by_heads_in_flight_in_arrival_order():
+    """F4: besides the width, the sum of reserved heads stays under the cap; a publication larger
+    than the cap runs alone; admission is first come, first served (a big waiter is not starved)."""
+    gate = checkpoints.Gate(2, heads=10)
+    inside = []
+
+    async def run():
+        events = {}
+
+        async def one(ws, weight):
+            events[ws] = asyncio.Event()
+            async with gate.enter(ws, weight):
+                inside.append(ws)
+                await events[ws].wait()
+                inside.remove(ws)
+
+        async def settle():
+            for _ in range(20):
+                await asyncio.sleep(0)
+
+        tasks = [asyncio.create_task(one("a", 6))]
+        await settle()
+        tasks.append(asyncio.create_task(one("b", 6)))  # 12 > 10: waits
+        await settle()
+        tasks.append(asyncio.create_task(one("c", 1)))  # would fit, but b came first
+        await settle()
+        assert inside == ["a"] and gate.heads == 6
+        events["a"].set()
+        await settle()
+        assert sorted(inside) == ["b", "c"] and gate.heads == 7
+        tasks.append(asyncio.create_task(one("d", 50)))  # above the cap: alone
+        await settle()
+        events["b"].set()
+        events["c"].set()
+        await settle()
+        assert inside == ["d"] and gate.heads == 50
+        events["d"].set()
+        await asyncio.gather(*tasks)
+
+    asyncio.run(run())
+    assert gate.heads == 0 and gate.active == 0
+
+
+def test_publication_width_and_heads_cap_come_from_the_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("ORCH_RELAY_PUBLISH_WIDTH", "1")
+    monkeypatch.setenv("ORCH_RELAY_PUBLISH_HEADS", "1234")
+    with TestClient(create_app(tmp_path)) as client:
+        gate = client.app.state.checkpoints.gate
+        assert (gate.width, gate.cap) == (1, 1234)
+
+
+def test_publication_reserves_its_staged_heads_and_reweighs_an_underestimate(relay, monkeypatch):
+    body, _ = append(relay, 300, 100)
+    seen = []
+    relay.cps.hooks["phase_a"] = lambda **kw: seen.append(relay.cps.gate.heads)
+    assert put(relay.client, body)["result"] == "accepted"
+    assert len(seen) == 1 and 300 <= seen[0] < 400, seen  # estimated from the staged bytes
+    seen.clear()
+    body, _ = append(relay, 200, 100, "u")
+    monkeypatch.setattr(checkpoints.Checkpoints, "weigh", lambda self, ws, pre: 0)
+    assert put(relay.client, body)["result"] == "accepted"
+    assert seen == [0, 200], seen  # phase A stopped at the manifest and re-entered with 200
+
+
 def test_publication_runs_its_phases_inside_the_gate(relay):
     seen = []
     relay.cps.hooks["phase_a"] = lambda **kw: seen.append(("a", relay.cps.gate.active))
@@ -403,6 +491,8 @@ def test_takeover_between_a_and_c_refuses_fenced_uncharged(relay, monkeypatch, w
     relay.cps.hooks[where] = takeover
     assert put(relay.client, body) == {"status": 409, "error": "fenced"}
     assert published(relay.path) == before and failures(relay.path) == 0
+    # F2: phase A's fold work is recorded even though `fenced` is never charged.
+    assert sql(relay.path, "SELECT heads FROM checkpoint_refused_heads") == [(40,)]
     if where == "chunk":  # phase B stops at the first chunk after the takeover
         assert usage(relay.path)[1] == 10
 
@@ -441,6 +531,29 @@ def test_staging_replaced_between_a_and_c_is_judged_on_the_live_set(relay):
     assert failures(relay.path) == 1
     spent = sql(relay.path, "SELECT heads FROM checkpoint_refused_heads")
     assert spent == [(80,)]  # phase A's 40 and phase C's live 40
+
+
+def test_an_unused_page_staged_between_a_and_c_is_refused(relay):
+    """Review O13: the set is re-staged with the same pages plus one unused page (of a log the
+    target does not name): phase C reuses every fold and still refuses the unused page."""
+    body, _ = append(relay, 40, 20)
+    pages = []
+    cursor = relay.tip
+    heads = [C.digest(f"FAKE a {i}".encode()) for i in range(40)]
+    for k in (0, 20):
+        pages.append(page("workspace", cursor, heads[k : k + 20]))
+        cursor = entry(heads[k : k + 20], cursor["acc"], cursor["seq"])
+    pages.append(page("01" + "1" * 24, C.EMPTY, [C.digest(b"FAKE unused")]))
+    folds = []
+
+    def restage(**kw):
+        sql(relay.path, "DELETE FROM checkpoint_staging WHERE workspace_id=?", (WS,))
+        stage(relay.path, relay.first, body["checkpoint"], pages)
+
+    relay.cps.hooks["before_c"] = restage
+    relay.cps.hooks["restart"] = lambda **kw: folds.append("restart")
+    assert put(relay.client, body) == {"status": 409, "error": "chain_diverged"}
+    assert folds == []
 
 
 def test_a_refusal_after_folds_is_answered_by_phase_c_as_by_the_live_path(relay):
@@ -510,6 +623,9 @@ def restore_change(path, change):
             con.execute(
                 "UPDATE workspaces SET delegation=? WHERE workspace_id=?", (P.cj(delegation), WS)
             )
+        elif change == "member_removed":
+            device, _ = signer_of()
+            con.execute("DELETE FROM members WHERE workspace_id=? AND device_id=?", (WS, device))
         else:
             other = P.b64u(bytes.fromhex(V["keys"]["wsk_b.sig"]["pub"]))
             con.execute("UPDATE workspaces SET wsk_pub=? WHERE workspace_id=?", (other, WS))
@@ -521,6 +637,7 @@ def restore_change(path, change):
         ("signer_revoked", (409, "restore_not_owner")),
         ("chain_pair_added", (409, "restore_missing_revocation")),
         ("delegation_changed", (409, "restore_not_owner")),
+        ("member_removed", (409, "restore_not_owner")),
         ("wsk_changed", (401, "bad_signature")),
         (None, (200, None)),
     ],
@@ -588,14 +705,18 @@ def test_crash_in_phase_b_leaves_a_prefix_and_a_retry_is_accepted(relay, monkeyp
 
 def test_phase_c_never_accepts_on_folds_whose_nodes_phase_b_did_not_insert(relay):
     """Defence in depth: if phase A did not accept (so phase B inserted nothing), phase C may not
-    commit an acceptance resting on phase A's folds; it re-runs the publication live."""
+    commit an acceptance resting on phase A's folds; it restarts from phase A (round 2)."""
     body, heads = append(relay, 30, 10)
+    rounds = []
 
     def forget(**kw):
-        kw["memo"].accepted = False
+        rounds.append(kw["memo"].accepted)
+        if len(rounds) == 1:
+            kw["memo"].accepted = False
 
     relay.cps.hooks["after_a"] = forget
     assert put(relay.client, body)["result"] == "accepted"
+    assert rounds == [True, True]
     assert proof(relay, body) == heads
 
 
@@ -668,3 +789,241 @@ def test_healthz_login_and_bridge_are_served_during_phase_a_and_b(relay, monkeyp
     assert served, results
     assert (results["healthz"], results["login"], results["poll"]) == (200, 200, 200), results
     assert results["put"]["result"] == "accepted"
+
+
+# --- review round 2: F1 restarts, F2 work on every refusal, F3 snapshots, F6 settle -------------
+
+
+def publisher_lock(relay, monkeypatch):
+    """Record Directory.lock holds and log_acc calls made under it by the publishing thread."""
+    recorder = Recorder(relay.d.lock)
+    real = checkpoints.log_acc
+
+    def counted(acc, head):
+        if recorder.lock._is_owned():
+            recorder.folds += 1
+        return real(acc, head)
+
+    monkeypatch.setattr(checkpoints, "log_acc", counted)
+    relay.d.lock = recorder
+    return recorder
+
+
+def at_after(ms):
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(ms // 1000 + 1)) + "Z"
+
+
+@pytest.mark.parametrize("trigger", ["clock_edge", "staging_completed"])
+def test_phase_c_restarts_instead_of_folding_a_set_under_the_lock(relay, monkeypatch, trigger):
+    """F1: phase A refuses before any fold (checkpoint_time, staging_incomplete), live state then
+    lets the publication through: phase C must not fold the set under the lock (above
+    LIVE_FOLD_LIMIT); it restarts from phase A, which folds outside the lock."""
+    count = checkpoints.LIVE_FOLD_LIMIT + 1_000
+    clock = {"now": NOW}
+    relay.d.clock = lambda: clock["now"]
+    at = at_after(NOW + 300_000) if trigger == "clock_edge" else None
+    body, heads = append(relay, count, count // 2, at=at)
+    rounds, hold = [], {}
+    if trigger == "clock_edge":
+
+        def after_a(**kw):
+            rounds.append(kw["memo"].accepted)
+            clock["now"] = NOW + 2_000  # the A -> C window: `at` is now within five minutes
+
+    else:
+        h = C.checkpoint_hash(body["checkpoint"])
+        hold["page"] = sql(
+            relay.path,
+            "SELECT i, body FROM checkpoint_staging_pages WHERE target=? ORDER BY i DESC",
+            (h,),
+        )[0]
+        sql(
+            relay.path,
+            "DELETE FROM checkpoint_staging_pages WHERE target=? AND i=?",
+            (h, hold["page"][0]),
+        )
+
+        def after_a(**kw):
+            rounds.append(kw["memo"].accepted)
+            if len(rounds) == 1:  # the last page lands between phase A and phase C
+                sql(
+                    relay.path,
+                    "INSERT INTO checkpoint_staging_pages SELECT workspace_id,source,target,?,? "
+                    "FROM checkpoint_staging WHERE target=?",
+                    (*hold["page"], h),
+                )
+
+    relay.cps.hooks["after_a"] = after_a
+    recorder = publisher_lock(relay, monkeypatch)
+    began = time.perf_counter()
+    result = put(relay.client, body)
+    wall = time.perf_counter() - began
+    relay.d.lock = recorder.lock
+    assert result["result"] == "accepted", result
+    assert rounds == [False, True], rounds
+    assert recorder.folds <= checkpoints.LIVE_FOLD_LIMIT
+    assert max(held for _, held in recorder.holds) <= 0.5 * wall, (recorder.holds, wall)
+    assert proof(relay, body) == heads
+
+
+def test_phase_c_restarts_after_an_owner_policy_change_between_a_and_c(tmp_path, monkeypatch):
+    """F1, owner policy: phase A refuses restore_not_owner (the signer is not a list member), the
+    member row is back before phase C. With LIVE_FOLD_LIMIT 0 no live fold is allowed under the
+    lock: phase C restarts and round 2 is accepted on phase A's folds."""
+    from test_checkpoints import signer_of
+
+    monkeypatch.setattr(checkpoints, "LIVE_FOLD_LIMIT", 0)
+    restore = case(RESTORE)
+    with TestClient(create_app(tmp_path)) as client:
+        path = tmp_path / db.DB_NAME
+        replay(client, path, restore, upto=2)
+        step = restore["steps"][2]
+        device, _ = signer_of()
+        row = sql(path, "SELECT * FROM members WHERE workspace_id=? AND device_id=?", (WS, device))
+        sql(path, "DELETE FROM members WHERE workspace_id=? AND device_id=?", (WS, device))
+        cps, rounds = client.app.state.checkpoints, []
+
+        def after_a(**kw):
+            rounds.append(kw["memo"].accepted)
+            if len(rounds) == 1:
+                sql(path, "INSERT INTO members VALUES (?,?,?,?)", tuple(row[0]))
+
+        cps.hooks["after_a"] = after_a
+        d = client.app.state.directory
+        recorder = Recorder(d.lock)
+        real = checkpoints.log_acc
+
+        def counted(acc, head):
+            if recorder.lock._is_owned():
+                recorder.folds += 1
+            return real(acc, head)
+
+        monkeypatch.setattr(checkpoints, "log_acc", counted)
+        d.lock = recorder
+        r = client.put(URL, content=P.cj(step["input"]["body"]), headers=HOST)
+        d.lock = recorder.lock
+        assert r.json() == {k: v for k, v in step["expect"].items() if k != "status"}, r.text
+        assert rounds == [False, True] and recorder.folds == 0
+
+
+def test_restarts_end_in_a_retryable_uncharged_503(relay, monkeypatch):
+    """F1: a publication whose phase C keeps needing live folds restarts at most twice, then is
+    answered 503 overloaded with Retry-After, uncharged, nothing published."""
+    count = checkpoints.LIVE_FOLD_LIMIT + 1_000
+    body, _ = append(relay, count, count // 2)
+    h = C.checkpoint_hash(body["checkpoint"])
+    last = sql(
+        relay.path,
+        "SELECT i, body FROM checkpoint_staging_pages WHERE target=? ORDER BY i DESC",
+        (h,),
+    )[0]
+
+    def drop(**kw):
+        sql(relay.path, "DELETE FROM checkpoint_staging_pages WHERE target=? AND i=?", (h, last[0]))
+
+    def add(**kw):
+        sql(
+            relay.path,
+            "INSERT INTO checkpoint_staging_pages SELECT workspace_id,source,target,?,? "
+            "FROM checkpoint_staging WHERE target=?",
+            (*last, h),
+        )
+
+    drop()
+    restarts = []
+    relay.cps.hooks.update(after_a=add, restart=lambda **kw: restarts.append(1) or drop())
+    before = published(relay.path)
+    recorder = publisher_lock(relay, monkeypatch)
+    r = relay.client.put(URL, content=P.cj(body), headers=HOST)
+    relay.d.lock = recorder.lock
+    assert (r.status_code, r.json()) == (503, {"error": "overloaded"}), r.text
+    assert r.headers["retry-after"] == "1"
+    assert len(restarts) == 2
+    assert recorder.folds <= checkpoints.PUBLISH_ROUNDS * checkpoints.LIVE_FOLD_LIMIT
+    assert published(relay.path) == before and failures(relay.path) == 0
+
+
+def test_a_database_error_in_phase_a_retries_phase_a(relay, monkeypatch):
+    """F1: an sqlite3.Error in phase A never falls back to folding under the lock."""
+    import sqlite3
+
+    body, heads = append(relay, 3_000, 1_500)
+    real, calls = checkpoints.Checkpoints.phase_a, []
+
+    def flaky(self, *args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise sqlite3.OperationalError("FAKE database is locked")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(checkpoints.Checkpoints, "phase_a", flaky)
+    recorder = publisher_lock(relay, monkeypatch)
+    result = put(relay.client, body)
+    relay.d.lock = recorder.lock
+    assert result["result"] == "accepted" and len(calls) == 2 and recorder.folds == 0
+    assert proof(relay, body) == heads
+
+
+def test_self_takeover_records_phase_a_work_every_round(relay):
+    """F2: a holder taking over its own workspace while its publication is in phase A is answered
+    `fenced` (uncharged), but the heads phase A folded are recorded every round."""
+    body, _ = append(relay, 2_000, 1_000, wrong=True)
+    gen = [1]
+
+    def after_a(**kw):
+        r = relay.client.post(
+            f"/v2/workspaces/{WS}/host/hold", json={"gen": None, "take_over": True}, headers=HOST
+        )
+        assert r.status_code == 200, r.text
+        gen[0] = r.json()["gen"]
+
+    relay.cps.hooks["after_a"] = after_a
+    for _ in range(4):
+        assert put(relay.client, body, {**HOST, "Orch-Holder": str(gen[0])}) == {
+            "status": 409,
+            "error": "fenced",
+        }
+    spent = sql(relay.path, "SELECT coalesce(sum(heads),0) FROM checkpoint_refused_heads")
+    assert spent[0][0] == 8_000 and failures(relay.path) == 0
+
+
+def test_phase_a_ends_its_read_snapshot_between_folds(relay, monkeypatch):
+    """F3: phase A re-opens its WAL read snapshot every A_SNAPSHOT_HEADS folded heads, so a full
+    checkpoint (TRUNCATE) can complete while it runs (no long reader starves the WAL)."""
+    import sqlite3
+
+    monkeypatch.setattr(checkpoints, "A_SNAPSHOT_HEADS", 10)
+    body, _ = append(relay, 40, 10)
+    results = []
+
+    def refresh(**kw):
+        sql(
+            relay.path,
+            "UPDATE holders SET lease_until_ms=lease_until_ms WHERE workspace_id=?",
+            (WS,),
+        )
+        con = sqlite3.connect(relay.path, timeout=0)
+        try:
+            results.append(con.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0])
+        finally:
+            con.close()
+
+    relay.cps.hooks["refresh"] = refresh
+    assert put(relay.client, body)["result"] == "accepted"
+    assert len(results) >= 3 and results == [0] * len(results), results  # busy == 0 every time
+
+
+def test_a_settle_error_does_not_replace_the_refusal(relay, monkeypatch):
+    """F6: accounting after the answer is best effort; a database error there is logged."""
+    import sqlite3
+
+    body, _ = append(relay, 40, 20)
+    relay.cps.hooks["before_c"] = lambda **kw: sql(
+        relay.path, "DELETE FROM checkpoint_staging WHERE workspace_id=?", (WS,)
+    )
+
+    def broken(*args, **kwargs):
+        raise sqlite3.OperationalError("FAKE disk I/O error")
+
+    monkeypatch.setattr(checkpoints.Checkpoints, "account", broken)
+    assert put(relay.client, body) == {"status": 409, "error": "staging_incomplete"}
