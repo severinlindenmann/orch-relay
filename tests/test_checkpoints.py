@@ -1260,7 +1260,7 @@ def test_unauthorized_staging_is_not_parsed_when_preauthorization_fails(tmp_path
     from orch_relay import proto as P
     from orch_relay.app import create_app
 
-    def unavailable(self, route, ws, headers):
+    def unavailable(self, route, ws, headers, size=0):
         raise sqlite3.OperationalError("FAKE database is locked")
 
     calls = []

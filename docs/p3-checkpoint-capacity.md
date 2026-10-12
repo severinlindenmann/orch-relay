@@ -94,10 +94,15 @@ are the G4 measurements above.
 |---|---:|---|---|
 | Staged bytes per owner person (all its workspaces) | 512 MiB | `ORCH_RELAY_ACCOUNT_STAGE_BYTES` | 4 GiB ceiling / 8: eight full 64 MiB workspace quotas; at least 8 accounts to fill the ceiling (was 1) |
 | Workspaces per account (first card) | 32 | `ORCH_RELAY_ACCOUNT_WORKSPACES` | reached in 3.2 h at 10 cards/hour (was unbounded); lifetime (no workspace deletion) |
+| Per-account override of the above (P3-D36) | none | `orch-relay account-cap set` (audited; 1..10,000) | replaces the global cap for that account only; disk: each extra workspace can add up to 1.17 GB of nodes |
 | Stored nodes per workspace (orphans included) | 4,000,000 | `ORCH_RELAY_WORKSPACE_NODES` | 4,000,000 x 293 B ≈ 1.17 GB ≈ 4.4 full sets; ~11 years at 1,000 events a day |
+| Of which reserved for owner-signed restores (P3-D36) | 5 % (200,000) | `ORCH_RELAY_WORKSPACE_NODES_RESERVE` | ordinary publications stop at 3,800,000; a recovery restore adds 1 node, one carrying a full set ~906,877 |
 | Receipts kept per workspace (newest) | 256 | constant `RECEIPTS_KEPT` | ~100 B each (a restore's up to ~0.8 MB with 4,096 refs) |
 | `checkpoint_gone` kept per workspace (newest) | 4,096 | constant `GONE_KEPT` | ~100 B each; one per purged checkpoint |
 | New self-certified evidence pairs per owner person | 50,000 | `ORCH_RELAY_ACCOUNT_EVIDENCE` | ~1 KB per entry (`cj`), ~500 per 512 KiB line: ~100 restores, ~75 MB of global and chain rows |
+
+The staging bucket (P3-D35, weighted by P3-D36: one token per started 64 KiB, burst 28,801, refill 600/min per
+workspace) bounds staging writes, not storage; the staging bytes are bounded by the caps above.
 
 Worst cases with the defaults: one account stores at most 32 x 1.17 GB ≈ 37.5 GB of nodes (by accepted
 publications, each refused one costing the refused-heads budget instead) and stages at most 512 MiB. A

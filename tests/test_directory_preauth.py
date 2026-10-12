@@ -12,6 +12,7 @@ import threading
 import time
 from contextlib import closing, contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from directory_support import (
@@ -355,7 +356,9 @@ def run(tmp_path, monkeypatch, case, precheck=True):
         windows = dict(d.windows)
         r = send(c, method, path, headers, body)
         challenged = CHALLENGE in d.challenges
-        return r, spy, windows, dict(d.windows), challenged
+        # Counted at the answer: the shutdown's Bridge.close() takes the lock (P3-D36 review F3).
+        counted = SimpleNamespace(locks=spy.locks, writes=spy.writes)
+        return r, counted, windows, dict(d.windows), challenged
 
 
 @pytest.mark.parametrize("case", REFUSED, ids=[c[0] for c in REFUSED])

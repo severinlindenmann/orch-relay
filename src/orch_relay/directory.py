@@ -31,6 +31,9 @@ MINUTE, HOUR, DAY = 60_000, 3_600_000, 86_400_000
 # P3-D34 (G3): workspaces one account (owner person) may own; a first card beyond it is 429
 # quota_exceeded. Bounds per-account staging fairness and storage (x the per-workspace node quota).
 ACCOUNT_WORKSPACES = 32
+# P3-D36 (review F2): an audited per-account override (migration 0016, `orch-relay account-cap`),
+# 1..MAX_ACCOUNT_WORKSPACES, replaces the global cap for that account only.
+MAX_ACCOUNT_WORKSPACES = 10_000
 MAX_RESPONSE = 4 * 1024 * 1024
 # P3-D35 (pre-public-deploy blocker 4): token buckets for authenticated requests, as (burst,
 # refill per minute); round 2 after the Opus review (F1-F3). Every request with a valid session on
@@ -53,14 +56,21 @@ MAX_RESPONSE = 4 * 1024 * 1024
 # (16 x 57 tokens + 1 = 913) and a 5,000-ticket workspace adds one small page per log (SYNC_LOGS),
 # so the page burst is 913 + 5,001 = 5,914 tokens with a 10/s refill (10,000 heads/s, ~740 kB/s,
 # a full re-walk every ~10 min). One manifest describes at most MANIFEST_PAGES = 27,776 pages
-# (PAGE_CAP over the smallest canonical descriptor, 150 bytes plus a comma), so the staging burst
-# is one full set plus its manifest, refilled at 50/s. The answer bucket matches the existing
+# (PAGE_CAP over the smallest canonical descriptor, 150 bytes plus a comma). P3-D36 (delta review
+# S1): a staging PUT costs one token per started 64 KiB of its body (STAGE_TOKEN_BYTES), at least
+# one, so a set of at most MANIFEST_PAGES + 1 PUTs and STAGE_BYTES costs at most one token per PUT
+# plus STAGE_BYTES // 64 KiB = 1,024: the burst (28,801) serves any honest set at once (a 5,001-page
+# set ~5,015 tokens, a full set in 4 MiB pages 1,025). The refill is 600/min (10/s, was 3,000):
+# 640 KiB/s of lock-taking staging per workspace, a full burst back in ~48 min, a 4 MiB set in
+# under 2 min. The answer bucket matches the existing
 # bridge-host-post window (20 chunks/s per workspace and target). Overrides:
 # ORCH_RELAY_THROTTLE_<NAME>="burst/per-minute". In memory, reset on restart (accepted).
 PAGE_BYTES = 4 * 1024 * 1024  # checkpoints.PAGE_CAP (pinned by tests)
 PROOF_PAGE_HEADS = (PAGE_BYTES - 128) // 74  # checkpoints.PROOF_PAGE_HEADS
 STAGE_HEADS = 64 * 1024 * 1024 // 74  # heads in a full 64 MiB staging set (checkpoints.STAGE_CAP)
 PAGE_TOKEN_HEADS = 1_000
+STAGE_BYTES = 64 * 1024 * 1024  # checkpoints.STAGE_CAP (pinned by tests)
+STAGE_TOKEN_BYTES = 64 * 1024
 SYNC_LOGS = 5_001  # logs of a 5,000-ticket workspace (bench_checkpoint_capacity's shape)
 FULL_SET_TOKENS = (STAGE_HEADS // PROOF_PAGE_HEADS) * math.ceil(
     PROOF_PAGE_HEADS / PAGE_TOKEN_HEADS
@@ -70,6 +80,14 @@ _DESCRIPTOR = {"i": 0, "kind": "appended", "log": "workspace", "after_seq": 0, "
 MANIFEST_PAGES = (PAGE_BYTES - len(P.cj({"pages": []}))) // (
     len(P.cj({**_DESCRIPTOR, "digest": "sha256:" + "0" * 64})) + 1
 )
+STAGING_BURST = MANIFEST_PAGES + 1 + STAGE_BYTES // STAGE_TOKEN_BYTES
+
+
+def staging_tokens(size):
+    """P3-D36: a staging PUT's weight, one token per started 64 KiB of its body, at least one."""
+    return max(1, -(-size // STAGE_TOKEN_BYTES))
+
+
 THROTTLES = {
     "session": (600, 600),
     "person": (1200, 1200),
@@ -77,7 +95,7 @@ THROTTLES = {
     "page-session": (PAGE_BURST, 600),
     "page-person": (2 * PAGE_BURST, 1200),
     "page-workspace": (2 * PAGE_BURST, 1200),
-    "staging": (MANIFEST_PAGES + 1, 3000),
+    "staging": (STAGING_BURST, 600),
     "host-answer": (1200, 1200),
 }
 # Buckets kept per key class (8 classes; ORCH_RELAY_THROTTLE_TABLE), evicting full buckets first.
@@ -463,6 +481,14 @@ class Directory:
     def assert_can_wait(self):
         """G3 must call before a long-poll wait, outside its database transaction."""
         assert not self.lock._is_owned(), "long poll cannot wait while holding directory.lock"
+
+    def workspace_cap(self, con, person):
+        """P3-D36: the account's override of the workspaces cap, else the global cap. One
+        indexed read on the caller's connection (the pre-check's snapshot or the transaction)."""
+        row = con.execute(
+            "SELECT cap FROM account_workspace_override WHERE person_id=?", (person,)
+        ).fetchone()
+        return row[0] if row else self.account_workspaces
 
     def rate(self, purpose, identity, duration, cap, now, charge=True):
         with self.budget:
@@ -1057,7 +1083,7 @@ class Directory:
             owned = con.execute(
                 "SELECT count(*) FROM workspaces WHERE owner_person_id=?", (owner,)
             ).fetchone()[0]
-            if owned >= self.account_workspaces:
+            if owned >= self.workspace_cap(con, owner):
                 fail("quota_exceeded")
         self.authorized(state)
         if not stored:
@@ -1404,6 +1430,8 @@ def install(app, data):
 def create_invite(path, ttl_ms):
     if type(ttl_ms) is not int or ttl_ms <= 0:
         raise ValueError("positive invite TTL required")
+    if os.path.exists(path):  # a fresh deployment's first invite still creates the database
+        require_owner(path)
     db.migrate(path)
     code = P.b64u(secrets.token_bytes(32))
     with closing(db.connect(path)) as con, con:
@@ -1412,3 +1440,130 @@ def create_invite(path, ttl_ms):
             (digest(code.encode()), time.time_ns() // 1_000_000 + ttl_ms),
         )
     return code
+
+
+ADMIN_TEXT = re.compile(r"[^\x00-\x1f\x7f]*")
+
+
+def admin_text(value, limit, name, required=True):
+    if value is None and not required:
+        return None
+    if not isinstance(value, str) or not value or len(value) > limit:
+        raise ValueError(f"{name} must be 1..{limit} characters")
+    if not ADMIN_TEXT.fullmatch(value):
+        raise ValueError(f"{name} must not contain control characters")
+    return value
+
+
+def require_owner(path):
+    """P3-D36 round 2 (review F2): an operator command runs as the user that owns the relay's
+    database and its directory, or SQLite's -wal/-shm files it may create (and leave behind if
+    killed) would belong to another user and lock the relay out ("readonly database")."""
+    me = os.geteuid()
+    for target in (path, os.path.dirname(os.path.abspath(path))):
+        owner = os.stat(target).st_uid
+        if owner != me:
+            raise ValueError(
+                f"{target} belongs to uid {owner}, not {me}: run as the relay's user "
+                "(e.g. sudo -u orch-relay orch-relay ...)"
+            )
+
+
+def admin_connection(path):
+    """The account-cap commands' connection: the database must exist (never created, review F2)
+    and belong to the effective user."""
+    if not os.path.isfile(path):
+        raise ValueError(f"no database at {path}: check ORCH_RELAY_DATA")
+    require_owner(path)
+    return closing(db.connect_existing(path))
+
+
+def require_override_schema(path):
+    """The operator commands never change the schema of a database a relay may be serving (no
+    migration from the CLI here): migration 0016 must be applied (`orch-relay migrate`, or a relay
+    start). A plain read, no write lock."""
+    with admin_connection(path) as con:
+        try:
+            done = con.execute(
+                "SELECT 1 FROM schema_migrations WHERE version LIKE '0016_%'"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            done = None
+    if not done:
+        raise ValueError("database not migrated to 0016: run `orch-relay migrate` first")
+
+
+def set_account_cap(path, person, cap, by, note=None, now_ms=None, timeout_ms=5000):
+    """P3-D36: set an account's workspaces cap override (operator command, never HTTP) and append
+    its audit row in ONE write transaction; returns (old cap or None, new cap).
+
+    Works with the relay running or stopped: BEGIN IMMEDIATE takes SQLite's write lock, waiting up
+    to `timeout_ms` for the relay's own write transactions (each held well under a second); past
+    that it raises sqlite3.OperationalError and writes nothing. The relay reads the row on the
+    next first card (no cache, no restart). The schema must be migrated already."""
+    P.unhex(person)
+    if type(cap) is not int or not 1 <= cap <= MAX_ACCOUNT_WORKSPACES:
+        raise ValueError(f"cap must be an integer in 1..{MAX_ACCOUNT_WORKSPACES}")
+    by = admin_text(by, 128, "--by")
+    note = admin_text(note, 1024, "--note", required=False)
+    require_override_schema(path)
+    now = time.time_ns() // 1_000_000 if now_ms is None else now_ms
+    with admin_connection(path) as con:
+        con.execute(f"PRAGMA busy_timeout={int(timeout_ms)}")
+        con.isolation_level = None
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            if not con.execute("SELECT 1 FROM accounts WHERE person_id=?", (person,)).fetchone():
+                raise ValueError("no account with that person_id")
+            row = con.execute(
+                "SELECT cap FROM account_workspace_override WHERE person_id=?", (person,)
+            ).fetchone()
+            old = row[0] if row else None
+            con.execute(
+                "INSERT INTO account_workspace_override VALUES (?,?,?,?,?) ON CONFLICT(person_id) "
+                "DO UPDATE SET cap=excluded.cap, set_by=excluded.set_by, "
+                "set_at_ms=excluded.set_at_ms, note=excluded.note",
+                (person, cap, by, now, note),
+            )
+            con.execute(
+                "INSERT INTO account_workspace_override_audit"
+                "(person_id, old_cap, new_cap, set_by, set_at_ms, note) VALUES (?,?,?,?,?,?)",
+                (person, old, cap, by, now, note),
+            )
+            con.execute("COMMIT")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+    return old, cap
+
+
+def show_account_cap(path, person, global_cap):
+    """The account's owned workspaces, effective cap and override row (read-only)."""
+    P.unhex(person)
+    require_override_schema(path)
+    with admin_connection(path) as con:
+        owned = con.execute(
+            "SELECT count(*) FROM workspaces WHERE owner_person_id=?", (person,)
+        ).fetchone()[0]
+        row = con.execute(
+            "SELECT cap, set_by, set_at_ms, note FROM account_workspace_override WHERE person_id=?",
+            (person,),
+        ).fetchone()
+    override = dict(zip(("cap", "set_by", "set_at_ms", "note"), row)) if row else None
+    cap = row[0] if row else global_cap
+    return {"person_id": person, "owned": owned, "cap": cap, "override": override}
+
+
+def account_cap_audit(path, person=None):
+    """The audit rows, oldest first (one account's, or all)."""
+    if person is not None:
+        P.unhex(person)
+    require_override_schema(path)
+    names = ("seq", "person_id", "old_cap", "new_cap", "set_by", "set_at_ms", "note")
+    with admin_connection(path) as con:
+        rows = con.execute(
+            f"SELECT {','.join(names)} FROM account_workspace_override_audit "
+            "WHERE ?1 IS NULL OR person_id=?1 ORDER BY seq",
+            (person,),
+        ).fetchall()
+    return [dict(zip(names, row)) for row in rows]

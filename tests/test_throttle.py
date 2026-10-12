@@ -127,9 +127,16 @@ def test_defaults_and_their_arithmetic():
         "page-session": (5_914, 600),
         "page-person": (11_828, 1200),
         "page-workspace": (11_828, 1200),
-        "staging": (27_777, 3000),
+        "staging": (28_801, 600),
         "host-answer": (1200, 1200),
     }
+    # P3-D36: staging is weighted by body size, one token per started 64 KiB (at least one). A
+    # set holds at most MANIFEST_PAGES pages plus its manifest and STAGE_CAP bytes in all, so
+    # its tokens are at most one per piece plus floor(STAGE_CAP / 64 KiB) = 1,024 (each piece's
+    # extra tokens are floor((size - 1) / 64 KiB), and their sum is at most the total over it).
+    assert D.STAGE_TOKEN_BYTES == 64 * 1024 and D.STAGE_BYTES == C.STAGE_CAP
+    assert D.STAGING_BURST == D.MANIFEST_PAGES + 1 + C.STAGE_CAP // D.STAGE_TOKEN_BYTES
+    assert [D.staging_tokens(n) for n in (0, 1, 65_536, 65_537, C.PAGE_CAP)] == [1, 1, 1, 2, 64]
     assert D.THROTTLE_TABLE == 16_384  # per key class
 
 
@@ -655,14 +662,118 @@ def test_staging_buckets_are_per_workspace(client):
     assert client.put(f"/v2/workspaces/{OTHER}/{pages}", json={}, headers=other).status_code != 429
 
 
-def test_default_staging_burst_covers_a_full_manifest_at_once(client):
+def stage_all(d, sizes, now=NOW, ws=WS):
+    """Charge one staging PUT per body size, as authorize() does; the number served."""
+    session = {"kind": "workspace", "subject_id": ws, "token_hash": "t"}
+    served = 0
+    for size in sizes:
+        d.throttle(session, now, "staging", ws, cost=D.staging_tokens(size))
+        served += 1
+    return served
+
+
+def small_set(pages):
+    """Body sizes of an honest set of `pages` one-head pages plus its manifest (real encodings)."""
+    from orch_relay import proto as P
+
+    head = "sha256:" + "0" * 64
+    body = {"kind": "appended", "log": "0" * 26, "after_seq": 0, "from_acc": head}
+    body = {**body, "heads": [head], "digest": head}
+    one = {"i": 0, "kind": "appended", "log": "0" * 26, "after_seq": 0, "count": 1, "digest": head}
+    manifest = P.cj({"pages": [{**one, "i": i} for i in range(pages)]})
+    return [len(P.cj(body))] * pages + [len(manifest)]
+
+
+def test_default_staging_burst_covers_honest_sets_at_once(client):
+    """P3-D36: with an injected clock that never moves, an honest 5,001-page set, a full 64 MiB
+    set in 4 MiB pages and the largest set by page count each upload with no 429."""
+    from orch_relay import checkpoints as C
+
+    d = client.app.state.directory
+    sizes = small_set(5_001)
+    assert sum(D.staging_tokens(n) for n in sizes) == 5_001 + 14  # a ~0.9 MB manifest
+    assert stage_all(d, sizes) == 5_002
+    d.buckets.clear()
+    full = [C.PAGE_CAP] * 15 + [C.PAGE_CAP - 4096, 4096]  # 64 MiB with its manifest
+    assert sum(full) == C.STAGE_CAP and sum(D.staging_tokens(n) for n in full) == 1_025
+    assert stage_all(d, full) == 17
+    d.buckets.clear()
+    largest = [300] * D.MANIFEST_PAGES + [C.PAGE_CAP]  # 27,776 pages and a full manifest
+    assert stage_all(d, largest) == D.MANIFEST_PAGES + 1
+    assert stage_all(d, [10] * 961) == 961  # 28,801 - 27,776 - 64 left, exactly
+    with pytest.raises(Refusal):
+        stage_all(d, [10])
+    stage_all(d, [1], ws=OTHER)  # another workspace is unaffected
+
+
+def test_staging_flood_is_cut_off_and_refills_at_ten_a_second(client):
+    from orch_relay import checkpoints as C
+
     d = client.app.state.directory
     session = {"kind": "workspace", "subject_id": WS, "token_hash": "t"}
-    for _ in range(D.MANIFEST_PAGES + 1):  # every page of the largest set, then its manifest
-        d.throttle(session, NOW, "staging", WS)
+    served = 0
+    with pytest.raises(Refusal) as refused:
+        while True:
+            stage_all(d, [10])
+            served += 1
+    assert served == D.STAGING_BURST == 28_801
+    assert refused.value.retry == 1  # 600 per minute: one token per 100 ms
+    assert stage_all(d, [10] * 60, NOW + 6_000) == 60  # exactly 60 back after 6 s
     with pytest.raises(Refusal):
-        d.throttle(session, NOW, "staging", WS)
-    d.throttle(session, NOW, "staging", OTHER)  # another workspace is unaffected
+        stage_all(d, [10], NOW + 6_000)
+    # A flood of identical 4 MiB re-PUTs is cut off at 450 (28,801 // 64), then one per 6.4 s.
+    d.buckets.clear()
+    served = 0
+    with pytest.raises(Refusal) as refused:
+        while True:
+            stage_all(d, [C.PAGE_CAP])
+            served += 1
+    assert served == 450 and refused.value.retry == 7  # 64 - 1 tokens missing at 10/s
+    assert stage_all(d, [C.PAGE_CAP], NOW + 6_300) == 1
+    # A full burst is back after 28,801 / 600 min (about 48 min), never beyond the burst.
+    later = NOW + 6_300 + 28_801 * 100
+    assert d.buckets.table[("staging", WS)][0] < D.STAGING_BURST * Buckets.UNIT
+    d.throttle(session, later, "staging", WS, cost=D.STAGING_BURST)
+    with pytest.raises(Refusal):
+        d.throttle(session, later + 10_000_000, "staging", WS, cost=D.STAGING_BURST + 1)
+
+
+def test_staging_puts_are_weighted_by_body_size(client):
+    """The HTTP route charges one token per started 64 KiB of the body it read, at least one."""
+    d = client.app.state.directory
+    limit(client, staging=(70, 60))
+    host = {**HOST, "Orch-Holder": "1", "Content-Type": "application/json"}
+    base = f"/v2/workspaces/{WS}/staging/null/sha256:{'1' * 64}"
+
+    def level():
+        return d.buckets.table[("staging", WS)][0] // Buckets.UNIT
+
+    client.put(f"{base}/pages/0", content=b"{}", headers=host)
+    assert level() == 69
+    client.put(f"{base}/pages/1", content=b" " * 65_536 + b"{}", headers=host)  # 65,538 bytes
+    assert level() == 67
+    client.put(f"{base}/manifest", content=b" " * (4 * 65_536), headers=host)
+    assert level() == 63
+    r = client.put(f"{base}/pages/2", content=b" " * (64 * 65_536), headers=host)  # 64 tokens
+    assert (r.status_code, r.json()["error"]) == (429, "rate_limited")
+    assert level() == 63  # a refusal charges nothing of the staging bucket
+
+
+def test_staging_weight_is_the_bytes_read_not_the_declared_length(client):
+    """P3-D36 round 2 (review F4): a chunked body declares no length; the charge is the bytes the
+    transport actually read (3 x 64 KiB + 1 = 4 tokens)."""
+    d = client.app.state.directory
+    limit(client, staging=(70, 60))
+    host = {**HOST, "Orch-Holder": "1", "Content-Type": "application/json"}
+    url = f"/v2/workspaces/{WS}/staging/null/sha256:{'1' * 64}/pages/0"
+    body = b" " * (3 * 65_536) + b"{"
+
+    def chunks():
+        for k in range(0, len(body), 10_000):
+            yield body[k : k + 10_000]
+
+    client.put(url, content=chunks(), headers=host)
+    assert d.buckets.table[("staging", WS)][0] // Buckets.UNIT == 70 - 4
 
 
 def test_checkpoint_writes_are_charged_after_authorization(client):

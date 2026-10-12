@@ -21,6 +21,17 @@ def connect(path: Path, **options) -> sqlite3.Connection:
     return con
 
 
+def connect_existing(path: Path) -> sqlite3.Connection:
+    """An operator command's connection (P3-D36 round 2, review F2): the database must exist
+    (`mode=rw`: never created, no directory made), with the relay's pragmas but no journal-mode
+    change (the relay set WAL when it created it)."""
+    con = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=rw", uri=True, timeout=5)
+    con.execute("PRAGMA busy_timeout=5000")
+    con.execute("PRAGMA synchronous=FULL")
+    con.execute("PRAGMA foreign_keys=ON")
+    return con
+
+
 class Connections:
     """The relay process's connections, owned by no thread (P3-D32 round 2, review F1).
 

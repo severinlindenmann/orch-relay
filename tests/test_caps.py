@@ -255,6 +255,7 @@ def test_node_quota_refuses_in_phase_a_before_phase_b_inserts(relay):
     body, _ = append(relay, 30, 10)
     before = published(relay.path)
     relay.cps.caps.nodes = stored + 29
+    relay.cps.caps.reserve = 0
     memos = []
     relay.cps.hooks["after_a"] = lambda **kw: memos.append(kw["memo"].accepted)
     r = relay.client.put(URL, content=P.cj(body), headers=HOST)
@@ -268,6 +269,7 @@ def test_node_quota_refuses_in_phase_a_before_phase_b_inserts(relay):
     assert sql(relay.path, "SELECT heads FROM checkpoint_refused_heads") == [(30,)]
     # Exactly at the quota is honest use: accepted.
     relay.cps.caps.nodes = stored + 30
+    relay.cps.caps.reserve = 0
     assert put(relay.client, body)["result"] == "accepted"
     assert usage(relay.path) == (stored + 30, 0)
 
@@ -278,6 +280,7 @@ def test_node_quota_is_rechecked_in_phase_c(relay):
     stored = usage(relay.path)[0]
     body, _ = append(relay, 30, 10)
     relay.cps.caps.nodes = stored + 30
+    relay.cps.caps.reserve = 0
 
     def grow(**kw):
         sql(
@@ -304,11 +307,13 @@ def test_orphans_count_toward_the_node_quota(relay):
     nodes, orphaned = usage(relay.path)
     assert orphaned == 40
     relay.cps.caps.nodes = nodes + 5
+    relay.cps.caps.reserve = 0
     other, _ = append(relay, 10, 10, "other")
     assert put(relay.client, other) == {"status": 429, "error": "quota_exceeded"}
     # A publication whose nodes are all stored adds nothing and is never refused by the quota,
     # even with the workspace at or over it.
     relay.cps.caps.nodes = nodes - 1
+    relay.cps.caps.reserve = 0
     sql(relay.path, "DELETE FROM checkpoint_staging WHERE workspace_id=?", (WS,))
     again, _ = append(relay, 40, 20)
     assert put(relay.client, again)["result"] == "accepted"
@@ -321,7 +326,7 @@ def test_node_quota_counts_live_inserts_once(relay):
     stored = usage(relay.path)[0]
     body, _ = append(relay, 30, 10)
     caps = checkpoints.Caps()
-    caps.nodes = stored + 30
+    caps.nodes, caps.reserve = stored + 30, 0
     with closing(db.connect(relay.path)) as con, con:
         result = checkpoints.Relay(relay.d, con, WS, NOW, caps=caps).publish(P.cj(body), 1)
     assert result["result"] == "accepted"
@@ -331,6 +336,7 @@ def test_node_quota_counts_live_inserts_once(relay):
 def test_node_quota_refuses_only_after_authorization(relay):
     body, _ = append(relay, 30, 10)
     relay.cps.caps.nodes = 0
+    relay.cps.caps.reserve = 0
     assert put(relay.client, body, {**HOST, "Orch-Holder": "0"}) == {
         "status": 409,
         "error": "fenced",
@@ -350,6 +356,7 @@ def test_node_quota_holds_under_concurrent_publications(relay):
     one, _ = append(relay, 30, 10, "one")
     two, _ = append(relay, 30, 10, "two", at="2026-09-21T13:46:41Z")
     relay.cps.caps.nodes = stored + 30
+    relay.cps.caps.reserve = 0
     barrier, results = threading.Barrier(2), []
 
     def send(body):
@@ -622,3 +629,157 @@ def test_associated_evidence_is_never_counted(tmp_path):
         assert put(client, body)["result"] == "accepted"
         owner = c["state"]["delegation"]["o"]["owner_person_id"]
         assert evidence_used(path, owner) == 0
+
+
+# --- P3-D36: the node quota keeps a reserve for owner-signed restores (review F1) ----------------
+
+RESTORE = "workspace_restore_and_exact_retry"
+LOWER = {k.lower(): v for k, v in HOST.items()}
+
+
+@pytest.fixture
+def rs(tmp_path):
+    """An owner-signed workspace restore, staged and not yet sent, with the new nodes it adds
+    (measured by a phase A that writes nothing) and the workspace's stored nodes."""
+    from types import SimpleNamespace
+
+    c = case(RESTORE)
+    with TestClient(create_app(tmp_path)) as client:
+        path = tmp_path / db.DB_NAME
+        replay(client, path, c, upto=2)
+        body = c["steps"][2]["input"]["body"]
+        cps = client.app.state.checkpoints
+        memo = cps.phase_a(WS, LOWER, P.cj(body), None)
+        assert memo.accepted and memo.rows
+        yield SimpleNamespace(
+            client=client,
+            path=path,
+            cps=cps,
+            body=body,
+            pending=len(memo.rows),
+            stored=usage(path)[0],
+            expect={k: v for k, v in c["steps"][2]["expect"].items() if k != "status"},
+        )
+
+
+def test_ordinary_publication_is_refused_at_quota_minus_reserve(relay):
+    stored = usage(relay.path)[0]
+    body, _ = append(relay, 30, 10)
+    before = published(relay.path)
+    relay.cps.caps.nodes, relay.cps.caps.reserve = stored + 40, 11  # ordinary limit stored + 29
+    memos = []
+    relay.cps.hooks["after_a"] = lambda **kw: memos.append(kw["memo"].accepted)
+    r = relay.client.put(URL, content=P.cj(body), headers=HOST)
+    assert (r.status_code, r.json()) == (429, {"error": "quota_exceeded"}), r.text
+    assert memos == [False]  # refused in phase A: no phase B
+    assert usage(relay.path) == (stored, 0) and published(relay.path) == before
+    # The same treatment as the quota itself: uncharged, fold work recorded as refused heads.
+    assert failures(relay.path) == 0
+    assert sql(relay.path, "SELECT heads FROM checkpoint_refused_heads") == [(30,)]
+    relay.cps.caps.reserve = 10  # exactly at quota - reserve is honest use
+    assert put(relay.client, body)["result"] == "accepted"
+    assert usage(relay.path) == (stored + 30, 0)
+
+
+def test_ordinary_publication_reserve_is_rechecked_in_phase_c(relay):
+    stored = usage(relay.path)[0]
+    body, _ = append(relay, 30, 10)
+    relay.cps.caps.nodes, relay.cps.caps.reserve = stored + 40, 10
+
+    def grow(**kw):
+        kw["memo"].accepted = False  # phase B does not run: phase C judges the nodes itself
+        sql(
+            relay.path, "UPDATE checkpoint_node_usage SET nodes=nodes+1 WHERE workspace_id=?", (WS,)
+        )
+
+    relay.cps.hooks["after_a"] = grow
+    r = relay.client.put(URL, content=P.cj(body), headers=HOST)
+    assert (r.status_code, r.json()) == (429, {"error": "quota_exceeded"}), r.text
+    assert node_count(relay.path) == stored and failures(relay.path) == 0
+
+
+def test_hostile_fill_stops_at_the_reserve(relay):
+    """A WSK holder's publications, accepted or refused with orphans, never store more than
+    quota - reserve: the reserve stays free for the owner."""
+    stored = usage(relay.path)[0]
+    relay.cps.caps.nodes, relay.cps.caps.reserve = stored + 60, 20
+    body, _ = append(relay, 40, 20)
+    relay.cps.hooks["before_c"] = lambda **kw: sql(
+        relay.path, "DELETE FROM checkpoint_staging WHERE workspace_id=?", (WS,)
+    )
+    assert put(relay.client, body) == {"status": 409, "error": "staging_incomplete"}
+    del relay.cps.hooks["before_c"]
+    assert usage(relay.path) == (stored + 40, 40)  # orphans, at quota - reserve
+    for tag, count in (("x", 1), ("y", 20)):
+        sql(relay.path, "DELETE FROM checkpoint_staging WHERE workspace_id=?", (WS,))
+        more, _ = append(relay, count, 10, tag)
+        assert put(relay.client, more) == {"status": 429, "error": "quota_exceeded"}
+    assert usage(relay.path)[0] == stored + 40 == relay.cps.caps.nodes - relay.cps.caps.reserve
+
+
+def test_restore_is_accepted_into_the_reserve(rs):
+    rs.cps.caps.nodes, rs.cps.caps.reserve = rs.stored + rs.pending, rs.pending
+    # The ordinary limit is the stored count: any ordinary publication adding a node is refused.
+    assert put(rs.client, rs.body) == {"status": 200, **rs.expect}
+    assert usage(rs.path)[0] == rs.stored + rs.pending
+
+
+def test_restore_after_a_hostile_fill_uses_the_reserve(rs):
+    """The workspace filled to exactly quota - reserve (here by orphans of a hostile holder):
+    the owner's restore still fits."""
+    rs.cps.caps.nodes, rs.cps.caps.reserve = rs.stored + 1000, rs.pending + 10
+    filled = rs.cps.caps.nodes - rs.cps.caps.reserve
+    sql(
+        rs.path,
+        "INSERT INTO checkpoint_node_usage VALUES (?,?,?) ON CONFLICT(workspace_id) DO UPDATE "
+        "SET nodes=excluded.nodes, orphaned=excluded.orphaned",
+        (WS, filled, filled - rs.stored),
+    )
+    assert put(rs.client, rs.body) == {"status": 200, **rs.expect}
+    assert usage(rs.path)[0] == filled + rs.pending <= rs.cps.caps.nodes
+
+
+def test_restore_is_refused_at_the_full_quota(rs):
+    rs.cps.caps.nodes, rs.cps.caps.reserve = rs.stored + rs.pending - 1, rs.pending
+    before = published(rs.path)
+    r = rs.client.put(URL, content=P.cj(rs.body), headers=HOST)
+    assert (r.status_code, r.json()) == (429, {"error": "quota_exceeded"}), r.text
+    assert published(rs.path) == before and failures(rs.path) == 0
+    assert usage(rs.path)[0] == rs.stored
+    assert sql(rs.path, "SELECT count(*) FROM checkpoint_refused_heads")[0][0] == 1
+    rs.cps.caps.nodes += 1
+    assert put(rs.client, rs.body) == {"status": 200, **rs.expect}
+
+
+def test_restore_reserve_holds_in_phase_c(rs):
+    """Phase C judges a restore against the full quota too: here phase B does not run in the
+    first round, so phase C counts the restore's nodes itself (then restarts, review F1)."""
+    rs.cps.caps.nodes, rs.cps.caps.reserve = rs.stored + rs.pending, rs.pending
+    rounds = []
+
+    def once(**kw):
+        if not rounds:
+            kw["memo"].accepted = False
+        rounds.append(kw["memo"].accepted)
+
+    rs.cps.hooks["after_a"] = once
+    assert put(rs.client, rs.body) == {"status": 200, **rs.expect}
+    assert rounds == [False, True]  # phase C of round 1 passed the quota, then restarted
+
+
+def test_restore_reserve_comes_from_the_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("ORCH_RELAY_WORKSPACE_NODES", "1000")
+    monkeypatch.setenv("ORCH_RELAY_WORKSPACE_NODES_RESERVE", "7")
+    with TestClient(create_app(tmp_path)) as client:
+        caps = client.app.state.checkpoints.caps
+        assert (caps.nodes, caps.reserve) == (1000, 7)
+    defaults = checkpoints.Caps()
+    assert defaults.reserve == checkpoints.WORKSPACE_NODES // 20 == 200_000
+    assert defaults.reserve * 20 == defaults.nodes  # 5 %
+    for nodes, reserve in (("1000", "-1"), ("1000", "1001"), ("1000", "x")):
+        with pytest.raises(ValueError):
+            checkpoints.Caps(
+                {"ORCH_RELAY_WORKSPACE_NODES": nodes, "ORCH_RELAY_WORKSPACE_NODES_RESERVE": reserve}
+            )
+    # Unset, the reserve is 5 % of the configured quota (a lowered quota keeps its proportion).
+    assert checkpoints.Caps({"ORCH_RELAY_WORKSPACE_NODES": "270000"}).reserve == 13_500

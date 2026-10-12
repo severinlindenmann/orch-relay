@@ -33,7 +33,7 @@ from starlette.concurrency import run_in_threadpool
 from . import proto as P
 from . import unpublished as U
 from .bridge import refuse
-from .directory import PAGE_TOKEN_HEADS, Refusal, integer
+from .directory import PAGE_TOKEN_HEADS, Refusal, integer, staging_tokens
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +54,14 @@ ACCOUNT_STAGE_CAP = GLOBAL_STAGE_CAP // 8
 # stored log_nodes per workspace, orphans included (ORCH_RELAY_WORKSPACE_NODES; ~1.2 GB at 293 B
 # per node, about 4.4 full 64 MiB staging sets),
 WORKSPACE_NODES = 4_000_000
+# P3-D36 (review F1): the last nodes of that quota are a reserve that only an owner-signed restore
+# may use (ORCH_RELAY_WORKSPACE_NODES_RESERVE; unset: 5 % of the quota, 200,000 by default), so a
+# WSK holder that fills the workspace cannot starve the owner's restore. A restore adds its line
+# head plus every head of its staged set not stored yet (retained pages of an unstored branch,
+# appended pages of other logs): 1 node for a roll-back to a stored prefix with no other log
+# growing, at most STAGE_CAP // 74 + 1 = 906,877. 200,000 fits 200,000 minimal restores, or
+# several carrying tens of thousands of new heads each.
+WORKSPACE_NODES_RESERVE_SHARE = 20  # reserve = quota // 20 when unset
 # and distinct self-certified revocation pairs an owner person's restores may add to the global
 # table (ORCH_RELAY_ACCOUNT_EVIDENCE). All three answer 429 quota_exceeded.
 ACCOUNT_EVIDENCE = 50_000
@@ -172,6 +180,13 @@ class Caps:
         env = env if env is not None else {}
         self.account_stage = int(env.get("ORCH_RELAY_ACCOUNT_STAGE_BYTES", ACCOUNT_STAGE_CAP))
         self.nodes = int(env.get("ORCH_RELAY_WORKSPACE_NODES", WORKSPACE_NODES))
+        self.reserve = int(
+            env.get(
+                "ORCH_RELAY_WORKSPACE_NODES_RESERVE", self.nodes // WORKSPACE_NODES_RESERVE_SHARE
+            )
+        )
+        if not 0 <= self.reserve <= self.nodes:
+            raise ValueError("ORCH_RELAY_WORKSPACE_NODES_RESERVE must be in 0..the node quota")
         self.evidence = int(env.get("ORCH_RELAY_ACCOUNT_EVIDENCE", ACCOUNT_EVIDENCE))
 
 
@@ -1164,7 +1179,7 @@ class Relay:
                 root = self.log(log).at_seq(entry, 1)
                 need(root["head"] == o["genesis"], "genesis_mismatch", 409)
         need(used == {d["i"] for d in stage["manifest"]["pages"]}, "chain_diverged", 409)
-        self.node_quota()
+        self.node_quota(restored is not None)
         if self.dry:  # phase A ends at the commit point: phase B inserts the nodes, C commits
             self.memo.accepted = True
             return result
@@ -1198,11 +1213,13 @@ class Relay:
         )
         return result
 
-    def node_quota(self):
+    def node_quota(self, restore=False):
         """P3-D34 (G4): at the commit point of phase A (before phase B inserts anything) and of
         phase C, the workspace's stored nodes (orphans included: `nodes`, never `orphaned`) plus
         the new nodes this publication adds must stay within the quota. A publication that adds
-        no node is never refused by it."""
+        no node is never refused by it. P3-D36: only an owner-signed restore (`restore`, verified
+        by restore() before this point) may use the reserve; any other publication must stay
+        within quota - reserve. The same 429, uncharged."""
         added = sum(n.added for n in self.nodes.values())
         pending = added + self.reused
         if pending:
@@ -1211,7 +1228,8 @@ class Relay:
             ).fetchone()
             # Live inserts (phase C, or no memo) are counted in this transaction already.
             stored = (row[0] if row else 0) - (0 if self.dry else added)
-            need(stored + pending <= self.caps.nodes, "quota_exceeded", 429)
+            limit = self.caps.nodes - (0 if restore else self.caps.reserve)
+            need(stored + pending <= limit, "quota_exceeded", 429)
 
     def fresh_evidence(self, listed):
         """The self-certified pairs (device without association) this restore would add to the
@@ -1773,12 +1791,13 @@ class Checkpoints:
         if name in self.hooks:
             self.hooks[name](**info)
 
-    def authorize(self, con, route, ws, headers, now, charge=False):
+    def authorize(self, con, route, ws, headers, now, charge=False, size=0):
         """The route's principal: authenticated, authorized for this workspace, fenced.
 
         With `charge` (once per request, at its first authorization) the request is charged after
         authentication (P3-D35): a refusal one token of the session's read buckets; an authorized
-        staging PUT the workspace's staging bucket; a proof or transition page one token of the
+        staging PUT the workspace's staging bucket, weighted by its body's `size` (P3-D36: one
+        token per started 64 KiB); a proof or transition page one token of the
         page buckets up front (read() charges the rest of its weight); anything else the read
         buckets."""
         session = self.d.authenticate(con, headers, now)
@@ -1790,7 +1809,7 @@ class Checkpoints:
             raise
         if charge:
             if route in ("staging_page", "staging_manifest"):
-                self.d.throttle(session, now, "staging", ws)
+                self.d.throttle(session, now, "staging", ws, cost=staging_tokens(size))
             elif route in ("proof", "transitions"):
                 self.d.throttle(session, now, "page")
             else:
@@ -1809,11 +1828,12 @@ class Checkpoints:
         d.fence(con, headers, ws, now)
         return session
 
-    def preauthorize(self, route, ws, headers):
-        """Read-only, before any lock, write transaction or failure window (G3 review 3)."""
+    def preauthorize(self, route, ws, headers, size=0):
+        """Read-only, before any lock, write transaction or failure window (G3 review 3); `size`
+        is the request body's length (the staging weight)."""
         with self.bridge.reading() as con:
             con.execute("BEGIN")
-            self.authorize(con, route, ws, headers, self.d.clock(), charge=True)
+            self.authorize(con, route, ws, headers, self.d.clock(), charge=True, size=size)
             row = con.execute(
                 "SELECT wsk_pub FROM workspaces WHERE workspace_id=?", (ws,)
             ).fetchone()
@@ -2135,7 +2155,10 @@ class Checkpoints:
     async def maintenance(self, interval=60):
         while True:
             await asyncio.sleep(interval)
-            await run_in_threadpool(self.sweep)
+            try:
+                await run_in_threadpool(self.sweep)
+            except sqlite3.Error:  # busy past the timeout: try again next round (review F3)
+                log.warning("checkpoint sweep failed", exc_info=True)
 
     async def transport(self, request, route):
         """Size cap, strict query and content type: refused before any parsing or lock."""
@@ -2202,7 +2225,9 @@ class Checkpoints:
                 result = await run_in_threadpool(self.read, route, params, query, headers)
                 return JSONResponse(result)
             try:
-                wsk = await run_in_threadpool(self.preauthorize, route, params["ws"], headers)
+                wsk = await run_in_threadpool(
+                    self.preauthorize, route, params["ws"], headers, len(raw)
+                )
                 prepared = await run_in_threadpool(self.prepare, route, params["ws"], raw, wsk)
             except sqlite3.Error:
                 # Not pre-authorized: nothing is parsed or validated before the transaction's own
