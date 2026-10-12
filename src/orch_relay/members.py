@@ -10,6 +10,7 @@ from .directory import (
     fail,
     fields,
     integer,
+    pair_revoked,
     usable_account,
 )
 
@@ -47,11 +48,13 @@ def verify(obj, pub, kind):
 
 def certificate(con, member, owner, persons, now):
     did = member["device_id"]
-    if con.execute("SELECT 1 FROM revocations WHERE device_id=?", (did,)).fetchone():
-        fail("revoked")
     row = con.execute("SELECT * FROM devices WHERE device_id=?", (did,)).fetchone()
     if row is None:
         fail("cert_invalid")
+    # P3-D30: the cutoff is per pair, under the registry person (never the list's member person,
+    # which is checked against it below): another person's pair for this id never refuses it.
+    if pair_revoked(con, did, row["person_id"]):
+        fail("revoked")
     cert = P.parse_json(row["cert"])
     if not isinstance(cert, dict) or not isinstance(cert.get("o"), dict):
         fail("cert_invalid")

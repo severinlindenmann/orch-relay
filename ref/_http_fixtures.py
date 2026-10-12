@@ -167,6 +167,10 @@ def build(vectors=None):
     cert, card = v["certs"]["signed"]["phone"], v["card"]["card"]
     revocation = v["revocations"][0]["signed"]
     publication = objs["publication"]
+    # P3-D30: GET /v2/devices/{device}/revocation lists every held pair, the registered person's first; public
+    # signed records and a provenance label only (no certificate or account key: security review).
+    registry_pair = {"person_id": person, "reason": revocation["o"]["reason"], "revocation": revocation,
+                     "provenance": "registry"}
     def chunk(raw):
         h = R.Header.decode(raw)
         return {"id": h.rid.hex(), "idx": h.seq, "last": bool(h.flags & R.F_LAST), "stream": bool(h.flags & R.F_STREAM), "envelope": R.b64u(raw)}
@@ -189,7 +193,7 @@ def build(vectors=None):
         "session_logout": ({}, {}),
         "accounts": ({"invite": "FAKE-single-use-invite", "pk_pub": R.b64u(bytes.fromhex(v["keys"]["person_alice.sig"]["pub"])), "device_cert": cert, "challenge": objs["login"]["challenge"], "sig": objs["login"]["sig"]}, {"person_id": person}),
         "device_put": ({"cert": cert}, {"device_id": device}), "device_get": (None, {"cert": cert}),
-        "revocations_post": ({"record": revocation}, {"device_id": device}), "revocation_get": (None, {"record": revocation}),
+        "revocations_post": ({"record": revocation}, {"device_id": device}), "revocation_get": (None, {"pairs": [registry_pair], "next": None}),
         "revocation_feed": (None, {"revocations": [{"cursor": 1, "record": revocation}], "next": None}),
         "card_put": ({"card": card}, {"card_seq": 1}), "card_get": (None, {"card": card}),
         "membership": (publication, {"list_seq": 1, "epoch": 1}),
@@ -333,6 +337,38 @@ def build(vectors=None):
             extra("filtered_workspace_feed", response_json={"revocations": [{"cursor": 1, "record": v["revocations"][0]["signed"]}], "next": None},
                   given="W ever_devices contains only the phone; records for the same person's other devices are excluded before pagination")
             cases[-1]["request"]["headers"]["Authorization"] = "Bearer FAKE-workspace-token"
+        if name == "revocation_get":
+            # P3-D30: bob's out-of-band pair ('feed') and the intruder's restore-carried pair ('chain') for the same
+            # id. Both person ids sort before alice's, yet the registered person's pair comes first, then chain before
+            # feed, then by revocation cursor (round 2, review S1: never by person_id). Pages hold at most 32 pairs;
+            # `next` is opaque and passed back as `after`.
+            S2 = R.SUITES[2]
+            def key(name_):
+                return S2.sig_key(bytes.fromhex(v["keys"][name_ + ".sig"]["seed"]))
+            def other(name_, reason):
+                pk = bytes.fromhex(v["keys"][name_ + ".sig"]["pub"])
+                pid = R.person_id(S2, pk).hex()
+                rec = R.sign_object(S2, key(name_), {**revocation["o"], "person_id": pid, "reason": reason})
+                return pid, pk, rec
+            bob_id, _, bob_rec = other("person_bob", "compromised")
+            q_id, _, q_rec = other("intruder", "lost")
+            assert person > max(bob_id, q_id) and bob_id < q_id
+            # Held in this cursor order: alice (1), the intruder's chain pair (2), bob's feed pair (3).
+            pairs = [registry_pair,
+                     {"person_id": q_id, "reason": "lost", "revocation": q_rec, "provenance": "chain"},
+                     {"person_id": bob_id, "reason": "compromised", "revocation": bob_rec, "provenance": "feed"}]
+            condition = ("The relay holds exactly given.held_pairs for the device, with revocation cursors 1, 2, 3 in "
+                         "that order: the registry pair, a 'chain' pair (an accepted restore's evidence too) and a "
+                         "'feed' pair (revocation table only).")
+            def token(rank, cursor):
+                return R.b64u(R.cj({"device": device, "rank": rank, "cursor": cursor}))
+            for label, query_, page, nxt in [
+                    ("every_pair_registered_person_first", {}, pairs, None),
+                    ("every_pair_first_page", {"limit": "1"}, pairs[:1], token(0, 1)),
+                    ("every_pair_next_page", {"after": token(0, 1), "limit": "1"}, pairs[1:2], token(1, 2)),
+                    ("every_pair_last_page", {"after": token(1, 2)}, pairs[2:], None)]:
+                extra(label, {"query": query_}, {"pairs": page, "next": nxt}, given="every_pair")
+                cases[-1]["given"].update(condition=condition, held_pairs=pairs)
         if name in {"device_put", "cert_challenge", "cert_rejection"}:
             action = {"device_put": "certificate", "cert_challenge": "challenge", "cert_rejection": "rejection"}[name]
             vec = next(c for c in v["p3"]["cases"] if c["name"] == action + "_resigned_identical")

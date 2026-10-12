@@ -304,6 +304,44 @@ def http(client, method, path, headers, query=None, body=None):
     return {"status": response.status_code, **response.json()}
 
 
+def device_key(cert):
+    """The vector device key whose public key the certificate names."""
+    for name, key in V["keys"].items():
+        if name.endswith(".sig") and R.b64u(bytes.fromhex(key["pub"])) == cert["o"]["dk_sig_pub"]:
+            return S.sig_key(bytes.fromhex(key["seed"]))
+    raise KeyError(cert["o"]["device_id"])
+
+
+def create_account(client, path, cert, pk_pub, now):
+    """POST /v2/accounts (P3-D3) for a register_device step with route 'account': a fresh invite and
+    the device's login signature over a relay challenge, as a real first device sends it."""
+    from orch_relay.directory import digest
+
+    invite = "FAKE-vector-invite-" + cert["o"]["device_id"] + cert["o"]["person_id"]
+    with closing(db.connect(path)) as con, con:
+        con.execute(
+            "INSERT OR IGNORE INTO invites(code_hash,expires_ms) VALUES (?,?)",
+            (digest(invite.encode()), now + DAY),
+        )
+    challenge = http(client, "POST", "/v2/session/challenge", {}, body={})["challenge"]
+    d = client.app.state.directory
+    message = P.auth_bytes(d.origin, P.unb64u(challenge), "device", cert["o"]["device_id"])
+    sig = R.b64u(S.sign(device_key(cert), message))
+    return http(
+        client,
+        "POST",
+        "/v2/accounts",
+        {},
+        body={
+            "invite": invite,
+            "pk_pub": pk_pub,
+            "device_cert": cert,
+            "challenge": challenge,
+            "sig": sig,
+        },
+    )
+
+
 SKIPPED = "skipped"
 
 
@@ -348,7 +386,12 @@ def step(client, path, inp, case, ws=WS):
     if op == "register_device":
         pool = pools(case)
         cert = certificate(pool, body["device_id"], body["person_id"])
-        result = http(client, "PUT", f"/v2/devices/{body['device_id']}", {}, body={"cert": cert})
+        if body.get("route") == "account":
+            result = create_account(client, path, cert, body["pk_pub"], now)
+        else:
+            result = http(
+                client, "PUT", f"/v2/devices/{body['device_id']}", {}, body={"cert": cert}
+            )
         return {k: v for k, v in result.items() if k in ("status", "error")}
     if op == "owner_policy":
         if inp.get("historical"):

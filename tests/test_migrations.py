@@ -104,3 +104,83 @@ def test_0010_rekeys_revocations_per_pair_and_keeps_rows(tmp_path):
         con.execute("INSERT INTO revocations VALUES ('d1','p1','{}','lost',6,10)")
     index = con.execute("SELECT sql FROM sqlite_master WHERE name='revocation_feed'").fetchone()
     assert index and "person_id, cursor" in index[0]
+
+
+def test_0011_indexes_chain_revocations_by_device_and_keeps_rows(tmp_path):
+    """P3-D30: 0011 adds the checkpoint_revocations(device_id, person_id) index the registration
+    refusal and the per-pair revocation list use; rows are kept, it applies once and re-running its
+    SQL is harmless (IF NOT EXISTS)."""
+    import shutil
+    from importlib import resources
+
+    mdir = tmp_path / "m"
+    mdir.mkdir()
+    src = resources.files("orch_relay").joinpath("migrations")
+    for e in src.iterdir():
+        if e.name.endswith(".sql") and e.name < "0011":
+            shutil.copy(str(e), mdir / e.name)
+    path = tmp_path / "r.sqlite3"
+    db.migrate(path, mdir)
+    row = ("w", "d1", "p1", "lost", b"{}", b"{}", "pk", "r", "t")
+    con = sqlite3.connect(path)
+    with con:
+        con.execute("INSERT INTO checkpoint_revocations VALUES (?,?,?,?,?,?,?,?,?)", row)
+    con.close()
+    name = "0011_registration_lookup.sql"
+    shutil.copy(str(src.joinpath(name)), mdir / name)
+    assert db.migrate(path, mdir) == ["0011_registration_lookup"]
+    assert db.migrate(path, mdir) == []
+    con = sqlite3.connect(path)
+    assert con.execute("SELECT * FROM checkpoint_revocations").fetchall() == [row]
+    index = con.execute(
+        "SELECT sql FROM sqlite_master WHERE name='checkpoint_revocation_device'"
+    ).fetchone()
+    assert index and "(device_id, person_id)" in index[0]
+    plan = con.execute(
+        "EXPLAIN QUERY PLAN SELECT 1 FROM checkpoint_revocations WHERE device_id='d1' LIMIT 1"
+    ).fetchall()
+    assert any("checkpoint_revocation_device" in str(r) for r in plan)
+    with con:
+        con.execute(src.joinpath(name).read_text().split("\n")[-2])  # the CREATE, again: no-op
+
+
+def test_0012_drops_evidence_only_device_rows_and_keeps_revocations(tmp_path):
+    """P3-D30 round 2 (review R1): 0012 deletes device rows of evidence-only persons (and their
+    sessions); accounts, evidence_persons, other devices and every revocation stay."""
+    import shutil
+    from importlib import resources
+
+    mdir = tmp_path / "m"
+    mdir.mkdir()
+    src = resources.files("orch_relay").joinpath("migrations")
+    for e in src.iterdir():
+        if e.name.endswith(".sql") and e.name < "0012":
+            shutil.copy(str(e), mdir / e.name)
+    path = tmp_path / "r.sqlite3"
+    db.migrate(path, mdir)
+    con = sqlite3.connect(path)
+    with con:
+        con.execute("INSERT INTO accounts VALUES ('pe','pk',0),('pa','pk2',0)")
+        con.execute("INSERT INTO evidence_persons VALUES ('pe')")
+        con.execute("INSERT INTO devices VALUES ('de','pe','{}','s','k','[]',NULL)")
+        con.execute("INSERT INTO devices VALUES ('da','pa','{}','s','k','[]',NULL)")
+        con.execute("INSERT INTO sessions VALUES ('t1','device','de',9),('t2','device','da',9)")
+        con.execute("INSERT INTO revocations VALUES ('de','pe','{}','lost',5,7)")
+        # A registered AND revoked device of a real account (delta review S-a): it stays.
+        con.execute("INSERT INTO revocations VALUES ('da','pa','{}','lost',5,8)")
+        con.execute("INSERT INTO revocations VALUES ('da','pe','{}','compromised',5,9)")
+    con.close()
+    name = "0012_drop_evidence_devices.sql"
+    shutil.copy(str(src.joinpath(name)), mdir / name)
+    assert db.migrate(path, mdir) == ["0012_drop_evidence_devices"]
+    assert db.migrate(path, mdir) == []
+    con = sqlite3.connect(path)
+    assert con.execute("SELECT device_id FROM devices").fetchall() == [("da",)]
+    assert con.execute("SELECT token_hash FROM sessions").fetchall() == [("t2",)]
+    assert con.execute("SELECT person_id FROM evidence_persons").fetchall() == [("pe",)]
+    assert con.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 2
+    assert con.execute("SELECT * FROM revocations ORDER BY cursor").fetchall() == [
+        ("de", "pe", "{}", "lost", 5, 7),
+        ("da", "pa", "{}", "lost", 5, 8),
+        ("da", "pe", "{}", "compromised", 5, 9),
+    ]

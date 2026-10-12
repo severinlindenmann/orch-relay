@@ -176,11 +176,11 @@ The **Auth** column uses these codes:
 | `POST /v2/session/challenge` | none | `{}` → `{challenge, expires_ms}` | 60 s, single use; per address ≤ 16 outstanding and 60/min; global ≤ 65 536 outstanding, excess **refused** (P3-D17) | 429 `rate_limited` | §12.2 |
 | `POST /v2/session/login` | none | `{challenge, kind, id, sig}` → `{token, expires_ms}` | challenge consumed on every attempt; 15 min; concurrent tokens allowed | 400 `malformed`, `cert_expired`, `cert_invalid`; 401 `unknown_challenge`, `expired`, `bad_signature`; 403 `revoked` | §12.2, §4 |
 | `POST /v2/session/logout` | D or W | `{}` → `{}` | idempotent; safe to retry with an expired token (200) | — | new |
-| `POST /v2/accounts` | none | `{invite, pk_pub, device_cert, challenge, sig}` → `{person_id}` | `sig` is the new device's login signature over a fresh challenge; the exact same request → 200 (by digest) | 400 `malformed`, `cert_invalid`; 401 `bad_signature`, `unknown_challenge`; 403 `not_eligible` (one code for unknown, used or expired); 409 `account_exists` | spec §6.1 (P3-D3) |
+| `POST /v2/accounts` | none | `{invite, pk_pub, device_cert, challenge, sig}` → `{person_id}` | `sig` is the new device's login signature over a fresh challenge; the exact same request → 200 (by digest) | 400 `malformed`, `cert_invalid`; 401 `bad_signature`, `unknown_challenge`; 403 `not_eligible` (one code for unknown, used or expired), `revoked` (P3-D30 registration refusal); 409 `account_exists` | spec §6.1 (P3-D3) |
 | `PUT /v2/devices/{device}` | none | `{cert}` → `{device_id}` | self-authenticating under the account `PK`; per address 30/h; per person 64/day, charged only after the signature verifies; an exact retry is free | 400 `cert_invalid`, `cert_expired`; 403 `revoked`, `other_person` (no account); 409 `cert_conflict` | §6.1, §8.3, §8.4 (P3-D5) |
 | `GET /v2/devices/{device}` | D(p), or W whose `ever_persons` contains the person | → `{cert}` | | 403 `not_eligible`; 404 `not_found` | §6.1 |
 | `POST /v2/revocations` | none | `{record}` → `{device_id}` | authority is `PK`; per address 10/min; per person 32/day, charged only after the signature verifies, with 8/day reserved for revocations of devices not yet revoked; an exact retry is free | 400 `malformed`; 401 `bad_signature`; 403 `other_person` | §6.2 (P3-D5) |
-| `GET /v2/devices/{device}/revocation` | none | → `{record}` | per address 60/min | 404; 429 | §6.2, gaps 24 |
+| `GET /v2/devices/{device}/revocation?after=&limit=` | none | → `{pairs: [{person_id, reason, revocation, provenance}], next}`, registered person first, then chain before feed by cursor (P3-D30) | per address 60/min; limit ≤ 32 | 400; 404; 429 | §6.2, gaps 24 |
 | `GET /v2/persons/{person}/revocations?after=&limit=` | D(p), or W whose `ever_persons` contains the person | → `{revocations, next}` | limit ≤ 256 | 403 | §6.2 |
 | `PUT /v2/workspaces/{ws}/card` | none for the first card; W(g) after | `{card}` → `{card_seq}` | first card: per address 10/h, per owner account 10/h, first writer wins in one transaction; same card → 200 | proto §7.1 codes: 400 `malformed`, `wrong_suite`, `delegation_mismatch`; 401 `bad_signature`; 403 `other_person`; 409 `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version` | §7.1 (P3-D4) |
 | `GET /v2/workspaces/{ws}/card` | D(m) or W | → `{card}` | | 403; 404 | §7.1 |
@@ -584,7 +584,8 @@ challenge is consumed.
 
 ### 5.3 The relay side of revocation (#12, proto §6.2)
 
-On a verified revocation, from the route or from a restore's entries, the relay does the following in one transaction:
+On a verified revocation, from the route or from a restore's entries, the relay does the following in one transaction
+(the cutoff steps only for the device's registry pair, P3-D30):
 
 - it stores the revocation, or upgrades the stored reason (compromised over lost/retired);
 - it deletes the device's sessions, request mailboxes, queued responses, grants and card-key wraps in every workspace;
@@ -1165,8 +1166,57 @@ HTTP fixture.
 - **P3-D29 (evidence-only persons).** Self-certified R4 evidence for a person without an account stores an
   account row marked in `evidence_persons`, because the device and its revocation must be stored (§19.8 R4)
   and both reference `accounts`. Such a person registers no device, owns no card and joins no list
-  (`other_person`) until it redeems an invite, which turns the row into its account; revocation intake for it
-  still works. Found by the G4 security review: without the mark, the row was a full account without an invite.
+  (`other_person`) until it redeems an invite, which turns the row into its account (its evidence device rows are
+  deleted, P3-D30 round 2); revocation intake for it still works. Found by the G4 security review: without the mark, the row was a full account without an invite.
+- **P3-D30 (per-pair device cutoff, chain-learned registration refusal; orch-52 rulings 1 to 4).** Protocol §19.5
+  states the rules; the decisions taken in implementing them:
+  - *Cutoff per registry pair.* `device_status` (sessions, login, stored-certificate retries, the bridge),
+    `members.certificate` and `PUT /v2/devices/{device}` of a registered device check the pair
+    `(device_id, devices.person_id)`; the person never comes from the request.
+  - *Registration refusal.* A new registration (`PUT` without a registry row, every `POST /v2/accounts`) is 403
+    `revoked` on any `checkpoint_revocations` row of the id (any workspace, any person) or on a revocation of the
+    new pair itself. A global row of another person alone never refuses it, so a squatted id registers and logs in.
+    Migration 0011 adds the `checkpoint_revocations(device_id, person_id)` index for this lookup.
+  - *`revoke()`* always stores the pair. It deletes sessions, prunes queues, grants and wraps, and sets
+    `rotation_due` only when the record's person is the registry person. A revocation of an unregistered id cuts
+    nothing off, because no session, queue, grant, wrap or member row can exist without a registry row. If the id
+    registers later, the stored pair applies to the registry person through the same per-pair checks.
+  - *Bridge notice cursor.* `revocations_cursor` counts only registry pairs of ever-devices, excluding P3-D29
+    evidence-only persons (the same filter as `unpublished` eligibility). Another person's pair cuts nothing off and
+    obliges no rotation, so it must not wake the host.
+  - *Revocation list.* `GET /v2/devices/{device}/revocation` returns `{pairs: [{person_id, reason, revocation,
+    provenance}]}` built by joins, with no new column. `registry` marks an association: the registry row, excluding
+    evidence-only persons. `chain` marks a pair that a `checkpoint_revocations` row holds; `feed` marks one that only
+    the global table holds. Round 2 (review S1): paginated like the §19.5 feed, `?after=&limit=` with at most 32 per
+    page and `{pairs, next}`, where `next` is opaque and passed back as `after`. The order is the registered person
+    first, then `chain` before `feed`, then by cursor. `person_id` order would let an attacker mint ids that push
+    genuine pairs off page 1. Intake is not capped. No client decision may rest on this route.
+  - *Deviation from ruling 3, needs orch-52 confirmation.* Ruling 3 included `device_cert` and `pk_pub` where the
+    relay holds them. The security review of this change found that this discloses, on an unauthenticated route,
+    the registry certificate, which `GET /v2/devices/{device}` gates (scopes, `dk_kx_pub`, expiry, sealed label).
+    It also discloses the account key, and the evidence that another workspace's restore carried, which is otherwise
+    readable only through that workspace's routes. Both fields are therefore omitted. The response is the public
+    signed records plus the label. As a result, a consumer cannot verify a non-registry pair from this route alone.
+    That needs an authorized route (P3-D31, or a gated variant).
+    A `chain` label is not authentication: any workspace host can carry a self-certified pair.
+  - *Exact account retry.* The exact same `POST /v2/accounts` body is answered 200 from the invite digest even after
+    the device was revoked. It writes nothing and grants nothing.
+  - *Evidence-only device rows (round 2, review R1).* An evidence-only person's pre-0010 device rows were created by
+    restores and so are no association. Redeeming an invite used to turn them into associations even when the person
+    redeemed with another device. Such an association could contradict another workspace's chain pair for the id
+    and strand that workspace. `account()` now deletes them, with their sessions and queues, before the person stops
+    being evidence-only, and migration 0012 does the same once.
+    We deleted the rows instead of marking each device, because deletion is the safer choice:
+    - It needs no new column. Every reader (`association()`, the list, the bridge cursor, `GET /v2/devices`) is left
+      unchanged, and none of them can forget a marker.
+    - Nothing references such a row: its pair is revoked, and members, grants and wraps need a usable account.
+    - Each such device stays cut off: its revocations are kept, and its chain pair refuses re-registration.
+  - *Pinned by:*
+    - the `P3_D30_*` checkpoint vectors: both routes, through `register_device` with `route`; registry person vs
+      request person; the account route always a new registration;
+    - the `revocation_get` fixtures `every_pair_*`, including pages;
+    - production tests in `tests/test_directory.py` and `tests/test_migrations.py`.
+  - *Separate.* The retrieval route for `unpublished_refs` is P3-D31, a separate design. It is not implemented here.
 - *Measured* (`uv run python tests/bench_checkpoint_capacity.py`, `docs/p3-checkpoint-capacity.md`).
 
 - *Round 2 (Opus review of PR #51).* R1: staged descriptors are grouped by `(kind, log)` once per
@@ -1366,3 +1416,4 @@ No new decisions.
 | P3-D27 | Bounded exact-bytes re-store of expired response chunks (current epoch or refusal, immutable deadline, ≤ 8 per chunk, budgets) | §3.3 |
 | P3-D28 | Pairing attempt binding: device `attempt` nonce, fresh keys per attempt, bound challenge and rejection, two `rejected` forms, `approved` join anchor (G3b) | §3.3 |
 | P3-D29 | Evidence-only person rows for self-certified restore evidence; no account powers until an invite (G4) | §10 |
+| P3-D30 | Per-pair device cutoff under the registry person; new registration refused on any chain-learned revocation; per-pair `GET /revocation` list; registry-pair notice cursor (orch-52 rulings 1 to 4) | §10, proto §19.5 |
