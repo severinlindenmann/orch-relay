@@ -873,3 +873,13 @@ What changes the plan:
 Still open (NOT OBTAINABLE read-only): U4 (database `schema_migrations`), U5 file listing, U10 (benchmark on the
 VPS), U11 local bridge-client status (orch-52), U12 restore-recovery behaviour (orch-f1), U13 owner and date of the
 G5 remote harness.
+
+## 11. Decision of 12 Oct 2026 and cleanup list
+
+**Decision (orch-d6): this plan is merged as documentation only. No dev deploy yet.** With no real relay client in the phone build (Demo mode only) and no P3 bridge client in orch-core, nothing could use the relay. The deploy waits until one of them exists, and then still needs orch-d6's explicit approval. The throwaway VM for the nft and systemd checks must be Ubuntu 26.04, the real VPS OS (the local VM is installed by the owner).
+
+**Cleanup list (found by the read-only check; no action now):**
+- The `-dirty` release on the VPS contains a leftover `0002_bad.sql` from a rollback test. Remove that release directory (or never point `current` at it) before any deploy, so a stray migration file cannot be applied.
+- Caddy serves `pub.dev` and `apps.dev` with no running backend (ports 8103/8104): they answer 502. Remove the vhosts or start the services; outside this plan.
+- Four releases sit under `/opt/orch/relay`; prune old ones after the deploy settles.
+- `/healthz` reports version `0.1.0` for every build; a build identifier in the health body would make the post-deploy check meaningful.
