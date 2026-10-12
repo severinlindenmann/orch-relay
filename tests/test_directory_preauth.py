@@ -476,6 +476,52 @@ def test_precheck_read_failure_after_consuming_keeps_the_challenge_consumed(tmp_
         assert CHALLENGE not in d.challenges
 
 
+@pytest.mark.parametrize(
+    "used_ms,expires_ms,locks",
+    [
+        (NOW - 1000, NOW + HOUR, 0),  # used: refused in the pre-check whatever follows
+        (None, NOW - MINUTE, 0),  # expired for a minute: no redemption can be in flight
+        (None, NOW - 1000, 1),  # just expired: the transaction decides (a retry may race it)
+        (None, NOW + HOUR, 1),  # unused: only the transaction consumes (here: bad pk_pub)
+    ],
+)
+def test_used_or_expired_invites_are_refused_without_the_lock(
+    tmp_path, monkeypatch, used_ms, expires_ms, locks
+):
+    """Review F2: invites are never deleted, so one seen once must not open a challenge-free path
+    to the lock. The refusal is the transaction's: 401 `unknown_challenge` for a garbage
+    challenge, 403 `not_eligible` with a live one (consumed)."""
+    from orch_relay.directory import digest
+
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        sql(
+            d,
+            "INSERT INTO invites(code_hash,expires_ms,used_ms,used_by,request_digest) "
+            "VALUES (?,?,?,?,?)",
+            (
+                digest(b"seen-once"),
+                expires_ms,
+                used_ms,
+                PERSON if used_ms else None,
+                digest(b"the redeeming request") if used_ms else None,
+            ),
+        )
+        d.add_challenge(CHALLENGE, NOW + MINUTE, "testclient", None)
+        spy = Spy(d, monkeypatch)
+        body = {"invite": "seen-once", "pk_pub": "", "device_cert": {}, "sig": ""}
+        r = c.post("/v2/accounts", json={**body, "challenge": P.b64u(bytes(32))})
+        assert r.status_code == 401 and r.json() == {"error": "unknown_challenge"}
+        r = c.post("/v2/accounts", json={**body, "challenge": CHALLENGE})
+        usable = expires_ms > NOW and used_ms is None
+        assert (r.status_code, r.json()["error"]) == (
+            (400, "malformed") if usable else (403, "not_eligible")
+        )
+        assert CHALLENGE not in d.challenges
+        assert (spy.locks, spy.writes) == (2 * locks, 2 * locks)
+
+
 def test_concurrent_identical_account_retries_both_succeed(tmp_path):
     """An existing invite is never decided by the pre-check: the retry sees the replay."""
     from concurrent.futures import ThreadPoolExecutor

@@ -514,10 +514,13 @@ class Directory:
         invite = con.execute("SELECT * FROM invites WHERE code_hash=?", (invite_hash,)).fetchone()
         if invite and invite["request_digest"] == digest(raw):
             return {"person_id": invite["used_by"]}
-        if invite:
-            # P3-D32: an existing invite may be redeemed by a concurrent identical request, whose
-            # retry must see the replay, not a challenge this pre-check consumed: only the
-            # transaction consumes it. Without an invite the request is refused below in any case.
+        if invite and invite["used_ms"] is None and now < invite["expires_ms"] + MINUTE:
+            # P3-D32: an unused invite may be being redeemed by a concurrent identical request,
+            # whose retry must see the replay, not a challenge this pre-check consumed: only the
+            # transaction consumes it. A used invite never becomes unused and its replay was
+            # answered above, and a request on an invite expired for over a minute cannot race a
+            # redemption still in flight (review F2): those, and requests without an invite, are
+            # refused below in the pre-check, after consuming the challenge.
             self.authorized(state)
         challenge = self.consume_once(body["challenge"], now, state)
         if invite is None or invite["used_ms"] is not None or now >= invite["expires_ms"]:
