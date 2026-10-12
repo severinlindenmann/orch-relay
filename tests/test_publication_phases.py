@@ -395,7 +395,11 @@ def test_publication_reserves_its_staged_heads_and_reweighs_an_underestimate(rel
     relay.cps.hooks["phase_a"] = lambda **kw: seen.append(relay.cps.gate.heads)
     assert put(relay.client, body)["result"] == "accepted"
     assert len(seen) == 1 and 300 <= seen[0] < 400, seen  # estimated from the staged bytes
-    seen.clear()
+
+
+def test_an_underestimated_publication_reweighs_before_folding(relay, monkeypatch):
+    seen = []
+    relay.cps.hooks["phase_a"] = lambda **kw: seen.append(relay.cps.gate.heads)
     body, _ = append(relay, 200, 100, "u")
     monkeypatch.setattr(checkpoints.Checkpoints, "weigh", lambda self, ws, pre: 0)
     assert put(relay.client, body)["result"] == "accepted"
