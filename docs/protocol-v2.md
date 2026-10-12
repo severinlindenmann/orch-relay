@@ -2473,22 +2473,33 @@ private half; the publicly derived reference key is only a test artifact.
   check, its challenge consumed. Window checks never charge. Relay operators SHOULD also rate-limit per client
   address at the reverse proxy.
 - **Session buckets (P3-D35).** Every request with a valid session on a directory (§19.1, §19.2, §19.5), bridge
-  (§19.3, certificate queues included) or checkpoint (§19.8, unpublished included) route takes one token of
-  that session's bucket, and of its workspace's bucket for a W session; proof and transition pages also take one
-  token of the page buckets. Tokens are taken after authentication and before any lock, write transaction,
-  poll slot or waiter, also when the request is then refused (a valid session's refusals are charged to it);
-  a request without a valid session takes none. An empty bucket answers 429 `rate_limited` with `Retry-After`
-  in place of the request's answer. Long polls take one token per request. In memory, reset on restart.
+  (§19.3, certificate queues included) or checkpoint (§19.8, unpublished included) route is charged to one bucket
+  class after authentication and before any lock, write transaction, poll slot or waiter; a request without a
+  valid session takes nothing. Read class: the device's (or a W session's token's) bucket and the person's (or
+  the workspace's). Page class (proof and transition pages): the page buckets of the same identities, one token
+  per started 1 000 heads returned (a transition page by its bytes at 74 per head), at least one; one token is
+  taken before the read and the rest after it, which may leave the bucket below zero. Staging class (staging page
+  and manifest PUTs): the workspace's staging bucket. Host answers (a W session's direction-2 ORB2 post on the
+  bridge or a pair): the (workspace, target device) bucket when the target has a live request on that rid, all
+  pair answers of a workspace one (workspace, pair) bucket, anything else the host's read buckets. A refusal
+  after authentication takes one read-class token. An empty bucket answers 429 `rate_limited` with `Retry-After` (whole seconds until the tokens are
+  back) in place of the request's answer. Long polls take one token per request. In memory, reset on restart.
 
   | Bucket | Key | Burst | Refill | Override |
   |---|---|---|---|---|
-  | session | session token | 600 | 600/min (10/s) | `ORCH_RELAY_THROTTLE_SESSION` |
-  | workspace | workspace of a W session | 1 200 | 1 200/min (20/s) | `ORCH_RELAY_THROTTLE_WORKSPACE` |
-  | page-session | session token (proof, transitions) | 256 | 120/min (2/s) | `ORCH_RELAY_THROTTLE_PAGE_SESSION` |
-  | page-workspace | workspace of a W session (proof, transitions) | 512 | 240/min (4/s) | `ORCH_RELAY_THROTTLE_PAGE_WORKSPACE` |
+  | session | device (device session) or token (W session) | 600 | 600/min (10/s) | `ORCH_RELAY_THROTTLE_SESSION` |
+  | person | person of a device session | 1 200 | 1 200/min | `ORCH_RELAY_THROTTLE_PERSON` |
+  | workspace | workspace of a W session | 1 200 | 1 200/min | `ORCH_RELAY_THROTTLE_WORKSPACE` |
+  | page-session | as session (pages) | 5 914 | 600/min | `ORCH_RELAY_THROTTLE_PAGE_SESSION` |
+  | page-person | as person (pages) | 11 828 | 1 200/min | `ORCH_RELAY_THROTTLE_PAGE_PERSON` |
+  | page-workspace | as workspace (pages) | 11 828 | 1 200/min | `ORCH_RELAY_THROTTLE_PAGE_WORKSPACE` |
+  | staging | workspace (staging PUTs) | 27 777 | 3 000/min (50/s) | `ORCH_RELAY_THROTTLE_STAGING` |
+  | host-answer | (workspace, requesting device) or (workspace, pair) | 1 200 | 1 200/min (20/s) | `ORCH_RELAY_THROTTLE_HOST_ANSWER` |
 
-  Overrides are `burst/per-minute`. Honest clients long-poll or poll at most every few seconds and walk at most a
-  few dozen proof pages, far below these. The public revocation-pair read (§19.5) is
+  Overrides are `burst/per-minute`. Honest clients long-poll or poll at most every few seconds. A first sync walks
+  one proof per grown log: a full 64 MiB set is 17 pages of at most 56 678 heads (913 tokens), and a
+  5 000-ticket workspace adds 5 001 one-page logs, so 5 914 tokens; a staging set has at most 27 776 pages (a
+  4 MiB manifest of 150-byte descriptors) plus its manifest. The public revocation-pair read (§19.5) is
   limited to 60 per minute per address and 960 per minute per IPv6 /56. A relay behind a reverse proxy MUST be
   configured with the proxy's address (`ORCH_RELAY_TRUSTED_PROXY`); otherwise every client shares one address,
   and the relay logs a warning.

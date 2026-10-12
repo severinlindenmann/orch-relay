@@ -1549,13 +1549,16 @@ HTTP fixture.
   resends were unlimited write transactions), N3 (`admit()` summed the poll table) and N4 (no warning when
   `ORCH_RELAY_TRUSTED_PROXY` is unset behind Caddy), and the G4 / P3-D33 review note that authenticated reads and
   refusals were not rate-limited.
-  - *What is charged.* Every request that carries a valid session on a directory (§19.1, §19.2, §19.5), bridge
-    (§19.3, certificate queues included) or checkpoint (§19.8, unpublished included) route takes one token of the
-    session's bucket (key: the token hash) and, for a W session, of the workspace's bucket (W sessions are not
-    capped in number; device sessions are, 8 per device, so a device gets at most 8 session buckets). Proof and
-    transition pages also take one token of the page buckets (per session and per workspace). Long polls are
-    charged once per request (their wake-up re-checks are bounded by the admission slots and the 5–7 s tick), so
-    authenticated `wait=0` polls, polls that return at once and identical resends are now bounded per session.
+  - *What is charged* (as of round 2, below). Every request that carries a valid session on a directory (§19.1,
+    §19.2, §19.5), bridge (§19.3, certificate queues included) or checkpoint (§19.8, unpublished included) route is
+    charged to exactly one bucket class. *Read* (everything not listed next): the session's bucket, keyed by the
+    device for a device session and by the token for a W session, plus the person's bucket (device sessions) or the
+    workspace's (W sessions, which are not capped in number). *Page* (proof and transition pages): the page buckets
+    of the same identities, weighted by the work returned. *Staging* (staging page and manifest PUTs): one bucket
+    per workspace. *Host answer* (a W session's ORB2 response or pair answer): one bucket per (workspace, target
+    device). Long polls are charged once per request (their wake-up re-checks are bounded by the admission slots
+    and the 5–7 s tick), so authenticated `wait=0` polls, polls that return at once and identical resends are
+    bounded per device.
   - *When: after authentication, before anything else.* The charge comes after the read-only authentication of
     P3-D32 / G3 review 3 and before `Directory.lock`, a write transaction, a poll slot, a waiter or the checkpoint
     snapshot read. A request with no valid session (no, a malformed, an unknown, an expired token, a revoked or
@@ -1564,21 +1567,46 @@ HTTP fixture.
     after authentication (403 `not_eligible`, 409 `fenced`, 404, 400 `malformed`) are charged the same: the holder
     of a token only burns its own buckets. An empty bucket answers 429 `rate_limited` with `Retry-After` (whole
     seconds to the next token) in place of whatever the request would have answered; no new code, no shape change.
-  - *Defaults* (burst, refill), `ORCH_RELAY_THROTTLE_<NAME>="burst/per-minute"`: session 600, 600/min (10/s);
-    workspace 1,200, 1,200/min (20/s); page-session 256, 120/min (2/s); page-workspace 512, 240/min (4/s). The
-    arithmetic: honest hosts and phones long-poll (`wait` up to 25 s) or poll at most every few seconds (≤ 0.5/s),
-    and a sync reads the card, members, grants, a card key and a few certificates; a device that initializes
-    walks at most a few dozen proof pages (a full 64 MiB set is about 16 pages of 56,680 heads, plus one page per
-    small log, and transitions come 16 per page). So 600 requests of burst and 10/s sustained are 20x above an
-    honest client's peak, and a 256-page burst covers a full initialization. What it bounds: one session at
-    10 lock-taking directory requests per second (about 0.1 % of the lock at the measured ~60 µs each) and
-    2 proof pages per second (a full page is about 4 MiB of JSON).
+  - *Defaults* (burst, refill per minute; `ORCH_RELAY_THROTTLE_<NAME>="burst/per-minute"`): session 600, 600
+    (10/s); person 1,200, 1,200; workspace 1,200, 1,200; page-session 5,914, 600; page-person and page-workspace
+    11,828, 1,200; staging 27,777, 3,000 (50/s); host-answer 1,200, 1,200. The arithmetic, round 2:
+    - *Read.* Honest hosts and phones long-poll (`wait` up to 25 s) or poll at most every few seconds (≤ 0.5/s),
+      and a directory sync reads the card, members, grants, a card key and a few certificates: 600 of burst and
+      10/s per device are 20x above an honest client's peak. A person with 2 devices at full rate fits its 1,200.
+      What it bounds: one device at 10 lock-taking directory requests per second (about 0.1 % of the lock at the
+      measured ~60 µs each).
+    - *Page.* A device without H walks one full proof per grown log (ref `sync_walk`, protocol §19.8 device
+      synchronisation step 5). A full 64 MiB set (`STAGE_CAP / 74` = 906,876 heads) is 17 pages of at most
+      `PROOF_PAGE_HEADS` = 56,678 heads; at one token per started 1,000 heads that is 16 x 57 + 1 = 913 tokens.
+      A 5,000-ticket workspace has 5,001 logs, each at least one page: 5,001 more. So the page burst is 5,914
+      and a first sync of that workspace (or of a full single-log set) completes at once without a 429. The refill
+      of 10 tokens/s bounds sustained bandwidth to 10,000 heads/s (~740 kB/s) per device; a flood of full pages
+      gets 104 pages, then one every 5.7 s. The first token is taken before the read; the rest of a page's weight
+      after it, as debt (the level may go below zero, so the next request waits for it).
+    - *Staging.* A manifest is at most `PAGE_CAP`, and its smallest canonical descriptor is 150 bytes plus a
+      comma, so one staging set has at most 27,776 pages; the burst is that plus the manifest, so the largest
+      honest set (and a 5,001-page one) uploads without a 429 and never touches the host's session. Staging PUTs
+      take the lock, so they stay bounded per workspace: 50/s after the burst (a full set again after ~9 min).
+    - *Host answer.* A member posts at most 20 requests/s (`bridge-post`) and 10/s on its device bucket; the host's
+      answers to it are charged to (workspace, that device) at 1,200 burst and 20/s, the rate of the existing
+      `bridge-host-post` window. A member therefore spends only the host's answers to itself; the host's polls,
+      `hold` and answers to other members keep their buckets. The key is never the poster's free choice (security
+      review of round 2: keying by the envelope's target alone let a W session name a fresh device per post, each
+      a fresh bucket and a lock-taking refused transaction, and flood the table): a bridge response uses
+      (workspace, target) only when the target has a live request on that rid (`rid_seen` without an offer,
+      written only by an eligible member's own post), so the keys are bounded by the members' requests; anything
+      else is charged to the host's read buckets. All pair answers of a workspace share the key
+      (workspace, "pair"). The check is one indexed read on a pooled snapshot before the transaction, which
+      re-checks everything.
   - *Store.* In memory (`Directory.buckets`), under the budget mutex like the rate windows (P3-D32): all buckets of
     a request are checked without side effects, then charged. Levels are integers in 1/60,000 of a token, so
-    counts are exact under an injected clock; a clock that goes back adds nothing. The table is bounded
-    (`ORCH_RELAY_THROTTLE_TABLE`, default 65,536 entries, about 390 B each, ~25 MB when full) with LRU eviction;
-    an evicted entry comes back full, so eviction can only favour the evicted identity, and needs 65,536 other
-    authenticated identities charged in between. Reset on restart (accepted, like every window). No migration.
+    counts are exact under an injected clock; a clock that goes back adds nothing. Each key class (session,
+    person, workspace, the three page classes, staging, host-answer) has its own bounded table
+    (`ORCH_RELAY_THROTTLE_TABLE`, default 16,384 entries per class, about 470 B each: ~7.6 MB per full class, ~61 MB
+    if all 8 were full), so keys of one class never evict another's. Beyond the bound the entry evicted is, among
+    the 64 least recently charged, the first that has refilled completely (lossless: a missing entry is a full
+    bucket), else the one closest to full; a depleted bucket is not reset by a flood of fresh identities while
+    fuller ones remain (security review of round 2). Reset on restart (accepted, like every window). No migration.
   - *N3.* `Bridge.polls` keeps running totals (all polls, and per key kind: pair, device, workspace) updated on
     every table write (admit, release, also direct writes), so `admit()` is O(1). Pinned at zero after a
     timeout, an exception in the transaction, a replaced host poll and a cancelled request.
@@ -1591,9 +1619,12 @@ HTTP fixture.
     are deliberately not charged per address: they take no lock (~15 µs, P3-D32), and a per-address 401 budget
     would let an attacker behind the same address (or every client, with N4's misconfiguration) turn honest
     clients' 401 into 429 and delay their re-login. The Caddy per-IP limit covers them.
-  - *Not charged.* The sqlite3.Error fallbacks of the bridge and checkpoint pre-checks (the transaction
-    authorizes alone; rare: WAL readers do not wait); the session buckets are not weighted by work, so a
-    4 MiB staging page or a publication costs one token like a GET (remaining, see the gates).
+  - *Refusals.* A refusal after authentication always takes one token of the session's read class, whatever the
+    route, so a refused staging PUT or host answer for a workspace the session may not write never spends that
+    workspace's staging bucket or that target's answer bucket.
+  - *Not charged.* The sqlite3.Error fallbacks of the bridge, directory and checkpoint pre-checks (the
+    transaction authorizes alone; rare: WAL readers do not wait). Request bodies (up to 4 MiB) are read before
+    the charge, so bandwidth is bounded by the proxy, not the bucket.
   - *Pinned by* `tests/test_throttle.py`: every authenticated GET family fires at the limit and not below with
     `Retry-After`; requests without a valid session charge nothing and create no entry; a session's refusals charge
     only its own bucket, other sessions of the same device and the host unaffected; W sessions share the workspace
@@ -1603,12 +1634,37 @@ HTTP fixture.
     bounded under many valid sessions); the revocation-read /56 window; the N4 warnings (once; not with a proxy;
     at start-up); the environment knobs; the N3 counters (no table scan in `admit()`, direct writes, timeout,
     exception, replaced poll, cancel, both ceilings). Load tests and benchmarks that flood one session on purpose
-    lift the buckets (`directory_support.unthrottled`). Targeted mutation (one at a time on a scratch copy):
+    lift the buckets (`directory_support.unthrottled`). Round 1 targeted mutation (one at a time on a scratch copy):
     36 of 36 killed (removed, charged before authentication, shared or wrong key, and refusals uncharged for
     each of the directory, bridge, checkpoint read, checkpoint write, unpublished and page throttles; the bucket's
     check, eviction, refill cap, clock, Retry-After and environment; the revocation-read /56 window; the N3
     counters, scans and pair share; the N4 warnings). The first run left one survivor (the pair share compared
     with the total), killed by an added test.
+  - *Round 2 (Opus review of PR #59).* F1: the round 1 page arithmetic counted only the single-log case ("a few
+    dozen pages", and 16 instead of 17); the reference walk makes one proof per grown log, so a phone's first sync
+    of a 5,000-ticket workspace needed 5,001 pages (about 40 minutes and 2,373 refusals at 256 / 2/s), and staging
+    those 5,001 pages held the host's own session at zero for about 7 minutes. Now proof and transition pages
+    charge only the page buckets, weighted by heads, with the burst above; staging has its own per-workspace
+    bucket. F2: the session key was the token, so a logout and a login gave a fresh bucket (60 tokens from a burst
+    of 3 in the review's probe); a device session is now keyed by its device, plus a per-person bucket. F3: host
+    answers were charged to the host's session and workspace, so one member sending requests at its own limit
+    could push the host into 429 for everyone; they now charge (workspace, target device). F5: tests for one global
+    workspace bucket, Retry-After with partial and non-integer refill, the revocation read checking both windows
+    before charging, and a clock going back. *Pinned by* `tests/test_throttle.py` round 2: a logout and login loop
+    gets one burst; a person's devices share the person bucket; workspaces have separate buckets; proof pages are
+    weighted (debt, Retry-After over it); the default page burst serves a 5,001-log first sync under a full set at
+    one instant and a flood of full pages gets exactly 104; staging charges only its own bucket, per workspace, and
+    its default burst serves a full manifest; host answers spend only the requesting member's bucket, refused
+    answers and answers with no request on the rid (also a pairing request's rid) the host's read buckets and mint
+    no key; the bucket tables keep a depleted bucket under a same-class flood and never evict across classes.
+    Mutation (one at a time on a scratch copy, on the final code):
+    62 mutants, 61 killed and 1 equivalent (skipping the early return of a fully refilled eviction candidate:
+    it has the highest fill anyway). They cover round 1 re-targeted (removed, before authentication, refusals
+    uncharged, shared keys, the bucket, N3, N4), the review's survivors O2, O5, O6, O10 and O15, weighting and
+    debt, the page and staging classes and burst sizes, device and person keys, host-answer keys (on the session,
+    shared, unvalidated, any offer, refusals on the target) and eviction (plain LRU, emptiest first, one table,
+    scan of 1, clock going back). Survivors on the way (staging and answer keys shared, a pairing rid accepted,
+    eviction under a clock going back) were killed by added tests.
 
 - *Round 2 (Opus review of PR #51).* R1: staged descriptors are grouped by `(kind, log)` once per
   publication; a refused 10,000-ticket x 2-page first publication held the lock 12.7 s (9.4 s in the
@@ -1702,19 +1758,22 @@ public deployment.
   request (directory, bridge, checkpoint) takes a token of its session's bucket after authentication, refusals
   included, plus a page token for proof and transition pages; N1, N3 and N4 of the G3 re-review are closed.
   Remaining, listed honestly:
-  - *Cost is not weighted.* A 4 MiB staging page, a genesis or baseline refusal and an `ignored` lower-n
-    publication (full stateless validation, uncharged by the failure budget; exact retries skip it since round 3)
-    take one token like a GET. One session can therefore send 600 such requests at once and 10/s after; the
-    staging quotas (P3-D34) and the publication gate bound the stored and phase A work, not the parsing. A
-    per-route cost (tokens per MiB of body) is the follow-up if a review shows it matters.
+  - *Cost is weighted only for pages.* Proof and transition pages are weighted by heads and staging PUTs have
+    their own bucket (round 2), but a genesis or baseline refusal and an `ignored` lower-n publication (full
+    stateless validation, uncharged by the failure budget; exact retries skip it since round 3) take one read
+    token like a GET. The publication gate (P3-D33) bounds their phase A work, not their parsing.
   - *The Caddy per-IP limit is still an infra TODO* (provisioning in the dev-kit `vps/`, not this repo): it is
     the only bound on unauthenticated 401 floods (deliberately not charged per address, P3-D35), on the
     sqlite3.Error fallbacks and on traffic spread over many valid sessions. Deploy checklist item 7.
-  - *Per-device aggregation.* A device has up to 8 sessions, so up to 8 session buckets; a W session's
-    workspace bucket is shared by every W session of the workspace, so a delegated WSK holder can spend it and
-    delay the owner's host sessions of that workspace (within the delegated trust, as P3-D34's staging cap).
-  - *Buckets reset on restart* and an LRU-evicted identity comes back full (needs 65,536 other authenticated
-    identities in between).
+  - *Per-workspace sharing.* A W session's workspace bucket and the workspace's staging bucket are shared by every
+    W session of the workspace, so a delegated WSK holder can spend them and delay the owner's host sessions of
+    that workspace (within the delegated trust, as P3-D34's staging cap). W sessions themselves are keyed by token,
+    so a WSK holder that logs in again gets a fresh session bucket, but never a fresh workspace bucket.
+  - *Pair answers* of a workspace share one host-answer key: anonymous pair requests (60/min per workspace)
+    can delay the host's pair answers for that workspace, never its bridge answers, polls or `hold`.
+  - *Buckets reset on restart*, and an identity whose depleted bucket is evicted comes back full; this needs 64
+    least recently charged entries of its class that are all depleted and a full class table (16,384 live
+    identities of that class).
 - **P3-D32 residual: exact certificate receipt replays (P3-D32 review F3).** A byte-identical `PUT /v2/devices/{d}`
   of an accepted certificate takes no window and no challenge from any address and runs the P3-D30 status
   re-check and `complete()` under `Directory.lock` (about 35 µs each). The status re-check must stay (it is the
@@ -1853,9 +1912,11 @@ handling of 429 `quota_exceeded` on a membership publication (do not retry uncha
    every client has the proxy's address, so all anonymous pairing shares 4 concurrent polls and one set of
    address windows relay-wide (the relay logs one WARNING on the first `X-Forwarded-For`). Add a per-client-IP
    request rate limit in Caddy (infra TODO in the dev-kit `vps/` provisioning; not in this repo): it is the only
-   bound on unauthenticated 401 floods and on load spread over many valid sessions. The session buckets
-   (`ORCH_RELAY_THROTTLE_*`, P3-D35) need no change for honest load; their table adds up to ~25 MB per instance to
-   the memory baseline of item 1.
+   bound on unauthenticated 401 floods, on request bandwidth (bodies are read before the buckets) and on load
+   spread over many valid identities. The buckets (`ORCH_RELAY_THROTTLE_*`, P3-D35) need no change for honest load
+   up to a 5,000-ticket workspace and a full staging set; a deployment expecting larger first syncs raises
+   `ORCH_RELAY_THROTTLE_PAGE_SESSION` (one token per 1,000 heads plus one per log). Their tables add up to ~61 MB
+   per instance (all 8 key classes full) to the memory baseline of item 1.
 
 ## 11. Open questions
 
@@ -1999,4 +2060,4 @@ No new decisions.
 | P3-D32 | Directory routes authorize first: read-only pre-check outside `Directory.lock`, bounded shared connection pool, side-effect-free window checks (G3 re-review D4) | §4, §10, proto §19.4 |
 | P3-D33 | Final publication outside the global write lock: phase A on renewed read snapshots (folds keyed by page digest and start), phase B node chunks, phase C live re-run and commit with bounded live work and restarts (503 after 3 rounds); per-workspace mutex and admission by width and heads on the event loop; refused-heads budget on every refusal; orphan accounting (G1 gate) | §10, proto §19.8 |
 | P3-D34 | Per-account and per-workspace caps (429 `quota_exceeded`): 512 MiB staged per owner person, 32 workspaces per account, 4,000,000 stored nodes per workspace before phase B, newest 256 receipts and 4,096 tombstones per workspace, 50,000 new self-certified evidence pairs per owner person; ever-device recovery design (G3, G4 gates) | §10, proto §19.8 |
-| P3-D35 | Session token buckets on every authenticated directory, bridge and checkpoint request (charged after authentication, refusals included; per workspace for W sessions; page buckets for proof and transition pages; bounded LRU table), O(1) poll admission counters (N3), proxy misconfiguration warning (N4), revocation-read /56 window (blocker 4) | §10, proto §19.4, §19.6 |
+| P3-D35 | Token buckets on every authenticated directory, bridge and checkpoint request, charged after authentication (refusals to the read class): read buckets per device (or W token) and person (or workspace), page buckets weighted by heads, a staging bucket per workspace, host answers per (workspace, target device); bounded LRU table; O(1) poll admission counters (N3); proxy misconfiguration warning (N4); revocation-read /56 window (blocker 4; round 2: review F1-F3) | §10, proto §19.4, §19.6 |
