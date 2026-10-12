@@ -33,7 +33,7 @@ from starlette.concurrency import run_in_threadpool
 from . import proto as P
 from . import unpublished as U
 from .bridge import refuse
-from .directory import PAGE_TOKEN_HEADS, Refusal, integer
+from .directory import PAGE_TOKEN_HEADS, Refusal, integer, staging_tokens
 
 log = logging.getLogger(__name__)
 
@@ -1773,12 +1773,13 @@ class Checkpoints:
         if name in self.hooks:
             self.hooks[name](**info)
 
-    def authorize(self, con, route, ws, headers, now, charge=False):
+    def authorize(self, con, route, ws, headers, now, charge=False, size=0):
         """The route's principal: authenticated, authorized for this workspace, fenced.
 
         With `charge` (once per request, at its first authorization) the request is charged after
         authentication (P3-D35): a refusal one token of the session's read buckets; an authorized
-        staging PUT the workspace's staging bucket; a proof or transition page one token of the
+        staging PUT the workspace's staging bucket, weighted by its body's `size` (P3-D36: one
+        token per started 64 KiB); a proof or transition page one token of the
         page buckets up front (read() charges the rest of its weight); anything else the read
         buckets."""
         session = self.d.authenticate(con, headers, now)
@@ -1790,7 +1791,7 @@ class Checkpoints:
             raise
         if charge:
             if route in ("staging_page", "staging_manifest"):
-                self.d.throttle(session, now, "staging", ws)
+                self.d.throttle(session, now, "staging", ws, cost=staging_tokens(size))
             elif route in ("proof", "transitions"):
                 self.d.throttle(session, now, "page")
             else:
@@ -1809,11 +1810,12 @@ class Checkpoints:
         d.fence(con, headers, ws, now)
         return session
 
-    def preauthorize(self, route, ws, headers):
-        """Read-only, before any lock, write transaction or failure window (G3 review 3)."""
+    def preauthorize(self, route, ws, headers, size=0):
+        """Read-only, before any lock, write transaction or failure window (G3 review 3); `size`
+        is the request body's length (the staging weight)."""
         with self.bridge.reading() as con:
             con.execute("BEGIN")
-            self.authorize(con, route, ws, headers, self.d.clock(), charge=True)
+            self.authorize(con, route, ws, headers, self.d.clock(), charge=True, size=size)
             row = con.execute(
                 "SELECT wsk_pub FROM workspaces WHERE workspace_id=?", (ws,)
             ).fetchone()
@@ -2202,7 +2204,9 @@ class Checkpoints:
                 result = await run_in_threadpool(self.read, route, params, query, headers)
                 return JSONResponse(result)
             try:
-                wsk = await run_in_threadpool(self.preauthorize, route, params["ws"], headers)
+                wsk = await run_in_threadpool(
+                    self.preauthorize, route, params["ws"], headers, len(raw)
+                )
                 prepared = await run_in_threadpool(self.prepare, route, params["ws"], raw, wsk)
             except sqlite3.Error:
                 # Not pre-authorized: nothing is parsed or validated before the transaction's own

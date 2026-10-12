@@ -53,14 +53,21 @@ MAX_RESPONSE = 4 * 1024 * 1024
 # (16 x 57 tokens + 1 = 913) and a 5,000-ticket workspace adds one small page per log (SYNC_LOGS),
 # so the page burst is 913 + 5,001 = 5,914 tokens with a 10/s refill (10,000 heads/s, ~740 kB/s,
 # a full re-walk every ~10 min). One manifest describes at most MANIFEST_PAGES = 27,776 pages
-# (PAGE_CAP over the smallest canonical descriptor, 150 bytes plus a comma), so the staging burst
-# is one full set plus its manifest, refilled at 50/s. The answer bucket matches the existing
+# (PAGE_CAP over the smallest canonical descriptor, 150 bytes plus a comma). P3-D36 (delta review
+# S1): a staging PUT costs one token per started 64 KiB of its body (STAGE_TOKEN_BYTES), at least
+# one, so a set of at most MANIFEST_PAGES + 1 PUTs and STAGE_BYTES costs at most one token per PUT
+# plus STAGE_BYTES // 64 KiB = 1,024: the burst (28,801) serves any honest set at once (a 5,001-page
+# set ~5,015 tokens, a full set in 4 MiB pages 1,025). The refill is 600/min (10/s, was 3,000):
+# 640 KiB/s of lock-taking staging per workspace, a full burst back in ~48 min, a 4 MiB set in
+# under 2 min. The answer bucket matches the existing
 # bridge-host-post window (20 chunks/s per workspace and target). Overrides:
 # ORCH_RELAY_THROTTLE_<NAME>="burst/per-minute". In memory, reset on restart (accepted).
 PAGE_BYTES = 4 * 1024 * 1024  # checkpoints.PAGE_CAP (pinned by tests)
 PROOF_PAGE_HEADS = (PAGE_BYTES - 128) // 74  # checkpoints.PROOF_PAGE_HEADS
 STAGE_HEADS = 64 * 1024 * 1024 // 74  # heads in a full 64 MiB staging set (checkpoints.STAGE_CAP)
 PAGE_TOKEN_HEADS = 1_000
+STAGE_BYTES = 64 * 1024 * 1024  # checkpoints.STAGE_CAP (pinned by tests)
+STAGE_TOKEN_BYTES = 64 * 1024
 SYNC_LOGS = 5_001  # logs of a 5,000-ticket workspace (bench_checkpoint_capacity's shape)
 FULL_SET_TOKENS = (STAGE_HEADS // PROOF_PAGE_HEADS) * math.ceil(
     PROOF_PAGE_HEADS / PAGE_TOKEN_HEADS
@@ -70,6 +77,14 @@ _DESCRIPTOR = {"i": 0, "kind": "appended", "log": "workspace", "after_seq": 0, "
 MANIFEST_PAGES = (PAGE_BYTES - len(P.cj({"pages": []}))) // (
     len(P.cj({**_DESCRIPTOR, "digest": "sha256:" + "0" * 64})) + 1
 )
+STAGING_BURST = MANIFEST_PAGES + 1 + STAGE_BYTES // STAGE_TOKEN_BYTES
+
+
+def staging_tokens(size):
+    """P3-D36: a staging PUT's weight, one token per started 64 KiB of its body, at least one."""
+    return max(1, -(-size // STAGE_TOKEN_BYTES))
+
+
 THROTTLES = {
     "session": (600, 600),
     "person": (1200, 1200),
@@ -77,7 +92,7 @@ THROTTLES = {
     "page-session": (PAGE_BURST, 600),
     "page-person": (2 * PAGE_BURST, 1200),
     "page-workspace": (2 * PAGE_BURST, 1200),
-    "staging": (MANIFEST_PAGES + 1, 3000),
+    "staging": (STAGING_BURST, 600),
     "host-answer": (1200, 1200),
 }
 # Buckets kept per key class (8 classes; ORCH_RELAY_THROTTLE_TABLE), evicting full buckets first.
