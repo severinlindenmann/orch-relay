@@ -200,6 +200,7 @@ class Bridge:
                 con.close()
             self.connections.clear()
         self.local = threading.local()
+        self.d.close()  # the directory's per-thread connections (P3-D32)
 
     def wake(self, *keys):
         for key in keys:

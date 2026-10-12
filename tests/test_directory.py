@@ -256,11 +256,11 @@ def test_database_work_is_off_event_loop(tmp_path, monkeypatch):
 
     real_connect = db.connect
 
-    def connect(path):
+    def connect(path, **options):
         try:
             asyncio.get_running_loop()
         except RuntimeError:
-            return real_connect(path)
+            return real_connect(path, **options)
         pytest.fail("SQLite connection opened on the event loop")
 
     monkeypatch.setattr(db, "connect", connect)

@@ -270,6 +270,37 @@ class Directory:
             .public_key()
             .public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
         )
+        self.local = threading.local()
+        self.connections = []
+        self.connections_lock = threading.Lock()
+
+    def connection(self, purpose):
+        """A per-thread connection reused across requests (as Bridge.connection).
+
+        "read" is query-only with busy_timeout=0: a pre-check never waits (WAL readers do not
+        block on writers; on any sqlite3.Error the transaction decides alone). "write" is used
+        only under self.lock with BEGIN IMMEDIATE."""
+        cache = self.local.__dict__.setdefault("connections", {})
+        con = cache.get(purpose)
+        if con is None:
+            con = db.connect(self.path, check_same_thread=False)
+            con.row_factory = sqlite3.Row
+            if purpose == "read":
+                con.execute("PRAGMA query_only=ON")
+                con.execute("PRAGMA busy_timeout=0")
+            with self.connections_lock:
+                self.connections.append(con)
+            cache[purpose] = con
+        if con.in_transaction:
+            con.rollback()
+        return con
+
+    def close(self):
+        with self.connections_lock:
+            for con in self.connections:
+                con.close()
+            self.connections.clear()
+        self.local = threading.local()
 
     def assert_can_wait(self):
         """G3 must call before a long-poll wait, outside its database transaction."""
@@ -931,11 +962,12 @@ class Directory:
             if len(raw) > body_cap(route):
                 fail("too_large")
             address = canonical_address(peer, headers.get("x-forwarded-for"), self.trusted_proxy)
-            with self.lock, closing(db.connect(self.path)) as con:
-                con.row_factory = sqlite3.Row
+            with self.lock:
+                con = self.connection("write")
                 now = self.clock()
                 con.execute("BEGIN IMMEDIATE")
                 with con:
+                    changes = con.total_changes
                     if route == "revocations" or (route == "device" and method == "PUT"):
                         revocation = route == "revocations"
                         kind = "revocation" if revocation else "certificate"
@@ -969,11 +1001,11 @@ class Directory:
                     result = self.dispatch(
                         con, route, ident, method, body, raw, query, headers, address, now
                     )
-                    # Fresh connection: any row change (incl. triggers) came from this commit.
-                    # Unthrottled receipt replays change nothing and so wake nothing.
+                    # Any row change (incl. triggers) on this connection since BEGIN came from this
+                    # commit. Unthrottled receipt replays change nothing and so wake nothing.
                     wake = (
                         self.wake_keys(con, route, ident, body, logout)
-                        if con.total_changes > 0 and method != "GET"
+                        if con.total_changes > changes and method != "GET"
                         else []
                     )
             response = JSONResponse(result)
