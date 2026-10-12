@@ -1213,3 +1213,64 @@ def test_unpublished_scan_cost_does_not_grow_with_the_global_revocation_table(tm
         )
     large = cost()
     assert large <= small + 20, (small, large)
+
+
+def test_exact_retry_skips_signature_and_entry_validation(tmp_path, monkeypatch):
+    # N4: the receipt is found before the lock; the retry is served without re-verifying.
+    from checkpoint_support import CORPUS, http, replay
+    from fastapi.testclient import TestClient
+
+    from orch_relay import checkpoints
+    from orch_relay.app import create_app
+
+    case = next(
+        c
+        for c in CORPUS["suites"]["2"]["checkpoints"]["cases"]
+        if c["name"] == "first_checkpoint_full_proof"
+    )
+    with TestClient(create_app(tmp_path)) as client:
+        path = tmp_path / db.DB_NAME
+        replay(client, path, case, upto=len(case["steps"]) - 1)  # accepted, retry not yet sent
+        retry = case["steps"][-1]
+        calls = []
+        real = checkpoints.verify_signed
+        monkeypatch.setattr(checkpoints, "verify_signed", lambda *a: calls.append(a) or real(*a))
+        host = {"Authorization": "Bearer FAKE-workspace", "Orch-Holder": "1"}
+        result = http(
+            client, "PUT", f"/v2/workspaces/{WS}/checkpoint", host, body=retry["input"]["body"]
+        )
+        assert result == retry["expect"] and calls == []
+
+
+def test_unauthorized_staging_is_not_parsed_when_preauthorization_fails(tmp_path, monkeypatch):
+    # N5: on the sqlite3.Error fallback nothing is parsed or validated before the transaction's
+    # own authorization.
+    import sqlite3
+
+    from fastapi.testclient import TestClient
+
+    from orch_relay import checkpoints
+    from orch_relay import proto as P
+    from orch_relay.app import create_app
+
+    def unavailable(self, route, ws, headers):
+        raise sqlite3.OperationalError("FAKE database is locked")
+
+    calls = []
+    monkeypatch.setattr(checkpoints.Checkpoints, "preauthorize", unavailable)
+    monkeypatch.setattr(
+        checkpoints, "precheck_page", lambda *a: calls.append(a) or {"refusal": None}
+    )
+    parsed = []
+    real = P.parse_json
+    monkeypatch.setattr(P, "parse_json", lambda raw: parsed.append(len(raw)) or real(raw))
+    page = b'{"heads":[' + b'"x",' * 100_000 + b'"x"]}'
+    with TestClient(create_app(tmp_path)) as client:
+        parsed.clear()
+        r = client.put(
+            f"/v2/workspaces/{WS}/staging/null/{digest(b'FAKE n5')}/pages/0",
+            content=page,
+            headers={"Content-Type": "application/json"},
+        )
+        assert (r.status_code, r.json()) == (401, {"error": "unauthenticated"}), r.text
+    assert calls == [] and len(page) not in parsed
