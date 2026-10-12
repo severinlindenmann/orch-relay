@@ -214,6 +214,14 @@ def test_no_head_is_folded_under_the_lock_and_each_hold_inserts_one_chunk(relay,
         return real(acc, head)
 
     monkeypatch.setattr(checkpoints, "log_acc", counted)
+    pages, real_page = [], checkpoints.Relay.page_body
+
+    def page_body(self, stage, d):
+        if recorder.lock._is_owned():
+            pages.append(d["i"])  # phase C reads no staged page: phase A recorded what it needs
+        return real_page(self, stage, d)
+
+    monkeypatch.setattr(checkpoints.Relay, "page_body", page_body)
     publisher = []
     relay.cps.hooks["phase_a"] = lambda **kw: publisher.append(threading.get_ident())
     relay.d.lock = recorder
@@ -222,7 +230,7 @@ def test_no_head_is_folded_under_the_lock_and_each_hold_inserts_one_chunk(relay,
     wall = time.perf_counter() - began
     relay.d.lock = recorder.lock
     assert result["result"] == "accepted", result
-    assert recorder.folds == 0
+    assert recorder.folds == 0 and pages == []
     holds = [held for thread, held in recorder.holds if thread == publisher[0]]
     assert len(holds) == 6 + 1, recorder.holds  # the background sweeps hold it too, briefly
     assert max(holds) <= 0.25 * wall, (holds, wall)
@@ -337,8 +345,9 @@ def test_same_workspace_publications_serialize_and_exactly_one_wins(relay):
     second = threading.Thread(target=lambda: results.update(two=put(relay.client, two)))
     second.start()
     time.sleep(0.3)
-    assert len(entered) == 1  # the second waits on the workspace mutex, not in phase A
+    waited = len(entered) == 1  # the second waits on the workspace mutex, not in phase A
     release.set()
+    assert waited, entered
     first.join(30)
     second.join(30)
     assert results["one"]["result"] == "accepted", results
@@ -440,7 +449,7 @@ def test_a_refusal_after_folds_is_answered_by_phase_c_as_by_the_live_path(relay)
     same chain_diverged: it reads phase A's nodes for the root check."""
     ticket = "01" + "0" * 24
     heads = [C.digest(f"FAKE ticket {i}".encode()) for i in range(3)]
-    body, _ = append(relay, 30, 10, tickets={ticket: (heads, entry(heads[:2]))})
+    body, _ = append(relay, 30, 30, tickets={ticket: (heads, entry(heads[:2]))})
     memos = []
     relay.cps.hooks["after_a"] = lambda **kw: memos.append(kw["memo"].accepted)
     assert put(relay.client, body) == {"status": 409, "error": "chain_diverged"}

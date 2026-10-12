@@ -1694,8 +1694,10 @@ class Checkpoints:
     def phase_b(self, ws, headers, memo):
         """Insert phase A's new nodes, NODE_CHUNK rows per short transaction under the lock, each
         re-authorized (a takeover stops it). Nodes are immutable and nothing references them yet,
-        so a refusal or a crash after any chunk leaves only orphans (counted); fold order makes
-        every committed prefix branch-closed, and the inserts are idempotent on a retry."""
+        so a refusal or a crash after any chunk leaves only orphans (counted), and the inserts are
+        idempotent on a retry. Chunks follow fold order, so every committed prefix is also
+        branch-closed (not load-bearing: a later fold reaches a stored node only along a branch it
+        holds in its own cache or that is stored in full)."""
         rows, memo.rows = memo.rows, []
         d = self.d
         for k in range(0, len(rows), NODE_CHUNK):
