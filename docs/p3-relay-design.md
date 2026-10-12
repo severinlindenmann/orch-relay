@@ -869,7 +869,7 @@ commit atomically: H = E, record the restore ids, apply the bundles' revocations
   applied signers) or locally revoked (orch-52 #377), and a local `compromised` revocation alarms when learned.
   At the relay, device→person comes from the live global device registry (or a verified restore signer), not a
   snapshot. Round 4: a held revocation is never discarded; self-certified evidence registers the device globally in
-  the same transaction, so the first accepted binding wins at the relay and on devices alike. The
+  the same transaction, so the first accepted binding wins at the relay and on devices alike (reverted in round 6). The
   failed-publication budget is 16 per holder generation and 48 per workspace-hour: takeovers stay unlimited
   (P3-D10), so the workspace ceiling, not a takeover limit, bounds a WSK holder taking over from itself.
   Round 5 (orch-core #387, F1 §5.10 at e9a26d95, decision rows 149–151): the chain-learned/out-of-band split is now
@@ -881,6 +881,13 @@ commit atomically: H = E, record the restore ids, apply the bundles' revocations
   only for committed signers. A hash-only withheld suffix can hide a committed revocation (accepted limit). The relay
   server's R4 must use per-workspace chain-learned revocations in G4, not the global table (protocol-v2 §19.8
   transport detail 6 (c)).
+  Round 6 (orch-core #397, F1 §5.10 at 8a07c5ab, decision row 152, the row-151 fix): every revocation is retained
+  and matched per `(device_id, person_id)`. The round-4 first-come rule is gone at the relay and on devices: restore
+  evidence never registers its device, held revocations (chain pairs, the global set, a device's local evidence)
+  never bind a carried entry's identity (only associations do: registry, verified signers, a device's
+  `known_devices`), a restore may carry two persons' pairs for one device id, completeness and `unpublished` are per
+  pair, and devices have no `contested` store. Held out-of-band evidence on devices is capped per person (members
+  included, the card owner exempt), per device and in total, membership read at eviction time.
 - **Devices keep their durable revocation knowledge and tombstones.** A restore can never resurrect a device they know
   to be revoked. Bundle absence does not prove historical non-revocation, and no retroactive completeness is demanded.
 
@@ -1211,7 +1218,8 @@ public deployment.
   about 4x the staged bytes, repeatable every ~25 s per workspace; `checkpoint_receipts` and
   `checkpoint_gone` are never purged and restore-referenced checkpoints are permanent. `checkpoint_revocations`
   and `checkpoint_unpublished` grow with restores x known devices (owner-gated). Self-certified restore evidence
-  adds an account, a device and a global revocation per entry, and any account holder can cause it from their
+  adds a global revocation pair per entry (since the #397 re-pin no account or device), and any account holder can
+  cause it from their
   own workspace (hundreds of entries per 512 KiB line); this is what made the round-2 unpublished scan
   (review N2, now a per-device lookup) a cost for every workspace. Needs a per-workspace storage quota (429)
   and a quota on self-certified evidence per account. The `unpublished` retrieval or poll route (orch-52

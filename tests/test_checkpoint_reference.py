@@ -194,7 +194,10 @@ def test_historical_owner_refuses_any_known_signer_revocation_not_completeness(r
     case = CASES["historical_signer_known_lost_before_line_at_refused"]
     state = copy.deepcopy(case["state"])
     request = case["steps"][0]["input"]
-    signer = request["body"]["cert"]["o"]["device_id"]
+    o = request["body"]["cert"]["o"]
+    signer = (
+        o["device_id"] + ":" + o["person_id"]
+    )  # held revocations are keyed by pair (orch-core #397)
     known = state["revocations"].pop(signer)
     if reason:
         key = S.sig_key(bytes.fromhex(V["keys"]["person_alice.sig"]["seed"]))
@@ -251,3 +254,23 @@ def test_manifest_bytes_count_toward_the_staging_quota(monkeypatch):
     assert state == before
     monkeypatch.setattr(C, "STAGE_CAP", size)
     assert C.dispatch(S, state, **manifest)["status"] == 200
+
+
+@pytest.mark.parametrize("store", ["revocations", "global_revocations"])
+def test_owner_refuses_the_signer_pair_only(store):
+    """orch-core #397 at the relay: a held revocation (this workspace's chain pairs or the global set) refuses the
+    restore signer only when it names the signer's (device, person) pair; another person's "revocation" of the
+    signer's device id never refuses (it is another pair)."""
+    case = CASES["historical_signer_known_lost_before_line_at_refused"]
+    state = copy.deepcopy(case["state"])
+    request = case["steps"][0]["input"]
+    o = request["body"]["cert"]["o"]
+    known = state["revocations"].pop(o["device_id"] + ":" + o["person_id"])
+    bob = V["ids"]["person_bob"]
+    key = S.sig_key(bytes.fromhex(V["keys"]["person_bob.sig"]["seed"]))
+    state[store][o["device_id"] + ":" + bob] = R.sign_object(
+        S, key, {**known["o"], "person_id": bob}
+    )
+    assert C.dispatch(S, copy.deepcopy(state), **request) == {"status": 200}
+    state[store][o["device_id"] + ":" + o["person_id"]] = known
+    assert C.dispatch(S, state, **request) == {"status": 409, "error": "restore_not_owner"}

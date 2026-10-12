@@ -16,7 +16,7 @@ ROUTES = [
     ("session_challenge", "POST", "/v2/session/challenge", "client", "none", "429:rate_limited"),
     ("session_login", "POST", "/v2/session/login", "client", "none", "400:cert_expired,cert_invalid 401:unknown_challenge,expired,bad_signature 403:revoked 429:quota_exceeded"),
     ("session_logout", "POST", "/v2/session/logout", "client", "logout", ""),
-    ("accounts", "POST", "/v2/accounts", "client", "none", "400:cert_invalid 401:bad_signature,unknown_challenge,expired 403:not_eligible 409:account_exists"),
+    ("accounts", "POST", "/v2/accounts", "client", "none", "400:cert_invalid 401:bad_signature,unknown_challenge,expired 403:not_eligible,revoked 409:account_exists"),
     ("device_put", "PUT", "/v2/devices/{device}", "client", "none", "400:cert_invalid,cert_expired 403:revoked,other_person 409:cert_conflict 429:rate_limited"),
     ("device_get", "GET", "/v2/devices/{device}", "client", "D(p)|W", "403:not_eligible 404:not_found"),
     ("revocations_post", "POST", "/v2/revocations", "client", "none", "401:bad_signature 403:other_person 429:rate_limited"),
@@ -134,7 +134,7 @@ def condition_for(name, code):
     if code == "cert_expired":
         return "A proposed member certificate has expired; publication is refused with 403." if name == "membership" else f"Device certificate used by {name} has expired (400)."
     if code == "revoked":
-        return f"The target device for {name} is revoked." if name in {"membership", "bridge_host_post", "device_put"} else f"The device authenticating {name} is revoked."
+        return f"The target device for {name} is revoked." if name in {"membership", "bridge_host_post", "device_put", "accounts"} else f"The device authenticating {name} is revoked."
     if code == "quota_exceeded" and name == "session_login":
         return "Eight live device tokens exist; the earliest expires in 20 seconds."
     if code == "expired":

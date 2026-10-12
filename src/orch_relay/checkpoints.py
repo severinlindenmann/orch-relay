@@ -590,19 +590,27 @@ class Relay:
 
     # --- owner-device policy (P3-D23/D24, relay side) ------------------------------------------------
 
-    def revoked(self, device):
-        return self.con.execute("SELECT 1 FROM revocations WHERE device_id=?", (device,)).fetchone()
+    def revoked(self, device, person):
+        """A held revocation of the restore signer's (device, person) pair (orch-core #397): another
+        person's revocation of the device id is another pair and never refuses the signer. (The
+        device-auth cutoff for sessions and member certificates stays by device id: directory.)"""
+        return self.con.execute(
+            "SELECT 1 FROM revocations WHERE device_id=? AND person_id=?", (device, person)
+        ).fetchone()
 
     def owner(self, w, cert, at_ms, extra=()):
-        # Every revocation the relay holds, and evidence in this payload, refuses the signer.
-        # A malformed certificate fails verify_cert below; a database error propagates (fail
-        # closed, review L2): the relay's revocation lookup is never skipped.
+        # Every revocation the relay holds of the signer's pair, and any entry in this payload for
+        # the signer's device id (self-revocation, any person), refuses the signer. A malformed
+        # certificate fails verify_cert below; a database error propagates (fail closed, review
+        # L2): the relay's revocation lookup is never skipped.
         try:
-            device = cert["o"]["device_id"]
+            device, person = cert["o"]["device_id"], cert["o"]["person_id"]
         except (TypeError, KeyError):
-            device = None
+            device = person = None
         revoked = set()
-        if isinstance(device, str) and (device in extra or self.revoked(device)):
+        if isinstance(device, str) and (
+            device in extra or (isinstance(person, str) and self.revoked(device, person))
+        ):
             revoked = {device}
         checked = P.verify_cert(cert, P.unb64u(w["owner_pk"]), at_ms, revoked)
         need("ok" in checked, "restore_not_owner", 409)
@@ -981,39 +989,31 @@ class Relay:
         P.unb64u(line["host_sig"], 64)
         need(isinstance(line["revocations"], list))
 
-    def known_persons(self, device):
-        """{person: key or None} a carried revocation of `device` must come from; {} for a wholly
-        unknown device (self-certified evidence, review 5).
+    def association(self, device):
+        """(person, account key or None) the relay associates with `device`, or None: the live
+        device registry (§19.1, written by PUT /v2/devices or account creation under the person's
+        account key; a restore signer is a list member and so a registered device, review L3).
 
-        Bindings come from this workspace's own chain pairs first (the first accepted binding wins,
-        review A/B), then the live device registry (§19.1, written under the person's account
-        key). Out-of-band evidence (the global revocation table) never binds (orch-52, F1 #387
-        provisional). A restore signer is a list member and so a registered device (review L3)."""
-        persons = [
-            r[0]
-            for r in self.con.execute(
-                "SELECT person_id FROM checkpoint_revocations WHERE workspace_id=? AND device_id=?",
-                (self.ws, device),
-            )
-        ]
-        if not persons:
-            row = self.con.execute(
-                "SELECT person_id FROM devices WHERE device_id=?", (device,)
-            ).fetchone()
-            persons = [row[0]] if row else []
-        out = {}
-        for person in persons:
-            key = self.con.execute(
-                "SELECT pk_pub FROM accounts WHERE person_id=?", (person,)
-            ).fetchone()
-            out[person] = key[0] if key else None
-        return out
+        orch-core #397: only associations bind a carried entry's identity. Held revocations bind
+        nothing: neither this workspace's chain pairs nor the global table (a tombstone is evidence,
+        not an association). Restore evidence never registers a device (apply_evidence), and a
+        registry row of an evidence-only person (P3-D29, created by restore evidence before
+        migration 0010) is not an association either."""
+        row = self.con.execute(
+            "SELECT d.person_id, a.pk_pub FROM devices d LEFT JOIN accounts a "
+            "ON a.person_id=d.person_id WHERE d.device_id=? AND NOT EXISTS "
+            "(SELECT 1 FROM evidence_persons e WHERE e.person_id=d.person_id)",
+            (device,),
+        ).fetchone()
+        return (row[0], row[1]) if row else None
 
     def evidence(self, line, log):
-        """Verified entries keyed by (device, person): a restore may carry one entry per pair,
-        sorted by (device_id, person_id) (orch-52 decision point 4, provisional)."""
+        """Verified entries keyed by (device, person): a restore carries one entry per pair, sorted
+        by (device_id, person_id) (orch-core #397). An entry for an associated device must be of its
+        person and key; a device without association is self-certified by each pair, so two
+        persons' entries for one such device are two pairs, both accepted."""
         need(log == "workspace" or line["revocations"] == [], "restore_invalid", 409)
-        listed, order, unknown = {}, [], {}
+        listed, order = {}, []
         for item in line["revocations"]:
             need(
                 isinstance(item, dict) and set(item) == {"revocation", "device_cert", "pk_pub"},
@@ -1027,15 +1027,9 @@ class Relay:
             rev = P.verify_revocation(item["revocation"], pk, checked["ok"])
             need("ok" in rev, "restore_invalid", 409)
             pair = (rev["ok"]["device_id"], rev["ok"]["person_id"])
-            persons = self.known_persons(pair[0])
-            if not persons:
-                # A wholly unknown device is self-certified by exactly one person per restore: its
-                # first entry binds it (registered globally on acceptance), so another person's
-                # entry for it in the same restore is contradicting evidence, as it would be in
-                # the next restore (review: identity binding).
-                persons = unknown.setdefault(pair[0], {pair[1]: item["pk_pub"]})
+            holder = self.association(pair[0])
             need(
-                pair[1] in persons and persons[pair[1]] in (None, item["pk_pub"]),
+                holder is None or (pair[1] == holder[0] and holder[1] in (None, item["pk_pub"])),
                 "restore_invalid",
                 409,
             )
@@ -1050,9 +1044,13 @@ class Relay:
         (F1 #387): each chain pair of a device in ever_devices (G2 and checkpoint) or in this
         restore needs a carried entry of the same pair at the same or a stronger reason.
 
-        Returns the `unpublished` hints: revocations the relay holds globally (out of band for
-        this workspace) of a device this workspace knows, which the restore does not carry at
-        their strength under the same pair. They never refuse (provisional, orch-52)."""
+        Returns the `unpublished` references, per pair (orch-core #397): revocations the relay
+        holds globally (out of band for this workspace) that the restore does not carry at their
+        strength under the same pair, for a device this workspace associates (its G2 ever-devices,
+        the list members). Not reported, still retained and enforced: the signer's device, a pair
+        whose device's association names another person, and tombstone-only devices (known to
+        this workspace only through restore evidence, so not known for forwarding). They never
+        refuse."""
         if log != "workspace":
             return []
         carried = {
@@ -1080,15 +1078,27 @@ class Relay:
         )
         need(not missing, "restore_missing_revocation", 409, devices=missing)
         unpublished = []
-        # Only the devices this workspace knows (review N2): never the relay-wide table, which
+        # Only the devices this workspace associates (review N2): never the relay-wide table, which
         # any account holder grows with self-certified evidence. A chain pair whose global
         # revocation is stronger than what the restore carries is reported too (review N1).
+        associated = {
+            r[0]
+            for r in self.con.execute(
+                "SELECT device_id FROM ever_devices WHERE workspace_id=?", (self.ws,)
+            )
+        } - {signer}
         rows = []
-        for d in sorted(known):
-            rows += self.con.execute(
-                "SELECT device_id,person_id,reason,cursor,record FROM revocations WHERE device_id=?",
-                (d,),
-            ).fetchall()
+        for d in sorted(associated):
+            holder = self.association(d)
+            rows += [
+                row
+                for row in self.con.execute(
+                    "SELECT device_id,person_id,reason,cursor,record FROM revocations "
+                    "WHERE device_id=? ORDER BY person_id",
+                    (d,),
+                )
+                if holder is None or row[1] == holder[0]
+            ]
         for d, p, reason, cursor, record in rows:
             if carried.get((d, p), 0) < STRENGTH[reason]:
                 unpublished.append(
@@ -1223,11 +1233,12 @@ class Relay:
         return log
 
     def apply_evidence(self, listed, restore_id, target_hash):
-        """§19.5 intake and this workspace's chain pairs, in this transaction. A wholly unknown
-        device is registered from its self-certified evidence first, so the registry never
-        contradicts the binding (review A/B). Neither table ever loses a revocation: the
-        global one only upgrades (§6.2 "no un-revoke"), a chain pair keeps its first evidence
-        and provenance until a stronger reason replaces them (F1 #387: monotonic)."""
+        """§19.5 intake and this workspace's chain pairs, in this transaction, per (device,
+        person) pair. Restore evidence never registers its device or creates an account (orch-core
+        #397: no first-come association; the round-4 rule is reverted). Neither table ever loses a
+        revocation: the global one only upgrades per pair (§6.2 "no un-revoke"), a chain pair keeps
+        its first evidence and provenance until a stronger reason replaces them (monotonic,
+        sticky: only an accepted restore writes a chain pair, never out-of-band evidence)."""
         con = self.con
         for (device, person), item in listed.items():
             reason = item["revocation"]["o"]["reason"]
@@ -1255,18 +1266,7 @@ class Relay:
                         target_hash,
                     ),
                 )
-            rev, cert = item["revocation"], item["device_cert"]
-            if not con.execute("SELECT 1 FROM devices WHERE device_id=?", (device,)).fetchone():
-                person = cert["o"]["person_id"]
-                if not con.execute(
-                    "SELECT 1 FROM accounts WHERE person_id=?", (person,)
-                ).fetchone():
-                    con.execute(
-                        "INSERT INTO accounts VALUES (?,?,?)", (person, item["pk_pub"], self.now)
-                    )
-                    con.execute("INSERT INTO evidence_persons VALUES (?)", (person,))
-                self.d.store_device(con, cert)
-            self.d.revoke(con, rev, self.now)
+            self.d.revoke(con, item["revocation"], self.now)
             self.wake.add(("subject", device))
             self.wake.update(
                 ("ws", r[0])

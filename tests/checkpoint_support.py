@@ -100,12 +100,13 @@ def certificate(pool, device, person):
 
 
 def revocations(state):
-    """Production holds revocations globally: the strongest of the held and the global sets."""
+    """Production holds revocations globally, per (device, person) pair (orch-core #397, migration
+    0010): the strongest of the held and the global sets, keyed 'device:person' as in the reference."""
     out = {}
     for source in (state["revocations"], state.get("global_revocations", {})):
-        for d, rev in source.items():
-            if d not in out or STRENGTH[rev["o"]["reason"]] > STRENGTH[out[d]["o"]["reason"]]:
-                out[d] = rev
+        for key, rev in source.items():
+            if key not in out or STRENGTH[rev["o"]["reason"]] > STRENGTH[out[key]["o"]["reason"]]:
+                out[key] = rev
     return out
 
 
@@ -123,23 +124,19 @@ def seed(path, state, case, now=None, ws=WS):
     pool = pools(case)
     revs = revocations(state)
     with closing(db.connect(path)) as con, con:
+        # Restore evidence registers no device (orch-core #397): the registry holds the
+        # reference's registry, verified signers and the list members only.
         devices = dict(state["registry"])
-        for d, rev in revs.items():
-            devices.setdefault(d, rev["o"]["person_id"])
         for d, person in state.get("bound", {}).items():
             devices.setdefault(d, person)
         for d in state["members"]:
             # Production members are registered devices (G2 membership verifies their certs).
             devices.setdefault(d, next(p for (dd, p) in pool["certs"] if dd == d))
         persons = dict(state["person_keys"])
-        evidence = set()
         for person in set(devices.values()) - set(persons):
             persons[person] = pool["pks"][person]
-            evidence.add(person)
         for person, pk in persons.items():
             con.execute("INSERT OR IGNORE INTO accounts VALUES (?,?,?)", (person, pk, 0))
-        for person in evidence:
-            con.execute("INSERT OR IGNORE INTO evidence_persons VALUES (?)", (person,))
         for d, person in devices.items():
             cert = certificate(pool, d, person)
             o = cert["o"]
@@ -179,11 +176,18 @@ def seed(path, state, case, now=None, ws=WS):
             # signers outside the list are checkpoint_ever_devices only (review R2).
             if d not in state["members"]:
                 con.execute("INSERT INTO checkpoint_ever_devices VALUES (?,?)", (ws, d))
-        for cursor, d in enumerate(sorted(revs), 1):
-            rev = revs[d]
+        for cursor, key in enumerate(sorted(revs), 1):
+            rev = revs[key]
             con.execute(
                 "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
-                (d, rev["o"]["person_id"], P.cj(rev), rev["o"]["reason"], 0, cursor),
+                (
+                    rev["o"]["device_id"],
+                    rev["o"]["person_id"],
+                    P.cj(rev),
+                    rev["o"]["reason"],
+                    0,
+                    cursor,
+                ),
             )
         # The reference's held (workspace) revocations are this workspace's chain pairs.
         provenance = {}
@@ -193,8 +197,8 @@ def seed(path, state, case, now=None, ws=WS):
                 provenance.setdefault(
                     (o["device_id"], o["person_id"]), (t["restore_id"], t["target_hash"])
                 )
-        for d, rev in state["revocations"].items():
-            person = rev["o"]["person_id"]
+        for rev in state["revocations"].values():
+            d, person = rev["o"]["device_id"], rev["o"]["person_id"]
             ref = provenance.get((d, person), ("seed", "seed"))
             con.execute(
                 "INSERT INTO checkpoint_revocations VALUES (?,?,?,?,?,?,?,?,?)",
@@ -435,9 +439,12 @@ def project_state(state, now):
             for h, b in state["baselines"].items()
             if b["until_ms"] > now
         },
-        "revocations": {d: (r["o"]["person_id"], r["o"]["reason"]) for d, r in revs.items()},
+        "revocations": {
+            (r["o"]["device_id"], r["o"]["person_id"]): r["o"]["reason"] for r in revs.values()
+        },
         "chain": {
-            (d, r["o"]["person_id"]): r["o"]["reason"] for d, r in state["revocations"].items()
+            (r["o"]["device_id"], r["o"]["person_id"]): r["o"]["reason"]
+            for r in state["revocations"].values()
         },
         "ever": set(state["ever_devices"]),
         "staging": {
@@ -518,7 +525,7 @@ def project_db(path, now, ws=WS):
                 )
             },
             "revocations": {
-                d: (p, r)
+                (d, p): r
                 for d, p, r in con.execute("SELECT device_id,person_id,reason FROM revocations")
             },
             "chain": {

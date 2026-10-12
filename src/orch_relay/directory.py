@@ -281,6 +281,8 @@ class Directory:
         return {"challenge": challenge, "expires_ms": now + MINUTE}
 
     def device_status(self, con, device, now):
+        # Device-auth cutoff: any held revocation of the device id, whatever the person (a different
+        # concern from restore-signer refusal, which matches the (device, person) pair, orch-core #397).
         if con.execute(
             "SELECT 1 FROM revocations WHERE device_id=?", (device["device_id"],)
         ).fetchone():
@@ -412,7 +414,16 @@ class Directory:
         if not P.SUITE.pub_ok(pub):
             fail("cert_invalid")
         check_suite(body["device_cert"])
-        o = checked(P.verify_cert(body["device_cert"], pub, now))
+        # As PUT /v2/devices (recovery): a device id with any held revocation is never registered
+        # (the device-auth cutoff, by device id). Since 0010 such an id can exist without a
+        # registry row (restore evidence registers nothing), so account creation checks it too.
+        cert_o = body["device_cert"].get("o") if isinstance(body["device_cert"], dict) else None
+        did = cert_o.get("device_id") if isinstance(cert_o, dict) else None
+        prior = (
+            isinstance(did, str)
+            and con.execute("SELECT 1 FROM revocations WHERE device_id=?", (did,)).fetchone()
+        )
+        o = checked(P.verify_cert(body["device_cert"], pub, now, {did} if prior else set()))
         if not P.SUITE.verify(
             P.unb64u(o["dk_sig_pub"]),
             P.unb64u(body["sig"]),
@@ -515,7 +526,12 @@ class Directory:
             fail("other_person")
         pub = P.unb64u(account["pk_pub"])
         stored = con.execute("SELECT * FROM devices WHERE device_id=?", (did,)).fetchone()
-        prior = con.execute("SELECT * FROM revocations WHERE device_id=?", (did,)).fetchone()
+        # A revocation is held per (device, person) pair (orch-core #397); a certificate is refused
+        # for a device id with any held revocation (the device-auth cutoff, by device id).
+        prior = con.execute(
+            "SELECT * FROM revocations WHERE device_id=? AND (?=0 OR person_id=?)",
+            (did, int(revocation), person),
+        ).fetchone()
         if revocation:
             checked(
                 P.verify_revocation(
@@ -552,15 +568,24 @@ class Directory:
         return {"device_id": did}
 
     def revoke(self, con, record, now):
-        """Called only after PK verification; caller owns the write transaction (also G4)."""
+        """Called only after PK verification; caller owns the write transaction (also G4).
+
+        Retained per (device_id, person_id) pair (orch-core #397, migration 0010): another person's
+        revocation of the same device id is another row, never dropped and never replacing this
+        one; a pair only upgrades (§6.2 "no un-revoke"). The cutoff below (sessions, member list,
+        rotation) is by device id: device authentication ends for a device id with any revocation."""
         o = record["o"]
         did = o["device_id"]
-        prior = con.execute("SELECT * FROM revocations WHERE device_id=?", (did,)).fetchone()
+        prior = con.execute(
+            "SELECT * FROM revocations WHERE device_id=? AND person_id=?", (did, o["person_id"])
+        ).fetchone()
         cursor = prior["cursor"] if prior else None
         if prior is None or (prior["reason"] != "compromised" and o["reason"] == "compromised"):
             cursor = con.execute("SELECT COALESCE(MAX(cursor),0)+1 FROM revocations").fetchone()[0]
             con.execute(
-                "INSERT INTO revocations VALUES (?,?,?,?,?,?) ON CONFLICT(device_id) DO UPDATE SET record=excluded.record, reason=excluded.reason, received_ms=excluded.received_ms, cursor=excluded.cursor",
+                "INSERT INTO revocations VALUES (?,?,?,?,?,?) ON CONFLICT(device_id,person_id) "
+                "DO UPDATE SET record=excluded.record, reason=excluded.reason, "
+                "received_ms=excluded.received_ms, cursor=excluded.cursor",
                 (did, o["person_id"], P.cj(record), o["reason"], now, cursor),
             )
         con.execute("DELETE FROM sessions WHERE kind='device' AND subject_id=?", (did,))
@@ -659,8 +684,13 @@ class Directory:
             return self.recovery(con, body, raw, address, now, ident)
         if route == "revocation":
             self.rate("revocation-read", address, MINUTE, 60, now)
+            # Per pair since 0010: the registered person's revocation of the device first, else the
+            # earliest held one (the response shape names one record).
             row = con.execute(
-                "SELECT record FROM revocations WHERE device_id=?", (ident,)
+                "SELECT r.record FROM revocations r LEFT JOIN devices d ON d.device_id=r.device_id "
+                "AND d.person_id=r.person_id WHERE r.device_id=? "
+                "ORDER BY d.device_id IS NULL, r.cursor LIMIT 1",
+                (ident,),
             ).fetchone()
             if row is None:
                 fail("not_found")
