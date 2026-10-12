@@ -1404,6 +1404,24 @@ HTTP fixture.
     - F4: memory roughly doubles with two big publications in flight: the gate by heads and the
       environment knobs above.
     - F6: post-answer accounting is best effort; `orphaned` is cumulative.
+  - *Round 2 delta check (Opus, "pass with required changes (small)").*
+    - N1: the admission queue mishandled cancellation. A waiter cancelled in the same loop step
+      as another publication's leave was admitted by `wake()`: `set_result` raised in the leaving
+      request (a committed publication answered 500), the slot leaked for good, and the cancelled
+      waiter then failed to remove itself. Now `wake()` skips done futures, and a cancelled waiter
+      removes itself only if it is still queued, then wakes the queue. This was latent: nothing
+      cancels publication handlers today. Pinned by three cancellation tests: cancelled while
+      queued (behind another waiter), cancelled in the same step as a leave, and cancelled after
+      admission but before running. In each, the gate ends empty and still admits.
+    - N2: restart rounds did not count earlier rounds of the same request against the
+      refused-heads budget, which is recorded only after the answer (PoC: 3 sets recorded against
+      a one-set budget). Now each round's budget check, in phase A and phase C, adds the heads
+      carried from earlier rounds. One request folds at most the remaining budget plus one set,
+      and a round past the budget answers 429 `quota_exceeded`, uncharged, with the work
+      recorded.
+    - Pins: phase C's live heads on a restart are recorded; phase A reads no staged page after it
+      renews its snapshot. The preload mutant is equivalent here because the pages are read in
+      bulk at the first access, which is also before the first renewal.
     - F7: pins for membership removed between A and C, an unused page re-staged between A and C,
       and the mutex taken before admission.
   - *Residual.*
@@ -1459,8 +1477,8 @@ HTTP fixture.
 public deployment.
 
 - **G1: publication work inside the global write lock. Closed for honest load and bounded against a WSK
-  holder as of P3-D33 round 2** (the review's re-check of F1 and F2 is pending; F3 to F5 residuals are
-  listed in P3-D33). A full 64 MiB / ~900,000-head
+  holder as of P3-D33 round 2** (the round-2 delta check passed the re-check of F1 and F2; its N1
+  gate-cancellation fix and N2 per-request budget fix are in; F3 to F5 residuals are listed in P3-D33). A full 64 MiB / ~900,000-head
   publication held `directory.lock` (shared by every write: logins, bridge, membership, recovery) for
   21.4 s with peak RSS about 836 MB, and a refusal at the end of the fold cost the same; refused
   publications repeated 48 times per workspace-hour without re-staging, and blocked writes pinned the

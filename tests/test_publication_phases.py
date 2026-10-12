@@ -1107,13 +1107,17 @@ def test_gate_waiter_cancelled_while_queued():
 
         t1 = asyncio.create_task(holder())
         await steps()
+        first = asyncio.create_task(enter_once(gate, "c"))
+        await steps()
         t2 = asyncio.create_task(enter_once(gate, "b"))
         await steps()
-        t2.cancel()
+        t2.cancel()  # queued behind `first`, not at the head
         await steps()
         assert gate.active == 1 and gate.heads == 1
+        assert len(next(iter(gate.loops.values()))[1]) == 1  # it left the queue at once
         go.set()
         await t1
+        await asyncio.wait_for(first, 1)
         with pytest.raises(asyncio.CancelledError):
             await t2
 

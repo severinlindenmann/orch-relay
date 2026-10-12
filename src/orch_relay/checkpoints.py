@@ -574,6 +574,7 @@ class Memo:
         self.committed = False  # phase C committed the publication
         self.charged = False  # phase C's charged refusal recorded the heads itself
         self.reserved = None  # heads reserved in the gate (phase A reweighs beyond it)
+        self.carried = 0  # heads folded by earlier rounds of this request (budget check, N2)
         self.refresh = None  # phase A: end the read snapshot and start a new one (review F3)
         self.inserted = self.hits = 0
 
@@ -1041,6 +1042,8 @@ class Relay:
             "WHERE workspace_id=? AND at_ms>?",
             (self.ws, self.now - HOUR),
         ).fetchone()[0]
+        if self.memo is not None:  # earlier rounds of this request, recorded only after it (N2)
+            spent += self.memo.carried
         need(
             window[1] < FAILURE_BUDGET
             and window[0] < WORKSPACE_FAILURE_CEILING
@@ -1595,8 +1598,10 @@ class Gate:
         self.wake(waiters)
 
     def wake(self, waiters):
-        while waiters and self.fits(waiters[0][0]):
+        while waiters and (waiters[0][1].done() or self.fits(waiters[0][0])):
             weight, future = waiters.popleft()
+            if future.done():  # cancelled while queued (review N1): it gives up its place
+                continue
             self.admit(weight)
             future.set_result(None)
 
@@ -1620,8 +1625,9 @@ class Gate:
                     except asyncio.CancelledError:
                         if waiter[1].done() and not waiter[1].cancelled():
                             self.release(weight, waiters)  # admitted, then cancelled
-                        else:
-                            waiters.remove(waiter)
+                        else:  # never admitted; a leave may have dropped it already (N1)
+                            if waiter in waiters:
+                                waiters.remove(waiter)
                             self.wake(waiters)
                         raise
                 try:
@@ -1781,7 +1787,8 @@ class Checkpoints:
                 if attempt:
                     self.hook("restart", ws=ws, round=attempt)
                 try:
-                    fresh = self.phase_a(ws, headers, raw, prepared, reserved)
+                    carried = memo.heads + memo.live if memo is not None else 0
+                    fresh = self.phase_a(ws, headers, raw, prepared, reserved, carried)
                 except sqlite3.Error:
                     continue
                 if memo is not None:  # the work and the nodes of earlier rounds
@@ -1805,7 +1812,7 @@ class Checkpoints:
             if memo is not None:
                 self.settle(ws, memo, refused)
 
-    def phase_a(self, ws, headers, raw, prepared, reserved=None):
+    def phase_a(self, ws, headers, raw, prepared, reserved=None, carried=0):
         """Authorize, then run the whole publication on WAL read snapshots, without the lock:
         every fold, R0-R5 and the checks in their reference order. Nothing is written; the
         outcome only prepares phase C, which answers (a refusal here is re-derived there). The
@@ -1813,7 +1820,7 @@ class Checkpoints:
         assert not self.d.lock._is_owned(), "phase A runs outside Directory.lock"
         pre = prepared[1] if prepared is not None else None
         memo = Memo()
-        memo.reserved = reserved
+        memo.reserved, memo.carried = reserved, carried
         with self.bridge.reading("query") as con:
             con.execute("BEGIN")
             now = self.d.clock()

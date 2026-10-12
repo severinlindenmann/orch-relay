@@ -2875,7 +2875,7 @@ charged; they cost one signature check and one canonicalisation of at most 2 MiB
 and the budget check above also answers 429 `quota_exceeded` (not charged) once the workspace's refusals of
 the rolling hour have folded about 1.81 million heads (twice the heads of a full 64 MiB staging set). A refusal
 before the staged set is folded (for example `restore_source_mismatch`, `checkpoint_time`,
-`staging_incomplete`) folds nothing. Every refusal records the fold work done for it, also the uncharged
+`staging_incomplete`) folds nothing. Work already done for the same request counts in the check too. Every refusal records the fold work done for it, also the uncharged
 ones (`fenced` after a takeover, 429, 503). No new refusal code; the staged set is kept on a refusal. A relay verifies
 a publication outside its global write transaction and may store the verified nodes of a publication it then
 refuses (for example after a takeover between verification and commit); such nodes are immutable, referenced
