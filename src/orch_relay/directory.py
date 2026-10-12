@@ -683,41 +683,64 @@ class Directory:
             (cursor, did),
         )
 
-    def revocation_pairs(self, con, device):
-        """GET /v2/devices/{device}/revocation (P3-D30, orch-52 ruling 3): every held pair of the
-        device id, the registered person's pair first, then the others by person_id.
+    PAIR_PAGE = 32
+
+    def revocation_pairs(self, con, device, query):
+        """GET /v2/devices/{device}/revocation?after=&limit= (P3-D30, orch-52 ruling 3; paginated
+        in round 2, review S1): every held pair of the device id, at most 32 per page, as
+        `{pairs, next}`. The registered person's pair is first on page 1; the others follow
+        chain before feed, then by §19.5 cursor (earliest first), never by person_id, which an
+        attacker chooses (minted keys) to push genuine pairs off page 1. `next` is opaque and
+        passed back as `after`. A pair upgraded or carried during a walk may be listed again or
+        keep its earlier entry. Intake is not capped (that would let an attacker block restores).
 
         provenance: 'registry' when the pair's person is the device's association (its registry row,
         excluding P3-D29 evidence-only rows, which restores created); 'chain' when an accepted
         restore of some workspace carried the pair (`checkpoint_revocations`: carried by some
         workspace host, NOT authenticated by the device's person); 'feed' otherwise (the §19.5
-        table alone). Only 'registry' is an association the relay verified.
+        table alone). The labels are relay claims; no client decision may rest on this route.
 
         The route is unauthenticated, so each entry is only the public signed record (the strongest
         held, the §19.5 row) and its label. Security review of P3-D30: no device certificate (the
         registry one is gated by GET /v2/devices/{device}; a chain one came from another
         workspace's restore, readable only through that workspace's routes) and no account key."""
+        limit = integer(query.get("limit", str(self.PAIR_PAGE)), self.PAIR_PAGE)
+        if limit == 0:
+            fail("malformed")
+        rank, cursor = -1, 0
+        if "after" in query:
+            continuation = P.parse_json(P.unb64u(query["after"]))
+            fields(continuation, "device rank cursor")
+            rank, cursor = continuation["rank"], continuation["cursor"]
+            if continuation["device"] != device or rank not in (0, 1, 2) or type(cursor) is not int:
+                fail("malformed")
         rows = con.execute(
-            "SELECT r.person_id, r.reason, r.record, d.device_id IS NOT NULL, EXISTS ("
-            "SELECT 1 FROM checkpoint_revocations c WHERE c.device_id=r.device_id "
-            "AND c.person_id=r.person_id) FROM revocations r "
-            "LEFT JOIN devices d ON d.device_id=r.device_id AND d.person_id=r.person_id "
+            "SELECT * FROM (SELECT r.person_id, r.reason, r.record, r.cursor, CASE "
+            "WHEN d.device_id IS NOT NULL THEN 0 WHEN EXISTS (SELECT 1 FROM checkpoint_revocations "
+            "c WHERE c.device_id=r.device_id AND c.person_id=r.person_id) THEN 1 ELSE 2 END rank "
+            "FROM revocations r LEFT JOIN devices d ON d.device_id=r.device_id "
+            "AND d.person_id=r.person_id "
             "AND NOT EXISTS (SELECT 1 FROM evidence_persons e WHERE e.person_id=d.person_id) "
-            "WHERE r.device_id=? ORDER BY d.device_id IS NULL, r.person_id",
-            (device,),
+            "WHERE r.device_id=?) WHERE (rank, cursor) > (?, ?) ORDER BY rank, cursor LIMIT ?",
+            (device, rank, cursor, limit + 1),
         ).fetchall()
-        if not rows:
+        if not rows and "after" not in query:
             fail("not_found")
+        page = rows[:limit]
+        last = page[-1] if page else None
         return {
             "pairs": [
                 {
                     "person_id": person,
                     "reason": reason,
                     "revocation": P.parse_json(record),
-                    "provenance": "registry" if registry else "chain" if chain else "feed",
+                    "provenance": ("registry", "chain", "feed")[rank_],
                 }
-                for person, reason, record, registry, chain in rows
-            ]
+                for person, reason, record, _, rank_ in page
+            ],
+            "next": P.b64u(P.cj({"device": device, "rank": last[4], "cursor": last[3]}))
+            if len(rows) > limit
+            else None,
         }
 
     def card_put(self, con, ws, body, headers, address, now):
@@ -778,7 +801,10 @@ class Directory:
         if route in members.ROUTES:
             P.unhex(ident)
             return members.dispatch(self, con, route, ident, body, raw, query, headers, now)
-        allowed = {"after", "limit", "next"} if route == "feed" else set()
+        allowed = {
+            "feed": {"after", "limit", "next"},
+            "revocation": {"after", "limit"},
+        }.get(route, set())
         if any(k not in allowed for k in query) or len(query) != len(set(query.keys())):
             fail("malformed")
         if ident is not None:
@@ -802,7 +828,7 @@ class Directory:
             return self.recovery(con, body, raw, address, now, ident)
         if route == "revocation":
             self.rate("revocation-read", address, MINUTE, 60, now)
-            return self.revocation_pairs(con, ident)
+            return self.revocation_pairs(con, ident, query)
         if route == "card" and method == "PUT":
             return self.card_put(con, ident, body, headers, address, now)
         session = self.authenticate(con, headers, now)

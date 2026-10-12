@@ -519,17 +519,17 @@ def _own_row(con, did=DEVICE, reason="lost"):
 
 def test_revocation_route_lists_every_pair_registered_person_first(tmp_path):
     """P3-D30 (orch-52 ruling 3): one entry per held pair; the registered person's pair first even
-    though it sorts last by person_id and has the highest cursor, then by person_id; each with its
-    provenance label (no certificate or key: see the disclosure test below)."""
+    though it sorts last by person_id and has the highest cursor, then chain before feed (round 2,
+    review S1), each with its provenance label (no certificate or key: see the disclosure test)."""
     intruder = R.person_id(S, P.unb64u(INTRUDER_PK)).hex()
     with TestClient(create_app(tmp_path)) as c:
         d = c.app.state.directory
         seed(d)
         with closing(db.connect(d.path)) as con, con:
-            chain, _ = _chain_row(con, DEVICE, intruder, "intruder.sig", INTRUDER_PK)
             feed = _other_person_row(con, DEVICE)
+            chain, _ = _chain_row(con, DEVICE, intruder, "intruder.sig", INTRUDER_PK)
             own = _own_row(con)
-        assert PERSON > max(BOB, intruder)
+        assert PERSON > max(BOB, intruder) and BOB < intruder
         body = c.get("/v2/devices/" + DEVICE + "/revocation").json()
         assert body == {
             "pairs": [
@@ -540,42 +540,79 @@ def test_revocation_route_lists_every_pair_registered_person_first(tmp_path):
                     "provenance": "registry",
                 },
                 {
-                    "person_id": BOB,
-                    "reason": "compromised",
-                    "revocation": feed,
-                    "provenance": "feed",
-                },
-                {
                     "person_id": intruder,
                     "reason": "compromised",
                     "revocation": chain,
                     "provenance": "chain",
                 },
-            ]
+                {
+                    "person_id": BOB,
+                    "reason": "compromised",
+                    "revocation": feed,
+                    "provenance": "feed",
+                },
+            ],
+            "next": None,
         }
 
 
-def test_revocation_route_without_registry_orders_by_person(tmp_path):
-    """No association: every pair is chain or feed, ordered by person_id; a pre-0010 evidence-only
+def test_revocation_route_without_registry_orders_chain_first(tmp_path):
+    """No association: every pair is chain or feed, chain first; a pre-0010 evidence-only
     registry row (P3-D29, written by a restore) is no association and so not 'registry'."""
     with TestClient(create_app(tmp_path)) as c:
         d = c.app.state.directory
         seed(d)
         with closing(db.connect(d.path)) as con, con:
             con.execute("INSERT INTO evidence_persons VALUES (?)", (PERSON,))
-            own, _ = _chain_row(con, DEVICE, PERSON, "person_alice.sig", PK, reason="lost")
             bob = _other_person_row(con, DEVICE)
+            own, _ = _chain_row(con, DEVICE, PERSON, "person_alice.sig", PK, reason="lost")
         pairs = c.get("/v2/devices/" + DEVICE + "/revocation").json()["pairs"]
         assert [(p["person_id"], p["provenance"]) for p in pairs] == [
-            (BOB, "feed"),
             (PERSON, "chain"),
+            (BOB, "feed"),
         ]
-        assert pairs[0]["revocation"] == bob and pairs[1]["revocation"] == own
+        assert pairs[0]["revocation"] == own and pairs[1]["revocation"] == bob
         assert c.get("/v2/devices/" + PRIMARY + "/revocation").json() == {"error": "not_found"}
 
 
+def test_revocation_route_pages_by_provenance_then_cursor(tmp_path):
+    """Round 2 (review S1): at most 32 pairs per page with an opaque `next` passed back as
+    `after`. Minted persons whose ids sort first never push the registry pair or an earlier
+    genuine pair off page 1 (ordering is chain before feed, then by cursor, not by person_id);
+    walking every page lists each pair exactly once."""
+    url = "/v2/devices/" + DEVICE + "/revocation"
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        with closing(db.connect(d.path)) as con, con:
+            bob = _other_person_row(con, DEVICE)
+            minted = [f"{i:032x}" for i in range(40)]
+            for person in minted:
+                con.execute(
+                    "INSERT INTO revocations VALUES (?,?,?,?,?,"
+                    "(SELECT coalesce(max(cursor),0)+1 FROM revocations))",
+                    (DEVICE, person, b"{}", "lost", NOW),
+                )
+            _own_row(con)
+        first = c.get(url).json()
+        assert len(first["pairs"]) == 32 and first["next"]
+        assert [p["person_id"] for p in first["pairs"][:2]] == [PERSON, BOB]
+        assert first["pairs"][1]["revocation"] == bob
+        seen, page = [p["person_id"] for p in first["pairs"]], first
+        while page["next"]:
+            page = c.get(url, params={"after": page["next"], "limit": "7"}).json()
+            assert len(page["pairs"]) <= 7
+            seen += [p["person_id"] for p in page["pairs"]]
+        assert seen == [PERSON, BOB, *minted]
+        for bad in ({"limit": "33"}, {"limit": "0"}, {"after": "x"}, {"next": "x"}):
+            assert c.get(url, params=bad).json() == {"error": "malformed"}
+        other = P.b64u(P.cj({"device": PRIMARY, "rank": 0, "cursor": 0}))
+        assert c.get(url, params={"after": other}).json() == {"error": "malformed"}
+
+
+@pytest.mark.parametrize("expiring", [False, True])
 @pytest.mark.parametrize("who", ["own", "other"])
-def test_device_auth_cutoff_is_per_registry_pair(tmp_path, who):
+def test_device_auth_cutoff_is_per_registry_pair(tmp_path, who, expiring):
     """P3-D30 (orch-52 ruling 2): another person's pair for the registered device id never ends its
     sessions, login, stored-certificate retries or member certificates; the registry person's does."""
     import sqlite3
@@ -587,6 +624,10 @@ def test_device_auth_cutoff_is_per_registry_pair(tmp_path, who):
         d = c.app.state.directory
         seed(d)
         with closing(db.connect(d.path)) as con, con:
+            if expiring:  # round 2 (review S2, A10): a certificate with an expiry is cut off too
+                con.execute(
+                    "UPDATE devices SET expires_ms=? WHERE device_id=?", (NOW + DAY, DEVICE)
+                )
             (_own_row if who == "own" else _other_person_row)(con, DEVICE)
         cut = who == "own"
         session = c.get("/v2/devices/" + DEVICE, headers={"Authorization": "Bearer FAKE-device"})

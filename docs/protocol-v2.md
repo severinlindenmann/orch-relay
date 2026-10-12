@@ -2193,7 +2193,7 @@ Caps apply to streamed bytes as well as declared Content-Length; never buffer ab
 | `PUT /v2/devices/{device}` | none | `{cert}` → `{device_id}` | self-authenticating under the account `PK`; per address 30/h; per person 64/day, charged only on verified state changes; canonical retries and refused submissions are free (G0a review 3) (G0a review 5); JSON cap 16 KiB (G0a review 2) | 400 `cert_invalid`, `cert_expired`; 403 `revoked` (P3-D30: a registered device when its registry pair is revoked; a new registration when the id holds a chain-learned revocation of any person or the new pair is revoked), `other_person` (no account); 409 `cert_conflict` | §6.1, §8.3, §8.4 (P3-D5) |
 | `GET /v2/devices/{device}` | D(p), or W whose `ever_persons` contains the person and `ever_devices` contains the device (G0a review 1) | → `{cert}` | | 403 `not_eligible`; 404 `not_found` | §6.1 |
 | `POST /v2/revocations` | none | `{record}` → `{device_id}` | authority is `PK`; per address 10/min; per person 32/day, charged only on verified state changes (G0a review 5), with 8/day reserved for revocations of devices not yet revoked; an exact retry is free; JSON cap 16 KiB (G0a review 2) | 400 `malformed`; 401 `bad_signature`; 403 `other_person` | §6.2 (P3-D5) |
-| `GET /v2/devices/{device}/revocation` | none | → `{pairs: [{person_id, reason, revocation, provenance}]}` (P3-D30): every held `(device, person)` pair, the registered person's first, then by `person_id`. `revocation` is the public signed record. `provenance` is `registry` (the relay's verified association), `chain` (some workspace's accepted restore carried it; not authenticated by that person) or `feed`. No certificate or account key is served: the route is unauthenticated | per address 60/min | 404 (no pair); 429 | §6.2, gaps 24 |
+| `GET /v2/devices/{device}/revocation?after=&limit=` | none | → `{pairs: [{person_id, reason, revocation, provenance}], next}` (P3-D30): every held `(device, person)` pair, the registered person's first on page 1, then `chain` before `feed`, then by §19.5 cursor (never by `person_id`). `next` is opaque and passed back as `after`. `revocation` is the public signed record. `provenance` is `registry` (the relay's verified association), `chain` (some workspace's accepted restore carried it; not authenticated by that person) or `feed`. No certificate or account key is served: the route is unauthenticated | per address 60/min; limit ≤ 32 (default 32); no cap on held pairs | 400 `malformed`; 404 (no pair); 429 | §6.2, gaps 24 |
 | `GET /v2/persons/{person}/revocations?after=&limit=` | D(p), or W whose `ever_persons` contains the person | → `{revocations, next}` | W sees only `ever_devices`, filtered before pagination (G0a review 1); limit ≤ 256 | 403 | §6.2 |
 | `PUT /v2/workspaces/{ws}/card` | none for the first card; W(g) after | `{card}` → `{card_seq}` | first card: per address 10/h, per owner account 10/h charged only after delegation and card signatures verify; same-card retries are free (G0a review 5); first writer wins in one transaction; same card → 200; JSON cap 64 KiB (G0a review 2) | §7.1 codes: 400 `malformed`, `wrong_suite`, `delegation_mismatch`; 401 `bad_signature`; 403 `other_person`; 409 `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version` | §7.1 (P3-D4) |
 | `GET /v2/workspaces/{ws}/card` | D(m) or W | → `{card}` | | 403; 404 | §7.1 |
@@ -2528,8 +2528,14 @@ person the device authenticates as. The person always comes from the registry ro
   certificate. Evidence carried by a workspace's restore is readable only through that workspace's own routes. Only
   `registry` is an association the relay verified. `chain` means that some workspace host carried the pair in an
   accepted restore; any host can do that. A consumer MUST NOT treat a `chain` or `feed` pair as the registered
-  person's. The answer is 404 for an id with no revocation, whether the id is registered or unknown, so the route
-  reveals nothing about unrevoked registrations.
+  person's. The labels are relay claims, not authentication: **no client decision (refusal, trust, forwarding) may
+  rest on this route**; decisions use the authenticated retrieval route (P3-D31) or the §19.5 feed with verification.
+  The answer is 404 for an id with no revocation, whether the id is registered or unknown, so the route reveals
+  nothing about unrevoked registrations. Pages hold at most 32 pairs. Ordering by provenance and then cursor,
+  never by `person_id`, keeps the registry pair and pairs held before an attack on page 1: an attacker who mints
+  keys chooses person ids, not cursors. A pair upgraded or newly carried during a walk may appear again or keep its
+  earlier entry. Restore intake is never capped per device, because a cap would let an attacker block a genuine
+  workspace's restore.
 - `notices.revocations_cursor` (§19.3) counts only registry pairs of the workspace's ever-devices, with the
   `unpublished` eligibility filter (evidence-only persons, P3-D29, excluded). Another person's pair never moves it.
 
@@ -3114,9 +3120,10 @@ rules and must be confirmed before G4 ships:
    (sessions, login, member certificates, stored certificates) is per pair too, under the registry person, and a
    new registration is refused on any chain-learned revocation of the id (§19.5 P3-D30; index
    `checkpoint_revocations(device_id, person_id)`, migration 0011). `GET /v2/devices/{device}/revocation` lists
-   every pair, the registered person's first.
+   every pair in pages, the registered person's first.
    **P3-D29 (narrowed by #397):** restore evidence no longer creates an account, an evidence-only person or a device
-   row; only its revocation is retained (global pair and chain pair). Rows created before migration 0010 stay; an
-   evidence-only person's device row is not an association, and redeeming an invite still turns such a row into the
-   account. Pre-0010 device rows written by evidence for persons that already had an account cannot be told apart
+   row; only its revocation is retained (global pair and chain pair). An evidence-only person's device rows created
+   before migration 0010 were never associations; migration 0012 deletes them, and redeeming an invite deletes any
+   left (P3-D30 round 2), because they would otherwise become associations contradicting another workspace's chain
+   pair. The account row and every revocation stay, and redeeming still turns the account row into the account. Pre-0010 device rows written by evidence for persons that already had an account cannot be told apart
    from registrations and keep binding (a dev-relay-only residue).

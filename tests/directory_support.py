@@ -147,7 +147,7 @@ def prepare_case(directory, name, case):
                     (DEVICE, token_hash("FAKE-device")),
                 )
         if name == "revocation_get" and scenario == "every_pair":
-            for pair in case["response"]["json"]["pairs"][1:]:
+            for pair in case["given"]["held_pairs"][1:]:
                 record = pair["revocation"]
                 con.execute(
                     "INSERT INTO revocations VALUES (?,?,?,?,?,"
