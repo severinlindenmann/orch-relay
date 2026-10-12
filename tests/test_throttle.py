@@ -15,7 +15,7 @@ from contextlib import closing
 
 import pytest
 from bridge_support import HOST, RID, binary
-from directory_support import DEVICE, NOW, PERSON, WS, seed
+from directory_support import DEVICE, NOW, PERSON, PRIMARY, WS, issue_login, seed
 from fastapi.testclient import TestClient
 
 from orch_relay import bridge as B
@@ -27,7 +27,8 @@ from orch_relay.directory import Buckets, Refusal, token_hash
 PROXY = "10.9.9.9"
 OTHER = "ab" * 16
 DEV = {"Authorization": "Bearer FAKE-device"}
-DEV2 = {"Authorization": "Bearer FAKE-device-2"}
+DEV2 = {"Authorization": "Bearer FAKE-device-2"}  # another device (PRIMARY) of the same person
+SAME = {"Authorization": "Bearer FAKE-device-same"}  # another session of DEVICE
 W2 = {"Authorization": "Bearer FAKE-workspace-2", "Orch-Holder": "1"}
 BAD = {"Authorization": "Bearer nope"}
 
@@ -38,20 +39,18 @@ def client(tmp_path):
         d = client.app.state.directory
         seed(d)
         d.trusted_proxy = PROXY
-        sql(
-            client,
-            "INSERT INTO sessions VALUES (?,?,?,?),(?,?,?,?)",
-            (
-                token_hash("FAKE-device-2"),
-                "device",
-                DEVICE,
-                NOW + 900_000,
-                token_hash("FAKE-workspace-2"),
-                "workspace",
-                WS,
-                NOW + 900_000,
-            ),
-        )
+        for token, kind, ident in (
+            ("FAKE-device-2", "device", PRIMARY),
+            ("FAKE-device-same", "device", DEVICE),
+            ("FAKE-workspace-2", "workspace", WS),
+        ):
+            sql(
+                client,
+                "INSERT INTO sessions VALUES (?,?,?,?)",
+                (token_hash(token), kind, ident, NOW + 900_000),
+            )
+        sql(client, "INSERT INTO ever_devices VALUES (?,?,?)", (WS, PRIMARY, 1))
+        sql(client, "INSERT INTO members VALUES (?,?,?,?)", (WS, PRIMARY, PERSON, '["look"]'))
         yield client
         assert client.app.state.bridge.waiters == {}
 
@@ -98,20 +97,44 @@ CHECKPOINT_GETS = [
 
 
 def test_defaults_and_their_arithmetic():
+    from orch_relay import checkpoints as C
+    from orch_relay import proto as P
+
     # (burst, refill per minute). Honest hosts and phones poll at most every few seconds (long
-    # polls wait up to 25 s); a sync reads the card, members, grants and a few certificates; a
-    # device walks at most a few dozen proof pages. Each default is far above that.
+    # polls wait up to 25 s); a sync reads the card, members, grants and a few certificates.
+    # A first sync walks one proof page per grown log: a full 64 MiB set is 17 pages (16 of
+    # 56,678 heads at 57 tokens, then 28 heads at 1) = 913 tokens, plus 5,001 small logs.
+    assert (
+        (D.PAGE_BYTES, D.PROOF_PAGE_HEADS)
+        == (C.PAGE_CAP, C.PROOF_PAGE_HEADS)
+        == (
+            4 * 1024 * 1024,
+            56_678,
+        )
+    )
+    assert D.STAGE_HEADS == C.STAGE_CAP // 74 == 906_876
+    assert (D.FULL_SET_TOKENS, D.PAGE_BURST) == (16 * 57 + 1, 913 + 5_001)
+    # One manifest describes at most MANIFEST_PAGES pages: one more minimal descriptor does not fit.
+    one = {"i": 0, "kind": "appended", "log": "workspace", "after_seq": 0, "count": 1}
+    one["digest"] = "sha256:" + "0" * 64
+    assert len(P.cj({"pages": [one] * D.MANIFEST_PAGES})) <= C.PAGE_CAP
+    assert len(P.cj({"pages": [one] * (D.MANIFEST_PAGES + 1)})) > C.PAGE_CAP
+    assert D.MANIFEST_PAGES == 27_776
     assert D.THROTTLES == {
         "session": (600, 600),
+        "person": (1200, 1200),
         "workspace": (1200, 1200),
-        "page-session": (256, 120),
-        "page-workspace": (512, 240),
+        "page-session": (5_914, 600),
+        "page-person": (11_828, 1200),
+        "page-workspace": (11_828, 1200),
+        "staging": (27_777, 3000),
+        "host-answer": (1200, 1200),
     }
     assert D.THROTTLE_TABLE == 65_536
 
 
-def take(buckets, key, now, burst=3, rate=60, charge=True):
-    buckets.take(key, burst, rate, now, charge)
+def take(buckets, key, now, burst=3, rate=60, charge=True, cost=1, debt=False):
+    buckets.take(key, burst, rate, now, charge, cost, debt)
 
 
 def test_bucket_fires_at_burst_not_below_and_refills():
@@ -144,6 +167,41 @@ def test_bucket_fires_at_burst_not_below_and_refills():
         take(b, "k", NOW + 3_600_000)
     with pytest.raises(Refusal):
         take(b, "k", NOW)
+
+
+def retry(buckets, key, now, **kw):
+    with pytest.raises(Refusal) as refused:
+        take(buckets, key, now, **kw)
+    return refused.value.retry
+
+
+def test_retry_after_counts_partial_refill_and_rounds_up():
+    b = Buckets()
+    take(b, "seven", NOW, burst=1, rate=7)
+    assert retry(b, "seven", NOW, burst=1, rate=7) == 9  # 8.57 s to the next token
+    take(b, "six", NOW, burst=1, rate=6)
+    assert retry(b, "six", NOW + 5_500, burst=1, rate=6) == 5  # 4.5 s left of 10 s
+    take(b, "six", NOW + 10_000, burst=1, rate=6)
+
+
+def test_clock_going_back_keeps_the_latest_time():
+    b = Buckets()
+    take(b, "k", NOW + 5_000)
+    take(b, "k", NOW)  # the clock went back: no refill, the stored time stays NOW + 5,000
+    take(b, "k", NOW + 5_000)  # back to it: still no refill
+    with pytest.raises(Refusal):
+        take(b, "k", NOW + 5_000)
+
+
+def test_debt_is_charged_after_the_work_and_delays_the_next():
+    b = Buckets()
+    take(b, "k", NOW, burst=5)  # up front
+    take(b, "k", NOW, burst=5, cost=2, debt=True)
+    take(b, "k", NOW, burst=5)
+    take(b, "k", NOW, burst=5, cost=3, debt=True)  # never refused: the level goes below zero
+    assert retry(b, "k", NOW, burst=5) == 3  # level -2: three seconds to one token
+    take(b, "k", NOW + 3_000, burst=5)
+    assert retry(b, "k", NOW, burst=5, cost=2) == 2
 
 
 def test_bucket_check_without_charge_has_no_side_effects():
@@ -201,7 +259,9 @@ def test_a_sessions_refusals_charge_only_its_own_bucket(client):
     assert [get(client, other, DEV).status_code for _ in range(3)] == [404] * 3
     assert get(client, other, DEV).status_code == 429
     assert get(client, CARD_PATH, DEV).status_code == 429
-    # Another session of the same device, and the host, are unaffected.
+    # Another session of the same device shares its bucket (F2); another device of the person,
+    # and the host, are unaffected.
+    assert get(client, CARD_PATH, SAME).status_code == 429
     assert [get(client, CARD_PATH, DEV2).status_code for _ in range(3)] == [200] * 3
     assert [get(client, CARD_PATH, HOST).status_code for _ in range(3)] == [200] * 3
     # Refusals after authentication on every family are charged too.
@@ -229,14 +289,48 @@ def test_workspace_sessions_share_the_workspace_bucket(client):
 def test_bucket_table_bounded_under_many_valid_sessions(client):
     d = client.app.state.directory
     d.buckets.limit = 8
-    for i in range(40):
+    for i in range(40):  # W sessions are keyed by token (their workspace bucket is shared)
         sql(
             client,
             "INSERT INTO sessions VALUES (?,?,?,?)",
-            (token_hash(f"many-{i}"), "device", DEVICE, NOW + 900_000),
+            (token_hash(f"many-{i}"), "workspace", WS, NOW + 900_000),
         )
         assert get(client, CARD_PATH, {"Authorization": f"Bearer many-{i}"}).status_code == 200
     assert len(d.buckets.table) == 8
+
+
+def test_logout_and_login_do_not_refill_a_device(client):
+    limit(client, session=(3, 60))
+    served = 0
+    for _ in range(6):
+        token = issue_login(client).json()["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        served += sum(get(client, CARD_PATH, headers).status_code == 200 for _ in range(3))
+        assert client.post("/v2/session/logout", json={}, headers=headers).status_code == 200
+    assert served == 3
+
+
+def test_a_persons_devices_share_the_person_bucket(client):
+    limit(client, session=(100, 60), person=(3, 60))
+    assert [get(client, CARD_PATH, h).status_code for h in (DEV, DEV2, SAME)] == [200] * 3
+    assert get(client, CARD_PATH, DEV2).status_code == 429
+    assert get(client, CARD_PATH, HOST).status_code == 200
+
+
+def test_workspace_buckets_are_per_workspace(client):
+    d = client.app.state.directory
+    limit(client, session=(100, 60), workspace=(2, 60))
+    with closing(db.connect(d.path)) as con, con:
+        row = list(con.execute("SELECT * FROM workspaces WHERE workspace_id=?", (WS,)).fetchone())
+        con.execute("INSERT INTO workspaces VALUES (?,?,?,?,?,?,?,?)", (OTHER, *row[1:]))
+        con.execute(
+            "INSERT INTO sessions VALUES (?,?,?,?)",
+            (token_hash("FAKE-workspace-other"), "workspace", OTHER, NOW + 900_000),
+        )
+    other = {"Authorization": "Bearer FAKE-workspace-other"}
+    assert [get(client, CARD_PATH, HOST).status_code for _ in range(2)] == [200] * 2
+    assert get(client, CARD_PATH, HOST).status_code == 429
+    assert get(client, f"/v2/workspaces/{OTHER}/card", other).status_code == 200
 
 
 def test_throttled_request_takes_no_lock(client, monkeypatch):
@@ -268,7 +362,33 @@ def test_identical_resends_are_charged(client):
     assert [post(client, raw).status_code for _ in range(3)] == [202] * 3
     r = post(client, raw)
     assert r.status_code == 429 and r.headers["retry-after"] == "1"
-    assert post(client, raw, DEV2).status_code == 202
+    assert post(client, raw, SAME).status_code == 429  # the same device (F2)
+    assert get(client, CARD_PATH, DEV2).status_code == 200
+
+
+def test_host_answers_spend_only_the_targets_answer_bucket(client):
+    d = client.app.state.directory
+    limit(client, session=(1, 60), workspace=(1, 60), host_answer=(2, 60))
+    host = {**HOST, "Orch-Holder": "1"}
+    assert post(client, binary("bridge_device_post")).status_code == 202
+    answer = binary("bridge_host_post")
+    assert [post(client, answer, host).status_code for _ in range(2)] == [202] * 2
+    r = post(client, answer, host)
+    assert r.status_code == 429 and r.headers["retry-after"] == "1"
+    # The host's own session and workspace were never charged by the answers.
+    assert ("session", ("token", token_hash("FAKE-workspace"))) not in d.buckets.table
+    assert ("workspace", WS) not in d.buckets.table
+    assert get(client, f"/v2/workspaces/{WS}/host/poll", host).status_code == 200
+    # Answers to another member are a separate bucket.
+    session = {"kind": "workspace", "subject_id": WS, "token_hash": token_hash("FAKE-workspace")}
+    d.throttle(session, NOW, "host-answer", (WS, PRIMARY))
+    # A refused answer (stale generation) is charged to the host's read buckets, not the target's.
+    limit(client, session=(100, 60), workspace=(100, 60))
+    d.buckets.table.clear()
+    stale = {**HOST, "Orch-Holder": "7"}
+    assert post(client, answer, stale).status_code == 409
+    assert ("host-answer", (WS, DEVICE)) not in d.buckets.table
+    assert ("session", ("token", token_hash("FAKE-workspace"))) in d.buckets.table
 
 
 def test_throttled_wait_takes_no_slot(client, monkeypatch):
@@ -294,19 +414,92 @@ def test_anonymous_pairing_charges_no_bucket(client):
 
 
 def test_proof_and_transition_pages_have_their_own_bucket(client):
-    limit(client, session=(100, 60), page_session=(2, 60))
+    limit(client, session=(1, 60), page_session=(2, 60))
     proof = f"/v2/workspaces/{WS}/proof"
     transitions = f"/v2/workspaces/{WS}/transitions"
     assert get(client, proof, DEV, log="workspace").status_code != 429
     assert get(client, transitions, DEV).status_code != 429
     assert get(client, proof, DEV, log="workspace").status_code == 429
     assert get(client, transitions, DEV).status_code == 429
-    # The plain read bucket is unaffected; other sessions too.
+    # The plain read bucket is unaffected (pages never take it); other devices too.
     assert get(client, f"/v2/workspaces/{WS}/checkpoint", DEV).status_code == 404
     assert get(client, transitions, DEV2).status_code != 429
     limit(client, page_workspace=(1, 60))
-    assert get(client, transitions, HOST).status_code != 429
+    assert get(client, transitions, HOST).status_code != 429  # W sessions take page-workspace
     assert get(client, transitions, W2).status_code == 429
+
+
+def test_proof_pages_are_weighted_by_heads(client, monkeypatch):
+    from orch_relay import checkpoints as C
+
+    heads = {"n": 2_500}
+    monkeypatch.setattr(
+        C.Relay, "read", lambda self, route, query: {"heads": ["h"] * heads["n"], "next": None}
+    )
+    limit(client, page_session=(5, 60))
+    proof = f"/v2/workspaces/{WS}/proof"
+    assert get(client, proof, DEV).status_code == 200  # 3 tokens: 1 up front, 2 after
+    assert get(client, proof, DEV).status_code == 200  # 5 - 3 = 2 >= 1: served, now -1
+    r = get(client, proof, DEV)
+    assert r.status_code == 429 and r.headers["retry-after"] == "2"
+    heads["n"] = 1
+    client.app.state.directory.clock = lambda: NOW + 2_000
+    assert get(client, proof, DEV).status_code == 200  # a small page costs one token
+
+
+def test_default_page_burst_covers_a_first_sync_and_throttles_full_pages(client):
+    d = client.app.state.directory
+    session = {"kind": "device", "subject_id": DEVICE, "person_id": PERSON}
+
+    def page(heads, who=session):
+        d.throttle(who, NOW, "page")
+        cost = max(1, -(-heads // D.PAGE_TOKEN_HEADS))
+        if cost > 1:
+            d.throttle(who, NOW, "page", cost=cost - 1, debt=True)
+
+    # A first sync of a 5,000-ticket workspace under a full 64 MiB set, all at one instant.
+    for _ in range(D.STAGE_HEADS // D.PROOF_PAGE_HEADS):
+        page(D.PROOF_PAGE_HEADS)
+    page(D.STAGE_HEADS % D.PROOF_PAGE_HEADS)
+    for _ in range(D.SYNC_LOGS):
+        page(1)
+    with pytest.raises(Refusal):
+        page(1)
+    # A flood of full pages from a fresh device: 104 served (5,914 / 57), then refused.
+    flood = {"kind": "device", "subject_id": PRIMARY, "person_id": "f" * 32}
+    served = 0
+    with pytest.raises(Refusal):
+        while True:
+            page(D.PROOF_PAGE_HEADS, flood)
+            served += 1
+    assert served == 104
+
+
+def test_staging_has_its_own_workspace_bucket(client):
+    d = client.app.state.directory
+    limit(client, session=(1, 60), workspace=(1, 60), staging=(2, 60))
+    host = {**HOST, "Orch-Holder": "1"}
+    page = f"/v2/workspaces/{WS}/staging/sha256:{'0' * 64}/sha256:{'1' * 64}/pages/0"
+    statuses = [client.put(page, json={}, headers=host).status_code for _ in range(3)]
+    assert 429 not in statuses[:2] and statuses[2] == 429
+    assert ("session", ("token", token_hash("FAKE-workspace"))) not in d.buckets.table
+    assert get(client, CARD_PATH, host).status_code == 200  # the host's session is untouched
+    # A refused staging PUT (another workspace) never charges that workspace's staging bucket.
+    other = f"/v2/workspaces/{OTHER}/staging/sha256:{'0' * 64}/sha256:{'1' * 64}/pages/0"
+    limit(client, session=(100, 60), workspace=(100, 60))
+    d.buckets.table.clear()
+    assert client.put(other, json={}, headers=W2).status_code == 403
+    assert ("staging", OTHER) not in d.buckets.table
+
+
+def test_default_staging_burst_covers_a_full_manifest_at_once(client):
+    d = client.app.state.directory
+    session = {"kind": "workspace", "subject_id": WS, "token_hash": "t"}
+    for _ in range(D.MANIFEST_PAGES + 1):  # every page of the largest set, then its manifest
+        d.throttle(session, NOW, "staging", WS)
+    with pytest.raises(Refusal):
+        d.throttle(session, NOW, "staging", WS)
+    d.throttle(session, NOW, "staging", OTHER)  # another workspace is unaffected
 
 
 def test_checkpoint_writes_are_charged_after_authorization(client):
@@ -335,6 +528,10 @@ def test_revocation_read_has_a_parent_window(client, monkeypatch):
     assert r.status_code == 429 and r.headers["retry-after"]
     assert read("2001:db8:0:100::1").status_code == 404  # another /56
     assert read("192.0.2.1").status_code == 404
+    # The refused read charged neither window (both are checked before either is charged).
+    windows = client.app.state.directory.windows
+    assert ("revocation-read", "2001:db8:0:4::/64", D.MINUTE) not in windows
+    assert windows[("revocation-read-parent", "2001:db8::/56", D.MINUTE)][1] == 3
 
 
 # --- N4: proxy configuration ---------------------------------------------------------------------
