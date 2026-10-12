@@ -2929,8 +2929,9 @@ receiver persist each accepted bundle; both are atomic, the relay's is coarser).
 stored a signer as a bare device id resolves its person to the pinned card's owner (a restore signer is always the
 owner), else through the known devices; if that fails the evidence is kept but no alarm is raised (matching by device alone let any keypair holder raise a false C3 alarm). (3) The relay server's R1 refuses a signer revoked in any revocation it holds by device id; this equals F1's
 device-and-person match there because evidence is bound to the registry's first person (R4), so a held revocation of
-a registered owner device is always of that person. (4) The relay server does not report `revocation.unpublished`
-in its publication result (G4 follow-up, transport detail 6 (c)). (5) `contested` evidence (above) refuses its own person's device as a
+a registered owner device is always of that person. (4) The relay server reports `revocation.unpublished` in its
+publication result as the provisional `unpublished` / `unpublished_refs` fields (transport detail 8); no shared vector
+pins them yet, and the reference relay model has none. (5) `contested` evidence (above) refuses its own person's device as a
 signer and alarms although F1 says contradicting evidence is not an input: stricter than F1 (fails closed), raised
 with orch-52. (6) The caps on held evidence and on the per-walk harvest are relay additions. F1 C3 is kept as is:
 every held revocation of the signer pair refuses, whatever its reason; refusing only on `compromised` was rejected.
@@ -3044,8 +3045,10 @@ rules and must be confirmed before G4 ships:
    the relay accepted in this workspace's own restores (chain-learned for the workspace, with their restore id and
    target checkpoint as provenance, never removed), not the global §19.5 revocation table; a global (out-of-band)
    revocation of an ever-device that a restore omits or carries weaker is accepted and reported as
-   `revocation.unpublished` (a field of the accepted result, or a host-visible notice; to be fixed with the fixtures
-   in G4), while R1 keeps refusing a signer revoked in any revocation the relay holds.
+   `revocation.unpublished`, while R1 keeps refusing a signer revoked in any revocation the relay holds. **In G4**
+   the production relay emits `unpublished` and `unpublished_refs` in the accepted result (transport detail 8),
+   pinned by production unit tests (`tests/test_checkpoints.py`) only: there is no shared vector yet, and the
+   reference relay model (`ref/checkpoints.py`) has no `unpublished` and no per-pair chain table.
    **Status (G4):** (a) `log_nodes` stores a deterministic skip pointer per node (the ancestor at
    `skip_height(seq)`, as Bitcoin's block index), so a page finds its endpoint node and checks that `from` is
    on E's branch in O(log N) and then reads `limit` nodes: O(limit + log N) per page and O(N) for a full walk
@@ -3068,13 +3071,20 @@ rules and must be confirmed before G4 ships:
    ever-devices or in the restore needs a carried entry of the **same pair** at the same or a stronger reason;
    another person's entry never satisfies it. A restore's `revocations` are unique and sorted per
    `(device_id, person_id)`. Bindings for carried evidence come from this workspace's pairs, then the device
-   registry; out-of-band evidence never binds. A revocation the relay holds globally (the §19.5 feed, another
+   registry. Known difference from orch-core #397, to be removed in the #397 re-pin: the registry fallback means
+   out-of-band knowledge does bind (a device registered by its person binds evidence to that person), whereas
+   #397 lets only workspace associations constrain carried entries. A revocation the relay holds globally (the §19.5 feed, another
    workspace's restore) never causes `restore_missing_revocation`: when an accepted workspace restore omits it
    or carries it weaker under the same pair, and the device is known to this workspace, the result carries
    `unpublished: ["d_<device>", ...]` and `unpublished_refs: [{device_id, person_id, reason, cursor, digest}]`
    (the §19.5 revocation cursor and the record's digest), stored durably in `checkpoint_unpublished`. Both
-   fields are additive and absent when empty; ticket restores report none. The retrieval route is designed
-   separately. The signer refusal still uses every revocation the relay holds, by device id.
+   fields are additive and absent when empty; ticket restores report none. A stronger global revocation of a pair
+   already in the workspace chain, carried only at the chain strength, is reported too. Only the devices this
+   workspace knows are looked up (never the relay-wide table). `unpublished_refs` are relay claims, not
+   self-authenticating: a correct host fetches the record (§19.5) and verifies it under the named person's key with
+   a matching device certificate before acting. A ref goes stale when the revocation is later upgraded, because its
+   cursor and digest change. The retrieval route is designed separately. The signer refusal still uses every
+   revocation the relay holds, by device id.
    **P3-D29:** self-certified evidence for a person the relay has no account for creates an evidence-only
    account row (needed to store the device and its revocation); it registers no device, owns no card and
    joins no list until the person redeems an invite, which turns it into the account.

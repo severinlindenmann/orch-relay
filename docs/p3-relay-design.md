@@ -1176,6 +1176,13 @@ HTTP fixture.
   `unpublished` result fields follow protocol-v2 §19.8 transport detail 8. Out-of-band (global) revocations
   are hints, never refusals.
 
+- *Round 3 (Opus re-check).* N1: `unpublished` also reports a stronger global revocation of a chain pair the
+  restore carries only at chain strength. N2: the unpublished lookup reads only the devices this workspace
+  knows (500,000 unrelated global rows: 0.80 s scan before, 64 µs after). N3: test pins (multi-page logs,
+  full-strength carriage, chain scoping, precomputed refusal after the budget). N4: an exact retry is found in a
+  read snapshot before the lock and skips validation (10k-ticket retry 0.55–0.70 s → 0.06 s wall). N5: on the
+  `sqlite3.Error` fallback nothing is parsed before the transaction authorizes.
+
 **Pre-public-deploy gates.** Acceptable on the invite-only dev relay; each must be closed before any
 public deployment.
 
@@ -1202,10 +1209,16 @@ public deployment.
   limit on live workspaces per account.
 - **G4: storage amplification.** An accepted 64 MiB publication adds ~900k nodes (~264 MB at 293 B/node),
   about 4x the staged bytes, repeatable every ~25 s per workspace; `checkpoint_receipts` and
-  `checkpoint_gone` are never purged and restore-referenced checkpoints are permanent. Needs a per-workspace
-  storage quota (429).
-- **Unthrottled authenticated work.** Reads (up to 56,680 heads per proof page) and staging, genesis and
-  baseline refusals are not rate-limited; with the G3 review's `Directory.handle` finding (directory routes
+  `checkpoint_gone` are never purged and restore-referenced checkpoints are permanent. `checkpoint_revocations`
+  and `checkpoint_unpublished` grow with restores x known devices (owner-gated). Self-certified restore evidence
+  adds an account, a device and a global revocation per entry, and any account holder can cause it from their
+  own workspace (hundreds of entries per 512 KiB line); this is what made the round-2 unpublished scan
+  (review N2, now a per-device lookup) a cost for every workspace. Needs a per-workspace storage quota (429)
+  and a quota on self-certified evidence per account. The `unpublished` retrieval or poll route (orch-52
+  decision point 7) does not exist yet; it is a gate before the #397 host side relies on `unpublished`.
+- **Unthrottled authenticated work.** Reads (up to 56,680 heads per proof page), staging, genesis and
+  baseline refusals, and `ignored` lower-n publications (full stateless validation, uncharged; exact retries
+  skip it since round 3) are not rate-limited; with the G3 review's `Directory.handle` finding (directory routes
   take the lock before authenticating, D4) these are the same gate.
 
 ## 11. Open questions
