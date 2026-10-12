@@ -279,37 +279,23 @@ class Directory:
             .public_key()
             .public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
         )
-        self.local = threading.local()
-        self.connections = []
-        self.connections_lock = threading.Lock()
+        # Shared with the bridge and checkpoints (P3-D32 round 2): one write connection and a
+        # bounded read pool, owned by no worker thread.
+        self.pool = db.Connections(path)
 
     def connection(self, purpose):
-        """A per-thread connection reused across requests (as Bridge.connection).
+        """The shared write connection, only under self.lock with BEGIN IMMEDIATE."""
+        assert purpose == "write" and self.lock._is_owned(), "write connection outside the lock"
+        return self.pool.write()
 
-        "read" is query-only with busy_timeout=0: a pre-check never waits (WAL readers do not
-        block on writers; on any sqlite3.Error the transaction decides alone). "write" is used
-        only under self.lock with BEGIN IMMEDIATE."""
-        cache = self.local.__dict__.setdefault("connections", {})
-        con = cache.get(purpose)
-        if con is None:
-            con = db.connect(self.path, check_same_thread=False)
-            con.row_factory = sqlite3.Row
-            if purpose == "read":
-                con.execute("PRAGMA query_only=ON")
-                con.execute("PRAGMA busy_timeout=0")
-            with self.connections_lock:
-                self.connections.append(con)
-            cache[purpose] = con
-        if con.in_transaction:
-            con.rollback()
-        return con
+    def reader(self, purpose="read"):
+        """Borrow a pooled read connection for one use (context manager). "read" is query-only
+        with busy_timeout=0: a pre-check never waits (WAL readers do not block on writers; on any
+        sqlite3.Error the transaction decides alone); its snapshot ends when it is returned."""
+        return self.pool.borrow(purpose)
 
     def close(self):
-        with self.connections_lock:
-            for con in self.connections:
-                con.close()
-            self.connections.clear()
-        self.local = threading.local()
+        self.pool.close()
 
     @staticmethod
     def authorized(state):
@@ -1072,26 +1058,26 @@ class Directory:
         authorization point. Raises the refusal the transaction would raise, in the same order;
         returns the whole answer for FINAL steps, else None (the transaction re-checks everything).
         sqlite3.Error propagates: the caller falls back to the transaction alone."""
-        con = self.connection("read")
-        state["pre"] = True
-        try:
-            con.execute("BEGIN")
-            result = self.steps(
-                con, route, ident, method, raw, query, headers, address, self.clock(), state
-            )[0]
-            return result if state.get(FINAL) else None
-        except Proceed:
-            return None
-        except (Refusal, ValueError, TypeError, KeyError, AttributeError):
-            if "deferred" in state:
-                # The recovery address window precedes every other check (charged even when the
-                # request is refused): charge it now, atomically re-checked, as the transaction
-                # would have before refusing. A full window answers 429 instead.
-                self.rate(*state.pop("deferred"))
-            raise
-        finally:
-            state["pre"] = False
-            con.rollback()
+        with self.reader() as con:
+            state["pre"] = True
+            try:
+                con.execute("BEGIN")
+                result = self.steps(
+                    con, route, ident, method, raw, query, headers, address, self.clock(), state
+                )[0]
+                return result if state.get(FINAL) else None
+            except Proceed:
+                return None
+            except (Refusal, ValueError, TypeError, KeyError, AttributeError):
+                if "deferred" in state:
+                    # The recovery address window precedes every other check (charged even when
+                    # the request is refused): charge it now, atomically re-checked, as the
+                    # transaction would have before refusing. A full window answers 429 instead.
+                    self.rate(*state.pop("deferred"))
+                raise
+            finally:
+                state["pre"] = False
+                con.rollback()
 
     def handle(self, route, ident, method, raw, query, headers, peer):
         try:

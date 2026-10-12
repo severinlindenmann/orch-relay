@@ -7,8 +7,10 @@ refuses everything with the same status and body (the pre-check is never load-be
 
 import copy
 import json
+import sqlite3
 import threading
-from contextlib import closing
+import time
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 import pytest
@@ -447,7 +449,7 @@ def test_precheck_read_failure_after_consuming_keeps_the_challenge_consumed(tmp_
         seed(d)
         sql(d, "DELETE FROM sessions")
         d.add_challenge(CHALLENGE, NOW + MINUTE, "testclient", None)
-        real = d.connection
+        real = d.reader
         failed = []
 
         class Broken:
@@ -463,11 +465,12 @@ def test_precheck_read_failure_after_consuming_keeps_the_challenge_consumed(tmp_
             def __getattr__(self, name):
                 return getattr(self.con, name)
 
-        monkeypatch.setattr(
-            d,
-            "connection",
-            lambda purpose: Broken(real(purpose)) if purpose == "read" else real(purpose),
-        )
+        @contextmanager
+        def reader(purpose="read"):
+            with real(purpose) as con:
+                yield Broken(con)
+
+        monkeypatch.setattr(d, "reader", reader)
         r = c.post("/v2/session/login", json=login_body("phone.sig", d.origin))
         assert failed and r.status_code == 200, r.text
         assert CHALLENGE not in d.challenges
@@ -503,25 +506,92 @@ def test_concurrent_identical_account_retries_both_succeed(tmp_path):
         assert [r.status_code for r in responses] == [200] * 4
 
 
-def test_connections_are_per_thread_and_reused(tmp_path):
+def test_pooled_connections_are_reused_and_never_shared_at_once(tmp_path):
     with TestClient(create_app(tmp_path)) as c:
         d = c.app.state.directory
-        seen = {}
+        with d.reader() as first:
+            assert first.execute("PRAGMA query_only").fetchone()[0] == 1
+            assert first.execute("PRAGMA busy_timeout").fetchone()[0] == 0
+            with d.reader() as second:
+                assert second is not first  # one borrower at a time
+        with d.reader() as again:
+            assert again in (first, second)  # returned and reused
+        with d.reader("query") as query:
+            assert query.execute("PRAGMA query_only").fetchone()[0] == 1
+            assert query.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+        with d.lock:
+            write = d.connection("write")
+            assert write.execute("PRAGMA query_only").fetchone()[0] == 0
+            assert (
+                d.connection("write") is write and c.app.state.bridge.connection("write") is write
+            )
+        with pytest.raises(AssertionError):
+            d.connection("write")  # writes only under Directory.lock
 
-        def grab(name):
-            seen[name] = (d.connection("read"), d.connection("read"), d.connection("write"))
 
-        threads = [threading.Thread(target=grab, args=(n,)) for n in ("a", "b")]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        (a1, a2, aw), (b1, _, bw) = seen["a"], seen["b"]
-        assert a1 is a2 and a1 is not aw  # reused within a thread, one per purpose
-        assert a1 is not b1 and aw is not bw  # never shared between threads
-        assert a1.execute("PRAGMA query_only").fetchone()[0] == 1
-        assert a1.execute("PRAGMA busy_timeout").fetchone()[0] == 0
-        assert aw.execute("PRAGMA query_only").fetchone()[0] == 0
+def test_pool_beyond_its_size_closes_temporaries(tmp_path):
+    from orch_relay.db import Connections
+
+    pool = Connections(tmp_path / db.DB_NAME, size=2)
+    with pool.borrow() as a, pool.borrow() as b, pool.borrow() as extra:
+        assert len({id(a), id(b), id(extra)}) == 3 and pool.count() == 2
+    with pytest.raises(sqlite3.ProgrammingError):
+        extra.execute("SELECT 1")  # closed on return
+    assert pool.count() == 2
+    pool.close()
+    assert pool.count() == 0
+
+
+LIVE = set()  # ids of open connections made through db.connect during the churn test
+
+
+class Tracked(sqlite3.Connection):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        LIVE.add(id(self))
+
+    def close(self):
+        LIVE.discard(id(self))
+        super().close()
+
+
+def test_worker_thread_churn_opens_no_new_connections(tmp_path, monkeypatch):
+    """Review F1: anyio retires idle worker threads (10 s; 0.05 s here) and starts new ones, so no
+    connection may belong to a thread. Bursts of refused directory requests and of bridge
+    transactions keep the number of open connections (directory + bridge) bounded."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    import anyio._backends._asyncio as backend
+    from bridge_support import RID
+
+    monkeypatch.setattr(backend.WorkerThread, "MAX_IDLE_TIME", 0.05)
+    real = db.connect
+    monkeypatch.setattr(db, "connect", lambda path, **kw: real(path, factory=Tracked, **kw))
+    LIVE.clear()
+    with TestClient(create_app(tmp_path)) as c:
+        seed(c.app.state.directory)
+
+        def burst():
+            with ThreadPoolExecutor(24) as pool:
+                for r in pool.map(
+                    lambda i: c.get(
+                        f"/v2/workspaces/{WS}/members"
+                        if i % 2
+                        else f"/v2/workspaces/{WS}/bridge/{RID}",
+                        headers=BAD if i % 2 else DEV,
+                    ),
+                    range(24),
+                ):
+                    assert r.status_code in (200, 401), r.text
+            time.sleep(0.2)  # every worker thread idles out
+
+        burst()
+        settled = len(LIVE)
+        for _ in range(8):
+            burst()
+        assert len(LIVE) <= settled + 2, (settled, len(LIVE))
+        assert c.app.state.directory.pool.count() <= c.app.state.directory.pool.size + 1
+    assert not LIVE  # shutdown closes everything
 
 
 # --- the shared HTTP fixtures, byte for byte with and without the pre-check ----------------------
@@ -589,16 +659,22 @@ def test_fixture_bytes_identical_without_precheck(tmp_path, monkeypatch, name, c
 
 
 def test_reused_connection_never_carries_an_open_transaction(tmp_path):
-    """A connection handed out again is rolled back first: a pre-check never reads an old snapshot
-    and the transaction never inherits an open one."""
+    """A connection handed out again carries no open transaction: a pre-check never reads an old
+    snapshot and the transaction never inherits an open one."""
     with TestClient(create_app(tmp_path)) as c:
         d = c.app.state.directory
-        for purpose in ("read", "write"):
-            con = d.connection(purpose)
+        with d.reader() as con:
             con.execute("BEGIN")
             con.execute("SELECT count(*) FROM sessions").fetchone()
             assert con.in_transaction
-            assert d.connection(purpose) is con and not con.in_transaction
+        assert not con.in_transaction  # ended on return
+        with d.reader() as again:
+            assert again is con
+        with d.lock:
+            write = d.connection("write")
+            write.execute("BEGIN")
+            write.execute("SELECT count(*) FROM sessions").fetchone()
+            assert d.connection("write") is write and not write.in_transaction
 
 
 def test_windows_and_challenges_are_guarded_by_the_budget_mutex(tmp_path):

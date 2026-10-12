@@ -1381,16 +1381,13 @@ class Checkpoints:
 
     def preauthorize(self, route, ws, headers):
         """Read-only, before any lock, write transaction or failure window (G3 review 3)."""
-        con = self.bridge.connection("read")
-        con.execute("BEGIN")
-        try:
+        with self.bridge.reading() as con:
+            con.execute("BEGIN")
             self.authorize(con, route, ws, headers, self.d.clock())
             row = con.execute(
                 "SELECT wsk_pub FROM workspaces WHERE workspace_id=?", (ws,)
             ).fetchone()
             return row[0] if row else None
-        finally:
-            con.rollback()
 
     def prepare(self, route, ws, raw, wsk_pub):
         """Parse and validate what needs no database state, after authorization and before the
@@ -1403,16 +1400,12 @@ class Checkpoints:
             pre = precheck_publication(raw, wsk_pub, stages=False)
             if pre["early"]:
                 return None, pre
-            con = self.bridge.connection("query")
-            con.execute("PRAGMA query_only=ON")
-            con.execute("BEGIN")
-            try:
+            with self.bridge.reading("query") as con:
+                con.execute("BEGIN")
                 hit = con.execute(
                     "SELECT 1 FROM checkpoint_receipts WHERE workspace_id=? AND digest=?",
                     (ws, pre["receipt"]),
                 ).fetchone()
-            finally:
-                con.rollback()
             return None, pre if hit else precheck_publication(pre["body"], wsk_pub)
         body = P.parse_json(raw) if raw else None
         if route == "staging_page":
@@ -1422,30 +1415,22 @@ class Checkpoints:
         return body, None
 
     def read(self, route, params, query, headers):
-        con = self.bridge.connection("query")
-        con.execute("PRAGMA query_only=ON")
-        con.execute("BEGIN")
-        try:
+        with self.bridge.reading("query") as con:
+            con.execute("BEGIN")
             now = self.d.clock()
             self.authorize(con, route, params["ws"], headers, now)
             return Relay(self.d, con, params["ws"], now).read(route, query)
-        finally:
-            con.rollback()
 
     def unpublished_read(self, ws, query, headers):
         """GET .../unpublished (P3-D31): one query-only snapshot, no lock, no write. W(g) is checked
         first (401, then 403 for any other principal, never 404, then 409 fenced); only then is the
         workspace's fetch window charged; then the query and the position are parsed."""
-        con = self.bridge.connection("query")
-        con.execute("PRAGMA query_only=ON")
-        con.execute("BEGIN")
-        try:
+        with self.bridge.reading("query") as con:
+            con.execute("BEGIN")
             now = self.d.clock()
             self.authorize(con, "unpublished_get", ws, headers, now)
             self.budget.charge("unpublished-get", ws, U.FETCH_WINDOWS, now)
             return U.page(con, ws, query)
-        finally:
-            con.rollback()
 
     def unpublished_ack(self, ws, headers, raw):
         """POST .../unpublished/ack (P3-D31): authorized read-only first, then the ack window, then

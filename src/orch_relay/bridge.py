@@ -7,14 +7,12 @@ import random
 import secrets
 import sqlite3
 import struct
-import threading
 import time
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from . import db
 from . import proto as P
 from .directory import (
     Refusal,
@@ -171,36 +169,18 @@ class Bridge:
         self.polls = {}
         self.waiters = {}  # wake key -> set of asyncio.Event; touched on the event loop only
         self.pair_groups = {}  # address group -> admitted pair polls
-        self.local = threading.local()
-        self.connections = []
-        self.connections_lock = threading.Lock()
 
     def connection(self, purpose):
-        """A per-thread connection reused across transactions ("read" is query-only)."""
-        cache = self.local.__dict__.setdefault("connections", {})
-        con = cache.get(purpose)
-        if con is None:
-            con = db.connect(self.d.path, check_same_thread=False)
-            con.row_factory = sqlite3.Row
-            if purpose == "read":
-                # Used on the event loop: never block it waiting for a lock (recovery or an
-                # external exclusive lock); callers fall back to the full transaction.
-                con.execute("PRAGMA query_only=ON")
-                con.execute("PRAGMA busy_timeout=0")
-            with self.connections_lock:
-                self.connections.append(con)
-            cache[purpose] = con
-        if con.in_transaction:
-            con.rollback()
-        return con
+        """The directory's shared write connection; callers hold Directory.lock."""
+        return self.d.connection(purpose)
+
+    def reading(self, purpose="read"):
+        """Borrow a pooled read connection (context manager). "read" never waits for a lock
+        (used on the event loop; callers fall back to the full transaction); "query" waits."""
+        return self.d.reader(purpose)
 
     def close(self):
-        with self.connections_lock:
-            for con in self.connections:
-                con.close()
-            self.connections.clear()
-        self.local = threading.local()
-        self.d.close()  # the directory's per-thread connections (P3-D32)
+        self.d.close()  # the shared pool (P3-D32 round 2)
 
     def wake(self, *keys):
         for key in keys:
@@ -692,15 +672,13 @@ class Bridge:
 
         Returns (ready, expiry_ms). WAL readers never wait for writers.
         """
-        con = self.connection("read")
         try:
-            con.execute("BEGIN")
-            ready = self.ready(con, route, params, query, headers, token, self.d.clock())
-            return ready, None if ready or route == "pair" else self.expiry(con, headers)
+            with self.reading() as con:
+                con.execute("BEGIN")
+                ready = self.ready(con, route, params, query, headers, token, self.d.clock())
+                return ready, None if ready or route == "pair" else self.expiry(con, headers)
         except (Refusal, sqlite3.Error):
             return True, None  # the full transaction gives the authoritative answer
-        finally:
-            con.rollback()
 
     def preauthorize(self, route, method, params, headers, raw):
         """Read-only authorization before any lock, write transaction, slot or waiter.
@@ -711,44 +689,43 @@ class Bridge:
         (the transaction alone would answer 404 for unknown ids). The transaction
         re-checks everything. Returns (session or None, expiry_ms or None).
         """
+        with self.reading() as con:
+            con.execute("BEGIN")
+            return self.authorize_snapshot(con, route, method, params, headers, raw)
+
+    def authorize_snapshot(self, con, route, method, params, headers, raw):
+        """preauthorize()'s checks on one read snapshot."""
         d = self.d
-        con = self.connection("read")
-        con.execute("BEGIN")
-        try:
-            now = d.clock()
-            ws = params.get("ws")
-            if route == "pair":
-                if not con.execute(
-                    "SELECT 1 FROM workspaces WHERE workspace_id=?", (ws,)
-                ).fetchone():
-                    refuse("unknown_workspace", 401)
-                if not (method == "POST" and len(raw) >= 6 and raw[5] == 2):
-                    return None, None  # anonymous by design; charged in pairing windows
-            session = d.authenticate(con, headers, now)
-            if route == "cert_requests":
-                if method == "GET":
-                    if session["kind"] != "device" or session["person_id"] != params["person"]:
-                        fail("not_eligible")
-                else:
-                    if session["kind"] != "workspace":
-                        fail("not_eligible")
-                    d.fence(con, headers, session["subject_id"], now)
-            elif route in ("cert_challenge", "cert_rejection"):
-                if session["kind"] != "device":
+        now = d.clock()
+        ws = params.get("ws")
+        if route == "pair":
+            if not con.execute("SELECT 1 FROM workspaces WHERE workspace_id=?", (ws,)).fetchone():
+                refuse("unknown_workspace", 401)
+            if not (method == "POST" and len(raw) >= 6 and raw[5] == 2):
+                return None, None  # anonymous by design; charged in pairing windows
+        session = d.authenticate(con, headers, now)
+        if route == "cert_requests":
+            if method == "GET":
+                if session["kind"] != "device" or session["person_id"] != params["person"]:
                     fail("not_eligible")
-            elif route != "cert_request":
-                d.workspace_access(con, session, ws, write=route in ("hold", "host_poll", "pair"))
-                if (
-                    session["kind"] == "workspace"
-                    and route != "hold"
-                    and (method == "POST" or route == "host_poll")
-                ):
-                    d.fence(con, headers, ws, now)
-                if route == "bridge" and method == "GET" and session["kind"] != "device":
+            else:
+                if session["kind"] != "workspace":
                     fail("not_eligible")
-            return session, self.expiry(con, headers)
-        finally:
-            con.rollback()
+                d.fence(con, headers, session["subject_id"], now)
+        elif route in ("cert_challenge", "cert_rejection"):
+            if session["kind"] != "device":
+                fail("not_eligible")
+        elif route != "cert_request":
+            d.workspace_access(con, session, ws, write=route in ("hold", "host_poll", "pair"))
+            if (
+                session["kind"] == "workspace"
+                and route != "hold"
+                and (method == "POST" or route == "host_poll")
+            ):
+                d.fence(con, headers, ws, now)
+            if route == "bridge" and method == "GET" and session["kind"] != "device":
+                fail("not_eligible")
+        return session, self.expiry(con, headers)
 
     def admit(self, key):
         """Concurrency caps; callers run on the event loop, so no lock is needed."""
@@ -800,13 +777,10 @@ class Bridge:
         elif route == "cert_requests" and method == "POST":
             self.wake(("person", params["person"]))
         elif route in ("cert_challenge", "cert_rejection"):
-            con = self.connection("read")
-            try:
+            with self.reading() as con:
                 row = con.execute(
                     "SELECT workspace_id FROM cert_requests WHERE request_id=?", (params["ident"],)
                 ).fetchone()
-            finally:
-                con.rollback()
             if row:
                 self.wake(("ws", row[0]))
 
