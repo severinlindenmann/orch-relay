@@ -93,8 +93,14 @@ def last_stamp(delivered):
 
 
 def notices(con, ws):
+    # P3-D30: only registry pairs count, with the unpublished-eligibility filter (checkpoints
+    # association(): the person the registry associates with the device, P3-D29 evidence-only
+    # persons excluded). They are the pairs that cut the device off and oblige the host; another
+    # person's (e.g. a stranger's self-certified) pair for an ever-device never moves the cursor.
     cursor = con.execute(
-        "SELECT coalesce(max(r.cursor),0) FROM revocations r JOIN ever_devices e ON e.device_id=r.device_id WHERE e.workspace_id=?",
+        "SELECT coalesce(max(r.cursor),0) FROM revocations r JOIN ever_devices e ON e.device_id=r.device_id "
+        "JOIN devices d ON d.device_id=r.device_id AND d.person_id=r.person_id WHERE e.workspace_id=? "
+        "AND NOT EXISTS (SELECT 1 FROM evidence_persons x WHERE x.person_id=d.person_id)",
         (ws,),
     ).fetchone()[0]
     return {

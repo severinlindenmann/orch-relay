@@ -25,6 +25,9 @@ from orch_relay import cli, db
 from orch_relay import proto as P
 from orch_relay.app import create_app
 from orch_relay.directory import DAY, HOUR, MINUTE, digest
+from ref import orch_protocol_ref as R
+
+S = R.SUITES[2]
 
 
 def account_body(c, invite):
@@ -113,10 +116,16 @@ def test_revoke_cleanup_upgrade_and_recovery_after_restart(tmp_path):
         stronger = signed({**RECORD["o"], "reason": "compromised"})
         assert c.post("/v2/revocations", json={"record": stronger}).status_code == 200
         assert c.post("/v2/revocations", json={"record": RECORD}).status_code == 200
-        assert c.get("/v2/devices/" + DEVICE + "/revocation").json()["record"] == stronger
+        assert (
+            c.get("/v2/devices/" + DEVICE + "/revocation").json()["pairs"][0]["revocation"]
+            == stronger
+        )
     with TestClient(create_app(tmp_path)) as c:
         c.app.state.directory.clock = lambda: NOW
-        assert c.get("/v2/devices/" + DEVICE + "/revocation").json()["record"] == stronger
+        assert (
+            c.get("/v2/devices/" + DEVICE + "/revocation").json()["pairs"][0]["revocation"]
+            == stronger
+        )
         with closing(db.connect(c.app.state.directory.path)) as con:
             assert con.execute("SELECT revocation_cursor FROM rotation_due").fetchone()[0] == 2
         cert = V["certs"]["signed"]["laptop"]
@@ -457,7 +466,10 @@ def test_revoke_keeps_every_pair_and_upgrades_per_pair(tmp_path):
             )
         assert rows == {PERSON: P.cj(stronger), V["ids"]["person_bob"]: P.cj(bob_record)}
         # The registered person's record is the one GET /revocation names; bob's row stays.
-        assert c.get("/v2/devices/" + DEVICE + "/revocation").json()["record"] == stronger
+        assert (
+            c.get("/v2/devices/" + DEVICE + "/revocation").json()["pairs"][0]["revocation"]
+            == stronger
+        )
         with closing(db.connect(d.path)) as con, con:
             con.row_factory = __import__("sqlite3").Row
             d.revoke(con, RECORD, NOW)  # weaker for alice's pair: no change
@@ -470,53 +482,109 @@ def test_revoke_keeps_every_pair_and_upgrades_per_pair(tmp_path):
             )
 
 
-def test_revocation_route_falls_back_to_the_earliest_pair(tmp_path):
+BOB = V["ids"]["person_bob"]
+BOB_PK = P.b64u(bytes.fromhex(V["keys"]["person_bob.sig"]["pub"]))
+INTRUDER_PK = P.b64u(bytes.fromhex(V["keys"]["intruder.sig"]["pub"]))
+
+
+def _cert_of(person, key, did=DEVICE):
+    base = next(c for c in V["certs"]["signed"].values() if c["o"]["device_id"] == did)
+    return signed({**base["o"], "person_id": person}, key)
+
+
+def _chain_row(con, did, person, key, pk, reason="compromised", ws=WS):
+    """An accepted restore's evidence pair, as apply_evidence writes it: the chain row and the
+    global (§19.5) row of the same pair."""
+    record = signed({**RECORD["o"], "device_id": did, "person_id": person, "reason": reason}, key)
+    cert = _cert_of(person, key, did)
+    con.execute(
+        "INSERT INTO checkpoint_revocations VALUES (?,?,?,?,?,?,?,?,?)",
+        (ws, did, person, reason, P.cj(record), P.cj(cert), pk, "r", "t"),
+    )
+    con.execute(
+        "INSERT INTO revocations VALUES (?,?,?,?,?,(SELECT coalesce(max(cursor),0)+1 FROM revocations))",
+        (did, person, P.cj(record), reason, NOW),
+    )
+    return record, cert
+
+
+def _own_row(con, did=DEVICE, reason="lost"):
+    record = signed({**RECORD["o"], "device_id": did, "reason": reason})
+    con.execute(
+        "INSERT INTO revocations VALUES (?,?,?,?,?,(SELECT coalesce(max(cursor),0)+1 FROM revocations))",
+        (did, PERSON, P.cj(record), reason, NOW),
+    )
+    return record
+
+
+def test_revocation_route_lists_every_pair_registered_person_first(tmp_path):
+    """P3-D30 (orch-52 ruling 3): one entry per held pair; the registered person's pair first even
+    though it sorts last by person_id and has the highest cursor, then by person_id; provenance and
+    the evidence the relay holds for each."""
+    intruder = R.person_id(S, P.unb64u(INTRUDER_PK)).hex()
     with TestClient(create_app(tmp_path)) as c:
         d = c.app.state.directory
         seed(d)
         with closing(db.connect(d.path)) as con, con:
-            bob_record = _other_person_row(con, DEVICE)
-        # No pair of the registered person: the earliest held record.
-        assert c.get("/v2/devices/" + DEVICE + "/revocation").json()["record"] == bob_record
+            chain, chain_cert = _chain_row(con, DEVICE, intruder, "intruder.sig", INTRUDER_PK)
+            feed = _other_person_row(con, DEVICE)
+            own = _own_row(con)
+        assert PERSON > max(BOB, intruder)
+        body = c.get("/v2/devices/" + DEVICE + "/revocation").json()
+        assert body == {
+            "pairs": [
+                {
+                    "person_id": PERSON,
+                    "reason": "lost",
+                    "revocation": own,
+                    "device_cert": CERT,
+                    "pk_pub": PK,
+                    "provenance": "registry",
+                },
+                {
+                    "person_id": BOB,
+                    "reason": "compromised",
+                    "revocation": feed,
+                    "device_cert": None,
+                    "pk_pub": None,
+                    "provenance": "feed",
+                },
+                {
+                    "person_id": intruder,
+                    "reason": "compromised",
+                    "revocation": chain,
+                    "device_cert": chain_cert,
+                    "pk_pub": INTRUDER_PK,
+                    "provenance": "chain",
+                },
+            ]
+        }
 
 
-def test_device_auth_cutoff_stays_by_device_id(tmp_path):
-    """The device-auth cutoff is a different concern from restore-signer refusal: any held revocation
-    of a device id ends its sessions and refuses its login, whatever the person (documented)."""
+def test_revocation_route_without_registry_orders_by_person(tmp_path):
+    """No association: every pair is chain or feed, ordered by person_id; a pre-0010 evidence-only
+    registry row (P3-D29, written by a restore) is no association and so not 'registry'."""
     with TestClient(create_app(tmp_path)) as c:
         d = c.app.state.directory
         seed(d)
         with closing(db.connect(d.path)) as con, con:
-            _other_person_row(con, DEVICE)
-        assert issue_login(c).json() == {"error": "revoked"}
-
-
-def test_account_creation_refuses_a_revoked_device_id(tmp_path):
-    """PR #53 review R1 (reviewer PoC): since 0010 a device id can hold a revocation without a
-    registry row (here bob's pair for alice's not-yet-registered phone, as restore evidence stores
-    it). POST /v2/accounts refuses it like PUT /v2/devices does (403 revoked, by device id) and writes
-    no account, device or invite use; otherwise the registry would associate the id with alice and
-    strand any workspace whose chain holds (phone, bob)."""
-    from orch_relay.directory import create_invite
-
-    invite = create_invite(tmp_path / db.DB_NAME, DAY)
-    with TestClient(create_app(tmp_path)) as c:
-        d = c.app.state.directory
-        d.clock = lambda: NOW
-        with closing(db.connect(d.path)) as con, con:
-            _other_person_row(con, DEVICE)
-        r = c.post("/v2/accounts", json=account_body(c, invite))
-        assert (r.status_code, r.json()) == (403, {"error": "revoked"})
-        with closing(db.connect(d.path)) as con:
-            assert not con.execute("SELECT 1 FROM devices").fetchone()
-            assert not con.execute("SELECT 1 FROM accounts").fetchone()
-            assert con.execute("SELECT used_ms FROM invites").fetchone()[0] is None
+            con.execute("INSERT INTO evidence_persons VALUES (?)", (PERSON,))
+            own, own_cert = _chain_row(con, DEVICE, PERSON, "person_alice.sig", PK, reason="lost")
+            bob = _other_person_row(con, DEVICE)
+        pairs = c.get("/v2/devices/" + DEVICE + "/revocation").json()["pairs"]
+        assert [(p["person_id"], p["provenance"]) for p in pairs] == [
+            (BOB, "feed"),
+            (PERSON, "chain"),
+        ]
+        assert pairs[0]["revocation"] == bob and pairs[1]["revocation"] == own
+        assert pairs[1]["pk_pub"] == PK and pairs[1]["device_cert"] == own_cert
+        assert c.get("/v2/devices/" + PRIMARY + "/revocation").json() == {"error": "not_found"}
 
 
 @pytest.mark.parametrize("who", ["own", "other"])
-def test_member_certificate_cutoff_is_by_device_id(tmp_path, who):
-    """PR #53 review R3: membership refuses a member certificate whose device id holds a revocation of
-    any person (the device-auth cutoff, by device id); the same device is accepted without one."""
+def test_device_auth_cutoff_is_per_registry_pair(tmp_path, who):
+    """P3-D30 (orch-52 ruling 2): another person's pair for the registered device id never ends its
+    sessions, login, stored-certificate retries or member certificates; the registry person's does."""
     import sqlite3
 
     from orch_relay.directory import Refusal
@@ -525,18 +593,176 @@ def test_member_certificate_cutoff_is_by_device_id(tmp_path, who):
     with TestClient(create_app(tmp_path)) as c:
         d = c.app.state.directory
         seed(d)
+        with closing(db.connect(d.path)) as con, con:
+            (_own_row if who == "own" else _other_person_row)(con, DEVICE)
+        cut = who == "own"
+        session = c.get("/v2/devices/" + DEVICE, headers={"Authorization": "Bearer FAKE-device"})
+        assert session.status_code == (403 if cut else 200)
+        login = issue_login(c)
+        assert login.json() == {"error": "revoked"} if cut else login.status_code == 200
+        put = c.put("/v2/devices/" + DEVICE, json={"cert": CERT})
+        assert (put.status_code, put.json()) == (
+            (403, {"error": "revoked"}) if cut else (200, {"device_id": DEVICE})
+        )
         member = {"device_id": DEVICE, "person_id": PERSON, "scopes": ["look"]}
         with closing(db.connect(d.path)) as con:
             con.row_factory = sqlite3.Row
-            certificate(con, member, PERSON, [], NOW)  # control: no revocation, accepted
-            if who == "own":
-                con.execute(
-                    "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
-                    (DEVICE, PERSON, P.cj(RECORD), "lost", NOW, 1),
+            if cut:
+                with pytest.raises(Refusal) as refused:
+                    certificate(con, member, PERSON, [], NOW)
+                assert refused.value.code == "revoked"
+            else:
+                certificate(con, member, PERSON, [], NOW)
+
+
+def test_cutoff_person_comes_from_the_registry_row_not_the_request(tmp_path):
+    """The pair is (device, devices.person_id): bob's revoked pair for alice's device never turns
+    bob's certificate for that id or bob's list entry into 'revoked'; they keep their own refusals."""
+    import sqlite3
+
+    from orch_relay.directory import Refusal
+    from orch_relay.members import certificate
+
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        with closing(db.connect(d.path)) as con, con:
+            con.execute("INSERT INTO accounts VALUES (?,?,?)", (BOB, BOB_PK, NOW))
+            _other_person_row(con, DEVICE)
+        bob_cert = _cert_of(BOB, "person_bob.sig")
+        r = c.put("/v2/devices/" + DEVICE, json={"cert": bob_cert})
+        assert (r.status_code, r.json()) == (409, {"error": "cert_conflict"})
+        with closing(db.connect(d.path)) as con:
+            con.row_factory = sqlite3.Row
+            with pytest.raises(Refusal) as refused:
+                certificate(
+                    con,
+                    {"device_id": DEVICE, "person_id": BOB, "scopes": ["look"]},
+                    PERSON,
+                    [BOB],
+                    NOW,
                 )
+            assert refused.value.code == "other_person"
+
+
+def _register(c, route, invite):
+    if route == "put":
+        return c.put("/v2/devices/" + DEVICE, json={"cert": CERT})
+    return c.post("/v2/accounts", json=account_body(c, invite))
+
+
+@pytest.mark.parametrize("route", ["put", "account"])
+@pytest.mark.parametrize(
+    "evidence,refused",
+    [("chain_other", True), ("chain_own", True), ("feed_own", True), ("feed_other", False)],
+)
+def test_new_registration_refused_on_chain_learned_revocation(tmp_path, route, evidence, refused):
+    """P3-D30 (orch-52 rulings 2 and 4): PUT /v2/devices and POST /v2/accounts refuse a new
+    registration of a device id with a chain-learned revocation of ANY person (403 revoked, nothing
+    written), and a revocation of the new pair itself; out-of-band-only evidence of another person
+    (a squatted id) never refuses it, and the registered device then logs in (with the invite used,
+    it must: the cutoff after registration is per pair)."""
+    from orch_relay.directory import create_invite
+
+    invite = create_invite(tmp_path / db.DB_NAME, DAY)
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d, accounts=route == "put", devices=False, card=False)
+        with closing(db.connect(d.path)) as con, con:
+            if evidence == "chain_other":
+                _chain_row(con, DEVICE, BOB, "person_bob.sig", BOB_PK)
+            elif evidence == "chain_own":
+                _chain_row(con, DEVICE, PERSON, "person_alice.sig", PK)
+            elif evidence == "feed_own":
+                _own_row(con)
             else:
                 _other_person_row(con, DEVICE)
-            with pytest.raises(Refusal) as refused:
-                certificate(con, member, PERSON, [], NOW)
-            assert refused.value.code == "revoked"
-            con.rollback()
+        r = _register(c, route, invite)
+        with closing(db.connect(d.path)) as con:
+            devices = con.execute("SELECT person_id FROM devices").fetchall()
+            accounts = con.execute("SELECT person_id FROM accounts").fetchall()
+            used = con.execute("SELECT used_ms FROM invites").fetchone()[0]
+        if refused:
+            assert (r.status_code, r.json()) == (403, {"error": "revoked"})
+            assert devices == [] and used is None
+            assert accounts == ([(PERSON,)] if route == "put" else [])
+        else:
+            assert r.status_code == 200, r.text
+            assert devices == [(PERSON,)]
+            assert issue_login(c).status_code == 200
+
+
+def test_account_exact_retry_after_revocation_writes_nothing(tmp_path):
+    """The exact same account request is answered 200 from the invite's digest even after the device
+    was revoked; it writes nothing and grants nothing (login stays refused)."""
+    from orch_relay.directory import create_invite
+
+    invite = create_invite(tmp_path / db.DB_NAME, DAY)
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        d.clock = lambda: NOW
+        body = account_body(c, invite)
+        assert c.post("/v2/accounts", json=body).status_code == 200
+        assert c.post("/v2/revocations", json={"record": RECORD}).status_code == 200
+        with closing(db.connect(d.path)) as con:
+            before = [
+                con.execute(f"SELECT * FROM {t}").fetchall()
+                for t in ("accounts", "devices", "invites", "sessions")
+            ]
+        assert c.post("/v2/accounts", json=body).json() == {"person_id": PERSON}
+        with closing(db.connect(d.path)) as con:
+            after = [
+                con.execute(f"SELECT * FROM {t}").fetchall()
+                for t in ("accounts", "devices", "invites", "sessions")
+            ]
+        assert after == before
+        assert issue_login(c).json() == {"error": "revoked"}
+
+
+@pytest.mark.parametrize("who", ["own", "other", "unregistered"])
+def test_revoke_cutoff_only_for_the_registry_pair(tmp_path, who):
+    """P3-D30: revoke() always stores the pair, but deletes sessions, prunes the device's queues and
+    sets rotation_due only when the record's person is the registry person. A revocation of an
+    unregistered id has nothing to cut off."""
+    import sqlite3
+
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        did = DEVICE if who != "unregistered" else V["ids"]["device_intruder"]
+        person, key = (PERSON, "person_alice.sig") if who == "own" else (BOB, "person_bob.sig")
+        record = signed({**RECORD["o"], "device_id": did, "person_id": person}, key)
+        with closing(db.connect(d.path)) as con, con:
+            con.row_factory = sqlite3.Row
+            con.execute("INSERT INTO wk_grants VALUES (?,?,?,?)", (WS, DEVICE, 1, b"{}"))
+            d.revoke(con, record, NOW)
+        cut = who == "own"
+        with closing(db.connect(d.path)) as con:
+            assert con.execute(
+                "SELECT 1 FROM revocations WHERE device_id=? AND person_id=?", (did, person)
+            ).fetchone()
+            sessions = con.execute("SELECT COUNT(*) FROM sessions WHERE kind='device'").fetchone()[
+                0
+            ]
+            grants = con.execute("SELECT COUNT(*) FROM wk_grants").fetchone()[0]
+            due = con.execute("SELECT COUNT(*) FROM rotation_due").fetchone()[0]
+        assert sessions == (0 if cut else 1)
+        assert grants == (0 if cut else 1)
+        assert due == (1 if cut else 0)
+
+
+@pytest.mark.parametrize("who", ["own", "other", "evidence_only"])
+def test_bridge_notice_cursor_counts_registry_pairs_only(tmp_path, who):
+    """P3-D30: the host's revocations_cursor moves only for an associated pair of an ever-device: the
+    registry person's, and not when that registry row belongs to a P3-D29 evidence-only person
+    (the unpublished-eligibility filter); another person's pair never moves it."""
+    from orch_relay.bridge import notices
+
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d)
+        with closing(db.connect(d.path)) as con, con:
+            (_other_person_row if who == "other" else _own_row)(con, DEVICE)
+            if who == "evidence_only":
+                con.execute("INSERT INTO evidence_persons VALUES (?)", (PERSON,))
+            assert notices(con, WS)["revocations_cursor"] == (1 if who == "own" else 0)

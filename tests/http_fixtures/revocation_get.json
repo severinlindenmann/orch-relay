@@ -26,18 +26,47 @@
           "Content-Type": "application/json"
         },
         "json": {
-          "record": {
-            "o": {
-              "v": 2,
-              "suite": 2,
-              "kind": "revocation",
+          "pairs": [
+            {
               "person_id": "5c0574d08d9b869beaa7b630cc83893d",
-              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
-              "revoked_ms": 1790000000000,
-              "reason": "lost"
-            },
-            "sig": "5f5fIS1e8IWcHR3xFb8yPc3J6P5Kskox6EbXdnqZOMWP1Hd7rysykdtEsNaUGA0ZuWAmI_fLtEeLjN9nKwLZjQ"
-          }
+              "reason": "lost",
+              "revocation": {
+                "o": {
+                  "v": 2,
+                  "suite": 2,
+                  "kind": "revocation",
+                  "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                  "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                  "revoked_ms": 1790000000000,
+                  "reason": "lost"
+                },
+                "sig": "5f5fIS1e8IWcHR3xFb8yPc3J6P5Kskox6EbXdnqZOMWP1Hd7rysykdtEsNaUGA0ZuWAmI_fLtEeLjN9nKwLZjQ"
+              },
+              "device_cert": {
+                "o": {
+                  "v": 2,
+                  "suite": 2,
+                  "kind": "device_cert",
+                  "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                  "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                  "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+                  "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+                  "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+                  "created_ms": 1789913600000,
+                  "expires_ms": null,
+                  "scopes_max": [
+                    "look",
+                    "decide",
+                    "operate",
+                    "type"
+                  ]
+                },
+                "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+              },
+              "pk_pub": "BOgRnzpX0AUPYGfNWl4v7d-Nv0LQDpoz5PP_5XD8vgu0W3Z6l6Y2lTj9Ty_C2LiyvnyxnkdWSHRRU16AssDhfLY",
+              "provenance": "registry"
+            }
+          ]
         }
       }
     },
@@ -110,6 +139,127 @@
         },
         "json": {
           "error": "rate_limited"
+        }
+      }
+    },
+    {
+      "name": "every_pair_registered_person_first",
+      "given": {
+        "scenario": "every_pair",
+        "now_ms": 1790000000000,
+        "condition": "The relay also holds every non-registry pair of the response: 'chain' pairs as an accepted restore's evidence (certificate and key), 'feed' pairs in the revocation table only."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136/revocation",
+        "query": {},
+        "headers": {}
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "pairs": [
+            {
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "reason": "lost",
+              "revocation": {
+                "o": {
+                  "v": 2,
+                  "suite": 2,
+                  "kind": "revocation",
+                  "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                  "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                  "revoked_ms": 1790000000000,
+                  "reason": "lost"
+                },
+                "sig": "5f5fIS1e8IWcHR3xFb8yPc3J6P5Kskox6EbXdnqZOMWP1Hd7rysykdtEsNaUGA0ZuWAmI_fLtEeLjN9nKwLZjQ"
+              },
+              "device_cert": {
+                "o": {
+                  "v": 2,
+                  "suite": 2,
+                  "kind": "device_cert",
+                  "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                  "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                  "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+                  "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+                  "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+                  "created_ms": 1789913600000,
+                  "expires_ms": null,
+                  "scopes_max": [
+                    "look",
+                    "decide",
+                    "operate",
+                    "type"
+                  ]
+                },
+                "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+              },
+              "pk_pub": "BOgRnzpX0AUPYGfNWl4v7d-Nv0LQDpoz5PP_5XD8vgu0W3Z6l6Y2lTj9Ty_C2LiyvnyxnkdWSHRRU16AssDhfLY",
+              "provenance": "registry"
+            },
+            {
+              "person_id": "42f83168aabd846982483297b14e7301",
+              "reason": "compromised",
+              "revocation": {
+                "o": {
+                  "v": 2,
+                  "suite": 2,
+                  "kind": "revocation",
+                  "person_id": "42f83168aabd846982483297b14e7301",
+                  "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                  "revoked_ms": 1790000000000,
+                  "reason": "compromised"
+                },
+                "sig": "uzDyF2b8mbFM26AVqJdFW6JCCTZuIXtOTTukEW88euZhEEMZRK92cvtKu_OtCeqSXQ5xJhhsb2N3ndyYQrAPcQ"
+              },
+              "device_cert": null,
+              "pk_pub": null,
+              "provenance": "feed"
+            },
+            {
+              "person_id": "54b88389c0c6392335646d612f52a77d",
+              "reason": "lost",
+              "revocation": {
+                "o": {
+                  "v": 2,
+                  "suite": 2,
+                  "kind": "revocation",
+                  "person_id": "54b88389c0c6392335646d612f52a77d",
+                  "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                  "revoked_ms": 1790000000000,
+                  "reason": "lost"
+                },
+                "sig": "ui8_H9m4QdosR_-xuZ37DLd8x5-EP3HtBFRjsqFqleX51MBr2S6LBrIF_3qrxTykTv6H3KyYKGvUX75gwLsvhA"
+              },
+              "device_cert": {
+                "o": {
+                  "v": 2,
+                  "suite": 2,
+                  "kind": "device_cert",
+                  "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                  "person_id": "54b88389c0c6392335646d612f52a77d",
+                  "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+                  "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+                  "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+                  "created_ms": 1789913600000,
+                  "expires_ms": null,
+                  "scopes_max": [
+                    "look",
+                    "decide",
+                    "operate",
+                    "type"
+                  ]
+                },
+                "sig": "ouoefbqujRssLJs161gGBzOHPHzHhWEHMDH4f8Q_GIov9L8gDTWfsXX7ZddtwIMrh5f1eAUxBucqkg8Al4UQUw"
+              },
+              "pk_pub": "BOy0kkjLuhNWKBHT1d4vTlwYiFKwhr9wRpKAL9Y00uyHVcjHd9RJRGmCw1Tuhj57OdW-RskVyKVPMY--1m15_p0",
+              "provenance": "chain"
+            }
+          ]
         }
       }
     }

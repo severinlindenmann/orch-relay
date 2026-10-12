@@ -593,7 +593,7 @@ class Relay:
     def revoked(self, device, person):
         """A held revocation of the restore signer's (device, person) pair (orch-core #397): another
         person's revocation of the device id is another pair and never refuses the signer. (The
-        device-auth cutoff for sessions and member certificates stays by device id: directory.)"""
+        device-auth cutoff is per pair too, under the registry person: directory, P3-D30.)"""
         return self.con.execute(
             "SELECT 1 FROM revocations WHERE device_id=? AND person_id=?", (device, person)
         ).fetchone()

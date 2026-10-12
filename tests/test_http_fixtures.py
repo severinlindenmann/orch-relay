@@ -104,9 +104,14 @@ def check_signatures(
             ) == {"refuse": cert_refusal}
             continue
         if o["kind"] in {"device_cert", "revocation", "cert_challenge", "cert_rejection"}:
-            owner = (
-                "person_bob" if o["person_id"] == corpus["ids"]["person_bob"] else "person_alice"
-            )
+            persons = {
+                corpus["ids"]["person_bob"]: "person_bob",
+                # P3-D30: a revocation_get 'chain' pair of the vector intruder (no ids entry).
+                R.person_id(suite, bytes.fromhex(corpus["keys"]["intruder.sig"]["pub"])).hex(): (
+                    "intruder"
+                ),
+            }
+            owner = persons.get(o["person_id"], "person_alice")
         elif o["kind"] == "genesis_pin":
             if genesis_refusal:
                 assert (

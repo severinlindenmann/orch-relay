@@ -104,3 +104,41 @@ def test_0010_rekeys_revocations_per_pair_and_keeps_rows(tmp_path):
         con.execute("INSERT INTO revocations VALUES ('d1','p1','{}','lost',6,10)")
     index = con.execute("SELECT sql FROM sqlite_master WHERE name='revocation_feed'").fetchone()
     assert index and "person_id, cursor" in index[0]
+
+
+def test_0011_indexes_chain_revocations_by_device_and_keeps_rows(tmp_path):
+    """P3-D30: 0011 adds the checkpoint_revocations(device_id, person_id) index the registration
+    refusal and the per-pair revocation list use; rows are kept, it applies once and re-running its
+    SQL is harmless (IF NOT EXISTS)."""
+    import shutil
+    from importlib import resources
+
+    mdir = tmp_path / "m"
+    mdir.mkdir()
+    src = resources.files("orch_relay").joinpath("migrations")
+    for e in src.iterdir():
+        if e.name.endswith(".sql") and e.name < "0011":
+            shutil.copy(str(e), mdir / e.name)
+    path = tmp_path / "r.sqlite3"
+    db.migrate(path, mdir)
+    row = ("w", "d1", "p1", "lost", b"{}", b"{}", "pk", "r", "t")
+    con = sqlite3.connect(path)
+    with con:
+        con.execute("INSERT INTO checkpoint_revocations VALUES (?,?,?,?,?,?,?,?,?)", row)
+    con.close()
+    name = "0011_registration_lookup.sql"
+    shutil.copy(str(src.joinpath(name)), mdir / name)
+    assert db.migrate(path, mdir) == ["0011_registration_lookup"]
+    assert db.migrate(path, mdir) == []
+    con = sqlite3.connect(path)
+    assert con.execute("SELECT * FROM checkpoint_revocations").fetchall() == [row]
+    index = con.execute(
+        "SELECT sql FROM sqlite_master WHERE name='checkpoint_revocation_device'"
+    ).fetchone()
+    assert index and "(device_id, person_id)" in index[0]
+    plan = con.execute(
+        "EXPLAIN QUERY PLAN SELECT 1 FROM checkpoint_revocations WHERE device_id='d1' LIMIT 1"
+    ).fetchall()
+    assert any("checkpoint_revocation_device" in str(r) for r in plan)
+    with con:
+        con.execute(src.joinpath(name).read_text().split("\n")[-2])  # the CREATE, again: no-op

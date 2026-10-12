@@ -146,6 +146,29 @@ def prepare_case(directory, name, case):
                     "UPDATE sessions SET subject_id=? WHERE token_hash=?",
                     (DEVICE, token_hash("FAKE-device")),
                 )
+        if name == "revocation_get" and scenario == "every_pair":
+            for pair in case["response"]["json"]["pairs"][1:]:
+                record = pair["revocation"]
+                con.execute(
+                    "INSERT INTO revocations VALUES (?,?,?,?,?,"
+                    "(SELECT coalesce(max(cursor),0)+1 FROM revocations))",
+                    (DEVICE, pair["person_id"], P.cj(record), pair["reason"], NOW),
+                )
+                if pair["provenance"] == "chain":
+                    con.execute(
+                        "INSERT INTO checkpoint_revocations VALUES (?,?,?,?,?,?,?,?,?)",
+                        (
+                            WS,
+                            DEVICE,
+                            pair["person_id"],
+                            pair["reason"],
+                            P.cj(record),
+                            P.cj(pair["device_cert"]),
+                            pair["pk_pub"],
+                            "fixture",
+                            "fixture",
+                        ),
+                    )
         if name == "card_put" and (
             case["name"] == "first_card_without_session"
             or scenario in ("rate_limited", "other_person")

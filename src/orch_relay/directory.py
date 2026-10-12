@@ -182,6 +182,46 @@ def usable_account(con, person):
     ).fetchone()
 
 
+def pair_revoked(con, device_id, person_id):
+    """Does the relay hold a revocation of the (device_id, person_id) pair (global §19.5 table)?
+
+    P3-D30 (orch-52 ruling 2): the device-auth cutoff (sessions, login, member and stored
+    certificates) is per pair, the device plus the person of the registry row it authenticates
+    under. Callers pass `devices.person_id`, never a person named by the request, so a stranger's
+    self-certified pair for the same device id never cuts off the registered person's device."""
+    return (
+        con.execute(
+            "SELECT 1 FROM revocations WHERE device_id=? AND person_id=?", (device_id, person_id)
+        ).fetchone()
+        is not None
+    )
+
+
+def chain_revoked(con, device_id):
+    """Does any workspace's chain hold a revocation of this device id, whatever the person?
+
+    Chain-learned (P3-D30) = recorded in `checkpoint_revocations` by an accepted restore, the only
+    authenticated-history source this relay has. Out-of-band rows (the global table alone) are not
+    chain-learned. Served by migration 0011's index."""
+    return (
+        con.execute(
+            "SELECT 1 FROM checkpoint_revocations WHERE device_id=? LIMIT 1", (device_id,)
+        ).fetchone()
+        is not None
+    )
+
+
+def registration_refused(con, device_id, person_id):
+    """P3-D30: a NEW registration of `device_id` for `person_id` (the person of the verified
+    certificate, who becomes the registry person) is refused (403 `revoked`) when any chain-learned
+    revocation of the id exists, of any person, or when the new pair itself is revoked. Out-of-band
+    evidence of another person alone never refuses it.
+
+    Refusing on any chain pair keeps the F1 §5.10 limit unreachable: a registry person that
+    contradicts a chain pair would strand every workspace whose chain holds that pair."""
+    return chain_revoked(con, device_id) or pair_revoked(con, device_id, person_id)
+
+
 class Directory:
     def __init__(self, path, origin, trusted_proxy=None):
         self.path, self.origin, self.trusted_proxy = path, origin, trusted_proxy
@@ -281,11 +321,9 @@ class Directory:
         return {"challenge": challenge, "expires_ms": now + MINUTE}
 
     def device_status(self, con, device, now):
-        # Device-auth cutoff: any held revocation of the device id, whatever the person (a different
-        # concern from restore-signer refusal, which matches the (device, person) pair, orch-core #397).
-        if con.execute(
-            "SELECT 1 FROM revocations WHERE device_id=?", (device["device_id"],)
-        ).fetchone():
+        # Device-auth cutoff per pair (P3-D30): `device` is the registry row, so the person is the
+        # one this device id authenticates as (sessions, login, stored-certificate retries, bridge).
+        if pair_revoked(con, device["device_id"], device["person_id"]):
             fail("revoked")
         if device["expires_ms"] is not None and now >= device["expires_ms"]:
             fail("cert_expired")
@@ -414,14 +452,19 @@ class Directory:
         if not P.SUITE.pub_ok(pub):
             fail("cert_invalid")
         check_suite(body["device_cert"])
-        # As PUT /v2/devices (recovery): a device id with any held revocation is never registered
-        # (the device-auth cutoff, by device id). Since 0010 such an id can exist without a
-        # registry row (restore evidence registers nothing), so account creation checks it too.
+        # As PUT /v2/devices (recovery): a new registration is refused for a device id with any
+        # chain-learned revocation, or a revocation of the new pair itself (P3-D30). Since 0010
+        # such an id can exist without a registry row (restore evidence registers nothing).
         cert_o = body["device_cert"].get("o") if isinstance(body["device_cert"], dict) else None
-        did = cert_o.get("device_id") if isinstance(cert_o, dict) else None
+        did, person = (
+            (cert_o.get("device_id"), cert_o.get("person_id"))
+            if isinstance(cert_o, dict)
+            else (None, None)
+        )
         prior = (
             isinstance(did, str)
-            and con.execute("SELECT 1 FROM revocations WHERE device_id=?", (did,)).fetchone()
+            and isinstance(person, str)
+            and registration_refused(con, did, person)
         )
         o = checked(P.verify_cert(body["device_cert"], pub, now, {did} if prior else set()))
         if not P.SUITE.verify(
@@ -526,12 +569,17 @@ class Directory:
             fail("other_person")
         pub = P.unb64u(account["pk_pub"])
         stored = con.execute("SELECT * FROM devices WHERE device_id=?", (did,)).fetchone()
-        # A revocation is held per (device, person) pair (orch-core #397); a certificate is refused
-        # for a device id with any held revocation (the device-auth cutoff, by device id).
-        prior = con.execute(
-            "SELECT * FROM revocations WHERE device_id=? AND (?=0 OR person_id=?)",
-            (did, int(revocation), person),
-        ).fetchone()
+        # A revocation is held per (device, person) pair (orch-core #397). A certificate (P3-D30):
+        # the stored device is cut off per pair, under its registry person (never the request's);
+        # a new registration is refused on any chain-learned revocation of the id, or its own pair.
+        if revocation:
+            prior = con.execute(
+                "SELECT * FROM revocations WHERE device_id=? AND person_id=?", (did, person)
+            ).fetchone()
+        elif stored:
+            prior = pair_revoked(con, did, stored["person_id"])
+        else:
+            prior = registration_refused(con, did, person)
         if revocation:
             checked(
                 P.verify_revocation(
@@ -572,8 +620,13 @@ class Directory:
 
         Retained per (device_id, person_id) pair (orch-core #397, migration 0010): another person's
         revocation of the same device id is another row, never dropped and never replacing this
-        one; a pair only upgrades (§6.2 "no un-revoke"). The cutoff below (sessions, member list,
-        rotation) is by device id: device authentication ends for a device id with any revocation."""
+        one; a pair only upgrades (§6.2 "no un-revoke").
+
+        The cutoff below (sessions, prune_device's queues, grants and wraps, rotation_due) is per pair
+        (P3-D30): it runs only when the record's person is the device's registry person
+        (`devices.person_id`), the only person the device id authenticates as. Any other pair, and
+        any revocation of an unregistered id, has nothing to cut off: no session, member row or
+        grant can exist without a registry row of that person. Such a pair is still stored."""
         o = record["o"]
         did = o["device_id"]
         prior = con.execute(
@@ -588,6 +641,11 @@ class Directory:
                 "received_ms=excluded.received_ms, cursor=excluded.cursor",
                 (did, o["person_id"], P.cj(record), o["reason"], now, cursor),
             )
+        registered = con.execute(
+            "SELECT person_id FROM devices WHERE device_id=?", (did,)
+        ).fetchone()
+        if registered is None or registered[0] != o["person_id"]:
+            return
         con.execute("DELETE FROM sessions WHERE kind='device' AND subject_id=?", (did,))
         from .members import prune_device
 
@@ -601,6 +659,49 @@ class Directory:
                 revocation_cursor=excluded.revocation_cursor, epoch=excluded.epoch""",
             (cursor, did),
         )
+
+    def revocation_pairs(self, con, device):
+        """GET /v2/devices/{device}/revocation (P3-D30, orch-52 ruling 3): every held pair of the
+        device id, the registered person's pair first, then the others by person_id.
+
+        provenance: 'registry' when the pair's person is the device's association (its registry row,
+        excluding P3-D29 evidence-only rows, which restores created); 'chain' when an accepted
+        restore of some workspace carried the pair (`checkpoint_revocations`); 'feed' otherwise
+        (the §19.5 table alone). `revocation` is the strongest record held (the §19.5 row);
+        `device_cert` and `pk_pub` are the registry certificate and account key for a registry
+        pair, the carried evidence for a chain pair (the first workspace by id), else null."""
+        rows = con.execute(
+            "SELECT r.person_id, r.reason, r.record, d.cert, a.pk_pub FROM revocations r "
+            "LEFT JOIN devices d ON d.device_id=r.device_id AND d.person_id=r.person_id "
+            "AND NOT EXISTS (SELECT 1 FROM evidence_persons e WHERE e.person_id=d.person_id) "
+            "LEFT JOIN accounts a ON d.device_id IS NOT NULL AND a.person_id=r.person_id "
+            "WHERE r.device_id=? ORDER BY d.device_id IS NULL, r.person_id",
+            (device,),
+        ).fetchall()
+        if not rows:
+            fail("not_found")
+        pairs = []
+        for person, reason, record, cert, pk_pub in rows:
+            provenance = "registry" if cert is not None else "feed"
+            if cert is None:
+                chain = con.execute(
+                    "SELECT device_cert, pk_pub FROM checkpoint_revocations "
+                    "WHERE device_id=? AND person_id=? ORDER BY workspace_id LIMIT 1",
+                    (device, person),
+                ).fetchone()
+                if chain is not None:
+                    provenance, (cert, pk_pub) = "chain", tuple(chain)
+            pairs.append(
+                {
+                    "person_id": person,
+                    "reason": reason,
+                    "revocation": P.parse_json(record),
+                    "device_cert": P.parse_json(cert) if cert is not None else None,
+                    "pk_pub": pk_pub,
+                    "provenance": provenance,
+                }
+            )
+        return {"pairs": pairs}
 
     def card_put(self, con, ws, body, headers, address, now):
         fields(body, "card")
@@ -684,17 +785,7 @@ class Directory:
             return self.recovery(con, body, raw, address, now, ident)
         if route == "revocation":
             self.rate("revocation-read", address, MINUTE, 60, now)
-            # Per pair since 0010: the registered person's revocation of the device first, else the
-            # earliest held one (the response shape names one record).
-            row = con.execute(
-                "SELECT r.record FROM revocations r LEFT JOIN devices d ON d.device_id=r.device_id "
-                "AND d.person_id=r.person_id WHERE r.device_id=? "
-                "ORDER BY d.device_id IS NULL, r.cursor LIMIT 1",
-                (ident,),
-            ).fetchone()
-            if row is None:
-                fail("not_found")
-            return {"record": P.parse_json(row["record"])}
+            return self.revocation_pairs(con, ident)
         if route == "card" and method == "PUT":
             return self.card_put(con, ident, body, headers, address, now)
         session = self.authenticate(con, headers, now)

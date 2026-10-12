@@ -1,5 +1,5 @@
 {
-  "aggregate": "6781766addaa3cc767d67da0d9031ce1e60a80e251dc7972b2f3518a8ab10072",
+  "aggregate": "e07ad597b19770b28c0c9242f027ca43faacc8a991bfbddca22019c588958350",
   "files": {
     "README.md": "a4a11f1d535366d9fd22bc2d9f913c79010fee55191bc46a361e99e88072be58",
     "accounts.json": "060776501099476673fa1026afa1256ec7c06f8c922c9b3542ee63ee6058d1c3",
@@ -33,7 +33,7 @@
     "pair_poll.json": "e5b146b13447e6ca5b570ed11ed3c53eec11e81d091812c719327ccf8854307e",
     "proof.json": "b6f8cff6ec22c651ee7ba7110c7e94e5d841a42dfdb4255f827808e9b26bf135",
     "revocation_feed.json": "66fadcc488dd22f0e742e0f815e2e969d169549686594f2bdbdb5c4bb4feb8b2",
-    "revocation_get.json": "4ac300cc956bf63f1a6f5c9dfc11b8df4b933d30ef467d0f2a4c00c694452933",
+    "revocation_get.json": "6fc71fdf60b96ef0398cfcf38af11569fd2462ef1acc7cd3e27f5a0ef009bcca",
     "revocations_post.json": "f35f4ff8306d89cbaae00d74c6d31e7ceb2e8700d287b2b91dcd857d51b6968e",
     "session_challenge.json": "9095371f87b94bd03200d494ca50202abe6f3620910b0e486d25bac25dc7292e",
     "session_login.json": "ba37d00ab298808f4f1f9d0a62a0c31c6405f4213a317386bbd950ac87978e6d",
@@ -42,5 +42,5 @@
     "staging_page.json": "e3aa4048ed1fa171954ccae68907b67085342b8eb88b66ba37d58f6746fd9545",
     "transitions.json": "f1e5f37a65ca8ebdf6d51c3cd92c6759f7e33b49b42d0440c01065a4159400e3"
   },
-  "revision": 8
+  "revision": 9
 }
