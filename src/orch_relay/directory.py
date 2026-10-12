@@ -33,22 +33,52 @@ MINUTE, HOUR, DAY = 60_000, 3_600_000, 86_400_000
 ACCOUNT_WORKSPACES = 32
 MAX_RESPONSE = 4 * 1024 * 1024
 # P3-D35 (pre-public-deploy blocker 4): token buckets for authenticated requests, as (burst,
-# refill per minute). Every request with a valid session on a directory, bridge or checkpoint route
-# takes one token of its session's bucket, and of its workspace's for a W session (W sessions are
-# not capped in number; device sessions are, 8 per device), after authentication and before any
-# lock, slot or write; proof and transition pages also take one of the page buckets. Refusals
-# after authentication are charged the same, so a valid session spamming refused requests is
-# throttled too. Honest clients long-poll (up to 25 s) or poll at most every few seconds, and a
-# sync reads a handful of directory objects: 600/min sustained (10/s) and a 600 burst is two
-# orders of magnitude above that. A device walks at most a few dozen proof pages (a full 64 MiB
-# set is about 16 pages of 56,680 heads, plus one page per small log), so the page burst is 256 and
-# the refill 2/s. Overrides: ORCH_RELAY_THROTTLE_<NAME>="burst/per-minute". In memory, reset on
-# restart (accepted, like every rate window).
+# refill per minute); round 2 after the Opus review (F1-F3). Every request with a valid session on
+# a directory, bridge or checkpoint route is charged after authentication and before any lock, slot
+# or write, to exactly one bucket class (protocol §19.4 has the table):
+# - read (everything else): the session's bucket, keyed by the DEVICE for a device session (so a
+#   logout and login cannot refill it, F2) and by the token for a W session, plus the person's
+#   bucket (device sessions) or the workspace's (W sessions, which are not capped in number);
+# - page (proof and transition pages): the same identities' page buckets, weighted by the work
+#   returned: one token per started 1,000 heads (PAGE_TOKEN_HEADS), at least one (F1);
+# - staging (staging page and manifest PUTs): one bucket per workspace, not the session's (F1);
+# - answer (a host's ORB2 response or pair answer): one bucket per (workspace, target device), not
+#   the host's session or workspace (F3: a member can spend only the host's answers to itself).
+# A refusal after authentication is always charged one token of the read class, so a valid session
+# spamming refused requests is throttled and can never spend another workspace's or device's
+# staging or answer bucket.
+# Arithmetic: honest clients long-poll (up to 25 s) or poll every few seconds and a directory sync
+# is a handful of reads, so 600 burst and 10/s per device is far above it. A first sync walks one
+# proof per grown log (ref sync_walk): a full 64 MiB set is 17 pages of up to PROOF_PAGE_HEADS heads
+# (16 x 57 tokens + 1 = 913) and a 5,000-ticket workspace adds one small page per log (SYNC_LOGS),
+# so the page burst is 913 + 5,001 = 5,914 tokens with a 10/s refill (10,000 heads/s, ~740 kB/s,
+# a full re-walk every ~10 min). One manifest describes at most MANIFEST_PAGES = 27,776 pages
+# (PAGE_CAP over the smallest canonical descriptor, 150 bytes plus a comma), so the staging burst
+# is one full set plus its manifest, refilled at 50/s. The answer bucket matches the existing
+# bridge-host-post window (20 chunks/s per workspace and target). Overrides:
+# ORCH_RELAY_THROTTLE_<NAME>="burst/per-minute". In memory, reset on restart (accepted).
+PAGE_BYTES = 4 * 1024 * 1024  # checkpoints.PAGE_CAP (pinned by tests)
+PROOF_PAGE_HEADS = (PAGE_BYTES - 128) // 74  # checkpoints.PROOF_PAGE_HEADS
+STAGE_HEADS = 64 * 1024 * 1024 // 74  # heads in a full 64 MiB staging set (checkpoints.STAGE_CAP)
+PAGE_TOKEN_HEADS = 1_000
+SYNC_LOGS = 5_001  # logs of a 5,000-ticket workspace (bench_checkpoint_capacity's shape)
+FULL_SET_TOKENS = (STAGE_HEADS // PROOF_PAGE_HEADS) * math.ceil(
+    PROOF_PAGE_HEADS / PAGE_TOKEN_HEADS
+) + math.ceil(STAGE_HEADS % PROOF_PAGE_HEADS / PAGE_TOKEN_HEADS)
+PAGE_BURST = FULL_SET_TOKENS + SYNC_LOGS
+_DESCRIPTOR = {"i": 0, "kind": "appended", "log": "workspace", "after_seq": 0, "count": 1}
+MANIFEST_PAGES = (PAGE_BYTES - len(P.cj({"pages": []}))) // (
+    len(P.cj({**_DESCRIPTOR, "digest": "sha256:" + "0" * 64})) + 1
+)
 THROTTLES = {
     "session": (600, 600),
+    "person": (1200, 1200),
     "workspace": (1200, 1200),
-    "page-session": (256, 120),
-    "page-workspace": (512, 240),
+    "page-session": (PAGE_BURST, 600),
+    "page-person": (2 * PAGE_BURST, 1200),
+    "page-workspace": (2 * PAGE_BURST, 1200),
+    "staging": (MANIFEST_PAGES + 1, 3000),
+    "host-answer": (1200, 1200),
 }
 # Buckets kept (LRU-evicted beyond it; ORCH_RELAY_THROTTLE_TABLE). Only authenticated sessions and
 # their workspaces create entries, so a flood of bad tokens adds none; about 390 B per entry
@@ -289,16 +319,19 @@ class Buckets:
         self.limit = limit
         self.table = OrderedDict()  # key -> (level, ms of the level)
 
-    def take(self, key, burst, rate, now, charge=True):
-        """Refuse 429 `rate_limited` (Retry-After to the next whole token) when less than one token
-        is left; else, with charge, take it. A check (charge=False) has no side effects at all."""
+    def take(self, key, burst, rate, now, charge=True, cost=1, debt=False):
+        """Refuse 429 `rate_limited` (Retry-After to when `cost` tokens are back, whole seconds)
+        when fewer than `cost` tokens are left; else, with charge, take them. A check
+        (charge=False) has no side effects at all. With `debt` it never refuses and the level may
+        go below zero: work measured after it was done (a proof page's heads) delays the next."""
+        need = cost * self.UNIT
         full = burst * self.UNIT
         level, at = self.table.get(key, (full, now))
         level = min(full, level + max(0, now - at) * rate)
-        if level < self.UNIT:
-            fail("rate_limited", max(1, math.ceil((self.UNIT - level) / rate / 1000)))
+        if level < need and not debt:
+            fail("rate_limited", max(1, math.ceil((need - level) / rate / 1000)))
         if charge:
-            self.table[key] = (level - self.UNIT, max(now, at))
+            self.table[key] = (level - need, max(now, at))
             self.table.move_to_end(key)
             while len(self.table) > self.limit:
                 self.table.popitem(last=False)
@@ -403,20 +436,32 @@ class Directory:
         with self.budget:
             window_rate(self, purpose, identity, duration, cap, now, charge)
 
-    def throttle(self, session, now, page=False):
-        """P3-D35: take one token of an authenticated request's buckets, or refuse 429. Callers
-        charge only after authentication (a request without a valid session charges nothing) and
-        before any lock, slot or write; refusals after authentication are charged too. All
-        buckets are checked before any is charged, under the budget mutex."""
-        keys = [("session", session["token_hash"])]
-        if session["kind"] == "workspace":
-            keys.append(("workspace", session["subject_id"]))
-        if page:
-            keys += [("page-" + purpose, identity) for purpose, identity in keys]
+    def throttle(self, session, now, bucket="read", ident=None, cost=1, debt=False):
+        """P3-D35: charge an authenticated request's buckets of one class (see THROTTLES), or
+        refuse 429. Callers charge only after authentication (a request without a valid session
+        charges nothing) and before any lock, slot or write; a refusal after authentication is
+        charged to the "read" class. "staging" and "answer" name their key in `ident` and are
+        charged only once the request is authorized for it. All keys are checked before any is
+        charged, under the budget mutex."""
+        if bucket in ("read", "page"):
+            if session["kind"] == "device":
+                keys = [("session", ("device", session["subject_id"]))]
+                keys.append(("person", session["person_id"]))
+            else:
+                keys = [("session", ("token", session["token_hash"]))]
+                keys.append(("workspace", session["subject_id"]))
+            if bucket == "page":
+                keys = [("page-" + purpose, identity) for purpose, identity in keys]
+        elif bucket in ("staging", "host-answer"):
+            keys = [(bucket, ident)]
+        else:
+            raise ValueError(bucket)
         with self.budget:
             for charge in (False, True):
+                if debt and not charge:
+                    continue
                 for key in keys:
-                    self.buckets.take(key, *self.throttles[key[0]], now, charge)
+                    self.buckets.take(key, *self.throttles[key[0]], now, charge, cost, debt)
 
     def client_address(self, peer, headers):
         """canonical_address(), warning once (N4) when a proxy forwards but none is trusted."""

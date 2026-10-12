@@ -785,6 +785,17 @@ class Bridge:
             if route == "bridge" and method == "GET" and session["kind"] != "device":
                 fail("not_eligible")
 
+    @staticmethod
+    def answer(route, method, session, raw):
+        """Is this an authorized host's ORB2 response (direction 2) on the bridge or a pair?"""
+        return (
+            route in ("bridge", "pair")
+            and method == "POST"
+            and session["kind"] == "workspace"
+            and len(raw) >= 40
+            and raw[5] == 2
+        )
+
     def admit(self, key):
         """Concurrency caps; callers run on the event loop, so no lock is needed. O(1): the
         totals are running counters (N3)."""
@@ -918,7 +929,13 @@ class Bridge:
                 if getattr(error, "session", None):
                     self.d.throttle(error.session, self.d.clock())
                 raise
-            if session:
+            if session and self.answer(route, request.method, session, raw):
+                # A host's response or pair answer (P3-D35 F3): charged per (workspace, target
+                # device), never to the host's session or workspace, so a member that sends
+                # requests at its own limit can spend only the host's answers to itself.
+                target = (params["ws"], bytes(raw[24:40]).hex())
+                self.d.throttle(session, self.d.clock(), "host-answer", target)
+            elif session:
                 self.d.throttle(session, self.d.clock())
             if wait:
                 subject = None

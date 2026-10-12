@@ -18,6 +18,7 @@ import asyncio
 import collections
 import hashlib
 import logging
+import math
 import os
 import re
 import sqlite3
@@ -32,7 +33,7 @@ from starlette.concurrency import run_in_threadpool
 from . import proto as P
 from . import unpublished as U
 from .bridge import refuse
-from .directory import Refusal, integer
+from .directory import PAGE_TOKEN_HEADS, Refusal, integer
 
 log = logging.getLogger(__name__)
 
@@ -1669,6 +1670,16 @@ QUERY = {
 }
 
 
+def page_tokens(route, result):
+    """P3-D35 round 2 (F1): a page's weight, one token per started PAGE_TOKEN_HEADS heads (a
+    transition page by its bytes at 74 per head), at least one."""
+    if route == "proof":
+        units = len(result["heads"])
+    else:
+        units = len(P.cj(result["transitions"])) // 74
+    return max(1, math.ceil(units / PAGE_TOKEN_HEADS))
+
+
 class Gate:
     """The per-workspace publication mutex, then admission (P3-D33).
 
@@ -1765,9 +1776,11 @@ class Checkpoints:
     def authorize(self, con, route, ws, headers, now, charge=False):
         """The route's principal: authenticated, authorized for this workspace, fenced.
 
-        With `charge` (once per request, at its first authorization) the session's buckets are
-        charged after authentication (P3-D35), refused or not; proof and transition pages also
-        take a page token."""
+        With `charge` (once per request, at its first authorization) the request is charged after
+        authentication (P3-D35): a refusal one token of the session's read buckets; an authorized
+        staging PUT the workspace's staging bucket; a proof or transition page one token of the
+        page buckets up front (read() charges the rest of its weight); anything else the read
+        buckets."""
         session = self.d.authenticate(con, headers, now)
         try:
             self.authorize_session(con, session, route, ws, headers, now)
@@ -1776,7 +1789,12 @@ class Checkpoints:
                 self.d.throttle(session, now)
             raise
         if charge:
-            self.d.throttle(session, now, page=route in ("proof", "transitions"))
+            if route in ("staging_page", "staging_manifest"):
+                self.d.throttle(session, now, "staging", ws)
+            elif route in ("proof", "transitions"):
+                self.d.throttle(session, now, "page")
+            else:
+                self.d.throttle(session, now)
         return session
 
     def authorize_session(self, con, session, route, ws, headers, now):
@@ -1832,8 +1850,13 @@ class Checkpoints:
         with self.bridge.reading("query") as con:
             con.execute("BEGIN")
             now = self.d.clock()
-            self.authorize(con, route, params["ws"], headers, now, charge=True)
-            return Relay(self.d, con, params["ws"], now).read(route, query)
+            session = self.authorize(con, route, params["ws"], headers, now, charge=True)
+            result = Relay(self.d, con, params["ws"], now).read(route, query)
+        if route in ("proof", "transitions"):
+            extra = page_tokens(route, result) - 1
+            if extra > 0:  # the page's weight beyond the token taken up front (P3-D35 F1)
+                self.d.throttle(session, now, "page", cost=extra, debt=True)
+        return result
 
     def unpublished_read(self, ws, query, headers):
         """GET .../unpublished (P3-D31): one query-only snapshot, no lock, no write. W(g) is checked
