@@ -360,7 +360,7 @@ def caught(check, *args):
     return None
 
 
-def precheck_publication(body, wsk_pub):
+def precheck_publication(body, wsk_pub, stages=True):
     """Parse, size, shape, receipt digest, signature and entry shapes of a final publication.
 
     Nothing here reads mutable state (the card's WSK is fixed), so it runs before the lock; the
@@ -383,6 +383,9 @@ def precheck_publication(body, wsk_pub):
     if pre["early"]:
         return pre
     pre["body"], pre["receipt"] = body, digest(P.cj(body))
+    if not stages:
+        pre["lazy"] = True  # an exact retry needs no validation (review N4)
+        return pre
     cp = body["checkpoint"]
 
     def stage1():
@@ -814,6 +817,8 @@ class Relay:
         ).fetchone()
         if stored:
             return P.parse_json(stored[0])  # served even with the budget spent (review N5)
+        if pre.get("lazy"):  # a retry seen before the lock is never un-stored; validate anyway
+            pre = precheck_publication(body, w["wsk_pub"])
         window = self.con.execute(
             "SELECT count(*), coalesce(sum(gen=?),0) FROM checkpoint_failures "
             "WHERE workspace_id=? AND at_ms>?",
@@ -1416,13 +1421,28 @@ class Checkpoints:
         finally:
             con.rollback()
 
-    @staticmethod
-    def prepare(route, raw, wsk_pub):
+    def prepare(self, route, ws, raw, wsk_pub):
         """Parse and validate what needs no database state, after authorization and before the
         lock (review G2). A body that does not parse is refused here, except a final
-        publication's, which is charged in the transaction like every refusal after W(g)."""
+        publication's, which is charged in the transaction like every refusal after W(g).
+
+        An exact retry of an accepted publication (its receipt in a read snapshot; receipts are
+        never deleted) skips the signature and entry checks entirely (review N4)."""
         if route == "checkpoint_put":
-            return None, precheck_publication(raw, wsk_pub) if wsk_pub else None
+            pre = precheck_publication(raw, wsk_pub, stages=False)
+            if pre["early"]:
+                return None, pre
+            con = self.bridge.connection("query")
+            con.execute("PRAGMA query_only=ON")
+            con.execute("BEGIN")
+            try:
+                hit = con.execute(
+                    "SELECT 1 FROM checkpoint_receipts WHERE workspace_id=? AND digest=?",
+                    (ws, pre["receipt"]),
+                ).fetchone()
+            finally:
+                con.rollback()
+            return None, pre if hit else precheck_publication(pre["body"], wsk_pub)
         body = P.parse_json(raw) if raw else None
         if route == "staging_page":
             return body, precheck_page(body, raw)
@@ -1443,8 +1463,6 @@ class Checkpoints:
 
     def write(self, route, params, query, headers, raw, prepared=None):
         body, pre = prepared if prepared is not None else (None, None)
-        if prepared is None and route != "checkpoint_put":
-            body = P.parse_json(raw) if raw else None
         d = self.d
         with d.lock:
             con = self.bridge.connection("write")
@@ -1454,6 +1472,8 @@ class Checkpoints:
                 now = d.clock()
                 ws = params["ws"]
                 session = self.authorize(con, route, ws, headers, now)
+                if prepared is None and route != "checkpoint_put":
+                    body = P.parse_json(raw) if raw else None  # only after authorization (N5)
                 relay = Relay(d, con, ws, now)
                 if route == "checkpoint_put":
                     gen = integer(headers["orch-holder"])
@@ -1563,9 +1583,11 @@ class Checkpoints:
                 return JSONResponse(result)
             try:
                 wsk = await run_in_threadpool(self.preauthorize, route, params["ws"], headers)
+                prepared = await run_in_threadpool(self.prepare, route, params["ws"], raw, wsk)
             except sqlite3.Error:
-                wsk = None  # the transaction authorizes and validates on its own
-            prepared = await run_in_threadpool(self.prepare, route, raw, wsk)
+                # Not pre-authorized: nothing is parsed or validated before the transaction's own
+                # authorization (review N5).
+                prepared = None
             result, wake = await run_in_threadpool(
                 self.write, route, params, query, headers, raw, prepared
             )
