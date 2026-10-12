@@ -120,7 +120,7 @@ def test_proof_source_must_be_on_the_endpoint_branch(history, tmp_path):
         con.rollback()
 
 
-# --- P3-D29: a person first known from self-certified restore evidence gains no account powers ---
+# --- P3-D29 / orch-core #397: restore evidence creates no account and registers no device ---------
 
 
 def publish_self_certified_restore(client, path):
@@ -132,7 +132,7 @@ def publish_self_certified_restore(client, path):
 
     cs = {c["name"]: c for c in CORPUS["suites"]["2"]["checkpoints"]["cases"]}
     accepted = cs["B1_unknown_device_self_certifying"]["state"]
-    after = cs["B1_self_certified_registers_globally"]["state"]
+    after = cs["B1_self_certified_evidence_never_registers"]["state"]
     t = after["transitions"][0]
     target = after["checkpoints"][t["target_hash"]]["checkpoint"]
     nodes = accepted["nodes"]["workspace"]
@@ -145,7 +145,7 @@ def publish_self_certified_restore(client, path):
         "heads": [by_seq[3]["head"], by_seq[4]["head"]],
     }
     page["digest"] = C.page_digest(page)
-    seed(path, accepted, cs["B1_self_certified_registers_globally"])
+    seed(path, accepted, cs["B1_self_certified_evidence_never_registers"])
     client.app.state.directory.clock = lambda: 1790000000000
     host = {"Authorization": "Bearer FAKE-workspace", "Orch-Holder": "1"}
     base = f"/v2/workspaces/{WS}/staging/{t['source_hash']}/{t['target_hash']}"
@@ -179,7 +179,11 @@ def evidence_person_card(person):
     return {"o": o, "sig": sig, "delegation": delegation, "sealed": CARD["sealed"]}
 
 
-def test_evidence_only_person_cannot_register_devices_or_cards(tmp_path):
+def test_restore_evidence_creates_no_account_and_registers_no_device(tmp_path):
+    """orch-core #397: self-certified restore evidence is retained per pair (global revocation and
+    chain pair) but registers no device and creates no account (no first-come association: the
+    round-4 rule and its P3-D29 evidence-only accounts are gone). The person stays unknown to the
+    directory: no device registration, no card, no list membership, until it redeems an invite."""
     from directory_support import V, sign, signed
     from fastapi.testclient import TestClient
 
@@ -190,11 +194,14 @@ def test_evidence_only_person_cannot_register_devices_or_cards(tmp_path):
         path = tmp_path / db.DB_NAME
         person = publish_self_certified_restore(client, path)
         with closing(db.connect(path)) as con:
-            assert con.execute(
-                "SELECT 1 FROM evidence_persons WHERE person_id=?", (person,)
-            ).fetchone()
+            assert not con.execute("SELECT 1 FROM evidence_persons").fetchone()
+            assert not con.execute("SELECT 1 FROM accounts WHERE person_id=?", (person,)).fetchone()
+            assert not con.execute("SELECT 1 FROM devices WHERE person_id=?", (person,)).fetchone()
             assert con.execute(
                 "SELECT reason FROM revocations WHERE person_id=?", (person,)
+            ).fetchone()
+            assert con.execute(
+                "SELECT 1 FROM checkpoint_revocations WHERE person_id=?", (person,)
             ).fetchone()
         # A fresh device certified by the intruder's PK: without the guard this registers a live
         # device for a person who never redeemed an invite.
@@ -207,20 +214,9 @@ def test_evidence_only_person_cannot_register_devices_or_cards(tmp_path):
         card = evidence_person_card(person)
         r = client.put(f"/v2/workspaces/{card['o']['workspace_id']}/card", json={"card": card})
         assert (r.status_code, r.json()) == (403, {"error": "other_person"}), r.text
-        # Nor join a list: a live device of the person (stored directly, as no route stores one)
-        # is refused by membership's certificate check before any grant is sealed to it.
-        from orch_relay.directory import Refusal
-        from orch_relay.members import certificate
-
-        with closing(db.connect(path)) as con:
-            con.row_factory = __import__("sqlite3").Row
-            client.app.state.directory.store_device(con, fresh)
-            member = {"device_id": fresh["o"]["device_id"], "person_id": person, "scopes": ["look"]}
-            with pytest.raises(Refusal) as refused:
-                certificate(con, member, person, [], 1790000000000)
-            assert refused.value.code == "other_person"
-            con.rollback()
-        # Redeeming an invite turns the evidence-only row into the person's account.
+        # Nor join a list: membership certificates need a registered device of a usable account,
+        # and the person has neither.
+        # Redeeming an invite creates the person's account as for anyone else.
         from orch_relay.directory import digest as hexdigest
 
         with closing(db.connect(path)) as con, con:
@@ -748,7 +744,7 @@ def test_owner_check_fails_closed_when_the_revocation_lookup_errors(tmp_path, mo
     seed(path, case["state"], case)
     bundle = case["steps"][2]["input"]["body"]["restore"]
 
-    def broken(self, device):
+    def broken(self, device, person):
         raise sqlite3.OperationalError("FAKE disk I/O error")
 
     monkeypatch.setattr(Relay, "revoked", broken)
@@ -758,7 +754,7 @@ def test_owner_check_fails_closed_when_the_revocation_lookup_errors(tmp_path, mo
             relay.owner(relay.workspace(), bundle["cert"], 1790000000000)
 
 
-# --- per-workspace chain revocations and revocation.unpublished (F1 #387, orch-52; provisional) ---
+# --- per-workspace chain revocations and revocation.unpublished (F1 #387, per pair since #397) ---
 
 LAPTOP = "146f7f5f8b446934e01b8bdee16426fa"
 ALICE = "5c0574d08d9b869beaa7b630cc83893d"
@@ -834,7 +830,9 @@ def global_revocation(con, person, reason, key, cert=None):
 def test_out_of_band_revocation_is_never_demanded_and_reported_unpublished(tmp_path, where):
     # A revocation the relay holds globally (another workspace's restore, the §19.5 feed) is out of
     # band for this workspace: the restore that omits it is accepted, never restore_missing_revocation,
-    # and a device this workspace knows is reported in `unpublished` with a reference.
+    # and a device this workspace associates (a G2 ever-device) is reported in `unpublished` with a
+    # reference. A device known only through restore evidence (checkpoint_ever: a tombstone) counts
+    # as unknown for forwarding (orch-core #397), like a wholly unknown one.
     from directory_support import V
 
     def prepare(con):
@@ -848,7 +846,7 @@ def test_out_of_band_revocation_is_never_demanded_and_reported_unpublished(tmp_p
 
     result, tables = run_case(tmp_path, "workspace_restore_and_exact_retry", prepare)
     assert result["status"] == 200 and result["result"] == "accepted", result
-    if where == "unknown":  # unknown-device evidence is not forwarded
+    if where != "g2_ever":  # unknown and tombstone-only device evidence is not forwarded
         assert "unpublished" not in result and tables["checkpoint_unpublished"] == []
     else:
         assert result["unpublished"] == ["d_" + LAPTOP]
@@ -864,13 +862,13 @@ def test_listed_weaker_than_held_out_of_band_is_unpublished(tmp_path):
     # this workspace's chain) and reported; the global row is not downgraded.
     from directory_support import V
 
-    result, tables = run_case(
-        tmp_path,
-        "B1_evidence_sorted_pair",
-        lambda con: global_revocation(
+    def prepare(con):
+        global_revocation(
             con, ALICE, "compromised", "person_alice.sig", V["certs"]["signed"]["laptop"]
-        ),
-    )
+        )
+        con.execute("INSERT INTO ever_devices VALUES (?,?,1)", (WS, LAPTOP))  # a former member
+
+    result, tables = run_case(tmp_path, "B1_evidence_sorted_pair", prepare)
     assert result["result"] == "accepted" and result["unpublished"] == ["d_" + LAPTOP], result
     chain = {(r[1], r[2]): r[3] for r in tables["checkpoint_revocations"]}
     assert chain[(LAPTOP, ALICE)] == "lost"
@@ -941,10 +939,11 @@ def test_ticket_restores_report_nothing_unpublished(tmp_path):
     assert tables["checkpoint_unpublished"] == []
 
 
-def test_unknown_device_cannot_be_self_certified_under_two_persons_in_one_restore(tmp_path):
-    # With entries unique per (device, person), one restore could carry two self-certifying
-    # entries for one unknown device: bob's own and alice's (her PK certifying bob's phone id).
-    # Both would bind; the global row would then name bob with alice's record. Refused.
+def test_unknown_device_self_certified_by_two_persons_in_one_restore(tmp_path):
+    # orch-core #397 (relay commit a205ec2 reverted): one restore carries two self-certifying entries
+    # for one device without association, bob's own and alice's (her PK certifying bob's phone id).
+    # They are two pairs: both accepted and retained (globally and as chain pairs), and neither
+    # registers the device, so nothing binds it to the first person.
     import copy
 
     from checkpoint_support import CORPUS, http, seed
@@ -1007,9 +1006,15 @@ def test_unknown_device_cannot_be_self_certified_under_two_persons_in_one_restor
         manifest = {"pages": [C.descriptor(0, page)]}
         assert http(client, "PUT", base + "/manifest", host, body=manifest)["complete"]
         result = http(client, "PUT", f"/v2/workspaces/{WS}/checkpoint", host, body=body)
-        assert result == {"status": 409, "error": "restore_invalid"}, result
+        assert result["status"] == 200 and result["result"] == "accepted", result
         with closing(db.connect(path)) as con:
             assert not con.execute("SELECT 1 FROM devices WHERE device_id=?", (phone,)).fetchone()
+            pairs = {(BOB, "lost"), (ALICE, "compromised")}
+            for table in ("revocations", "checkpoint_revocations"):
+                got = con.execute(
+                    f"SELECT person_id,reason FROM {table} WHERE device_id=?", (phone,)
+                ).fetchall()
+                assert set(got) == pairs, table
 
 
 # --- round 3 (Opus re-check): N1-N3 ---------------------------------------------------------------
@@ -1026,6 +1031,7 @@ def test_chain_pair_weaker_than_global_is_reported_unpublished(tmp_path):
         global_revocation(
             con, ALICE, "compromised", "person_alice.sig", V["certs"]["signed"]["laptop"]
         )
+        con.execute("INSERT INTO ever_devices VALUES (?,?,1)", (WS, LAPTOP))  # a former member
         con.execute(
             "INSERT INTO checkpoint_revocations VALUES (?,?,?,?,?,?,?,?,?)",
             (
@@ -1051,13 +1057,11 @@ def test_revocation_carried_at_full_strength_is_not_unpublished(tmp_path):
     # N3.2: an out-of-band revocation the restore carries at its strength is published by it.
     from directory_support import V
 
-    result, tables = run_case(
-        tmp_path,
-        "B1_evidence_sorted_pair",
-        lambda con: global_revocation(
-            con, ALICE, "lost", "person_alice.sig", V["certs"]["signed"]["laptop"]
-        ),
-    )
+    def prepare(con):
+        global_revocation(con, ALICE, "lost", "person_alice.sig", V["certs"]["signed"]["laptop"])
+        con.execute("INSERT INTO ever_devices VALUES (?,?,1)", (WS, LAPTOP))  # a former member
+
+    result, tables = run_case(tmp_path, "B1_evidence_sorted_pair", prepare)
     assert result["result"] == "accepted" and "unpublished" not in result, result
     assert tables["checkpoint_unpublished"] == []
     assert (LAPTOP, ALICE, "lost") in [(r[1], r[2], r[3]) for r in tables["checkpoint_revocations"]]
@@ -1274,3 +1278,126 @@ def test_unauthorized_staging_is_not_parsed_when_preauthorization_fails(tmp_path
         )
         assert (r.status_code, r.json()) == (401, {"error": "unauthenticated"}), r.text
     assert calls == [] and len(page) not in parsed
+
+
+# --- orch-core #397: signer refusal, associations and unpublished, per (device, person) pair -------
+
+
+def signer_of(name="workspace_restore_and_exact_retry"):
+    from checkpoint_support import CORPUS
+
+    case = next(c for c in CORPUS["suites"]["2"]["checkpoints"]["cases"] if c["name"] == name)
+    o = case["steps"][-1]["input"]["body"]["restore"]["cert"]["o"]
+    return o["device_id"], o["person_id"]
+
+
+def held_row(con, device, person, key, reason="lost"):
+    from directory_support import signed
+
+    from orch_relay import proto as P
+
+    rev = signed(
+        {
+            "v": 2,
+            "suite": 2,
+            "kind": "revocation",
+            "person_id": person,
+            "device_id": device,
+            "revoked_ms": 1789990000000,
+            "reason": reason,
+        },
+        key,
+    )
+    con.execute(
+        "INSERT INTO revocations VALUES (?,?,?,?,?,"
+        "(SELECT coalesce(max(cursor),0)+1 FROM revocations))",
+        (device, person, P.cj(rev), reason, 0),
+    )
+
+
+@pytest.mark.parametrize("person", ["owner", "other"])
+def test_restore_signer_refusal_is_per_pair(tmp_path, person):
+    """A held revocation refuses the restore signer only when it names the signer's (device,
+    person) pair; bob's "revocation" of the signer's device id is another pair and never refuses."""
+    device, owner = signer_of()
+    who, key = (owner, "person_alice.sig") if person == "owner" else (BOB, "person_bob.sig")
+    result, _ = run_case(
+        tmp_path, "workspace_restore_and_exact_retry", lambda con: held_row(con, device, who, key)
+    )
+    if person == "owner":
+        assert result == {"status": 409, "error": "restore_not_owner"}, result
+    else:
+        assert result["status"] == 200 and result["result"] == "accepted", result
+
+
+@pytest.mark.parametrize("evidence_only", [True, False])
+def test_registry_row_of_an_evidence_only_person_is_no_association(tmp_path, evidence_only):
+    """A pre-0010 registry row created from restore evidence (its person is evidence-only, P3-D29)
+    binds nothing: alice's own entry for the laptop is accepted. A genuine registration (a usable
+    account) of the laptop under another person still binds and refuses it."""
+    from directory_support import V, signed
+
+    from orch_relay import proto as P
+    from ref import orch_protocol_ref as R
+
+    intruder = P.b64u(bytes.fromhex(V["keys"]["intruder.sig"]["pub"]))
+    person = R.person_id(R.SUITES[2], P.unb64u(intruder)).hex()
+    cert = signed({**V["certs"]["signed"]["laptop"]["o"], "person_id": person}, "intruder.sig")
+
+    def prepare(con):
+        con.execute("INSERT INTO accounts VALUES (?,?,0)", (person, intruder))
+        if evidence_only:
+            con.execute("INSERT INTO evidence_persons VALUES (?)", (person,))
+        o = cert["o"]
+        con.execute(
+            "INSERT INTO devices VALUES (?,?,?,?,?,?,?)",
+            (
+                LAPTOP,
+                person,
+                P.cj(cert),
+                o["dk_sig_pub"],
+                o["dk_kx_pub"],
+                P.cj(o["scopes_max"]),
+                None,
+            ),
+        )
+
+    result, _ = run_case(tmp_path, "B1_evidence_sorted_pair", prepare)
+    if evidence_only:
+        assert result["status"] == 200 and result["result"] == "accepted", result
+    else:
+        assert result == {"status": 409, "error": "restore_invalid"}, result
+
+
+def test_unpublished_suppressed_for_a_conflicting_association(tmp_path):
+    """The laptop is a former member registered to alice; bob's global "revocation" of its id is
+    retained but not reported (it would be forwarded to this workspace's host); alice's is."""
+    from directory_support import V
+
+    def prepare(con):
+        global_revocation(con, ALICE, "lost", "person_alice.sig", V["certs"]["signed"]["laptop"])
+        held_row(con, LAPTOP, BOB, "person_bob.sig", "compromised")
+        con.execute("INSERT INTO ever_devices VALUES (?,?,1)", (WS, LAPTOP))
+
+    result, tables = run_case(tmp_path, "workspace_restore_and_exact_retry", prepare)
+    assert result["result"] == "accepted", result
+    assert [(r["device_id"], r["person_id"]) for r in result["unpublished_refs"]] == [
+        (LAPTOP, ALICE)
+    ]
+    assert [r[3:5] for r in tables["checkpoint_unpublished"]] == [(LAPTOP, ALICE)]
+
+
+def test_unpublished_reports_every_pair_of_an_unregistered_former_member(tmp_path):
+    """Without a registry association every held pair of an associated device is reported, each
+    with its own reference (per pair, not per device id)."""
+
+    def prepare(con):
+        held_row(con, LAPTOP, ALICE, "person_alice.sig", "lost")
+        held_row(con, LAPTOP, BOB, "person_bob.sig", "compromised")
+        con.execute("INSERT INTO ever_devices VALUES (?,?,1)", (WS, LAPTOP))
+
+    result, _ = run_case(tmp_path, "workspace_restore_and_exact_retry", prepare)
+    assert result["unpublished"] == ["d_" + LAPTOP], result
+    assert sorted((r["person_id"], r["reason"]) for r in result["unpublished_refs"]) == sorted(
+        [(ALICE, "lost"), (BOB, "compromised")]
+    )
