@@ -531,15 +531,17 @@ challenge is consumed.
 - **Host poll notices** make a poll ready only when they differ from the notices last delivered to
   the current holder generation (a new generation receives them once); a past revocation alone does
   not keep a host poll from waiting.
-- **Pre-public-deploy gate (G3 review D4, open):** `Directory.handle` still takes the global
-  `Directory.lock`, opens a fresh connection and runs `BEGIN IMMEDIATE` before authenticating or
-  validating anything (about 1.3 ms of lock time per unauthenticated request; ~750 bad-token
-  requests/s from one client saturate the lock that bridge transactions share). Before any public
-  deploy: reuse per-thread connections in `Directory`, add a read-only pre-check outside the lock
-  for authenticated directory routes and `rate(..., charge=False)` pre-checks for unauthenticated
-  ones, and add a no-lock test for directory routes like the bridge's. The dev relay needs a Caddy
-  per-IP rate limit (or connection cap) meanwhile. Anonymous pair requests to an existing workspace
-  likewise reach the lock before their pairing windows refuse them.
+- **Pre-public-deploy gate (G3 review D4): done (P3-D32).** `Directory.handle` took the global
+  `Directory.lock`, opened a fresh connection and ran `BEGIN IMMEDIATE` before authenticating or
+  validating anything (about 1 ms of lock time per unauthenticated request; ~750 bad-token
+  requests/s from one client saturated the lock that bridge transactions share). Now every
+  directory route authorizes first in a read-only pre-check outside the lock, the relay reuses
+  connections from a bounded pool (no per-thread connections), `rate(..., charge=False)` is
+  side-effect-free, and
+  `tests/test_directory_preauth.py` pins that refusals take no lock or write transaction. Anonymous
+  pair requests check their pairing windows before the first bridge transaction.
+  *Infra TODO (defence in depth, not code):* a Caddy per-IP `rate_limit` or connection cap in front
+  of the relay, before any public deploy and on the dev relay now.
 - **Client addresses.**
   - The peer address is used, or Caddy's `X-Forwarded-For` only when the peer is the configured proxy.
   - Addresses are canonicalized: IPv4-mapped IPv6 becomes IPv4, and IPv6 is grouped by /64.
@@ -1258,6 +1260,59 @@ HTTP fixture.
   - *Pinned by:* the `unpublished` vector group (23 cases, reference and production), the `unpublished_get`,
     `unpublished_ack`, `host_poll` (`unpublished_notice*`) and `checkpoint_put` (`restore_with_unpublished_refs`)
     fixtures, and `tests/test_unpublished.py` (lock and window spies, snapshot, page cost, wakeups, hints, quota).
+- **P3-D32 (directory routes authorize first; G3 re-review D4, pre-public-deploy gate).** Protocol §19.4
+  "Authorization first" is normative; this is the decision record.
+  - *Mechanism.* `Directory.handle` runs the request's own steps (recovery address window, body, dispatch) as a
+    pre-check on a pooled `query_only` WAL connection (`busy_timeout=0`), outside `Directory.lock`, up to the
+    route's authorization point (`Directory.authorized`). A refusal there is the answer: same code, same order,
+    same body, from the same code path. Otherwise the transaction (the lock, the shared write connection,
+    `BEGIN IMMEDIATE`) re-runs every check, so correctness never rests on the pre-check (TOCTOU); any
+    `sqlite3.Error` in the pre-check falls back to the transaction alone.
+  - *Authorization point per route.* Device/workspace session reads (`members`, `grants`, `card-key`, feed,
+    `GET /devices/{d}`, `GET /card`): after authentication and access (404 `not_found` stays where it was, after
+    authentication). W(g) writes (`membership`, `card-keys`, `PUT /card` of a stored workspace): after fencing.
+    PK-signed and anonymous routes: login after the session quota; accounts after `account_exists`; recovery
+    (`POST /revocations`, `PUT /devices/{d}`) and the first card after their signature checks and their
+    `charge=False` window checks, before any charge or write.
+  - *Answered without the lock* (read-only, no row changes): `POST /session/challenge` (no database state), a logout
+    whose token has no stored session (200 `{}` as before), an exact revocation receipt replay, and the public
+    `GET /devices/{d}/revocation` read.
+  - *In-memory state* (challenges, rate windows) sits under a small budget mutex, taken alone by pre-checks and
+    inside `Directory.lock` by transactions; `rate(charge=False)` has no side effects. Steps with in-memory effects
+    happen once per request: a login consumes its challenge in the pre-check (one guess per challenge, as before)
+    and the transaction reuses it; an account request whose invite is unused (or expired for under a minute)
+    proceeds before consuming, so a concurrent identical retry still sees the replay, while one on a used or
+    long-expired invite (invites are never deleted) is refused in the pre-check, its challenge consumed (round 2,
+    review F2); the recovery address window (charged before authentication
+    by design) is checked in the pre-check and charged there only if the pre-check refuses, otherwise by the
+    transaction after re-reading the receipt (a concurrent identical retry stays free).
+  - *Connections (round 2, review F1).* anyio retires idle worker threads after 10 s and starts new ones, so
+    per-thread connections (Directory's, and the Bridge's on develop) were never closed: bursts of refused requests
+    leaked them until shutdown. `db.Connections` owns every connection instead: one write connection shared by
+    Directory, Bridge and checkpoints and used only under `Directory.lock` (guarded by a debug `assert`), and a pool of at most 48
+    `query_only` read connections borrowed per use and returned in a `finally` that ends the snapshot ("read" with
+    `busy_timeout=0`, "query" waiting); a borrow beyond the pool gets a temporary closed on return. Thread churn
+    test (idle timeout 0.05 s, 9 bursts): 21 → 161 open connections before; after, never more than the 24-wide burst + 2 (the pool grows lazily to the peak concurrency, then stays flat).
+  - *Bridge.* Anonymous and host pair requests check their pairing windows (`charge=False`) before the first
+    transaction, after admission, i.e. in the transaction's order.
+  - *Measured* (`uv run python tests/bench_directory_preauth.py`, in process, idle laptop): a refused directory
+    request 0.95–1.3 ms with ~1 ms holding `Directory.lock` → 13–19 µs with no lock; authenticated `GET members`
+    850–1 600/s → 17 700–18 400/s (connection reuse). Under a paced 750/s bad-token flood: bridge transactions
+    15 100/s → 29 200/s (idle ~32 000/s), `GET members` 741/s → 16 900/s; at 3 000/s the old relay served only
+    ~1 500 flood requests/s and bridge transactions fell to 97/s, now 3 000/s served and 19 300/s.
+  - *Residual (unthrottled paths to the lock, listed in the §10 gates).* (1) `POST /v2/accounts` on an unused
+    invite (or one expired for under a minute): needs a live invite code; once redeemed or expired the invite is
+    refused in the pre-check. (2) Exact certificate receipt replays (`PUT /v2/devices/{d}` with the bytes of an
+    accepted request): no window, any address, about 35 µs under the lock each; the body is `cj({cert})`, and
+    certificates are readable by members and hosts, so the bytes are not secret. (3) Accepted no-op recoveries:
+    each needs a valid `PK` signature and is behind the per-address recovery window. Unpaced in-process floods also
+    compete for the GIL. The per-IP limit belongs in Caddy (infra TODO).
+  - *Pinned by* `tests/test_directory_preauth.py`: every route class refused without lock or write connection and
+    with only the windows charged by design, the same bytes, windows and challenge state from the transaction alone
+    (also for every G1/G2 HTTP fixture), TOCTOU, the `sqlite3.Error` fallback, the consumed challenge handed over,
+    concurrent identical account retries, used and expired invites, the bounded pool under worker-thread churn,
+    lock order (budget never held while taking the lock); `test_rate_check_without_charge_has_no_side_effects`;
+    `test_full_pair_windows_refuse_without_lock_or_transaction`.
 - *Measured* (`uv run python tests/bench_checkpoint_capacity.py`, `docs/p3-checkpoint-capacity.md`).
 
 - *Round 2 (Opus review of PR #51).* R1: staged descriptors are grouped by `(kind, log)` once per
@@ -1324,8 +1379,15 @@ public deployment.
 - **Unthrottled authenticated work.** (The P3-D31 unpublished routes are throttled per workspace.) Reads (up to
   56,680 heads per proof page), staging, genesis and
   baseline refusals, and `ignored` lower-n publications (full stateless validation, uncharged; exact retries
-  skip it since round 3) are not rate-limited; with the G3 review's `Directory.handle` finding (directory routes
-  take the lock before authenticating, D4) these are the same gate.
+  skip it since round 3) are not rate-limited. (The G3 review's `Directory.handle` finding, D4, is closed by
+  P3-D32; the Caddy per-IP limit remains an infra TODO.)
+- **P3-D32 residual: exact certificate receipt replays (P3-D32 review F3).** A byte-identical `PUT /v2/devices/{d}`
+  of an accepted certificate takes no window and no challenge from any address and runs the P3-D30 status
+  re-check and `complete()` under `Directory.lock` (about 35 µs each). The status re-check must stay (it is the
+  per-pair cutoff). Fix options before a public deploy: answer the replay from the pre-check when `device_status`
+  passes on the snapshot and `complete()` would change no row (no challenged request of the person matches), or
+  charge a generous per-address replay window. Until then the Caddy per-IP limit covers it. Also listed there:
+  requests on an unused invite (needs a live invite code) reach the lock before the challenge is checked.
 
 ## 11. Open questions
 
@@ -1466,3 +1528,4 @@ No new decisions.
 | P3-D29 | Evidence-only person rows for self-certified restore evidence; no account powers until an invite (G4) | §10 |
 | P3-D30 | Per-pair device cutoff under the registry person; new registration refused on any chain-learned revocation; per-pair `GET /revocation` list; registry-pair notice cursor (orch-52 rulings 1 to 4) | §10, proto §19.5 |
 | P3-D31 | Retrieval of unpublished revocation evidence: derived per-workspace view, W(g) `GET`/`POST ack`, `notices.unpublished`, refs as hints, 4 096 ever-devices per workspace (orch-52 decision point 7) | §10, proto §19.5 |
+| P3-D32 | Directory routes authorize first: read-only pre-check outside `Directory.lock`, bounded shared connection pool, side-effect-free window checks (G3 re-review D4) | §4, §10, proto §19.4 |
