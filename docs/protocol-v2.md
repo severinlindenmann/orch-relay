@@ -2960,8 +2960,10 @@ need relay state far beyond any vector, so they are pinned by relay tests, not H
 pages, the bytes the staging caps count) by its maximum publication size (`ORCH_RELAY_MAX_PUBLICATION_BYTES`,
 default 16 MiB = 16,777,216 bytes, at most the 64 MiB workspace quota; a smaller deployment may set less, e.g.
 4 MiB). It is a permanent refusal for that set, `too_large`, never 429 and without `Retry-After`, checked after
-authorization (401, 403, 409 `fenced` first) and the staging conflict checks, before the staging quotas (429,
-503): a page PUT is refused 413 when the set's staged bytes plus the page would exceed it; a manifest PUT is
+authorization (401, 403, 409 `fenced` first) and the staging conflict checks, and before the byte quotas (429,
+503). For a new set the per-workspace live-set limit (429, 2 sets) is checked first, so a workspace that already
+holds 2 live sets gets a temporary 429 for an oversized third set, and 413 only once a slot frees (at most 1 h):
+a page PUT is refused 413 when the set's staged bytes plus the page would exceed it; a manifest PUT is
 refused 413, before any page is uploaded, when the set's staged bytes plus the manifest plus 74 bytes per head of
 every listed page not staged yet would exceed it (a lower bound: a page of n heads is at least 74 n bytes); the
 final publication is refused 400 `too_large` (this route's `too_large` status) when its staged set exceeds it,
