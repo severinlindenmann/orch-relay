@@ -221,6 +221,23 @@ def test_manifest_put_without_pages_is_bounded_by_its_own_bytes(relay):
     assert put_manifest(relay.client, manifest).status_code == 200
 
 
+def test_manifest_put_conflicts_win_over_too_large(relay):
+    """The staging conflict checks (409) run before the manifest's size refusal."""
+    pages = [fake_page(k, heads=3, after_seq=3 * k) for k in range(2)]
+    manifest = manifest_of(pages)
+    assert put_page(relay.client, 0, pages[0]).status_code == 200
+    relay.cps.caps.max_publication = 1  # every manifest is oversized now
+    # A manifest whose descriptor for the staged page 0 differs from that page.
+    other = manifest_of([fake_page("other", heads=3), pages[1]])
+    r = put_manifest(relay.client, other)
+    assert (r.status_code, r.json()) == (409, {"error": "staging_conflict"})
+    # A manifest that omits the staged page 0 (staged must be a subset of the manifest).
+    r = put_manifest(relay.client, {"pages": [C.descriptor(1, pages[1])]})
+    assert (r.status_code, r.json()) == (409, {"error": "staging_conflict"})
+    # Without a conflict the same oversized manifest is refused as too_large.
+    assert refused(put_manifest(relay.client, manifest))
+
+
 # --- the final publication (phase A, defence in depth) --------------------------------------------
 
 
@@ -294,6 +311,16 @@ def test_publication_refusal_comes_after_authorization(relay, big):
     }
     assert failures(relay.path) == 0
     assert put(relay.client, big.body) == {"status": 400, "error": "too_large"}
+
+
+def test_publication_staging_incomplete_wins_over_too_large(relay, big):
+    """On the final publication staging_incomplete (409) is checked before too_large (400)."""
+    size = set_bytes(relay.path, big.body)
+    relay.cps.caps.max_publication = size - 1  # oversized, and also incomplete below
+    key = C.checkpoint_hash(big.body["checkpoint"])
+    sql(relay.path, "UPDATE checkpoint_staging SET expires_ms=1 WHERE target=?", (key,))
+    assert put(relay.client, big.body) == {"status": 409, "error": "staging_incomplete"}
+    assert failures(relay.path) == 1
 
 
 def test_publication_within_the_maximum_is_unchanged(relay):

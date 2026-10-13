@@ -114,7 +114,7 @@ kernel OOM killer picking `sshd`, Caddy or the other relay instance.
 | P1 | **ORCH_RELAY_ORIGIN** per instance (`https://relay.dev.severin.io`, `https://relay-internal.dev.severin.io`). New finding: the default is `http://localhost:8101` (`directory.py` `install`), and login signatures bind the origin (`P.auth_bytes(self.origin, …)`, protocol §19.4 "origin is the instance's configured origin"), so without it **every login fails** | **Yes** | stream D (values) / owner (applies) | Not in `provision.sh` or dev-kit PR #27; added by §4.3 of this plan |
 | P2 | **Proxy env** `ORCH_RELAY_BEHIND_PROXY=1`, `ORCH_RELAY_TRUSTED_PROXY=127.0.0.1` (checklist 7, P3-D35 N4). Without it every client has Caddy's address, so all anonymous pairing shares 4 concurrent polls and one set of address windows relay-wide. Phone pairing tests would hit 429 | **Yes** | dev kit (PR #27) | In PR #27 (unit `Environment=`); not applied |
 | P3 | **Unit memory limits** `MemoryMax=900M` (public) / `450M` (int), `TasksMax=256`, `LimitNOFILE=4096`, no `MemoryHigh` (PR #27 round 2). Without them an overrun kills a random process | **Yes** | dev kit (PR #27) | Draft; Opus review "safe to apply after fixes", fixes in `48bf7b5`; Opus delta of `48bf7b5` running (automated flag: possible ordering cycle in `orch-limits.service`, `Before=network-pre.target` without `DefaultDependencies=no`) |
-| P4 | **Hard maximum publication size** (new relay item: refuse a publication above a configured heads limit). With `PUBLISH_WIDTH=1`, `Gate.fits()` admits any single publication when nothing else runs (`checkpoints.py` `Gate.fits`: `self.active == 0 or …`), so the heads cap does not bound a full 64 MiB set: ~1.2 GB phase A plus ~250 MB baseline per instance, above both `MemoryMax` values | **Yes: the code item, or the interim env cap in §4.3** (`ORCH_RELAY_GLOBAL_STAGE_BYTES`, which bounds every staged set and so every publication's new heads) | stream D (relay code) | Not started (tracked by orch-d6 after P3-D36); interim cap is env-only and needs no code |
+| P4 | **Hard maximum publication size** (P3-D37, orch-relay PR #62, merged). `ORCH_RELAY_MAX_PUBLICATION_BYTES` bounds the staged bytes of one set: default 16 MiB (public), 4 MiB (internal); refused as `too_large` (413 at staging, 400 at the final publication). The default publication heads cap follows it (max // 74), so one maximal publication always fits alone. Estimated peak per instance: ~618 MB public (MemoryMax 900M), ~342 MB internal (MemoryMax 450M) | **Done in code**; set `ORCH_RELAY_MAX_PUBLICATION_BYTES=4194304` on the internal instance (public keeps the 16 MiB default) | stream D (relay code) | Merged as P3-D37 (PR #62); deploy needs the env value on the internal unit only |
 | P5 | **nftables per-IP limits** on 443 (checklist 7; PR #27: table `inet orch_limits`, 100 concurrent / 60 new per s, burst 120, IPv6 per /64; Caddy `request_body max_size 8MB`). This is the only bound on unauthenticated 401 floods and on the P3-D32 residuals (exact certificate receipt replays, unused-invite account requests) | **Yes**, after `nft -c` passes on a throwaway Ubuntu 26.04 VM (the real VPS OS) and the Opus delta of `48bf7b5` passes. Fallback only if orch-d6 accepts it in writing: deploy with the Caddy body cap and memory limits and no nft table, as a known DoS exposure of a dev box | dev kit (PR #27); owner applies | Draft; `nft -c` **not yet run** |
 | P6 | **Disk fits the storage caps** (checklist 2). The defaults allow 32 × 1.17 GB ≈ 37.5 GB per account, about the whole 38 GB disk | **Yes** (env only, §4.3) | stream D | Values proposed in §4.3 |
 | P7 | **P3-D36 limits PR**: staging refill 600/min weighted by body size (checklist 8), node-quota restore reserve (checklist 3), audited per-account workspace-cap override (checklist 4, migration 0016, CLI `orch-relay account-cap`) | **No.** Preferred if merged by deploy time (one deploy, one wipe), but migration 0016 is additive and can follow later without a wipe. If deploying **without** it, set `ORCH_RELAY_THROTTLE_STAGING=27777/600` (checklist 8's interim). If deploying **with** it, do **not** set that variable: P3-D36 changes the staging burst and weights tokens by size, and the old override would undo that | stream D | Implemented locally (6 commits, `3e345cf`), not pushed, no PR; Opus review pending |
@@ -130,8 +130,8 @@ kernel OOM killer picking `sshd`, Caddy or the other relay instance.
 Notes on the table:
 
 - P1 and P2 are mechanical but load-bearing. P1 is missing from every artifact so far. P2 is in PR #27 only.
-- `ORCH_RELAY_PUBLISH_WIDTH=1` and `ORCH_RELAY_PUBLISH_HEADS=300000` from PR #27 stay as defence in depth. They do
-  not replace P4 (see the PR #27 README, "Honest peak").
+- Leave `ORCH_RELAY_PUBLISH_HEADS` and `ORCH_RELAY_PUBLISH_WIDTH` unset (the heads cap now defaults to max // 74, so
+  PR #27's `PUBLISH_WIDTH=1 PUBLISH_HEADS=300000` is dropped). P4 (P3-D37) is the bound on a single publication.
 
 ---
 
@@ -223,7 +223,7 @@ PR #27 changes both units, plus a new unit, the nft table and the Caddyfile:
 
 - Both relay units get `MemoryMax=900M` (public) / `450M` (int), `TasksMax=256`, `LimitNOFILE=4096`, no
   `MemoryHigh`, and
-  `Environment=ORCH_RELAY_BEHIND_PROXY=1 ORCH_RELAY_TRUSTED_PROXY=127.0.0.1 ORCH_RELAY_PUBLISH_WIDTH=1 ORCH_RELAY_PUBLISH_HEADS=300000`.
+  `Environment=ORCH_RELAY_BEHIND_PROXY=1 ORCH_RELAY_TRUSTED_PROXY=127.0.0.1`, and leave `ORCH_RELAY_PUBLISH_HEADS` and `ORCH_RELAY_PUBLISH_WIDTH` unset (the heads cap now defaults to max // 74); the internal unit also sets `ORCH_RELAY_MAX_PUBLICATION_BYTES=4194304`.
 - A new `orch-limits.service`, enabled and started by `provision.sh`, loads `/etc/nftables.d/orch-limits.nft`
   (table `inet orch_limits`).
 - The Caddyfile gains `request_body { max_size 8MB }` on `relay.` and `relay-internal.`.
@@ -254,9 +254,10 @@ All of these are read once at start-up. The list is complete for `develop` `601c
 | `ORCH_RELAY_ORIGIN` | `directory.py` | `http://localhost:8101` | `https://relay.dev.severin.io` / `https://relay-internal.dev.severin.io` | **P1**: login binds the origin; it must also equal the cards' `relay_url` (§7.1 form, no trailing slash) |
 | `ORCH_RELAY_TRUSTED_PROXY` | `directory.py` | unset | `127.0.0.1` (PR #27 unit) | P2: one trusted hop, last XFF entry only |
 | `ORCH_RELAY_BEHIND_PROXY` | `directory.py` | unset | `1` (PR #27 unit) | P2: start-up warning if the proxy setting is missing |
-| `ORCH_RELAY_PUBLISH_WIDTH` | `checkpoints.py` | 2 | `1` (PR #27 unit) | checklist 1 |
-| `ORCH_RELAY_PUBLISH_HEADS` | `checkpoints.py` | 1,500,000 | `300000` (PR #27 unit) | checklist 1 (only matters for width > 1) |
-| `ORCH_RELAY_GLOBAL_STAGE_BYTES` | `checkpoints.py` | 4 GiB | `16777216` (16 MiB) / `4194304` (4 MiB) | **P4 interim**, see below |
+| `ORCH_RELAY_PUBLISH_WIDTH` | `checkpoints.py` | 2 | leave unset | P3-D37: bounded by the maximum publication size |
+| `ORCH_RELAY_PUBLISH_HEADS` | `checkpoints.py` | max // 74 (226,719 at 16 MiB) | leave unset | P3-D37: the default heads cap follows the maximum |
+| `ORCH_RELAY_MAX_PUBLICATION_BYTES` | `checkpoints.py` | 16 MiB | public: leave the default (16 MiB); internal: `4194304` (4 MiB) | P3-D37 (PR #62), replaces the P4 interim cap |
+| `ORCH_RELAY_GLOBAL_STAGE_BYTES` | `checkpoints.py` | 4 GiB | leave the default (the per-set maximum bounds a publication) | superseded P4 interim, see below |
 | `ORCH_RELAY_ACCOUNT_STAGE_BYTES` | `checkpoints.py` | 512 MiB | leave the default (the global cap is lower) | — |
 | `ORCH_RELAY_WORKSPACE_NODES` | `checkpoints.py` | 4,000,000 | `500000` / `100000` | P6, disk |
 | `ORCH_RELAY_WORKSPACE_NODES_RESERVE` | `checkpoints.py` (P3-D36 only) | 5 % of the node quota | leave the default | — |
@@ -268,21 +269,21 @@ All of these are read once at start-up. The list is complete for `develop` `601c
 | `VAPID_SUBJECT`, `VAPID_PRIVATE_KEY_FILE`, `VAPID_PUBLIC_KEY_FILE` | **not read by the relay** | — | leave as `provision.sh` writes them | push is not implemented (TODO(P4) in `provision.sh`) |
 | APNs key (`/srv/orch-relay/apns/`) | **not read by the relay** | — | not needed for this deploy | see R8 |
 
-**P4 interim cap (`ORCH_RELAY_GLOBAL_STAGE_BYTES`).** The ceiling counts every live staged byte relay-wide (503
-`overloaded` above it, `charge_stage`). No staged set can exceed it, so a publication's new heads are bounded by
-`cap / 74 B`. Figures from design §10 checklist 1 (measured on macOS, CPython 3.14; **U10 NOT OBTAINABLE read-only (VPS Python is CPython 3.14.4, same minor as the measurement; the benchmark must still be run)** with `tests/bench_publication_lockhold.py`): ~1.3 KB of phase A memory per new node, and a baseline of
+**P4 cap (`ORCH_RELAY_MAX_PUBLICATION_BYTES`, P3-D37).** No staged set can exceed the maximum (`too_large`), so a
+publication's new heads are bounded by `max / 74 B`. Figures from design §10 checklist 1 (measured on macOS, CPython 3.14; **U10 NOT OBTAINABLE read-only (VPS Python is CPython 3.14.4, same minor as the measurement; the benchmark must still be run)** with `tests/bench_publication_lockhold.py`): ~1.3 KB of phase A memory per new node, and a baseline of
 ~150–250 MB plus up to 48 pooled read connections (~2 MB each) plus in-flight bodies. Allow ~350 MB for the
 baseline:
 
-- **Public (MemoryMax 900M):** 16 MiB → ≤ ~226,700 heads → ~295 MB phase A → ~650 MB peak, leaving ~250 MB of
-  margin.
-- **Int (MemoryMax 450M):** 4 MiB (one full page) → ≤ ~56,700 heads → ~75 MB → ~425 MB peak. This is tight. The
-  int instance is not needed for mobile testing, so orch-d6 may instead run it with checkpoint publication unused.
+- **Public (MemoryMax 900M):** 16 MiB → ≤ 226,719 heads → ~295 MB phase A → ~618 MB peak (×1.25 plus the
+  baseline), about 34 % under MemoryMax.
+- **Int (MemoryMax 450M):** 4 MiB (one full page) → ≤ 56,679 heads → ~75 MB → ~342 MB peak, about 27 % under
+  MemoryMax.
+- **VPS total:** 618 + 342 + ~100 (Caddy and the system) + ~250 (other) ≈ 1,310 of 1,961 MB.
 - **Honest load still fits.** A 5,000-ticket workspace stages ~20,000 heads (~1.5 MB of pages plus a ~0.85 MB
   manifest, `docs/p3-checkpoint-capacity.md`).
 - **Effect.** A workspace with more history than the cap cannot make its first publication (503). That is
   acceptable for dev and lifted by resizing (R1) or by P4's code.
-- Remove the interim cap only when P4 ships and the hard limit is set below `MemoryMax`.
+- The former interim `ORCH_RELAY_GLOBAL_STAGE_BYTES` cap is no longer needed: P4 has shipped.
 
 **Disk (P6).** Checklist 2: `accounts × ACCOUNT_WORKSPACES × WORKSPACE_NODES × 293 B`.
 
@@ -674,11 +675,11 @@ The certificates in `/var/lib/caddy` are never touched, which matters for the Le
 Ordered by impact:
 
 - **R1. Memory on a 1961 MB VPS with no swap.** One full 64 MiB publication needs ~1.45 GB per instance, above
-  both `MemoryMax` values, and the heads cap does not bound a single publication (P4).
-  - Mitigation for this deploy: `MemoryMax` plus the interim `ORCH_RELAY_GLOBAL_STAGE_BYTES` (§4.3). The per-node
+  both `MemoryMax` values, before P4 (P3-D37, now merged: 16 MiB public / 4 MiB internal).
+  - Mitigation for this deploy: `MemoryMax` plus `ORCH_RELAY_MAX_PUBLICATION_BYTES` (§4.3). The per-node
     figure is from macOS and unmeasured on the VPS (U10).
   - **Decision for the owner: resize to 4 GB** (the README planned 4 GB; design §10 checklist 1 gives width 1 and
-    heads 900,000 per instance at 4 GB), or keep 2 GB with the interim cap until P4 ships. Adding 2 GB of swap is a
+    heads 900,000 per instance at 4 GB), or keep 2 GB with the P3-D37 maximum. Adding 2 GB of swap is a
     stopgap only (§10 checklist 1).
 - **R2. Missing `ORCH_RELAY_ORIGIN`.** Every login fails, so the deploy "works" (healthz green) but nothing can
   authenticate. Also, `provision.sh` overwrites `/etc/orch/relay*.env`, so settings placed there vanish on the next
@@ -754,7 +755,7 @@ testing, orch-d6 says "go" again.
 - [ ] P1 `ORCH_RELAY_ORIGIN` values agreed (`https://relay.dev.severin.io`, `https://relay-internal.dev.severin.io`)
 - [ ] P2/P3 PR #27: Opus delta of the head passed, the ordering-cycle flag resolved, head sha recorded
 - [ ] P5 `nft -c -f orch-limits.nft` passed on a throwaway Ubuntu 26.04 (step A), if nft is in scope
-- [ ] P4 interim `ORCH_RELAY_GLOBAL_STAGE_BYTES` values agreed (16 MiB public, 4 MiB int), or P4 code merged
+- [ ] P4 (P3-D37, merged) values agreed: `ORCH_RELAY_MAX_PUBLICATION_BYTES` 16 MiB public (default), 4 MiB int
 - [ ] P6 disk values agreed for the number of invited accounts
 - [ ] P7 release includes P3-D36, or `ORCH_RELAY_THROTTLE_STAGING=27777/600` is in both env files (never both)
 - [ ] Release commit CI green on `develop` (`gh pr checks` / Actions), full suite and ruff

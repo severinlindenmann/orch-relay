@@ -1883,7 +1883,7 @@ HTTP fixture.
   - *Pinned by* `tests/test_max_publication.py`: each place refuses at max + 1 and accepts at max exactly (page
     running total, manifest implied size with and without staged pages, final publication in phase A and in
     phase C), the manifest refusal stores nothing (no set, no page), the page refusal keeps the set's pages at or
-    under the maximum and identical retries free, the refusal precedes the 429 staging quotas and follows
+    under the maximum and identical retries free, the refusal precedes the 429 byte quotas (the two-live-sets 429 of a new set comes first) and follows
     authorization (401, 409 `fenced`), the publication refusal reads no page, folds nothing, reserves nothing in
     the gate, records one failure and no refused heads and keeps the set; a restore refused and accepted at the
     boundary, its staging refused too; the environment, its default, the derived heads cap and its validation
@@ -1893,7 +1893,7 @@ HTTP fixture.
     pages ignored or counted at 73 bytes; `<` instead of `<=` in staging and at the publication; the
     environment ignored; a 64 MiB default; no upper or lower validation; the heads cap not derived; an
     oversized set reserved in the gate; a retryable 429; the publication check after `load_stage`, in phase A
-    only, or with 413; the page check after the staging quotas).
+    only, or with 413; the page check after the byte quotas).
 
 - *Round 2 (Opus review of PR #51).* R1: staged descriptors are grouped by `(kind, log)` once per
   publication; a refused 10,000-ticket x 2-page first publication held the lock 12.7 s (9.4 s in the
