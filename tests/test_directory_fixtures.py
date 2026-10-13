@@ -24,6 +24,7 @@ G1 = {
     "revocation_feed",
     "card_put",
     "card_get",
+    "relay_info",
 }
 # G4: checkpoint/restore fixtures replay against the production relay too, from their bound
 # vector state (tests/checkpoint_support.py); tests/test_http_fixtures.py checks the reference.
@@ -73,6 +74,8 @@ def test_http_example(tmp_path, name, case):
         expected = case["response"]
         assert response.status_code == expected["status"], response.text
         assert response.headers["content-type"] == "application/json"
+        if "Cache-Control" in expected["headers"]:
+            assert response.headers["cache-control"] == expected["headers"]["Cache-Control"]
         assert set(response.json()) == set(expected["json"])
         if response.status_code != 200 or name not in ("session_challenge", "session_login"):
             assert response.json() == expected["json"]
