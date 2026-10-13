@@ -216,6 +216,8 @@ LABELS = {
     "sig_ws_event": "orch/v2/sig/ws-event|",
     "sig_host_event": "orch/v2/sig/host-event|",
     "sig_checkpoint": "orch/v2/sig/checkpoint|",
+    # H12d (orch-core orch-v2-host §9.3, F1 §11.5; P3-D38): a reader's device-signed declaration of its level
+    "sig_reader_decl": "orch/v2/sig/reader-decl|",
     # hashes (ids, pins, commitments, challenges)
     "h_device_id": "orch/v2/id/device|",
     "h_person_id": "orch/v2/id/person|",
@@ -1360,8 +1362,10 @@ def _pairing(state, suite, h, hb, body, sig, pt, now_ms):
     if op != "pair":
         return _unverified(state, now_ms, "malformed", **ob)
     try:
-        if set(meta) != {"op", "dk_sig_pub", "dk_kx_pub", "label", "cert", "attempt"}:
+        if set(meta) - {"reader_decl"} != {"op", "dk_sig_pub", "dk_kx_pub", "label", "cert", "attempt"}:
             raise ValueError("fields")
+        if "reader_decl" in meta:                          # H12d: pair meta v2 (§8.3); verified at step 5
+            reader_decl_shape(meta["reader_decl"])
         sig_pub = unb64u(meta["dk_sig_pub"], suite.sig_pub_len)
         kx_pub = unb64u(meta["dk_kx_pub"], suite.kx_pub_len)
         unhex(meta["attempt"], 16)                         # G3b: the device's attempt nonce
@@ -1396,9 +1400,12 @@ def _pairing(state, suite, h, hb, body, sig, pt, now_ms):
             "attempt": meta["attempt"], "sas_nonce": offer["sas_nonce"], "state": "pending", "cert": meta["cert"],
             "cert_state": cert_state}
     state["pending_pairs"][h.device.hex()] = held
-    return {"result": "pair_pending", "label": label, "cert_state": cert_state,
-            "sas": sas(suite, h.workspace, h.stream, sig_pub, kx_pub, unb64u(wsk_pub), unb64u(offer["sas_nonce"])),
-            "answer": pending_answer(state, held)}
+    out = {"result": "pair_pending", "label": label, "cert_state": cert_state,
+           "sas": sas(suite, h.workspace, h.stream, sig_pub, kx_pub, unb64u(wsk_pub), unb64u(offer["sas_nonce"])),
+           "answer": pending_answer(state, held)}
+    if "reader_decl" in meta:      # kept verbatim for the host's H12d gate at step 5 (verify_reader_decl)
+        held["reader_decl"] = out["reader_decl"] = meta["reader_decl"]
+    return out
 
 
 def pending_answer(state, held) -> dict:
@@ -3008,6 +3015,137 @@ def relay_revoke(suite, state, record, pk_pub, cert):
         if d in {m["device_id"] for m in w["list"]["members"]}:
             w["rotation_due"][d] = {"epoch": w["list"]["epoch"], "revocation_cursor": state["cursor"]}
     return {"ok": d}
+
+
+# =====================================================================================================
+# H12d: the reader declaration (orch-core orch-v2-host §9.3; protocol §8.3, §8.6; P3-D38)
+# =====================================================================================================
+
+READER_DECL_MAX = 2048                 # bytes of cj(reader_decl), inside the 64 KiB meta (§8.2)
+READER_LEVEL_MAX = 2 ** 31 - 1
+READER_DECL_FIELDS = {"v", "kind", "suite", "workspace_id", "device_id", "dk_hash", "who", "reader", "kat", "bind",
+                      "created_ms"}
+KAT_SURFACES = ("log", "view")
+_KAT_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+_LEVEL_KEY = re.compile(r"[1-9][0-9]*")
+
+
+def reader_decl_signed_bytes(o: dict) -> bytes:
+    return L["sig_reader_decl"] + cj(o)
+
+
+def make_reader_decl(suite: Suite, dk_sig_priv, o: dict) -> dict:
+    """Signed by the declaring device's dk_sig. `o.v` is 1: the declaration's own version (§9.3)."""
+    return {"o": o, "sig": b64u(suite.sign(dk_sig_priv, reader_decl_signed_bytes(o)))}
+
+
+def reader_decl_digest(decl: dict) -> str:
+    """`rd` (§8.6) and a reader record's `digest`: sha256 over cj of the whole signed declaration."""
+    return "sha256:" + hashlib.sha256(cj(decl)).hexdigest()
+
+
+def reader_decl_shape(decl) -> None:
+    """The bridge's part (§8.3 step 3.1, `malformed`): a signed object of at most READER_DECL_MAX bytes.
+    Everything else is the host's gate (verify_reader_decl), never a bridge refusal."""
+    if not isinstance(decl, dict) or set(decl) != {"o", "sig"} or not isinstance(decl["o"], dict):
+        raise ValueError("reader_decl is not a signed object")
+    if len(cj(decl)) > READER_DECL_MAX:
+        raise ValueError("reader_decl over its cap")
+
+
+def _uint(v, top):
+    return type(v) is int and 0 <= v <= top
+
+
+def _reader_o_ok(suite: Suite, o: dict, host_max: int) -> bool:
+    try:
+        if set(o) != READER_DECL_FIELDS or type(o["v"]) is not int or o["v"] != 1 or o["kind"] != "reader_decl":
+            return False
+        if type(o["suite"]) is not int or o["suite"] != suite.id:
+            return False
+        unhex(o["workspace_id"], 16); unhex(o["device_id"], 16); unb64u(o["dk_hash"], 32)
+        who = o["who"]
+        if not isinstance(who, dict) or len(who) != 1:
+            return False
+        if "person_id" in who:
+            unhex(who["person_id"], 16)
+        elif "pk_pin" in who:
+            unb64u(who["pk_pin"], 32)
+        else:
+            return False
+        if not _uint(o["reader"], READER_LEVEL_MAX) or not _uint(o["created_ms"], 2 ** 53 - 1):
+            return False
+        bind = o["bind"]
+        if not isinstance(bind, dict) or bind.get("via") not in ("pair", "enrol", "declare"):
+            return False
+        if bind["via"] == "pair":
+            if set(bind) != {"via", "offer_id", "attempt"}:
+                return False
+            unhex(bind["offer_id"], 16); unhex(bind["attempt"], 16)
+        elif set(bind) != {"via"}:
+            return False
+        kat = o["kat"]
+        if not isinstance(kat, dict):
+            return False
+        for k, entry in kat.items():
+            if not _LEVEL_KEY.fullmatch(k) or not isinstance(entry, dict):
+                return False
+            if int(k) > host_max:          # a higher level's surfaces are not known here: ignored (§9.3)
+                continue
+            if not entry or not set(entry) <= set(KAT_SURFACES):
+                return False
+            if not all(isinstance(d, str) and _KAT_DIGEST.fullmatch(d) for d in entry.values()):
+                return False
+        return True
+    except (ValueError, TypeError, KeyError):
+        return False
+
+
+def verify_reader_decl(suite: Suite, decl, ctx: dict) -> dict:
+    """The appending writer's check of one declaration (§9.3), in this order: shape and cap, the signature under the
+    request's dk_sig, the binding to the request (workspace, device, keys, person, attempt), then the KAT entries for
+    levels 1..min(reader, host_max) and the surfaces the host requires. ctx: {"workspace_id", "dk_sig_pub",
+    "dk_kx_pub", "who", "bind", "host_max", "surfaces", "kat"?}. `kat` (level -> surface -> digest) is the host's
+    expected reader_kat digests (core-owned, F1 §11.5); without it the digests are checked for form only.
+    Time windows (via enrol/declare) are the host's (§9.3) and not modelled here. Refusals are core's code
+    `reader.decl_invalid` with a `reason`."""
+    def no(reason):
+        return {"refuse": "reader.decl_invalid", "reason": reason}
+    host_max = ctx["host_max"]
+    try:
+        reader_decl_shape(decl)
+    except ValueError:
+        return no("shape")
+    o = decl["o"]
+    if not _reader_o_ok(suite, o, host_max):
+        return no("shape")
+    try:
+        sig = unb64u(decl["sig"], 64)
+    except ValueError:
+        return no("shape")
+    sig_pub, kx_pub = unb64u(ctx["dk_sig_pub"]), unb64u(ctx["dk_kx_pub"])
+    if not suite.verify(sig_pub, sig, reader_decl_signed_bytes(o)):
+        return no("signature")
+    if o["workspace_id"] != ctx["workspace_id"]:
+        return no("workspace")
+    if o["device_id"] != device_id(suite, sig_pub).hex():
+        return no("device")
+    if o["dk_hash"] != b64u(dk_hash(suite, sig_pub, kx_pub)):
+        return no("keys")
+    if o["who"] != ctx["who"]:
+        return no("who")
+    if o["bind"] != ctx["bind"]:
+        return no("bind")
+    level = min(o["reader"], host_max)
+    for k in range(1, level + 1):
+        entry = o["kat"].get(str(k))
+        if entry is None or not all(s in entry for s in ctx["surfaces"]):
+            return no("kat_missing")
+        expected = ctx.get("kat", {}).get(str(k))
+        if expected is not None and any(entry[s] != expected[s] for s in ctx["surfaces"]):
+            return no("kat_mismatch")
+    return {"ok": {"device_id": o["device_id"], "reader": o["reader"], "level": level,
+                   "digest": reader_decl_digest(decl)}}
 
 
 VECTORS = Path(__file__).resolve().parents[1] / "tests" / "vectors_v2.json"

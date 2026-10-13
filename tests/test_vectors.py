@@ -70,6 +70,7 @@ def test_spec_mandated_labels():
     assert VEC["labels"]["kdf_push"] == "orch/v2/push"
     assert VEC["labels"]["sig_ws_envelope"] == "orch/v2/ws-envelope|"
     assert VEC["labels"]["sig_publish"] == "orch/v2/publish|"
+    assert VEC["labels"]["sig_reader_decl"] == "orch/v2/sig/reader-decl|"  # orch-core orch-v2-host §9.11
 
 
 # --- encodings (§2) ----------------------------------------------------------------------------------
