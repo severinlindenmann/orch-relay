@@ -1454,6 +1454,7 @@ def restore_envelope_ok(e, log):
             "webauthn",
             "tpm",
             "windows-hello",
+            "convenience",  # H12d level 1 (P3-D38): F1 §11.4 with the H5c amendment
         }
         and all(
             e[k] is None if e["seq"] == 1 else HASH_RE.fullmatch(e[k]) for k in ("based_on", "prev")

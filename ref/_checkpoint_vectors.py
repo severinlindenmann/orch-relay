@@ -251,6 +251,13 @@ def add_checkpoints(out):
             c, state = new(name, accepted)
             target, b = restore(modifications=changes)
             offer_restore(c, state, target, b, error)
+        # H12d (P3-D38): a signed restore line with auth "convenience" is accepted (AUTH_KINDS, level 1); an
+        # unknown kind is still refused, never mapped to a known one.
+        for name, auth, error in [('restore_auth_convenience_accepted', 'convenience', None),
+                                  ('restore_auth_unknown_refused', 'bogus', 'restore_invalid')]:
+            c, state = new(name, accepted)
+            target, b = restore(modifications={'auth': auth})
+            offer_restore(c, state, target, b, error)
         c, state = new('restore_at_rewritten_within_window_accepted', accepted)
         target, b = restore(time=NOW+1000)
         target = resign(target, at=at(NOW+2000))

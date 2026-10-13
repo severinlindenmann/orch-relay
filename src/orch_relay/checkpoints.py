@@ -141,6 +141,11 @@ RESTORE_FIELDS = {
 }
 AUTH_KINDS = ("passphrase", "secure-enclave", "secure-enclave-unlocked", "webauthn", "tpm")
 AUTH_KINDS += ("windows-hello",)
+# H12d (P3-D38; orch-core orch-v2-host §9.8): F1 §11.4 with the H5c amendment, the click signer's kind.
+# Parse only; every other kind stays refused. GET /v2/relay-info's level 1 states exactly this
+# (relay_info.RELAY_READER_LEVEL). The deployed relay must carry it before any convenience-signed
+# restore line can be published to it (design §10 P3-D38, dev-deploy-plan §2).
+AUTH_KINDS += ("convenience",)
 CHECKPOINT_FIELDS = {"v", "suite", "kind", "workspace_id", "genesis", "n", "at"}
 CHECKPOINT_FIELDS |= {"workspace_log", "tickets"}
 

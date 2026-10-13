@@ -299,6 +299,11 @@ def validate_checkpoint(S, state, cp):
         integer(entry['seq'], 1); hash_bytes(entry['head']); hash_bytes(entry['acc'])
 
 
+# F1 §11.4 with the H5c amendment; `convenience` is H12d's level 1 (P3-D38). Every other kind is refused.
+AUTH_KINDS = ('passphrase', 'secure-enclave', 'secure-enclave-unlocked', 'webauthn', 'tpm', 'windows-hello',
+              'convenience')
+
+
 def restore_shape(line):
     fields = {'v', 'id', 'seq', 'at', 'type', 'actor', 'based_on', 'prev', 'hash_v', 'host_sig',
               'sig', 'auth', 'roster_v', 'from_seq', 'head', 'abandoned', 'abandoned_decisions', 'reason', 'source', 'revocations'}
@@ -312,7 +317,7 @@ def restore_shape(line):
         integer(line['ws_seq'], 1)
     hash_bytes(line['based_on']); hash_bytes(line['prev']); hash_bytes(line['head']); timestamp(line['at'])
     need(line['seq'] == line['from_seq'] + 1 and line['prev'] == line['head'])
-    need(line['auth'] in ('passphrase', 'secure-enclave', 'secure-enclave-unlocked', 'webauthn', 'tpm', 'windows-hello'))
+    need(line['auth'] in AUTH_KINDS)
     need(line['reason'] in ('rollback', 'diverged', 'broken', 'other'))
     need(isinstance(line['abandoned_decisions'], list) and len(set(line['abandoned_decisions'])) == len(line['abandoned_decisions']))
     for ident in line['abandoned_decisions']:
