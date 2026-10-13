@@ -1878,8 +1878,8 @@ HTTP fixture.
   - *Host side (orch-52).* A host must treat 413 `too_large` on a staging PUT and 400 `too_large` on a final
     publication within the request cap as permanent for that set: do not retry it unchanged; split ordinary
     growth into several checkpoints, and surface an oversized restore to the owner (migration). The maximum is
-    a deployment value the relay does not advertise yet (a `details` field or `/healthz` would be a protocol
-    change: open).
+    a deployment value; since P3-D38 the relay advertises it as `max_publication_bytes` in `GET /v2/relay-info`
+    (unauthenticated, an operator statement).
   - *Pinned by* `tests/test_max_publication.py`: each place refuses at max + 1 and accepts at max exactly (page
     running total, manifest implied size with and without staged pages, final publication in phase A and in
     phase C), the manifest refusal stores nothing (no set, no page), the page refusal keeps the set's pages at or
@@ -1894,6 +1894,57 @@ HTTP fixture.
     environment ignored; a 64 MiB default; no upper or lower validation; the heads cap not derived; an
     oversized set reserved in the gate; a retryable 429; the publication check after `load_stage`, in phase A
     only, or with 413; the page check after the byte quotas).
+
+- **P3-D38 (H12d relay scope: the reader-version handshake; orch-core orch-v2-host §9, PR #440, decided by
+  orch-52, authorised by orch-d6).** The relay's part of H12d is three things; everything else (the gate, reader
+  records, `rd` checks) is the host's.
+  - *`GET /v2/relay-info`* (protocol §19.1) → exactly `{"v": 1, "reader": N, "max_publication_bytes": M}`.
+    `N` is `relay_info.RELAY_READER_LEVEL`, a **code constant (1), never a setting**, so an operator cannot
+    misreport it; the module refuses to import if `N ≥ 1` and `AUTH_KINDS` lacks `convenience`. `M` is
+    `Caps.max_publication` (`ORCH_RELAY_MAX_PUBLICATION_BYTES`, P3-D37), read per request. Unauthenticated (no
+    session is read, no bucket is created), the same answer for every caller, no workspace, person or device
+    data; `Cache-Control: no-store` on every answer (no cached level after a deploy); any query parameter is
+    400 `malformed`; GET only (other methods get the framework's 405, as on every route). Throttled like the
+    public revocation-pair read: its own windows, 60/min per canonical address and 960/min per IPv6 /56, both
+    checked before either is charged (protocol §19.4), so it can never spend the revocation read's windows. No
+    database access. An old relay answers 404, which the host reads as level 0. **It is an honest-operator
+    statement, authenticated only by TLS to the stored origin, never a security control**: a hostile relay can
+    claim level 1; its worst case is a refused restore publication, which the host alarms (orch-v2-host §9.8,
+    11A.9).
+  - *`AUTH_KINDS` gains `convenience`* (`src/orch_relay/checkpoints.py` and `ref/checkpoints.py`, now one named
+    tuple in each): a parse-only change of the R0 restore-line check; every unknown kind stays refused, never
+    mapped to a known one. That is what level 1 means.
+  - *Vectors and protocol text* for the host and phone, with no relay code: the `reader_decl` label
+    (`orch/v2/sig/reader-decl|`), the declaration checks, the pair-request meta v2 (`reader_decl`, §8.3) and
+    `rd` in the request meta (§8.6). The relay never sees sealed meta, so neither needs a relay change.
+  - ***Rollout order (binding).*** The deployed relay MUST carry `convenience` in `AUTH_KINDS` (this decision)
+    **before any convenience-signed restore line can be published to it**: an older relay refuses such a
+    restore as `restore_invalid`, and since publications are one ordered chain (11A.5) the held restore blocks
+    every later publication of that workspace. Order: (1) this relay deployed (`relay-info` answers level 1);
+    (2) orch-core adds the convenience cases to the F1 checkpoint vectors and `reader_kat_1`, the relay vendors
+    them; (3) only then may a relay-linked workspace switch convenience signing on (the host checks `relay-info`
+    at link and every login). dev-deploy-plan §2 P16.
+  - *Core-owned, not done here.* The F1 checkpoint/restore vectors have no `convenience` case yet (the
+    vendored `tests/vectors/f1/*` are untouched); the relay-owned `checkpoints` vectors carry a signed
+    convenience restore (accepted) and an unknown-kind restore (`restore_invalid`) meanwhile. `reader_kat_1` and
+    its digest are core's (F1 §11.5): the `reader_decl` vectors use FAKE stand-in digests and mark the two digest
+    comparisons `depends_on_core`.
+  - *Capacity and operations.* No schema change, no migration, no new setting. The route costs two in-memory
+    windows per address (the existing window table, pruned at the window's end) and no database read; hosts
+    call it at link and at each login (every 15 minutes at most per linked host), far below 60/min. The operator
+    checks a deploy with `curl -s https://<relay>/v2/relay-info` (expect `"reader":1` and the configured
+    maximum).
+  - *Pinned by* `tests/test_relay_info.py` (shape, constant level, settings that cannot change it, the maximum
+    following the setting and its default, no auth and the same answer for any caller or state, no buckets,
+    query refusal, methods as on other GET routes, deterministic address and /56 windows under the frozen clock,
+    windows separate from the revocation read), `tests/test_auth_kinds.py`, `tests/test_reader_vectors.py`, the
+    HTTP fixture `relay_info.json` replayed in production, and the new checkpoint vector cases. Every existing
+    vector and fixture is byte-identical (the vector diff is additions only). Mutation, one at a time on a
+    scratch copy: 17 of 17 killed (the level changed or read from the environment, the maximum not following the
+    setting, the throttle, the /56 window or the check-before-charge removed, `convenience` removed from the
+    relay or the reference (and with the import guard), an auth-dependent answer, no `no-store`, a query
+    accepted, and in the reference: no bind or device check, an inexact pair meta, no 2 KiB cap, KAT checked
+    above the host's level).
 
 - *Round 2 (Opus review of PR #51).* R1: staged descriptors are grouped by `(kind, log)` once per
   publication; a refused 10,000-ticket x 2-page first publication held the lock 12.7 s (9.4 s in the
@@ -2307,3 +2358,4 @@ No new decisions.
 | P3-D35 | Token buckets on every authenticated directory, bridge and checkpoint request, charged after authentication (refusals to the read class): read buckets per device (or W token) and person (or workspace), page buckets weighted by heads, a staging bucket per workspace, host answers per (workspace, target device); bounded LRU table; O(1) poll admission counters (N3); proxy misconfiguration warning (N4); revocation-read /56 window (blocker 4; round 2: review F1-F3) | §10, proto §19.4, §19.6 |
 | P3-D36 | Pre-public limits: staging weighted by body size (one token per started 64 KiB, burst 28,801, refill 600/min); a node-quota reserve (5 %, 200,000 nodes) only owner-signed restores may use; an audited per-account override of the workspaces cap (migration 0016, `orch-relay account-cap`, no HTTP route) (checklist items 3, 4, 8) | §10, proto §19.4, §19.8 |
 | P3-D37 | A hard maximum publication size (`ORCH_RELAY_MAX_PUBLICATION_BYTES`, default 16 MiB, 1..64 MiB): `too_large` at the staging manifest (implied size, before any page) and pages (413, running total) and at the final publication before any fold (400, phase A and C); restores alike; the publication heads cap defaults to the heads it implies (checklist item 1) | §10, proto §19.6, §19.8 |
+| P3-D38 | H12d relay scope: `GET /v2/relay-info` (`reader` a code constant, 1; `max_publication_bytes`; unauthenticated, per-address throttled, `no-store`, an honest-operator statement), `AUTH_KINDS` += `convenience` (deploy before any convenience restore), the `reader_decl`/pair meta v2/`rd` vectors and protocol text | §10, proto §8.3, §8.6, §19.1, §19.4, §19.8 |

@@ -126,6 +126,7 @@ kernel OOM killer picking `sshd`, Caddy or the other relay instance.
 | P13 | **Mobile fixture re-pin** to the deployed commit (§1.3) | **Yes**, for the testing to mean anything, not for the deploy itself | orch-f1 / orch-mobile | Mobile on `386a6cb` (pre-MANIFEST) |
 | P14 | **Database audit queries** from the P3-D30 implementer report ("4 SQL to run before any deploy") | No, if the databases are wiped (§3). Yes, if orch-d6 chooses to keep them | stream D | Moot under the wipe recommendation |
 | P15 | **Coordinator approval** of this plan and of each step in §5 | **Yes** | orch-d6 | Pending |
+| P16 | **H12d `AUTH_KINDS` += `convenience`** (P3-D38) deployed on a relay **before** convenience signing is switched on for any workspace linked to it: an older relay refuses a convenience-signed restore (`restore_invalid`) and the held restore blocks every later publication. Check: `GET /v2/relay-info` answers `"reader":1` | Not for this deploy (no convenience flag exists yet); **yes** before the first convenience flag on a relay-linked workspace | stream D (relay code) / orch-52 (flag) | Implemented on `feat/p3-h12d-relay`, not merged |
 
 Notes on the table:
 
@@ -538,6 +539,7 @@ fixture and compare the status and the JSON field set. Values that depend on the
 | `session_challenge.json` `refusal_413_too_large` (`body_recipe`) | 413 `{"error":"too_large"}` |
 | `members.json` `refusal_401_unauthenticated` (no `Authorization`) | 401 `{"error":"unauthenticated"}` |
 | `revocation_get.json` `refusal_404_not_found` (fresh database: no pairs) | 404 `{"error":"not_found"}` |
+| `relay_info.json` `success` (P3-D38, once deployed) | 200 `{"v":1,"reader":1,"max_publication_bytes":M}`, `Cache-Control: no-store`; `M` 16777216 public, 4194304 int |
 | `session_logout.json`, unknown token | 200 `{}` (protocol §19.6) |
 | a body of more than 8 MB to any relay route (only with the PR #27 Caddyfile) | 413 from Caddy, never reaching the relay |
 
@@ -758,6 +760,7 @@ testing, orch-d6 says "go" again.
 - [ ] P4 (P3-D37, merged) values agreed: `ORCH_RELAY_MAX_PUBLICATION_BYTES` 16 MiB public (default), 4 MiB int
 - [ ] P6 disk values agreed for the number of invited accounts
 - [ ] P7 release includes P3-D36, or `ORCH_RELAY_THROTTLE_STAGING=27777/600` is in both env files (never both)
+- [ ] P16 before any convenience flag on a relay-linked workspace: the deployed release has P3-D38 (`relay-info` `"reader":1`)
 - [ ] Release commit CI green on `develop` (`gh pr checks` / Actions), full suite and ruff
 
 **Pre-flight (step 0)**
