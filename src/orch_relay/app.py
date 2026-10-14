@@ -46,6 +46,9 @@ def create_app(data_dir: Path | str | None = None, instance: str | None = None) 
     from .checkpoints import install as install_checkpoints
 
     install_checkpoints(app)
+    from .relay_info import install as install_relay_info
+
+    install_relay_info(app)  # H12d (P3-D38)
 
     @app.get("/healthz")
     def healthz() -> dict:

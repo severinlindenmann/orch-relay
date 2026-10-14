@@ -1,5 +1,5 @@
 {
-  "aggregate": "8da79c77340347fec895513980113df5f7671990b769880d50c378d47b80c6ec",
+  "aggregate": "1807364f51c591221b11cfdeb34cd695930a4d25fa50d2e93822440b235acc82",
   "files": {
     "README.md": "1cc7bd998132c507afa9c0e2f23c90838d478ea3811b47482958da3943f8056b",
     "accounts.json": "060776501099476673fa1026afa1256ec7c06f8c922c9b3542ee63ee6058d1c3",
@@ -32,6 +32,7 @@
     "pair_host_post.json": "8b10f584a8b3b5c594fb7753e619745d9e2eb55184b92685b1b094880a189297",
     "pair_poll.json": "e5b146b13447e6ca5b570ed11ed3c53eec11e81d091812c719327ccf8854307e",
     "proof.json": "b6f8cff6ec22c651ee7ba7110c7e94e5d841a42dfdb4255f827808e9b26bf135",
+    "relay_info.json": "51177abdcbefc2e1acb1579376f44dd21fe78de09279cdd402eb06ac7f6d0e07",
     "revocation_feed.json": "66fadcc488dd22f0e742e0f815e2e969d169549686594f2bdbdb5c4bb4feb8b2",
     "revocation_get.json": "236b9b42f5d229d4a9c147714e9fba7539b6fa1512e9baec3cff4fcd451af6b9",
     "revocations_post.json": "f35f4ff8306d89cbaae00d74c6d31e7ceb2e8700d287b2b91dcd857d51b6968e",
@@ -44,5 +45,5 @@
     "unpublished_ack.json": "b9eb82d048df7dc44c9b351fee3c491701f010ee86d57d40782c5adf8f054fd8",
     "unpublished_get.json": "73ee9247010acb848870bd0e21a476ec36f883ae4c5c6ceacb31cdd6d6245768"
   },
-  "revision": 11
+  "revision": 12
 }

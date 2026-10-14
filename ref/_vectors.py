@@ -88,6 +88,8 @@ def build() -> dict:
     add_checkpoints_g4(out)
     from ref._unpublished_vectors import add_unpublished
     add_unpublished(out)
+    from ref._reader_vectors import add_reader
+    add_reader(out)
     return out
 
 
@@ -1105,7 +1107,7 @@ def _raw_meta(text):
 EXPECT_KEYS = ("result", "code", "why", "scopes", "meta", "data", "outcome", "high", "host_ms", "epoch", "status",
                "answer", "label", "sas", "cert_state", "wsk_pub", "stream", "last", "refusal", "offset_ms",
                "clock_wrong", "pin_failure", "fetch_grants", "state", "scopes", "primary_label", "device_id",
-               "alarm", "cert_code", "attributed", "anchor")
+               "alarm", "cert_code", "attributed", "anchor", "reader_decl")
 
 
 def _strip(r):

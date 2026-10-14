@@ -291,6 +291,7 @@ Every derivation, signature, AEAD associated data, hash and MAC has its own labe
 | `sig_ws_event` | `orch/v2/sig/ws-event\|` | signature | `dk_sig` | a person event in the workspace log (F1 §5.3) |
 | `sig_host_event` | `orch/v2/sig/host-event\|` | signature | `WSK` | the host's signature over a log line (F1 §5.5) |
 | `sig_genesis_pin` | `orch/v2/sig/genesis-pin\|` | signature | owner device | immutable genesis pin (P3-D18) |
+| `sig_reader_decl` | `orch/v2/sig/reader-decl\|` | signature | the declaring device's `dk_sig` | a reader declaration (H12d, §8.3; orch-core orch-v2-host §9.3, F1 §11.5) |
 | `h_checkpoint` | `orch/v2/checkpoint-hash\|` | hash | — | `cj(C.o)`, exactly F1 (P3-D13) |
 | `h_log_acc` | `orch/v2/log-acc\|` | hash | — | two decoded 32-byte hashes, exactly F1 (P3-D19) |
 | `sig_checkpoint` | `orch/v2/sig/checkpoint\|` | signature | `WSK` | a checkpoint (F1 §5.10) |
@@ -319,7 +320,8 @@ Every derivation, signature, AEAD associated data, hash and MAC has its own labe
 | `h_webauthn_reg` | `orch/v2/webauthn-reg\|` | hash | | WebAuthn registration challenge |
 | `mac_enroll` | `orch/v2/enroll\|` | HMAC-SHA-256 | the enrolment code | scoped agent enrolment |
 
-The `sig_ticket_event` … `h_grant_secret` rows come from orch-core's ticket format F1 (§5.6); the table stays
+The `sig_ticket_event` … `h_grant_secret` rows come from orch-core's ticket format F1 (§5.6), and `sig_reader_decl` from
+F1's H12d label (added to F1's `DEVICE_KEY_LABELS`, orch-v2-host §9.11); the table stays
 prefix-free with them, and `h_question` is the same label F1 calls the question hash (same preimage; F1 writes the digest as
 `sha256:` + hex, §13 as b64u).
 
@@ -980,10 +982,46 @@ Vectors: `bridge.seal`, `hkdf` (`k_bridge_epoch_1`, `k_bridge_epoch_2`, `k_pair`
 
    ```
    meta = {"op":"pair", "dk_sig_pub", "dk_kx_pub", "label": text, "cert": null | <signed device_cert>,
-           "attempt": hex(16 CSPRNG bytes)}
+           "attempt": hex(16 CSPRNG bytes)
+           [, "reader_decl": <signed reader_decl>]}                          meta v2 (H12d, P3-D38)
    ```
 
-   - The field set is exact.
+   - The field set is exact: these six fields, or these six and `reader_decl`. Nothing else.
+   - **`reader_decl` (meta v2, H12d; orch-core orch-v2-host §9.1, §9.3).** The phone's declaration of its reader
+     level, signed by the same new `dk_sig` that signs the envelope, under `sig_reader_decl`:
+
+     ```
+     reader_decl = {"o": {"v":1, "kind":"reader_decl", "suite", "workspace_id": hex, "device_id": hex,
+                          "dk_hash": b64u, "who": {"pk_pin": b64u} | {"person_id": hex}, "reader": uint,
+                          "kat": {"1": {"view": "sha256:" + hex, "log"?: ...}, ...},
+                          "bind": {"via":"pair", "offer_id": hex, "attempt": hex}, "created_ms": int},
+                    "sig": b64u(Sign(dk_sig, "orch/v2/sig/reader-decl|" || cj(o)))}
+     ```
+
+     Each field set is exact. `suite` is the deployment's. `workspace_id` is the link's (the offer stream's: the
+     meta itself names no workspace); `device_id` derives from this meta's `dk_sig_pub`; `dk_hash` (§8.4) is that of
+     this meta's two keys; `who` is `{"pk_pin"}`, the link's `pk_pin` as it appears in the link (b64u), for a phone
+     without a certificate, or `{"person_id"}`, its certificate's person, for a phone that sends one; `bind.offer_id`
+     and `bind.attempt` are this offer and this meta's `attempt`. So a declaration cannot be lifted into another
+     workspace, device, key pair, person, offer or attempt. `reader` is 0 … 2^31 − 1: an absent declaration
+     means 0 (an old build), and 0 is valid (an H12d-aware build of a lower level). `kat` holds, for each level
+     from 1 to `reader`, the build's known-answer digest per parsing surface (`view` for a phone); a host checks
+     the levels from 1 to the lowest of `reader` and its highest known level and ignores higher keys, so a higher
+     unknown level is accepted as at least the host's highest. The KAT corpus and its digest are core-owned
+     (`reader_kat_1`, F1 §11.5); these vectors use FAKE stand-in digests. `cj(reader_decl)` is at most
+     **2 KiB** (about 0.6 KiB in practice), well inside the 64 KiB meta (§8.2) and the 64 KiB pair-request body
+     (§19.3).
+   - **What the bridge checks, and what the host checks.** Step 3.1 refuses as `malformed` a `reader_decl`
+     that is not a signed object (`{"o": {…}, "sig"}`, `null` included) or that exceeds 2 KiB, like any other
+     shape error. The declaration itself (form, signature, binding, KAT) is checked by the host's H12d gate at
+     step 5, before the code is shown and before the primary is asked (orch-v2-host §9.4); it is never a bridge
+     refusal. A pairing whose declaration fails that gate, or whose level is below what the workspace requires,
+     is refused with the short `rejected` form (no reason on the wire; the host screen explains, orch-v2-host
+     §9.15 Q4). The host keeps the declaration verbatim.
+   - **Compatibility.** An old host refuses a meta v2 as `malformed` (an unknown key): that fails closed. A new
+     host accepts a meta without `reader_decl` (level 0). A phone sends `reader_decl` only to a host that
+     understands it; R6's first release ships both (orch-v2-host §9.11, Q7), so no negotiation is defined.
+     The relay never sees the meta (it is sealed under `K_pair`) and changes nothing for it.
    - **The pairing attempt (G3b, P3-D28).** `attempt` is a nonce the device draws when it starts a pairing
      attempt. A resend or `pair_status` poll of the same attempt keeps it (also across an app restart); a new
      attempt, including a new scan of the same link, draws a new one. A phone **without** a certificate MUST
@@ -1364,6 +1402,29 @@ verified.**
 
 Every refusal after step 4 is recorded before it is sent (v1 §5.3). Vectors: `bridge.host_cases`
 (47 per suite, including chains).
+
+**`rd`, the reader declaration digest (H12d, P3-D38; orch-core orch-v2-host §9.5).** A device that has declared
+its reader level (§8.3 `reader_decl`, or later `reader.declare`) carries `"rd": "sha256:" + hex(SHA-256(cj(reader_decl)))`,
+the digest of its **current** declaration, as a field of the meta of every request it sends at epoch ≥ 1 (the
+host's column-R requests). It is inside the seal and signed with the envelope: the relay never sees it
+(relay-blind), and no relay check or route changes for it. The bridge steps above do not read `rd`; the
+host's op layer checks it while the workspace requires a reader level (orch-v2-host §9.5: `no_declaration`,
+`reader_too_old`, `declaration_unknown`). A pre-H12d build sends no `rd`. **A resend or replay** of a rid is the
+same bytes (step 5), so it carries the `rd` of its **first** send; the host answers it from the rid record,
+never by checking that `rd` against the device's newer declaration. A request whose meta has `rd` is otherwise
+unchanged; a meta that is not strict JSON stays `malformed` (step 6). Vectors: `reader_decl.request_meta`.
+
+**H12d rollout order (orch-v2-host §9.8, §9.11).**
+
+1. The relay ships `AUTH_KINDS` with `convenience` (§19.8 R0) and `GET /v2/relay-info` with `reader: 1` (§19.1),
+   and is deployed. This must happen **before** any convenience-signed restore line can be published to it:
+   an older relay refuses such a restore as `restore_invalid`, and publications are one ordered chain, so a held
+   restore blocks every later publication.
+2. orch-core adds the convenience cases to the F1 checkpoint vectors and `reader_kat_1` (F1 §11.5); the relay
+   vendors them and runs them in CI.
+3. Only then may a relay-linked workspace switch convenience signing on: the host reads `relay-info` at link
+   and at every login, and a relay below level 1 (404 included) blocks it.
+4. Phones send `reader_decl` (§8.3) and `rd` (above) from R6's first release, together with the host's gate.
 
 ### 8.7 Ops, meta and WebAuthn
 
@@ -1986,6 +2047,7 @@ are FAKE (`SHA-256("FAKE orch v2 test vector: " || label)`), and so is every "ra
 | `drop` | content blob (3 chunks, empty), metadata, every wrap kind and moved wraps, descriptors, claims (with version and epoch checks), documents, chains and forks |
 | `ws_envelopes` | layout, both co-signatures and five WebAuthn negatives, refusal envelopes, reply consumption, ids per sender |
 | `publish`, `relay_auth` | §12, including challenge reuse, expiry, another origin, another kind, another key |
+| `reader_decl` | H12d (P3-D38): `decls`, the declaration checks (`verify_reader_decl`: a valid pairing declaration; the wrong workspace, `device_id`, `dk_hash`, offer, attempt or `who`; `reader: 0`; a higher unknown level 7 with `kat["1"]` only; a missing or wrong `kat["1"]`; a signature by another key or under another label; form and the 2 KiB cap); `pair_meta`, the meta v2 at the bridge (§8.3) and the host's gate; `request_meta`, `rd` (§8.6). `kat` digests are FAKE stand-ins; `depends_on_core` marks a digest comparison (core owns `reader_kat_1`) |
 
 **Round trips.** `tests/test_vectors.py` also feeds one side's output into the other side's checks:
 
@@ -2194,6 +2256,7 @@ Caps apply to streamed bytes as well as declared Content-Length; never buffer ab
 | `GET /v2/devices/{device}` | D(p), or W whose `ever_persons` contains the person and `ever_devices` contains the device (G0a review 1) | → `{cert}` | | 403 `not_eligible`; 404 `not_found` | §6.1 |
 | `POST /v2/revocations` | none | `{record}` → `{device_id}` | authority is `PK`; per address 10/min; per person 32/day, charged only on verified state changes (G0a review 5), with 8/day reserved for revocations of devices not yet revoked; an exact retry is free; JSON cap 16 KiB (G0a review 2) | 400 `malformed`; 401 `bad_signature`; 403 `other_person` | §6.2 (P3-D5) |
 | `GET /v2/devices/{device}/revocation?after=&limit=` | none | → `{pairs: [{person_id, reason, revocation, provenance}], next}` (P3-D30): every held `(device, person)` pair, the registered person's first on page 1, then `chain` before `feed`, then by §19.5 cursor (never by `person_id`). `next` is opaque and passed back as `after`. `revocation` is the public signed record. `provenance` is `registry` (the relay's verified association), `chain` (some workspace's accepted restore carried it; not authenticated by that person) or `feed`. No certificate or account key is served: the route is unauthenticated | per address 60/min; limit ≤ 32 (default 32); no cap on held pairs | 400 `malformed` (a bad limit or after token); 404 when a request without an after token finds no pair (a valid after token past the end, even for a device with no pairs, is an empty 200 page); 429 | §6.2, gaps 24 |
+| `GET /v2/relay-info` | none | → `{"v": 1, "reader": N, "max_publication_bytes": M}`, exactly these fields (H12d, P3-D38). `reader` is the relay software's reader level, a code constant (`RELAY_READER_LEVEL`), never a setting: 1 = its restore-evidence parser accepts `auth: "convenience"` and refuses every unknown `auth` (`AUTH_KINDS`, §19.8). `max_publication_bytes` is the configured maximum publication size (`ORCH_RELAY_MAX_PUBLICATION_BYTES`, P3-D37). The same answer for every caller: no session is read, no workspace, person or device data is served. An **honest-operator statement**, authenticated only by TLS to the stored origin, **never a security control**: a hostile relay can claim any level. A relay without the route answers 404, which a host reads as level 0 (orch-core orch-v2-host §9.8) | per address 60/min, per IPv6 /56 960/min (§19.4), checked before either is charged; `Cache-Control: no-store` on every answer; no query parameters; GET only | 400 `malformed` (any query parameter); 429 `rate_limited` | new (H12d) |
 | `GET /v2/persons/{person}/revocations?after=&limit=` | D(p), or W whose `ever_persons` contains the person | → `{revocations, next}` | W sees only `ever_devices`, filtered before pagination (G0a review 1); limit ≤ 256 | 403 | §6.2 |
 | `PUT /v2/workspaces/{ws}/card` | none for the first card; W(g) after | `{card}` → `{card_seq}` | first card: per address 10/h, per owner account 10/h charged only after delegation and card signatures verify; at most 32 workspaces per owner account, or the account's operator override (P3-D34/D36, 429 `quota_exceeded`, checked after the signatures, before any window is charged); same-card retries are free (G0a review 5); first writer wins in one transaction; same card → 200; JSON cap 64 KiB (G0a review 2) | §7.1 codes: 400 `malformed`, `wrong_suite`, `delegation_mismatch`; 401 `bad_signature`; 403 `other_person`; 409 `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version` | §7.1 (P3-D4) |
 | `GET /v2/workspaces/{ws}/card` | D(m) or W | → `{card}` | | 403; 404 | §7.1 |
@@ -2507,7 +2570,9 @@ private half; the publicly derived reference key is only a test artifact.
   27 777 + 64 MiB / 64 KiB = 28 801 tokens: any set uploads at once without a 429 (5 001 small pages and their
   manifest: about 5 015 tokens; 64 MiB in 4 MiB pages: 1 025). The refill bounds the lock-taking staging writes of
   a workspace to 10 small PUTs or 640 KiB per second; a full burst is back after about 48 minutes. The public revocation-pair read (§19.5) is
-  limited to 60 per minute per address and 960 per minute per IPv6 /56. A relay behind a reverse proxy MUST be
+  limited to 60 per minute per address and 960 per minute per IPv6 /56. `GET /v2/relay-info` (H12d, P3-D38) has its own
+  windows of the same sizes (`relay-info`, `relay-info-parent`), separate from the revocation read's; it takes no session
+  and so no bucket. A relay behind a reverse proxy MUST be
   configured with the proxy's address (`ORCH_RELAY_TRUSTED_PROXY`); otherwise every client shares one address,
   and the relay logs a warning.
 - **Waiting long polls** hold no lock, transaction or worker thread. Commits that insert or change
@@ -2982,7 +3047,10 @@ vector stages more than 16 MiB).
 in that one context only, never by trying T's entries.
 
 - **R0 (P3-D13):** exact F1 restore fields, person actor, `v=2`, `hash_v=1`, `sig`, `auth`, `roster_v`,
-  `host_sig`; `ws_seq` exactly when `log` is a ticket. Strict JSON, schema and line-size checks precede effects.
+  `host_sig`; `ws_seq` exactly when `log` is a ticket. `auth` is one of `passphrase`, `secure-enclave`,
+  `secure-enclave-unlocked`, `webauthn`, `tpm`, `windows-hello` and, since H12d (P3-D38), `convenience` (F1 §11.4
+  with the H5c amendment); any other value is refused, never mapped to a known one (`AUTH_KINDS`; this is what
+  `relay-info` level 1 states, §19.1). Strict JSON, schema and line-size checks precede effects.
   The bundle's delegation MUST have the card's delegation content (`o` equal) and verify under the owner PK (card
   binding; orch-core #377: an owner re-signing the same content is the same delegation).
 - **R1 (P3-D24):** verify both host and person signatures using F1's `{workspace_id, log}` context.

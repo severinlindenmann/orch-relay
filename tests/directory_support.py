@@ -246,6 +246,7 @@ def prepare_case(directory, name, case):
                 "device_put": ("certificate-address", 3_600_000, 30),
                 "revocations_post": ("revocation-address", 60_000, 10),
                 "revocation_get": ("revocation-read", 60_000, 60),
+                "relay_info": ("relay-info", 60_000, 60),
                 "card_put": ("card-address", 3_600_000, 10),
             }[name]
             directory.windows[(purpose, "testclient", duration)] = (NOW + 60_000, cap)

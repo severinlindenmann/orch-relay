@@ -42,6 +42,8 @@ ROUTES = [
     ("cert_challenge", "POST", "/v2/cert-requests/{id}/challenge", "primary", "D(p)", "401:bad_signature 403:other_person,not_for_this_device 409:replayed,other_workspace,already_signed 410:expired 404:not_found"),
     ("cert_rejection", "POST", "/v2/cert-requests/{id}/rejection", "primary", "D(p)", "401:bad_signature 403:other_person,not_for_this_device 409:already_signed,replayed,other_workspace 410:expired 404:not_found"),
     ("cert_request_get", "GET", "/v2/cert-requests/{id}", "host", "W", "404:not_found"),
+    # H12d (P3-D38): the relay software's reader level, an honest-operator statement (protocol §19.1)
+    ("relay_info", "GET", "/v2/relay-info", "client", "none", "429:rate_limited"),
 ]
 
 ROUTES += CP.ROUTES
@@ -211,6 +213,8 @@ def build(vectors=None):
         "cert_requests_poll": (None, {"requests": [objs["request"]]}),
         "cert_challenge": ({"challenge": objs["challenge"]}, {}), "cert_rejection": ({"rejection": objs["cert_rejection"]}, {}),
         "cert_request_get": (None, {"state": "challenged", "challenge": objs["challenge"], "cert": None, "rejection": None}),
+        # RELAY_READER_LEVEL 1 and the default ORCH_RELAY_MAX_PUBLICATION_BYTES (16 MiB, P3-D37)
+        "relay_info": (None, {"v": 1, "reader": 1, "max_publication_bytes": 16 * 1024 * 1024}),
     }
     query = {"revocation_feed": {"after": "0", "limit": "256"}, "grants": {"epoch": "1"}, "card_key": {"card_seq": "1"},
              "bridge_device_poll": {"wait": "25"}, "pair_poll": {"wait": "25"}, "host_poll": {"after": "0", "wait": "25"}, "cert_requests_poll": {"wait": "25"}}
@@ -409,6 +413,9 @@ def build(vectors=None):
                     f"not; the workspace's unpublished ack is {acked} (P3-D31)."))
         if name == "session_logout":
             extra("expired_token_retry", given="token_expired_or_already_logged_out")
+        if name == "relay_info":  # every answer of the route, refusals included, is never cached
+            for c in cases:
+                c["response"]["headers"]["Cache-Control"] = "no-store"
         output[name] = {"contract": "orch-relay-http-v2", "suite": 2, "route": {"method": method, "path": path, "role": role, "auth": auth},
                         "cases": cases}
     return CP.enrich(output, v)
