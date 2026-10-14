@@ -1910,7 +1910,8 @@ HTTP fixture.
     database access. An old relay answers 404, which the host reads as level 0. **It is an honest-operator
     statement, authenticated only by TLS to the stored origin, never a security control**: a hostile relay can
     claim level 1; its worst case is a refused restore publication, which the host alarms (orch-v2-host §9.8,
-    11A.9).
+    11A.9) and which stays held, blocking every later publication of that workspace until the operator resolves it
+    (availability only, review F2).
   - *`AUTH_KINDS` gains `convenience`* (`src/orch_relay/checkpoints.py` and `ref/checkpoints.py`, now one named
     tuple in each): a parse-only change of the R0 restore-line check; every unknown kind stays refused, never
     mapped to a known one. That is what level 1 means.

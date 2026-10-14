@@ -3,7 +3,8 @@
 The relay software's reader level for the reader-version handshake, and its maximum publication size.
 An **honest-operator statement**, authenticated only by TLS to the origin the host stored: it is never a
 security control (a hostile relay can claim any level; its worst case is a refused restore publication,
-which the host alarms). A relay without this route answers 404, which a host reads as level 0.
+which the host alarms and which stays held, blocking later publications of that workspace until the operator
+resolves it: availability only). A relay without this route answers 404, which a host reads as level 0.
 
 Unauthenticated and the same for every caller: no workspace, person or device data. Throttled per
 client address like the public revocation-pair read (§19.4: 60/min per address, 960/min per IPv6 /56),
