@@ -82,9 +82,7 @@ def test_decide_budget_upsert_charges_the_first_upload_and_refuses_at_the_caps(c
     assert spend(1000, day=8) == 1  # another UTC day, another row
     for _ in range(49):
         spend(1, day=9)
-    assert con.execute(
-        "SELECT creations FROM drop_decide_budget WHERE day=9"
-    ).fetchone() == (49,)
+    assert con.execute("SELECT creations FROM drop_decide_budget WHERE day=9").fetchone() == (49,)
     assert spend(1, day=9) == 1  # the 50th creation
     assert spend(1, day=9) == 0  # the 51st
 

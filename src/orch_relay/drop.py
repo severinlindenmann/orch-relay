@@ -1294,7 +1294,12 @@ class Drop:
                 # The workspace's upload bucket, now that the head names it (a W session's was
                 # charged at admission); then the quota reservation (item 8).
                 await run_in_threadpool(
-                    self.d.throttle, session, self.d.clock(), "keys", [("drop-up-workspace", key[1])], cost
+                    self.d.throttle,
+                    session,
+                    self.d.clock(),
+                    "keys",
+                    [("drop-up-workspace", key[1])],
+                    cost,
                 )
             reservation = self.reserve(plan)
             # 10. the blob, streamed to drop/tmp, landed at a unique final path

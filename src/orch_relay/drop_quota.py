@@ -126,7 +126,9 @@ def read_usage(con, keys):
             "WHERE scope=? AND id=?",
             (scope, ident),
         ).fetchone()
-        out[(scope, ident)] = dict(zip(FIELDS, row, strict=True)) if row else dict.fromkeys(FIELDS, 0)
+        out[(scope, ident)] = (
+            dict(zip(FIELDS, row, strict=True)) if row else dict.fromkeys(FIELDS, 0)
+        )
     return out
 
 

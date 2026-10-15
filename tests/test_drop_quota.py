@@ -15,7 +15,7 @@ from orch_relay import db
 from orch_relay import drop_quota as Q
 from orch_relay import proto as P
 from orch_relay.app import create_app
-from orch_relay.directory import throttle_settings
+from orch_relay.directory import Refusal, throttle_settings
 
 OWNER = "owner"
 
@@ -68,8 +68,8 @@ def need_of(signed, wraps):
     class Plan:  # the parts Need.of reads
         o = signed["o"]
         descriptor = P.cj(signed).decode()
-        wrap_texts = [P.cj(w).decode() for w in wraps]
-        devices = []
+        wrap_texts = tuple(P.cj(w).decode() for w in wraps)
+        devices = ()
 
     return Q.Need.of(Plan, False)
 
@@ -125,7 +125,7 @@ def test_each_cap_passes_exactly_at_the_cap_and_refuses_one_over(scope, field, a
     usage[(scope, ident)][field] = cap - 1
     Q.check(quotas, usage, {}, need, ws, owner, device, o)  # lands exactly on the cap
     usage[(scope, ident)][field] = cap
-    with pytest.raises(Exception) as caught:
+    with pytest.raises(Refusal) as caught:
         Q.check(quotas, usage, {}, need, ws, owner, device, o)
     error = caught.value
     assert error.status == status and error.retry == Q.SWEEP
@@ -135,7 +135,7 @@ def test_each_cap_passes_exactly_at_the_cap_and_refuses_one_over(scope, field, a
         assert (error.code, error.details) == ("quota_exceeded", {"quota": name})
     # the reservations of uploads in flight count against the cap too
     usage[(scope, ident)][field] = cap - 1
-    with pytest.raises(Exception):
+    with pytest.raises(Refusal):
         Q.check(quotas, usage, {(scope, ident): {field: 1}}, need, ws, owner, device, o)
 
 
@@ -146,7 +146,7 @@ def test_a_field_the_upload_does_not_add_to_is_not_checked():
     usage[("device", "w:d")]["head"] = quotas.dev_head + 10  # a lowered cap, an over-full share
     o = {"object_kind": "file", "version": 1}
     Q.check(quotas, usage, {}, Q.Need(5, 0, 1, 0), "w", "p", "d", o)
-    with pytest.raises(Exception):
+    with pytest.raises(Refusal):
         Q.check(quotas, usage, {}, Q.Need(5, 1, 1, 0), "w", "p", "d", o)
 
 
@@ -157,15 +157,15 @@ def test_the_authors_share_is_named_before_the_workspace_and_the_global_ceiling_
     for key in keys:
         usage[key]["blob"] = 10**12  # everything is over
     o = {"object_kind": "file", "version": 1}
-    with pytest.raises(Exception) as caught:
+    with pytest.raises(Refusal) as caught:
         Q.check(quotas, usage, {}, Q.Need(1, 0), "w", "p", "d", o)
     assert caught.value.details == {"quota": "drop_device"}
-    with pytest.raises(Exception) as caught:  # a W author has no device share
+    with pytest.raises(Refusal) as caught:  # a W author has no device share
         Q.check(quotas, usage, {}, Q.Need(1, 0), "w", "p", None, o)
     assert caught.value.details == {"quota": "drop_ws"}
     usage = blank(keys)
     usage[("global", "")]["blob"] = 10**12
-    with pytest.raises(Exception) as caught:
+    with pytest.raises(Refusal) as caught:
         Q.check(quotas, usage, {}, Q.Need(1, 0), "w", "p", "d", o)
     assert caught.value.code == "overloaded"
 
@@ -173,12 +173,32 @@ def test_the_authors_share_is_named_before_the_workspace_and_the_global_ceiling_
 def test_document_chain_cap_is_the_1025th_version():
     quotas = Q.Quotas({})
     keys = Q.usage_keys("w", "p", None)
-    Q.check(quotas, blank(keys), {}, Q.Need(1, 1), "w", "p", None, {"object_kind": "document", "version": 1024})
-    with pytest.raises(Exception) as caught:
-        Q.check(quotas, blank(keys), {}, Q.Need(1, 1), "w", "p", None, {"object_kind": "document", "version": 1025})
+    Q.check(
+        quotas,
+        blank(keys),
+        {},
+        Q.Need(1, 1),
+        "w",
+        "p",
+        None,
+        {"object_kind": "document", "version": 1024},
+    )
+    with pytest.raises(Refusal) as caught:
+        Q.check(
+            quotas,
+            blank(keys),
+            {},
+            Q.Need(1, 1),
+            "w",
+            "p",
+            None,
+            {"object_kind": "document", "version": 1025},
+        )
     assert (caught.value.status, caught.value.details) == (429, {"quota": "drop_doc_versions"})
     # a file is never version 1025 (CAS), and the cap has no per-member share
-    Q.check(quotas, blank(keys), {}, Q.Need(1, 1), "w", "p", None, {"object_kind": "file", "version": 1})
+    Q.check(
+        quotas, blank(keys), {}, Q.Need(1, 1), "w", "p", None, {"object_kind": "file", "version": 1}
+    )
 
 
 def test_reservations_add_up_and_release_exactly():
@@ -225,7 +245,10 @@ def test_creation_counter_upsert_refuses_at_the_cap_and_is_per_day(tmp_path):
 def test_global_ceilings_come_from_the_environment():
     assert Q.Quotas({}).global_blob == 4 * 1024**3 and Q.Quotas({}).global_head == 512 * 1024**2
     quotas = Q.Quotas(
-        {"ORCH_RELAY_DROP_GLOBAL_BYTES": "1073741824", "ORCH_RELAY_DROP_GLOBAL_HEAD_BYTES": "134217728"}
+        {
+            "ORCH_RELAY_DROP_GLOBAL_BYTES": "1073741824",
+            "ORCH_RELAY_DROP_GLOBAL_HEAD_BYTES": "134217728",
+        }
     )
     assert (quotas.global_blob, quotas.global_head) == (1024**3, 128 * 1024**2)
     for bad in ("0", "-1", "1.5", "x", ""):
@@ -258,11 +281,6 @@ HTTP_CAPS = [
     ("global", "", {"blob": 1}, None),
     ("global", "", {"head": 1}, None),
 ]
-ATTRS = {
-    "blob": ("dev_blob", "ws_blob", "account_blob", "global_blob"),
-    "head": ("dev_head", "ws_head", None, "global_head"),
-    "versions": ("dev_versions", "ws_versions", None, None),
-}
 
 
 @pytest.mark.parametrize(("scope", "ident", "fields", "quota"), HTTP_CAPS)
@@ -270,10 +288,8 @@ def test_a_full_scope_refuses_the_put_and_stores_nothing(client, scope, ident, f
     quotas = client.app.state.drop.quotas
     ident = owner_of(client) if scope == "account" else ident
     (field,) = fields
-    seed(client, scope, ident, **{field: {"device": 0, "workspace": 0}.get(scope, 0)})
     signed, wraps, body = upload("a")
     need = need_of(signed, wraps)
-    cap = {"device": quotas.dev_blob, "workspace": quotas.ws_blob}  # replaced below per field
     attr = {
         ("device", "blob"): "dev_blob",
         ("device", "head"): "dev_head",
@@ -309,13 +325,12 @@ def test_documents_and_the_document_chain_have_their_caps(client):
     drop.quotas.dev_documents, drop.quotas.ws_documents = 64, 1
     refused(put(client, two[0], two[2]), "drop_documents")
     drop.quotas.ws_documents, drop.quotas.doc_versions = 256, 2
-    o1 = one[0]["o"]
+    parent = one[0]["o"]
     for version, expected in ((2, 201), (3, 429)):
         signed, data, _dek = descriptor(
-            o1["object_id"], version=version, kind="document", parent=o1 if version == 2 else v2
+            parent["object_id"], version=version, kind="document", parent=parent
         )
-        if version == 2:
-            v2 = signed["o"]
+        parent = signed["o"]
         r = put(client, signed, frame(signed, [_wrap(signed)], data), if_match=str(version - 1))
         assert r.status_code == expected, r.text
         if expected == 429:
@@ -351,7 +366,7 @@ def test_the_commit_is_the_authority_when_usage_moves_after_the_reservation(clie
 
 def test_a_commit_refusal_charges_no_creation(client):
     drop = client.app.state.drop
-    signed, wraps, body = upload("a")
+    signed, _wraps, body = upload("a")
     drop.quotas.ws_blob = 1
     assert put(client, signed, body).status_code == 429
     assert rows(path_of(client), "drop_creations") == []  # rolled back with the transaction
@@ -381,7 +396,11 @@ def test_creation_counters_per_device_and_workspace_per_utc_day(client):
     assert (r.status_code, r.json()) == (429, {"error": "rate_limited"})
     # a new UTC day opens new counters (and the old rows stay for the sweep, PR 2)
     d.clock = lambda: NOW + DAY
-    s, _w, b = upload("c", expires=NOW + DAY + 7 * DAY)
+    with closing(db.connect(path_of(client))) as con, con:  # sessions and certificates outlive it
+        con.execute("UPDATE sessions SET expires_ms=?", (NOW + 2 * DAY,))
+        con.execute("UPDATE devices SET expires_ms=?", (NOW + 30 * DAY,))
+        con.execute("UPDATE holders SET lease_until_ms=?", (NOW + 2 * DAY,))
+    s, _w, b = upload("e", expires=NOW + DAY + 7 * DAY, now=NOW + DAY)
     assert put(client, s, b).status_code == 201
     days = {r["day"] for r in rows(path_of(client), "drop_creations")}
     assert days == {NOW // DAY, NOW // DAY + 1}
@@ -419,7 +438,7 @@ def test_concurrent_uploads_cannot_both_take_the_last_free_slice(h):
     the commit; the second is refused 429 at step 9, before it reads a blob byte."""
     first, _w1, body1 = upload("a")
     second, _w2, body2 = upload("b", author=LAPTOP)
-    h.drop.quotas.ws_blob = first["o"]["content_len"] + 100
+    h.drop.quotas.ws_blob = first["o"]["content_len"] + 10  # room for one, not two
 
     async def go():
         gate = asyncio.Event()
