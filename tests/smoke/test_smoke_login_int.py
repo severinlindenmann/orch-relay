@@ -341,6 +341,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/v2/accounts":
             if mode == "echo_invite":
                 return self.reply(400, {"error": body["invite"]})
+            if mode == "echo_invite_prefixed":
+                return self.reply(400, {"error": "e_" + body["invite"]})
             if mode == "echo_long":
                 return self.reply(400, {"error": "a" * 100})
             if mode == "echo_escape":
@@ -425,7 +427,9 @@ def test_redirect_and_environment_proxy_are_never_followed(fake):
     assert sink.log == []
 
 
-@pytest.mark.parametrize("mode", ["echo_invite", "echo_long", "echo_escape"])
+@pytest.mark.parametrize(
+    "mode", ["echo_invite", "echo_invite_prefixed", "echo_long", "echo_escape"]
+)
 def test_error_strings_from_the_relay_are_filtered(fake, mode):
     srv, invite = fake(mode), new_invite()
     r = fake_run(srv, invite)
@@ -602,34 +606,53 @@ INTERNAL = "https://relay-internal.dev.severin.io"
 
 
 @pytest.mark.parametrize(
-    "target, origin, extra",
+    "target, origin, extra, reason",
     [
-        ("https://tix.severin.io", "https://tix.severin.io", []),
-        ("https://tix.severin.io", "https://tix.severin.io", ["--public"]),
-        ("https://api.tix.severin.io", "https://api.tix.severin.io", ["--public"]),
-        ("https://relay.dev.severin.io", "https://relay.dev.severin.io", []),
-        ("https://example.com", "https://example.com", ["--public"]),
-        ("http://relay-internal.dev.severin.io", "http://relay-internal.dev.severin.io", []),
-        (INTERNAL, INTERNAL + "/", []),
-        (INTERNAL, "https://RELAY-INTERNAL.dev.severin.io", []),
-        (INTERNAL, INTERNAL + ":443", []),
-        (INTERNAL, "https://relay.dev.severin.io", ["--public"]),
-        (INTERNAL + "/v2", INTERNAL, []),
-        (INTERNAL + ":8443", INTERNAL + ":8443", []),
-        ("http://[::1", "http://[::1", []),
-        ("http://127.0.0.1:1", "http://[::1", []),
-        (INTERNAL, INTERNAL, []),  # stdin is a pipe and there is no --invite-stdin
-        ("http://127.0.0.1:1", "http://127.0.0.1:1", ["--invite-stdin"]),  # "x" is no invite
+        ("https://tix.severin.io", "https://tix.severin.io", [], "never"),
+        ("https://tix.severin.io", "https://tix.severin.io", ["--public"], "never"),
+        ("https://api.tix.severin.io", "https://api.tix.severin.io", ["--public"], "never"),
+        ("https://relay.dev.severin.io", "https://relay.dev.severin.io", [], "needs --public"),
+        ("https://example.com", "https://example.com", ["--public"], "allow-list"),
+        (
+            "http://relay-internal.dev.severin.io",
+            "http://relay-internal.dev.severin.io",
+            [],
+            "plain http",
+        ),
+        (INTERNAL, INTERNAL + "/", [], "ORIGIN must be exactly"),
+        (INTERNAL, "https://RELAY-INTERNAL.dev.severin.io", [], "ORIGIN must be exactly"),
+        (INTERNAL, INTERNAL + ":443", [], "no default port"),
+        (INTERNAL, "https://relay.dev.severin.io", ["--public"], "same host and port"),
+        (INTERNAL + "/v2", INTERNAL, [], "path"),
+        (INTERNAL + ":8443", INTERNAL + ":8443", [], "port 443"),
+        ("http://[::1", "http://[::1", [], "malformed"),
+        ("http://127.0.0.1:1", "http://[::1", [], "malformed"),
     ],
 )
 def test_main_refuses_before_any_network_access(
-    monkeypatch, capsys, no_network, target, origin, extra
+    monkeypatch, capsys, no_network, target, origin, extra, reason
 ):
-    stdin = "x\n" if "--invite-stdin" in extra else "FAKE-not-an-invite\n"
-    rc, out = run_main(monkeypatch, capsys, [target, origin, *extra], stdin)
+    # A usable invite on an allowed pipe: the refusal must come from the target checks alone.
+    argv = [target, origin, *extra, "--invite-stdin"]
+    rc, out = run_main(monkeypatch, capsys, argv, "FAKE-not-an-invite\n")
     assert rc == 2, out.out
     assert out.out.startswith("FAIL refused: ") and len(out.out.splitlines()) == 1, out.out
+    assert reason in out.out
     assert out.err == ""
+    assert no_network == []
+
+
+@pytest.mark.parametrize(
+    "extra, stdin, reason",
+    [
+        ([], "FAKE-not-an-invite\n", "not a terminal"),
+        (["--invite-stdin"], "x\n", "no usable invite"),
+        (["--invite-stdin"], "FAKE not an invite\r\n", "no usable invite"),
+    ],
+)
+def test_main_refuses_a_bad_invite_source(monkeypatch, capsys, no_network, extra, stdin, reason):
+    rc, out = run_main(monkeypatch, capsys, [INTERNAL, INTERNAL, *extra], stdin)
+    assert rc == 2 and out.out.startswith("FAIL refused: ") and reason in out.out, out.out
     assert no_network == []
 
 

@@ -154,7 +154,11 @@ def check_target(url, public):
     )
     if parts.netloc.lower() != netloc:
         raise Refused("URL is not in canonical form")
-    return parts.scheme, host, port, f"{parts.scheme}://{netloc}"
+    # The serialized origin (what the relay compares) never carries the scheme's default port.
+    default = 443 if parts.scheme == "https" else 80
+    origin = f"{parts.scheme}://" + (f"[{host}]" if ":" in host else host)
+    origin += f":{port}" if port != default else ""
+    return parts.scheme, host, port, origin
 
 
 @contextlib.contextmanager
@@ -445,7 +449,7 @@ def main(argv=None):
         scheme, host, port, _ = check_target(args.base_url, args.public)
         o_scheme, o_host, o_port, o_canonical = check_target(args.origin, args.public)
         if args.origin != o_canonical:
-            raise Refused("ORIGIN must be exactly scheme://host[:port], lowercase, no slash")
+            raise Refused("ORIGIN must be exactly scheme://host[:port], lowercase, no default port")
         if (o_scheme, o_host, o_port) != (scheme, host, port) and not is_loopback(host):
             raise Refused("ORIGIN must name the same host and port as BASE_URL")
         invite = read_invite(args.invite_stdin)
