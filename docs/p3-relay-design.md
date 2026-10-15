@@ -1928,8 +1928,9 @@ HTTP fixture.
   - *Core-owned, not done here.* The F1 checkpoint/restore vectors have no `convenience` case yet (the
     vendored `tests/vectors/f1/*` are untouched); the relay-owned `checkpoints` vectors carry a signed
     convenience restore (accepted) and an unknown-kind restore (`restore_invalid`) meanwhile. `reader_kat_1` and
-    its digest are core's (F1 §11.5): the `reader_decl` vectors use FAKE stand-in digests and mark the two digest
-    comparisons `depends_on_core`.
+    its digest are core's (F1 §11.5): the `reader_decl` vectors carry core's real level-1 `log` and `view`
+    digests (H12d-1, orch-core PR #463; provisional until H12d-2), copied by the generator; the old stand-ins and
+    the `depends_on_core` marker are gone.
   - *Capacity and operations.* No schema change, no migration, no new setting. The route costs two in-memory
     windows per address (the existing window table, pruned at the window's end) and no database read; hosts
     call it at link and at each login (every 15 minutes at most per linked host), far below 60/min. The operator

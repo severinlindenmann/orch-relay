@@ -1,8 +1,8 @@
 """H12d (P3-D38) relay-owned vectors: reader_decl, the pair-request meta v2 (§8.3) and `rd` (§8.6).
 
 Each case replays from the JSON alone; the signature, label, size and digest are also checked without the
-reference's verifier. The `kat` digests are FAKE stand-ins (core owns reader_kat_1, F1 §11.5): a case that
-compares a digest says so in `depends_on_core`. FAKE keys only.
+reference's verifier. The `kat` digests are core's real reader_kat_1 digests (H12d-1, F1 §11.5; the level-1 view
+set is provisional until H12d-2). FAKE keys only.
 """
 
 import copy
@@ -82,10 +82,44 @@ def test_case_list_covers_the_design():
         assert reason["over_2_kib"] == "shape"
 
 
-def test_only_digest_comparisons_depend_on_core():
+CORE_KAT = {
+    "log": "sha256:70b450df574b6c372005b7504a7f9efe80552cb2841193b960fe538c6aa6fc0e",
+    "view": "sha256:d76e4593ec191e91ca2f6bddef570cbfa1af14dae702bb5ded0572eebe1d9085",
+}
+
+
+def test_kat_digests_are_cores_real_ones():
     for sid in SUITES:
-        for c in VEC["suites"][sid]["reader_decl"]["decls"]:
-            assert ("depends_on_core" in c) == ("kat" in c["ctx"]), c["name"]
+        g = VEC["suites"][sid]["reader_decl"]
+        assert "kat_standin" not in g
+        assert {k: g["kat_core"][k] for k in CORE_KAT} == CORE_KAT
+        for c in g["decls"]:
+            assert "depends_on_core" not in c
+            if "kat" in c["ctx"]:
+                assert c["ctx"]["kat"]["1"]["view"] == CORE_KAT["view"]
+        ok = next(c for c in g["decls"] if c["name"] == "kat_1_matches_the_expected_digest")
+        assert ok["decl"]["o"]["kat"]["1"]["view"] == CORE_KAT["view"] and "ok" in ok["expect"]
+
+
+def test_h12d_review_f3_f4_cases():
+    for sid in SUITES:
+        g = VEC["suites"][sid]["reader_decl"]
+        got = {c["name"]: c["expect"] for c in g["decls"]}
+        assert "ok" in got["valid_declare_declaration"]
+        assert "ok" in got["created_ms_2_53_minus_1_accepted"]
+        for n in (
+            "bind_declare_with_an_extra_field",
+            "bind_enrol_with_an_extra_field",
+            "created_ms_negative",
+        ):
+            assert got[n]["reason"] == "shape", n
+        c = next(
+            x for x in g["pair_meta"] if x["name"] == "meta_v2_reader_decl_sig_not_a_string_pending"
+        )
+        assert (
+            c["steps"][0]["expect"]["result"] == "pair_pending"
+        )  # the bridge does not look at `sig`'s type
+        assert c["gate"]["expect"]["reason"] == "shape"  # the host gate refuses it
 
 
 def test_size_and_digest():

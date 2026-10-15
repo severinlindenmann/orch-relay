@@ -4,10 +4,11 @@
 Every key is FAKE (SHA-256 of a public label). Self-contained: reads the suite's keys and ids from the already built
 vectors and adds nothing to the older groups.
 
-Every `kat` digest here is a FAKE stand-in, NOT core's `reader_kat_1` digest: core owns the KAT corpus and its digest
-construction (F1 §11.5). The cases check the declaration's form, signature, binding and level rules, which the relay
-reference computes from §9.3 alone; a case whose outcome compares a digest with an expected value carries
-`depends_on_core`, and its expected value is the same stand-in, so it tests the comparison, not the digest.
+The `kat` digests are core's real `reader_kat_1` digests (orch-core `plugins/orch-core/tests/vectors/f1/reader_kat_1.json`,
+H12d-1, orch-core PR #463; F1 §11.5, level 1 = READER_VIEWS_1, provisional until H12d-2): core owns the KAT corpus and its
+digest construction, the relay only copies the two strings, so a mismatch case compares a declared digest with the
+real one. The one deliberately wrong digest (`KAT_OTHER`) is a FAKE. The cases check the declaration's form, signature,
+binding and level rules, which the relay reference computes from §9.3 alone.
 """
 import copy
 import hashlib
@@ -16,9 +17,9 @@ from ref import orch_protocol_ref as R
 from ref._vectors import _strip
 
 NOW = 1_790_000_000_000
-KAT_STANDIN = "sha256:" + hashlib.sha256(b"FAKE stand-in for core's reader_kat_1 view digest").hexdigest()
-KAT_OTHER = "sha256:" + hashlib.sha256(b"FAKE another reader_kat_1 view digest").hexdigest()
-CORE = "reader_kat_1 (F1 §11.5, orch-core): the expected digest here is a FAKE stand-in"
+KAT_LOG = "sha256:70b450df574b6c372005b7504a7f9efe80552cb2841193b960fe538c6aa6fc0e"   # core reader_kat_1 expected["1"].log
+KAT_VIEW = "sha256:d76e4593ec191e91ca2f6bddef570cbfa1af14dae702bb5ded0572eebe1d9085"  # core reader_kat_1 expected["1"].view
+KAT_OTHER = "sha256:" + hashlib.sha256(b"FAKE another reader_kat_1 view digest").hexdigest()   # deliberately wrong
 
 
 def add_reader(out):
@@ -39,7 +40,7 @@ def _suite(S, v):  # noqa: C901 (a builder: long by nature)
 
     o = {"v": 1, "kind": "reader_decl", "suite": S.id, "workspace_id": ws.hex(),
          "device_id": R.device_id(S, phone_sig).hex(), "dk_hash": R.b64u(R.dk_hash(S, phone_sig, phone_kx)),
-         "who": {"pk_pin": pk_pin}, "reader": 1, "kat": {"1": {"view": KAT_STANDIN}},
+         "who": {"pk_pin": pk_pin}, "reader": 1, "kat": {"1": {"view": KAT_VIEW}},
          "bind": {"via": "pair", "offer_id": offer.hex(), "attempt": attempt}, "created_ms": NOW}
     ctx = {"workspace_id": ws.hex(), "dk_sig_pub": R.b64u(phone_sig), "dk_kx_pub": R.b64u(phone_kx),
            "who": {"pk_pin": pk_pin}, "bind": {"via": "pair", "offer_id": offer.hex(), "attempt": attempt},
@@ -48,10 +49,8 @@ def _suite(S, v):  # noqa: C901 (a builder: long by nature)
 
     decls = []
 
-    def case(name, decl, ctx_=None, core=False, expect=None):
+    def case(name, decl, ctx_=None, expect=None):
         c = {"name": name, "decl": decl, "ctx": ctx_ or ctx}
-        if core:
-            c["depends_on_core"] = CORE
         got = R.verify_reader_decl(S, decl, c["ctx"])
         if expect is not None:
             assert ("ok" in got) if expect == "ok" else got.get("reason") == expect, (name, got)
@@ -74,16 +73,16 @@ def _suite(S, v):  # noqa: C901 (a builder: long by nature)
     case("who_person_id_where_the_pairing_names_pk_pin", signed(who={"person_id": ids["person_alice"]}), expect="who")
     case("reader_0_is_valid_without_kat", signed(reader=0, kat={}), expect="ok")
     case("higher_unknown_level_7_with_kat_1_only_accepted",
-         signed(reader=7, kat={"1": {"view": KAT_STANDIN}, "7": {"surface_of_level_7": "anything"}}), expect="ok")
+         signed(reader=7, kat={"1": {"view": KAT_VIEW}, "7": {"surface_of_level_7": "anything"}}), expect="ok")
     case("reader_1_without_kat_1", signed(kat={}), expect="kat_missing")
-    case("kat_1_without_the_required_surface", signed(kat={"1": {"log": KAT_STANDIN}}), expect="kat_missing")
+    case("kat_1_without_the_required_surface", signed(kat={"1": {"log": KAT_LOG}}), expect="kat_missing")
     case("kat_1_not_a_digest", signed(kat={"1": {"view": "sha256:" + "G" * 64}}), expect="shape")
-    case("kat_1_unknown_surface", signed(kat={"1": {"view": KAT_STANDIN, "screen": KAT_STANDIN}}), expect="shape")
-    case("kat_level_key_with_a_leading_zero", signed(kat={"01": {"view": KAT_STANDIN}}), expect="shape")
-    case("kat_1_matches_the_expected_digest", valid, {**ctx, "kat": {"1": {"view": KAT_STANDIN}}}, core=True,
+    case("kat_1_unknown_surface", signed(kat={"1": {"view": KAT_VIEW, "screen": KAT_VIEW}}), expect="shape")
+    case("kat_level_key_with_a_leading_zero", signed(kat={"01": {"view": KAT_VIEW}}), expect="shape")
+    case("kat_1_matches_the_expected_digest", valid, {**ctx, "kat": {"1": {"view": KAT_VIEW}}},
          expect="ok")
-    case("wrong_kat_1_digest", signed(kat={"1": {"view": KAT_OTHER}}), {**ctx, "kat": {"1": {"view": KAT_STANDIN}}},
-         core=True, expect="kat_mismatch")
+    case("wrong_kat_1_digest", signed(kat={"1": {"view": KAT_OTHER}}), {**ctx, "kat": {"1": {"view": KAT_VIEW}}},
+         expect="kat_mismatch")
     case("signature_by_another_key", R.make_reader_decl(S, sig["intruder"], o), expect="signature")
     case("signature_under_another_label",
          {"o": o, "sig": R.b64u(S.sign(sig["phone"], R.L["sig_relay_auth"] + R.cj(o)))}, expect="signature")
@@ -94,8 +93,18 @@ def _suite(S, v):  # noqa: C901 (a builder: long by nature)
     case("reader_negative", signed(reader=-1), expect="shape")
     case("reader_above_2_31_minus_1", signed(reader=2 ** 31), expect="shape")
     case("reader_boolean", signed(reader=True), expect="shape")
+    declare = {"via": "declare"}
+    case("valid_declare_declaration", signed(bind=declare, created_ms=NOW + 1000), {**ctx, "bind": declare},
+         expect="ok")
+    case("bind_declare_with_an_extra_field", signed(bind={**declare, "offer_id": offer.hex()}),
+         {**ctx, "bind": declare}, expect="shape")
+    case("bind_enrol_with_an_extra_field", signed(bind={"via": "enrol", "attempt": attempt}),
+         {**ctx, "bind": {"via": "enrol"}}, expect="shape")
+    case("created_ms_2_53_minus_1_accepted", signed(created_ms=2 ** 53 - 1), expect="ok")
+    # created_ms 2^53 cannot be a vector: cj (§2.3) refuses an integer above 2^53 - 1, so no signed declaration has one
+    case("created_ms_negative", signed(created_ms=-1), expect="shape")
     case("bind_pair_with_an_extra_field", signed(bind={**o["bind"], "rid": "00" * 16}), expect="shape")
-    case("over_2_kib", signed(kat={"1": {"view": KAT_STANDIN}, "9": {"pad": "x" * 2048}}), expect="shape")
+    case("over_2_kib", signed(kat={"1": {"view": KAT_VIEW}, "9": {"pad": "x" * 2048}}), expect="shape")
 
     size = len(R.cj(valid))
     assert size <= R.READER_DECL_MAX and size < 1024, size
@@ -137,13 +146,19 @@ def _suite(S, v):  # noqa: C901 (a builder: long by nature)
     pcase("meta_v1_without_reader_decl_still_pending", meta_v1, "pair_pending")
     pcase("meta_v2_reader_decl_null_malformed", {**meta_v1, "reader_decl": None}, "malformed")
     pcase("meta_v2_reader_decl_without_sig_malformed", {**meta_v1, "reader_decl": {"o": o}}, "malformed")
+    # the bridge checks only "a signed object, at most 2 KiB" (§8.3 step 3.1); a `sig` that is not a string is the
+    # host gate's `shape`, not a bridge refusal
+    pcase("meta_v2_reader_decl_sig_not_a_string_pending", {**meta_v1, "reader_decl": {"o": o, "sig": 5}},
+          "pair_pending")
     pcase("meta_v2_reader_decl_over_2_kib_malformed",
-          {**meta_v1, "reader_decl": signed(kat={"1": {"view": KAT_STANDIN}, "9": {"pad": "x" * 2048}})}, "malformed")
+          {**meta_v1, "reader_decl": signed(kat={"1": {"view": KAT_VIEW}, "9": {"pad": "x" * 2048}})}, "malformed")
     pcase("meta_v2_with_another_unknown_field_malformed", {**meta_v2, "rd": R.reader_decl_digest(valid)}, "malformed")
     pcase("meta_v2_with_a_declaration_that_fails_the_gate_still_pending",
           {**meta_v1, "reader_decl": R.make_reader_decl(S, sig["intruder"], o)}, "pair_pending")
     assert pair[0]["gate"]["expect"]["ok"]["level"] == 1
     assert pair[-1]["gate"]["expect"]["reason"] == "signature"
+    sig_not_str = next(c for c in pair if c["name"] == "meta_v2_reader_decl_sig_not_a_string_pending")
+    assert sig_not_str["gate"]["expect"]["reason"] == "shape"
 
     # ------------------------------------------------------------------ rd in the request meta (§8.6)
     wk2 = fake(f"suite{S.id}/reader rd wk 2")
@@ -185,7 +200,8 @@ def _suite(S, v):  # noqa: C901 (a builder: long by nature)
     assert request[1]["steps"][1]["expect"].get("code") == "already_done", request[1]["steps"][1]["expect"]
 
     return {"label": R.LABELS["sig_reader_decl"], "max_bytes": R.READER_DECL_MAX, "host_max": 1,
-            "kat_standin": KAT_STANDIN,
+            "kat_core": {"source": "orch-core reader_kat_1.json expected[1] (H12d-1, provisional until H12d-2)",
+                         "log": KAT_LOG, "view": KAT_VIEW},
             "digest": {"decl": valid, "cj_bytes": len(R.cj(valid)), "rd": rd},
             "later_declaration": {"decl": later, "rd": R.reader_decl_digest(later)},
             "decls": decls, "pair_meta": pair, "request_meta": request}
