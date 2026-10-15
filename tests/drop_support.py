@@ -70,10 +70,11 @@ def descriptor(
     now=NOW,
     expires=None,
     space=WS,
+    chunk=512,
     **over,
 ):
     """A signed descriptor and its blob. `parent` is the parent version's descriptor o."""
-    data, dek = blob(o_id, version, content)
+    data, dek = blob(o_id, version, content, chunk)
     meta = R.drop_meta_seal(S, dek, bytes.fromhex(o_id), version, {"name": "f.txt"})
     if expires is None:
         expires = now + 7 * DAY if kind == "file" else None
