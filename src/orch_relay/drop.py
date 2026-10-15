@@ -517,14 +517,14 @@ class Drop:
             )  # the member-writer wrap; a W author may omit it only for devices
 
     def eligibility(self, con, session, signed, now, signature=True):
-        """Step 5's database checks in order: recipients are the space or its current member
-        devices (400), the expiry window (400; its 410 is in step 6), the author is the principal (403), the
-        signature (401, only once: keys never change), the write scope (403)."""
+        """Step 5's database checks: the expiry window (400; its 410 is in step 6), the author is
+        the principal (403), the signature (401, only once: keys never change), the write scope
+        (403), and only then the recipients as the space or its current member devices (400).
+        JUDGEMENT CALL (authorization pass): §14.2 lists the recipients check before the author,
+        but run first it would tell a caller without write scope which device ids are members
+        of any workspace (400 versus 403); after the scope check it reveals nothing new."""
         o = signed["o"]
         ws = o["space_id"]
-        if isinstance(o["recipients"], list):
-            for ident in o["recipients"]:
-                need(ident == ws or self.member(con, ws, ident) is not None)
         if o["object_kind"] == "file":
             need(o["expires_ms"] <= now + self.max_ttl + SKEW)
         kind, ident = session["kind"], session["subject_id"]
@@ -550,6 +550,9 @@ class Drop:
             need(scopes is not None and "operate" in scopes, "not_eligible", 403)
         else:
             need(ident == ws, "not_eligible", 403)
+        if isinstance(o["recipients"], list):
+            for target in o["recipients"]:
+                need(target == ws or self.member(con, ws, target) is not None)
 
     def object_state(self, con, session, o, now):
         """Step 6: another space's id or a device outside a device-only audience is 403 (never

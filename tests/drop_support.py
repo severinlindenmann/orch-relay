@@ -21,7 +21,7 @@ KX = {
     DEVICE: bytes.fromhex(V["keys"]["phone.kx"]["pub"]),
     LAPTOP: bytes.fromhex(V["keys"]["laptop.kx"]["pub"]),
 }
-SIGNERS = {DEVICE: "phone.sig", LAPTOP: "laptop.sig", WS: "wsk_a.sig"}
+SIGNERS = {DEVICE: "phone.sig", LAPTOP: "laptop.sig", WS: "wsk_a.sig", PRIMARY: "primary.sig"}
 TOKENS = {DEVICE: "FAKE-device", LAPTOP: "FAKE-laptop", WS: "FAKE-workspace", AGENT: "FAKE-agent"}
 FULL = ["look", "decide", "operate", "type"]
 DAY = 86_400_000
