@@ -230,4 +230,4 @@ def charge_creation(con, quotas, ws, device, day):
 
 
 def refuse_creations(now_ms):
-    refuse("rate_limited", 429, seconds_to_midnight(now_ms))
+    refuse("rate_limited", 429, seconds_to_midnight(now_ms), quota="drop_creations")

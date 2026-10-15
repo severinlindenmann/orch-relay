@@ -3722,6 +3722,15 @@ unauthenticated floods.
   revocation before the claim blocks it, which in practice helps only for uploads the host has not yet
   processed, since the host claims within its poll latency (orch-52 Q-H9).
 
+**D39a2 part 1 decisions (owner, via orch-d6, 15 Oct 2026).** When several caps apply at once, the refusal names
+the author's own share first, then the workspace, the account and the global ceiling (503, no `quota` key). Admission
+charges the head bytes gross (the audience rows a new document version releases are not netted off); the commit
+charges them exactly. A device's workspace upload bucket is charged once the head names the workspace (a W session's
+at admission). The daily version-1 creation counters answer 429 `rate_limited` with `quota: "drop_creations"` and
+`Retry-After` to 00:00 UTC; their day rows are swept with the budget's (D39a2 part 2). `ORCH_RELAY_DROP_NOTICE` works
+only with `ORCH_RELAY_DROP=1`. D39a2's `n`-assigning sweepers run only when `ORCH_RELAY_DROP=1` (the state-check gate
+arrives with the list walks).
+
 ### 14.5 Migration plan (0017, 0018, D39a2's)
 
 Conventions as before: numbered `.sql` files run by `db.migrate`, integer ms of the relay clock, ids as lower-case

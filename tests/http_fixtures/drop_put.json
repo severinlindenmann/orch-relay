@@ -947,7 +947,8 @@
           "Retry-After": "35200"
         },
         "json": {
-          "error": "rate_limited"
+          "error": "rate_limited",
+          "quota": "drop_creations"
         }
       }
     },

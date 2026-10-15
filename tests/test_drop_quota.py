@@ -380,7 +380,7 @@ def test_creation_counters_per_device_and_workspace_per_utc_day(client):
         assert put(client, s, b).status_code == 201
     s, _w, b = upload("c")
     r = put(client, s, b)  # the device's third in this UTC day
-    assert (r.status_code, r.json()) == (429, {"error": "rate_limited"})
+    assert (r.status_code, r.json()) == (429, {"error": "rate_limited", "quota": "drop_creations"})
     to_midnight = Q.seconds_to_midnight(NOW)
     assert r.headers["retry-after"] == str(to_midnight) and 1 <= to_midnight <= 86_400
     nothing_new(client, before=2)
@@ -393,7 +393,7 @@ def test_creation_counters_per_device_and_workspace_per_utc_day(client):
     assert put(client, s, b, author=LAPTOP).status_code == 201
     s, _w, b = upload("d", author=LAPTOP)
     r = put(client, s, b, author=LAPTOP)
-    assert (r.status_code, r.json()) == (429, {"error": "rate_limited"})
+    assert (r.status_code, r.json()) == (429, {"error": "rate_limited", "quota": "drop_creations"})
     # a new UTC day opens new counters (and the old rows stay for the sweep, PR 2)
     d.clock = lambda: NOW + DAY
     with closing(db.connect(path_of(client))) as con, con:  # sessions and certificates outlive it
@@ -587,3 +587,18 @@ def test_a_refused_put_still_spends_the_read_class_token_once(client):
     before = d.buckets.table
     assert put(client, s, b).status_code == 201
     assert len(d.buckets.table) > len(before)
+
+
+def test_the_drop_notice_is_absent_with_drop_off(monkeypatch):
+    from orch_relay.bridge import Bridge
+
+    class D:  # the bridge only stores the directory here
+        pass
+
+    monkeypatch.setenv("ORCH_RELAY_DROP_NOTICE", "1")
+    monkeypatch.setenv("ORCH_RELAY_DROP", "0")
+    assert Bridge(D()).drop_notice is False
+    monkeypatch.setenv("ORCH_RELAY_DROP", "1")
+    assert Bridge(D()).drop_notice is True
+    monkeypatch.setenv("ORCH_RELAY_DROP_NOTICE", "0")
+    assert Bridge(D()).drop_notice is False

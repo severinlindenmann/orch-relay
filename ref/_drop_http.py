@@ -224,7 +224,8 @@ def build(v):
     cs.append(case("refusal_429_rate_limited_creations", ok, relay={"creations": "device_full"},
                    condition="The device has made its 250 version-1 creations of this UTC day; Retry-After is "
                              "the seconds to 00:00 UTC.",
-                   response={"status": 429, "json": {"error": "rate_limited"}, "retry": str(midnight)}))
+                   response={"status": 429, "json": {"error": "rate_limited", "quota": "drop_creations"},
+                             "retry": str(midnight)}))
     foreign = b.oid("fx foreign")
     cs.append(case("another_space", put_req(up(foreign)),
                    ops=[{"op": "foreign_object", "object_id": foreign, "workspace_id": b.ws_b}]))
