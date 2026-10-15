@@ -39,6 +39,19 @@ from starlette.routing import Route
 from . import proto as P
 from .bridge import refuse
 from .directory import DAY, Refusal, fail, pair_revoked
+from .drop_quota import (
+    AUDIENCE_ROW,
+    Need,
+    Quotas,
+    Reservations,
+    charge_creation,
+    check,
+    creations_left,
+    day_of,
+    read_usage,
+    refuse_creations,
+    usage_keys,
+)
 
 log = logging.getLogger(__name__)
 
@@ -58,7 +71,6 @@ DEFAULT_MAX_TTL = 604_800_000  # ORCH_RELAY_DROP_MAX_TTL_MS
 SKEW = 300_000
 MIN_FILE_LIFE = 60_000  # amendment A1, Opus delta R3
 TOMBSTONE = 30 * DAY
-AUDIENCE_ROW = 65  # head bytes charged per drop_audience row
 LIST_LIMIT, LIST_BYTES, LIST_JSON_CAP = 64, 2 * MIB, 16 * KIB
 PAGE_LIMIT, PAGE_BYTES = 256, 1 * MIB
 IO = 64 * KIB
@@ -243,6 +255,8 @@ class Drop:
             env, "ORCH_RELAY_DROP_MAX_TTL_MS", DEFAULT_MAX_TTL, 1, 10 * 365 * DAY
         )
         self.max_body = 8 + MAX_HEAD + self.max_blob
+        self.quotas = Quotas(env)  # item 8: the caps (drop_quota.py)
+        self.reserved = Reservations()  # in-flight upload reservations, event loop only
         self.limits = Limits()
         self.files = None  # anyio.CapacityLimiter(FILE_TOKENS), made on the event loop
         self.uploads = Slots(16, {"device": 2, "person": 3, "workspace": 4})
@@ -364,7 +378,8 @@ class Drop:
     @staticmethod
     def charge(con, ws, owner, device, blob=0, head=0, versions=0, documents=0):
         """drop_usage per scope (§14.5): workspace, global and the author device's share carry
-        every counter; the account carries blob bytes and live versions. D39a2 enforces caps."""
+        every counter; the account carries blob bytes and live versions. The caps are enforced by
+        drop_quota (a reservation at step 9, authoritatively in the commit)."""
         rows = [
             ("workspace", ws, blob, head, versions, documents),
             ("global", "", blob, head, versions, documents),
@@ -390,10 +405,13 @@ class Drop:
 
     # --- authorization ---------------------------------------------------------------------------
 
-    def admit(self, headers, write=False):
+    def admit(self, headers, write=False, upload_cost=None):
         """Step 2 on a read snapshot: session (401), a `drop:` device (403), for a W write the
         fence at admission (409 `fenced`, before any slot or body read), then one read-class token
-        (P3-D35; a refusal after authentication is charged too)."""
+        (P3-D35; a refusal after authentication is charged too). `upload_cost` (a PUT: tokens for
+        its declared body, one per started MiB) then charges the upload bucket of the device, or
+        of the W session's workspace (item 8); a device's workspace bucket is charged once the
+        head names the workspace."""
         d = self.d
         with self.bridge.reading("query") as con:
             con.execute("BEGIN")
@@ -423,6 +441,13 @@ class Drop:
                 d.throttle(session, now)
                 raise
             d.throttle(session, now)
+            if upload_cost:
+                key = (
+                    ("drop-up", session["subject_id"])
+                    if session["kind"] == "device"
+                    else ("drop-up-workspace", session["subject_id"])
+                )
+                d.throttle(session, now, "keys", [key], upload_cost)
             return session
 
     @staticmethod
@@ -686,7 +711,70 @@ class Drop:
             self.cas(o, row, expected, request_now)
             self.check_wrap_shapes(o, records)
             self.wrap_state(con, o, records, request_now)
+            self.quota_snapshot(con, plan, row, request_now)
         return "store", plan
+
+    def quota_snapshot(self, con, plan, row, request_now):
+        """Step 9, after the wraps (item 8): the version-1 creation rate (429 `rate_limited`),
+        then what the reservation needs: the owner, the author device's share, the committed
+        usage of every scope this version charges. The reservation itself is taken on the event
+        loop (`reserve`); the commit re-checks everything on live rows."""
+        o = plan.o
+        ws = o["space_id"]
+        plan.device = o["author_id"] if o["author_kind"] == "device" else None
+        plan.owner = (
+            row["owner_person_id"]
+            if row is not None
+            else con.execute(
+                "SELECT owner_person_id FROM workspaces WHERE workspace_id=?", (ws,)
+            ).fetchone()[0]
+        )
+        if row is None and not creations_left(
+            con, self.quotas, ws, plan.device, day_of(request_now)
+        ):
+            refuse_creations(request_now)
+        plan.need = Need.of(plan, row is None and o["object_kind"] == "document")
+        plan.keys = usage_keys(ws, plan.owner, plan.device)
+        plan.usage = read_usage(con, plan.keys)
+
+    def reserve(self, plan):
+        """Step 9, on the event loop with no await between the check and the take: refuse a
+        version that would pass a cap with the in-flight reservations counted, else reserve its
+        bytes, head bytes, version and document until the request ends."""
+        o = plan.o
+        check(
+            self.quotas,
+            plan.usage,
+            self.reserved.view(),
+            plan.need,
+            o["space_id"],
+            plan.owner,
+            plan.device,
+            o,
+        )
+        return self.reserved.take(plan.keys, plan.need)
+
+    def enforce(self, con, plan, row, request_now, now):
+        """The commit's authority (item 8): the caps against the live usage rows (no
+        reservations: each upload's own commit decides), then, for a new object, the creation
+        counters by upsert. A refusal propagates out of the write transaction (rolled back)."""
+        o = plan.o
+        ws = o["space_id"]
+        usage = read_usage(con, plan.keys)
+        check(
+            self.quotas,
+            usage,
+            {},
+            Need.of(plan, row is None and o["object_kind"] == "document"),
+            ws,
+            plan.owner,
+            plan.device,
+            o,
+        )
+        if row is None and not charge_creation(
+            con, self.quotas, ws, plan.device, day_of(request_now)
+        ):
+            refuse_creations(now)
 
     # --- PUT: step 11 ----------------------------------------------------------------------------
 
@@ -709,6 +797,7 @@ class Drop:
                     return 200, o["version"], o["space_id"]
                 self.cas(o, row, expected, request_now)
                 self.wrap_state(con, o, plan.records, now)
+                self.enforce(con, plan, row, request_now, now)
                 self.insert(con, plan, row, blob_path, now)
         return 201, o["version"], o["space_id"]
 
@@ -723,7 +812,9 @@ class Drop:
                 "SELECT owner_person_id FROM workspaces WHERE workspace_id=?", (ws,)
             ).fetchone()[0]
             con.execute(
-                "INSERT INTO drop_objects VALUES (?,?,?,?,?,?,NULL,?,NULL,NULL,?,?,?,?,?)",
+                "INSERT INTO drop_objects (object_id, workspace_id, owner_person_id, object_kind, "
+                "current, inbox, expires_ms, head_author_id, head_hash, audience, n, created_ms) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     o["object_id"],
                     ws,
@@ -1139,7 +1230,7 @@ class Drop:
         """PUT /v2/drop/{o}/versions: the check order of §14.2 item 3."""
         headers = header_map(scope)
         body = Body(receive, self.limits)
-        slot, tmp, final, device = None, None, None, None
+        slot, tmp, final, device, reservation = None, None, None, None, None
         mode = "brief"  # steps 1-2: close at once after at most 64 KiB or 1 s
 
         def free():
@@ -1163,7 +1254,8 @@ class Drop:
             need(not query_map(scope))
             o_path = path_object(scope)
             # 2. session, principal, fence at admission, read bucket, an upload slot
-            session = await run_in_threadpool(self.admit, headers, True)
+            cost = max(1, -(-declared // MIB))  # one bucket token per started MiB of body
+            session = await run_in_threadpool(self.admit, headers, True, cost)
             device = session["subject_id"]
             slot = self.uploads.take(self.slot_keys(session, workspace=True))
             mode = "full"  # from here on early answers drain
@@ -1199,6 +1291,12 @@ class Drop:
                     no("quota_exceeded", 429, quota="slot")
                 self.uploads.used[key] += 1
                 slot.append(key)
+                # The workspace's upload bucket, now that the head names it (a W session's was
+                # charged at admission); then the quota reservation (item 8).
+                await run_in_threadpool(
+                    self.d.throttle, session, self.d.clock(), "keys", [("drop-up-workspace", key[1])], cost
+                )
+            reservation = self.reserve(plan)
             # 10. the blob, streamed to drop/tmp, landed at a unique final path
             mode = "none"  # a failure while streaming closes; the body was the client's
             tmp, handle = await self.io(self.open_tmp)
@@ -1258,6 +1356,8 @@ class Drop:
                 send, body, 400, b'{"error":"malformed"}', mode=mode, device=device
             )
         finally:
+            if reservation is not None:
+                self.reserved.release(reservation)
             if tmp is not None:
                 await self.io(self.unlink, tmp)
             if final is not None:
@@ -1319,6 +1419,19 @@ class Drop:
                 session = await run_in_threadpool(self.admit, headers)
                 slot = self.downloads.take(self.slot_keys(session))
                 handle, size = await run_in_threadpool(self.read_blob, session, o_id, version)
+                # One token per started MiB served, taken before the first byte is read (item 8).
+                keys = [
+                    ("drop-down", session["subject_id"]),
+                    ("drop-down-person", session["person_id"]),
+                ]
+                await run_in_threadpool(
+                    self.d.throttle,
+                    session,
+                    self.d.clock(),
+                    "keys",
+                    keys,
+                    max(1, -(-size // MIB)),
+                )
             except Refusal as error:
                 await self.send_json(send, error.status, error_body(error), retry_headers(error))
                 return

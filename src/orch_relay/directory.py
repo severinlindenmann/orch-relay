@@ -97,6 +97,13 @@ THROTTLES = {
     "page-workspace": (2 * PAGE_BURST, 1200),
     "staging": (STAGING_BURST, 600),
     "host-answer": (1200, 1200),
+    # P3-D39 item 8 (D39a2): Drop transfer buckets, one token per started MiB of body. Upload per
+    # device (ORCH_RELAY_THROTTLE_DROP_UP) and per workspace (..._DROP_UP_WORKSPACE); download per
+    # device and per person (twice the device's), taken before the blob is read.
+    "drop-up": (64, 32),
+    "drop-up-workspace": (256, 128),
+    "drop-down": (256, 256),
+    "drop-down-person": (512, 512),
 }
 # Buckets kept per key class (8 classes; ORCH_RELAY_THROTTLE_TABLE), evicting full buckets first.
 # Only authenticated identities create entries (a flood of bad tokens adds none); about 470 B per
@@ -512,6 +519,8 @@ class Directory:
                 keys = [("page-" + purpose, identity) for purpose, identity in keys]
         elif bucket in ("staging", "host-answer"):
             keys = [(bucket, ident)]
+        elif bucket == "keys":  # Drop transfer buckets: the caller names the keys (P3-D39 item 8)
+            keys = list(ident)
         else:
             raise ValueError(bucket)
         with self.budget:

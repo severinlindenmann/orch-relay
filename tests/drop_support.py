@@ -217,7 +217,7 @@ def apply_op(d, op):
         n = con.execute("SELECT n FROM drop_counter").fetchone()[0]
         if kind == "foreign_object":
             con.execute(
-                "INSERT INTO drop_objects VALUES (?,?,?,'file',1,0,NULL,?,NULL,NULL,?,?,'space',?,?)",
+                "INSERT INTO drop_objects VALUES (?,?,?,'file',1,0,NULL,?,NULL,NULL,?,?,'space',?,?,NULL)",
                 (
                     o_id,
                     op["workspace_id"],
