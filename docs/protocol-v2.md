@@ -3489,7 +3489,7 @@ document blobs are kept while among the newest 8 versions or younger than 30 day
 descriptor stays. A device sees a tombstone exactly when it saw the object (member with `look`, not excluded by a
 device-only `recipients` list); a W session sees every object of its workspace in every state.
 
-**List entry state (amendment A1).** Every list entry carries `object_id`, `version` (the newest) and `state`:
+**List entry state (amendment A1).** Every list entry carries `object_id`, `version` (the newest) and `state`: `object_id` and `version` have exactly the same encodings on every entry, tombstones included (`object_id` the lower-case hex id, `version` an integer), so one strict parser covers live entries and tombstones (orch-f1, Q-F10). A client treats an unknown `state` as not live.
 
 | `state` | Meaning | `descriptor` | `wraps` |
 |---|---|---|---|
