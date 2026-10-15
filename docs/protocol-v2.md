@@ -3487,7 +3487,7 @@ with `look` of the object's workspace and `recipients` does not exclude it. An u
 visible only to the W session and to its author device (amendment A2; this replaces A1's rule that every member
 device lists it): its author lists it under `sending` and reads its descriptor and its own `device` wrap, but
 its own descriptor read-back works, and only its blob waits for the claim (403); every other member device gets no list entry and 403 on reads and on a
-`PUT`, live or tombstoned, with the same body as every other 403 (`{"error": "not_eligible"}`, no extra key). Once claimed, it is visible to every `look` member (the claim raises `n`). An expired or
+`PUT`, live or tombstoned, with the same body as every other 403 `not_eligible` (`{"error": "not_eligible"}`, no extra key). Once claimed, it is visible to every `look` member (the claim raises `n`). An expired or
 retired object answers 410 `expired` for 30 days to callers that still see it (its tombstone; a `PUT` of the id
 too), then 404. An expired device-only file loses its audience rows at the expiry sweep: before the sweep its
 audience (author included) gets 410, after it every device gets 403 on reads and `PUT`, and only the W session
