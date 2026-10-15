@@ -297,6 +297,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def hang(self, length=None):
+        """Headers (maybe a huge Content-Length), then nothing, or an endless stream."""
+        self.send_response(200)
+        if length is not None:
+            self.send_header("Content-Length", str(length))
+        self.end_headers()
+        try:
+            while not self.server.stopped.is_set():
+                if length is None:
+                    self.wfile.write(b" " * 65536)
+                else:
+                    self.wfile.flush()
+                    time.sleep(0.1)
+        except OSError:
+            pass
+
     def serve(self, method):
         srv, path = self.server, self.path
         n = int(self.headers.get("Content-Length") or 0)
@@ -313,9 +329,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if mode == "slow":
                 return self.drip()
             if mode == "big_length":
-                return self.raw(b" " * (2 * SM.MAX_BODY))
+                return self.hang(length=10 * 1024**3)  # announced, never sent
             if mode == "big_stream":
-                return self.raw(b" " * (2 * SM.MAX_BODY), length=False)
+                return self.hang()  # no Content-Length, endless body
             if mode == "deep_json":
                 return self.raw(b"[" * 200_000)
             info = {"v": 1, "reader": 1, "max_publication_bytes": 4194304}
@@ -470,7 +486,8 @@ def test_person_id_is_printed_before_the_account_post(fake):
 )
 def test_oversized_and_nested_bodies(fake, mode, last):
     srv, invite = fake(mode), new_invite()
-    r = fake_run(srv, invite)
+    # A short call deadline: an unbounded read would end in a timeout instead of the size FAIL.
+    r = fake_run(srv, invite, "--call-timeout", "5", timeout=30)
     assert_quiet(r, invite, *srv.issued)
     if mode == "deep_json":
         assert r.returncode == 1 and r.stdout.splitlines()[0] == "FAIL relay-info: 200"
@@ -520,6 +537,8 @@ def test_piped_invite_needs_the_explicit_flag(fake):
         "https://relay-internal.dev.severin.io/v2",
         "https://relay-internal.dev.severin.io?x=1",
         "https://relay-internal.dev.severin.io#x",
+        "https://relay-internal.dev.severin.io?",
+        "https://relay-internal.dev.severin.io#",
         "https://user@relay-internal.dev.severin.io",
         "https://user:pw@relay-internal.dev.severin.io",
         "https://relay-internal.dev.severin.io@evil.com",
@@ -692,8 +711,44 @@ def test_excepthook_prints_the_type_name_only(capsys):
     assert capsys.readouterr().out == "FAIL internal: RecursionError\n"
 
 
-def test_a_malformed_token_is_never_sent(no_network):
+@pytest.mark.parametrize(
+    "token", ["SMOKETOKMARK0123456789\r\nX-Evil: 1", "short", "has space 0123456789abcdef"]
+)
+def test_a_malformed_token_is_never_sent(no_network, token):
     relay = SM.Relay("http", "127.0.0.1", 1)
     with pytest.raises(ValueError):
-        relay.call("GET", "/v2/devices/x", token="SMOKETOKMARK0123456789\r\nX-Evil: 1")
+        relay.call("GET", "/v2/devices/x", token=token)
     assert no_network == []
+
+
+def test_the_printer_withholds_secrets_and_control_characters(monkeypatch, capsys):
+    monkeypatch.setattr(SM, "SECRETS", ["smokesecret_0123456789"])
+    SM.say("FAIL x: smokesecret_0123456789")
+    SM.say("PASS y: \x1b[2J\nok")
+    assert capsys.readouterr().out == "FAIL <unprintable>\nPASS y: ?[2J?ok\n"
+
+
+def test_control_characters_in_a_refused_host_are_not_echoed(monkeypatch, capsys, no_network):
+    rc, out = run_main(monkeypatch, capsys, ["http://\x1bevil.example", "http://127.0.0.1:1"])
+    assert (
+        rc == 2 and "\x1b" not in out.out and out.out.startswith("FAIL refused: host ?evil.example")
+    )
+
+
+@pytest.mark.parametrize(
+    "url, reason",
+    [
+        ("https://user@relay-internal.dev.severin.io", "credentials"),
+        ("https://relay-internal.dev.severin.io@evil.com", "credentials"),
+        ("https://tix.severin.io", "never"),
+        ("https://example.com", "allow-list"),
+        ("http://relay-internal.dev.severin.io", "plain http"),
+        ("https://relay-internal.dev.severin.io:8443", "port 443"),
+        ("https://relay-internal.dev.severin.io:0443", "canonical"),
+        ("http://[::1", "malformed"),
+        ("https://relay-internal.dev.severin.io?", "query"),
+    ],
+)
+def test_check_target_refusal_reasons(no_network, url, reason):
+    with pytest.raises(SM.Refused, match=reason):
+        SM.check_target(url, public=True)
