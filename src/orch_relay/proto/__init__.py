@@ -26,6 +26,8 @@ LABELS = {
     "h_device_id": "orch/v2/id/device|",
     "h_person_id": "orch/v2/id/person|",
     "h_dk_hash": "orch/v2/dk-hash|",
+    "sig_drop_object": "orch/v2/sig/drop-object|",  # §10.4 (P3-D39)
+    "h_drop_parent": "orch/v2/drop-parent|",  # §10.6
 }
 L = {k: v.encode("ascii") for k, v in LABELS.items()}
 

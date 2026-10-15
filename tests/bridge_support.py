@@ -125,7 +125,14 @@ def prepare_fixture(client, name, case):
                 binary("bridge_host_post" if name == "bridge_device_poll" else "pair_host_post"),
             )
         if name == "host_poll":
-            if case["name"] == "pair_item":
+            if case["name"] == "drop_notice":  # P3-D39, behind ORCH_RELAY_DROP_NOTICE
+                client.app.state.bridge.drop_notice = True
+                con.execute(
+                    "INSERT INTO drop_objects VALUES (?,?,?,'file',1,0,NULL,?,NULL,NULL,?,?,"
+                    "'space',3,?)",
+                    ("ab" * 16, WS, PERSON, NOW + 86_400_000, DEVICE, "x" * 43, NOW),
+                )
+            elif case["name"] == "pair_item":
                 queue_body(con, binary("pair_device_post"), 2)
             elif scenario == "unpublished_notice":
                 con.execute(

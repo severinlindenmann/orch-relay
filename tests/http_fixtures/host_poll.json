@@ -358,6 +358,46 @@
           "next": null
         }
       }
+    },
+    {
+      "name": "drop_notice",
+      "given": {
+        "scenario": "drop_notice",
+        "now_ms": 1790000000000,
+        "relay": {
+          "drop_notice": true
+        },
+        "condition": "The relay runs with ORCH_RELAY_DROP_NOTICE=1; the workspace's newest Drop object is at change position 3."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/poll",
+        "query": {
+          "after": "0",
+          "wait": "25"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "items": [],
+          "notices": {
+            "revocations_cursor": 0,
+            "cert_requests": [],
+            "rotation_due": [],
+            "unpublished": null,
+            "drop": 3
+          },
+          "next": null
+        }
+      }
     }
   ]
 }

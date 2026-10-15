@@ -4,6 +4,7 @@ import asyncio
 import ipaddress
 import logging
 import math
+import os
 import random
 import secrets
 import sqlite3
@@ -92,12 +93,25 @@ def notices_stamp(updates):
     return digest(P.cj(updates))
 
 
-def last_stamp(delivered):
+def empty_notices(drop=False):
+    return {**EMPTY_NOTICES, "drop": 0} if drop else EMPTY_NOTICES
+
+
+def last_stamp(delivered, drop=False):
     """Digest of the notices last delivered in this holder generation."""
-    return (delivered["notices"] if delivered else None) or notices_stamp(EMPTY_NOTICES)
+    return (delivered["notices"] if delivered else None) or notices_stamp(empty_notices(drop))
 
 
-def notices(con, ws):
+def drop_notice(con, ws):
+    """P3-D39 (§19.9 host notice, §14.9 Q-H1): the newest Drop change position of the workspace,
+    0 if none. It can drop when the newest object's tombstone row is deleted (hosts treat only a
+    value above their stored position as news)."""
+    return con.execute(
+        "SELECT coalesce(max(n),0) FROM drop_objects WHERE workspace_id=?", (ws,)
+    ).fetchone()[0]
+
+
+def notices(con, ws, drop=False):
     # P3-D30: only registry pairs count, with the unpublished-eligibility filter (checkpoints
     # association(): the person the registry associates with the device, P3-D29 evidence-only
     # persons excluded). They are the pairs that cut the device off and oblige the host; another
@@ -126,6 +140,8 @@ def notices(con, ws):
         ],
         # P3-D31: the newest unpublished item's position while above the host's ack, else null.
         "unpublished": unpublished_notice(con, ws),
+        # P3-D39: emitted only with ORCH_RELAY_DROP_NOTICE=1, once hosts accept the key (Q-H1).
+        **({"drop": drop_notice(con, ws)} if drop else {}),
     }
 
 
@@ -213,8 +229,13 @@ class Bridge:
     over; the deadline also re-runs it, so a timed-out poll returns a fresh response.
     """
 
-    def __init__(self, directory):
+    def __init__(self, directory, drop_notice=None):
         self.d = directory
+        # P3-D39 (§14.9 Q-H1, Opus L12): `notices` is an exact key set, so the relay emits `drop`
+        # only once hosts tolerate it: off unless ORCH_RELAY_DROP_NOTICE=1 (the rollout switch).
+        if drop_notice is None:
+            drop_notice = os.environ.get("ORCH_RELAY_DROP_NOTICE", "0") == "1"
+        self.drop_notice = drop_notice
         self.polls = Polls()
         self.waiters = {}  # wake key -> set of asyncio.Event; touched on the event loop only
         self.pair_groups = {}  # address group -> admitted pair polls
@@ -496,7 +517,7 @@ class Bridge:
                 (after, token, now + 40000, ws),
             )
         elif holder["poll_token"] != token:
-            return {"items": [], "notices": notices(con, ws), "next": None}, True
+            return {"items": [], "notices": notices(con, ws, self.drop_notice), "next": None}, True
         cursor = max(holder["cursor"], after)
         position = cursor
         if "next" in query:
@@ -519,7 +540,7 @@ class Bridge:
             "SELECT * FROM bridge_msgs WHERE workspace_id=? AND direction=1 AND n>? ORDER BY n",
             (ws, position),
         ).fetchall()
-        updates = notices(con, ws)
+        updates = notices(con, ws, self.drop_notice)
         items, size, more = [], len(P.cj(updates)) + 512, False
         for row in rows:
             if row["offer"] is None:
@@ -549,7 +570,7 @@ class Bridge:
         # Durable notices (a past revocation cursor, rotation_due, cert request states)
         # make a poll ready only when they changed since the last delivered response.
         stamp = notices_stamp(updates)
-        ready = bool(items) or stamp != last_stamp(delivered)
+        ready = bool(items) or stamp != last_stamp(delivered, self.drop_notice)
         if ready:
             con.execute(
                 "INSERT INTO holder_delivery(workspace_id,notices) VALUES (?,?) ON CONFLICT(workspace_id) DO UPDATE SET notices=excluded.notices",
@@ -713,7 +734,9 @@ class Bridge:
         delivered = con.execute(
             "SELECT delivered,notices FROM holder_delivery WHERE workspace_id=?", (ws,)
         ).fetchone()
-        return notices_stamp(notices(con, ws)) != last_stamp(delivered)
+        return notices_stamp(notices(con, ws, self.drop_notice)) != last_stamp(
+            delivered, self.drop_notice
+        )
 
     def expiry(self, con, headers):
         """Earliest time (ms) the poll's authorization lapses without any commit."""

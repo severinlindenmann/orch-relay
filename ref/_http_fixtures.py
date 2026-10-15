@@ -9,6 +9,7 @@ from pathlib import Path
 
 from ref import orch_protocol_ref as R
 from ref import _checkpoint_http as CP
+from ref import _drop_http as DH
 
 # Separate role rows share a path but have distinct auth, body and response semantics.
 # id, method, path, role, auth, route-specific status/code pairs
@@ -47,6 +48,8 @@ ROUTES = [
 ]
 
 ROUTES += CP.ROUTES
+# P3-D39 (D39a1): the Drop write and read routes (ref/_drop_http.py, the model ref/drop_relay.py)
+ROUTES += DH.ROUTES
 
 CONDITIONS = {
     "malformed": "Unknown query parameter; strict route parsing refuses before dispatch.",
@@ -97,22 +100,25 @@ CONDITIONS = {
 
 
 CONDITIONS.update(CP.CONDITIONS)
+CONDITIONS.update(DH.CONDITIONS)
 
 # (G0a review 2) Whole JSON body caps, enforced before parsing.
 JSON_CAPS = {r[0]: (2097152 if r[0] == "membership" else 65536 if r[0] in
              {"accounts", "card_put", "card_keys", "cert_requests_post"} else 16384)
              for r in ROUTES if r[1] in {"POST", "PUT"} and r[0] not in
-             {"bridge_device_post", "bridge_host_post", "pair_device_post", "pair_host_post"}}
+             {"bridge_device_post", "bridge_host_post", "pair_device_post", "pair_host_post"} | DH.NAMES}
 JSON_CAPS.update(CP.CAPS)
+JSON_CAPS["drop_list"] = DH.CAPS["drop_list"]
 BODY_CAPS = {**JSON_CAPS, "bridge_device_post": 1048576, "bridge_host_post": 262144,
-             "pair_device_post": 65536, "pair_host_post": 65536}
+             "pair_device_post": 65536, "pair_host_post": 65536, "drop_put": DH.CAPS["drop_put"]}
 
 
 def refusals(row):
     name, method, _, _, auth, spec = row
     result = {(400, "malformed")}
     if name in BODY_CAPS:
-        result.add((413 if name in JSON_CAPS and name != "checkpoint_put" else 400, "too_large"))
+        result.add((413 if (name in JSON_CAPS and name != "checkpoint_put") or name == "drop_put" else 400,
+                    "too_large"))
     if auth not in ("none", "logout"):
         result |= {(401, "unauthenticated"), (403, "not_eligible")}
         if "D(" in auth:
@@ -218,6 +224,7 @@ def build(vectors=None):
     }
     query = {"revocation_feed": {"after": "0", "limit": "256"}, "grants": {"epoch": "1"}, "card_key": {"card_seq": "1"},
              "bridge_device_poll": {"wait": "25"}, "pair_poll": {"wait": "25"}, "host_poll": {"after": "0", "wait": "25"}, "cert_requests_poll": {"wait": "25"}}
+    shapes.update({name: (None, {}) for name in DH.NAMES})  # replaced by DH.enrich
     cp_shapes, cp_query, cp_paths = CP.shapes(v)
     shapes.update(cp_shapes)
     query.update(cp_query)
@@ -411,6 +418,15 @@ def build(vectors=None):
                 cases[-1]["given"].update(scenario="unpublished_notice", acked=acked, condition=(
                     "The relay holds the phone's registered (device, person) pair at §19.5 cursor 1; the workspace chain does "
                     f"not; the workspace's unpublished ack is {acked} (P3-D31)."))
+        if name == "host_poll":
+            # P3-D39 (§19.9 host notice, Q-H1): only with ORCH_RELAY_DROP_NOTICE=1, once hosts accept the key;
+            # the newest Drop change position of the workspace.
+            extra("drop_notice", response_json={"items": [], "notices": {"revocations_cursor": 0, "cert_requests": [],
+                                                                         "rotation_due": [], "unpublished": None,
+                                                                         "drop": 3}, "next": None})
+            cases[-1]["given"].update(scenario="drop_notice", relay={"drop_notice": True}, condition=(
+                "The relay runs with ORCH_RELAY_DROP_NOTICE=1; the workspace's newest Drop object is at change "
+                "position 3."))
         if name == "session_logout":
             extra("expired_token_retry", given="token_expired_or_already_logged_out")
         if name == "relay_info":  # every answer of the route, refusals included, is never cached
@@ -418,7 +434,7 @@ def build(vectors=None):
                 c["response"]["headers"]["Cache-Control"] = "no-store"
         output[name] = {"contract": "orch-relay-http-v2", "suite": 2, "route": {"method": method, "path": path, "role": role, "auth": auth},
                         "cases": cases}
-    return CP.enrich(output, v)
+    return DH.enrich(CP.enrich(output, v), v)
 
 
 if __name__ == "__main__":
