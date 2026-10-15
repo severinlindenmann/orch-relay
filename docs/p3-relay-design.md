@@ -2363,16 +2363,21 @@ No new decisions.
 | P3-D36 | Pre-public limits: staging weighted by body size (one token per started 64 KiB, burst 28,801, refill 600/min); a node-quota reserve (5 %, 200,000 nodes) only owner-signed restores may use; an audited per-account override of the workspaces cap (migration 0016, `orch-relay account-cap`, no HTTP route) (checklist items 3, 4, 8) | §10, proto §19.4, §19.8 |
 | P3-D37 | A hard maximum publication size (`ORCH_RELAY_MAX_PUBLICATION_BYTES`, default 16 MiB, 1..64 MiB): `too_large` at the staging manifest (implied size, before any page) and pages (413, running total) and at the final publication before any fold (400, phase A and C); restores alike; the publication heads cap defaults to the heads it implies (checklist item 1) | §10, proto §19.6, §19.8 |
 | P3-D38 | H12d relay scope: `GET /v2/relay-info` (`reader` a code constant, 1; `max_publication_bytes`; unauthenticated, per-address throttled, `no-store`, an honest-operator statement), `AUTH_KINDS` += `convenience` (deploy before any convenience restore), the `reader_decl`/pair meta v2/`rd` vectors and protocol text | §10, proto §8.3, §8.6, §19.1, §19.4, §19.8 |
-| P3-D39 | Drop at the relay (P4 basics, D39a/D39b): `/v2` routes; one streamed `ODU2` upload frame checked before any blob byte is read; exact retry before the CAS; `wk` wraps at the current epoch (409 `stale_epoch`); per-caller wrap filtering; list by change position and a host `drop` notice; descriptor pages; 26 MiB blobs; per device, workspace, account and global quotas with reservations; 7-day files, 30-day tombstones, pruned old document blobs; claims and host re-wraps (`wrap_conflict`); migration 0017 | §14.2, proto §19.9 |
-| P3-D40 | Push at the relay: per-(device, workspace, env, topic) APNs registrations with sealed tokens; same-person token move; host send route W(g) with targets, current-epoch outer, priority and TTL; generic `aps` text plus `o`, no collapse id or badge; in-memory best-effort queue, dedup LRU, budgets per device and workspace; APNs answer handling (410 deletes); the `.p8` and the token secret as systemd credentials, never in the database, logs or git; 404 when disabled; migration 0018 | §14.3, §14.7, proto §19.10 |
+| P3-D39 | Drop at the relay (P4 basics, D39a1/D39a2/D39b): `/v2` routes; one streamed `ODU2` upload frame (head ≤ 512 KiB, exact `Content-Length`) checked before any blob byte is read, early answers drained; descriptor ≤ 96 KiB, `meta` ≤ 64 KiB + 16; tombstone check, then exact retry, before the CAS; `wk` wraps at the current epoch (409 `stale_epoch`; rewrap the same `DEK`); `wxk` and `recipients` within the own workspace (cross-workspace is P6); per-caller wrap filtering; unclaimed inbox files listed, blob after the claim; list by change position and a host `drop` notice; byte-cut pages and bounded read slots; 26 MiB blobs; blob and head quotas per device, workspace, account and global with reservations; slot caps per device, person and workspace with minimum rates; 7-day files, documents without expiry and a host retire, 30-day tombstones, pruned old document blobs, batched sweeps; claims and host re-wraps (`wrap_conflict`); the Caddy body-cap exception before deploy; migration 0017 | §14.2, proto §19.9 |
+| P3-D40 | Push at the relay: per-(device, workspace, env, topic) APNs registrations with sealed tokens; same-person token move; host send route W(g) with targets, current-epoch outer, priority and TTL; generic `aps` text plus `o`, no collapse id or badge; in-memory best-effort queue, dedup LRU, budgets per device and workspace; APNs answer handling (410 deletes, 403 backoff); a per-environment key mapping (today the owner's one both-gateway key `TD27F9Z9V7`) and the token secret as files of the public instance's user (optionally `LoadCredentialEncrypted`), never in the database, logs or git; 404 when disabled; migration 0018 | §14.3, §14.7, proto §19.10 |
 
 ## 14. Drop and push, designed ahead of R3 (P3-D39, P3-D40)
 
 Status: **design for review**, 15 Oct 2026 (stream D). Docs only: no code, no migration, no deployment, no
-network call. Opus review and a Codex challenge are pending; orch-52 (host) and orch-f1 (phone) review §14.9.
+network call. Revision 2 (15 Oct) folds in the Opus design review (SOUND WITH CHANGES: H1, H2, M1–M7, L1–L14),
+orch-f1's phone-side review (R1–R6), orch-52's host-side review (relay-side items) and orch-d6's correction on
+the existing APNs key; the finding ids are cited where each lands. A Codex challenge is pending; the owner
+questions of §14.9 are **open**.
 Owner decisions (via orch-d6, 14 and 15 Oct): the end-to-end target includes **both** Drop and push; this design
-goes ahead of R3; orch-f1 creates a **new** APNs key on the owner's Apple team, and the relay holds it as a VPS
-secret that is never printed, logged or committed.
+goes ahead of R3; the relay uses the owner's existing APNs key (Key ID `TD27F9Z9V7`, created by the owner on 8 Oct,
+already on the VPS; orch-d6 correction, 15 Oct) as a VPS secret that is never printed, logged or committed. Any
+new key is created by hand by the owner (or the Apple team's admin): the App Store Connect API cannot create
+APNs keys (§14.7).
 
 Inputs: proto §9 (push payloads), §10 (Drop content, wraps, descriptors, claims, documents), §13 (decisions),
 §17/§18, §19 (routes and budgets); spec §6.3 and §6.4, D43, D47, D48; orch-mobile `FakeRelay.swift`
@@ -2388,11 +2393,14 @@ The wire contract is protocol-v2 §19.9 (Drop) and §19.10 (push); this section 
 
 ### 14.1 Scope
 
-**Drop, P4 basics (D43).** Workspace spaces only (`space_kind: "workspace"`): a member device sends a file or a
-document version to its workspace; the host sends one to its member devices; members read them. Claims (§10.5)
-and host re-wraps (`drop_rewrap`, §7.5) are in, because the phone's inbox and rewrap paths already use them
-(D39b). Out: personal and shared spaces (no `SK` grants exist), `drop:` scoped agents (P6, D15), the advisory
-lease (`POST /drop/{id}/lease`), public and upload links, delete or recall, byte ranges.
+**Drop, P4 basics (D43).** Workspace spaces only (`space_kind: "workspace"`), member ↔ **own** workspace only: a
+member device sends a file or a document version to its workspace; the host sends one to its member devices;
+members read them. Every `wxk` wrap and every workspace id in `recipients` names the object's own workspace
+(Opus M1; owner question 1). Claims (§10.5) and host re-wraps (`drop_rewrap`, §7.5) are in, because the phone's
+inbox and rewrap paths already use them (D39b); in P4 an `inbox` object is a `file` claimed by its own workspace
+(M7). Out: cross-workspace addressing (ws→ws mailboxes and foreign inbox claims, P6 #20), personal and shared
+spaces (no `SK` grants exist), `drop:` scoped agents (P6, D15), the advisory lease (`POST /drop/{id}/lease`),
+public and upload links, recall, byte ranges. The only delete is the host's document retire (item 5).
 
 **Push, P4 (spec §6.3, D47, D48).** Per-(device, workspace) APNs registrations; a host-originated send route; the
 relay's fan-out to registered tokens through APNs with the `.p8` auth key; token lifecycle. Delivery is best
@@ -2415,6 +2423,7 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
    | `GET /v2/drop/{o}/versions/{v}/blob` | as list | the ORD2 ciphertext, streamed |
    | `PUT /v2/drop/{o}/versions/{v}/wraps` | W(g) | the host's `drop_rewrap` wrap under its current `WK_e` (D39b) |
    | `POST /v2/drop/{o}/claim` | W(g) | §10.5 claim-once, unchanged (D39b) |
+   | `POST /v2/drop/{o}/retire` | W(g) of the space | tombstone a `document` at once, releasing its bytes (item 5, Opus M5; D39a2) |
 
    The host's writes are fenced (`Orch-Holder`) like every other W write (P3-D10). Drop routes refuse `drop:`
    scoped devices with 403 `not_eligible` until P6.
@@ -2426,126 +2435,209 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
    instead reads a frame:
 
    ```
-   body = "ODU2" || u32(head_len) || head || blob
+   body = "ODU2" || u32be(head_len) || head || blob        u32be: 4 bytes, unsigned, big-endian
    head = cj({"descriptor": <signed drop_object>, "wraps": [<wrap record>, ...]})      exactly these two fields
    ```
 
-   `head_len ≤ 1 MiB`; `blob` is exactly `content_len` bytes (the ORD2 ciphertext of §10.2), and the body ends
-   there. The relay authenticates and authorizes on the headers alone, reads and checks the head (signature, CAS,
-   wraps, quota reservation) **before it reads a single blob byte**, and answers a refusal at once (the client
-   may still be sending; the relay closes the connection after the answer). It then streams the blob in 64 KiB
-   reads into a temporary file, hashing as it goes, and never holds more than the head plus one buffer. The
-   phone keeps the frame bytes in its `drop_uploads` row exactly as it keeps the JSON body today, and resends
-   them byte for byte. Rejected alternatives: two requests (blob first, then descriptor) need a staging table, its
+   `head_len ≤ 512 KiB` (Opus L9: realistic P4 heads are under 300 KB); `blob` is exactly `content_len` bytes (the
+   ORD2 ciphertext of §10.2), and the body ends there. The request MUST carry `Content-Length` equal to
+   `8 + head_len + content_len` (no chunked bodies; Opus M3). The relay authenticates and authorizes on the
+   headers alone, reads and checks the head (signature, CAS, wraps, quota reservation) **before it reads a single
+   blob byte**, and answers a refusal (or the exact-retry 200) at once. It then streams the blob in 64 KiB reads
+   into a temporary file, hashing as it goes, and never holds more than the head plus one buffer. The phone keeps
+   the frame bytes in its `drop_uploads` row exactly as it keeps the JSON body today, and resends them byte for
+   byte (from the app, never the share extension, which only stages up to 25 MiB).
+
+   **Early answers must reach the phone (Opus M3, orch-f1 R3).** An answer sent before the body is read travels
+   URLSession → Caddy (HTTP/2) → uvicorn (HTTP/1.1). If the relay closes with unread upload bytes, the kernel can
+   answer them with a TCP RST that destroys the response; the phone then sees `disconnected` and resends a 409
+   `stale_epoch` or 429 forever. So after an early answer the relay shuts down its write side, **drains** the
+   rest of the declared body (bounded: at most the declared remainder, at the slot's minimum rate and idle
+   timeout of item 8, without hashing or storing it), then closes. The slot stays held while draining. Before
+   resending a stored frame after any lost answer, the phone reads back
+   `GET /v2/drop/{o}/versions/{v}/descriptor`: 200 with its own descriptor means done, 404 means the slot is
+   empty (orch-f1 R5). D39a1 adds a real-socket test (an early 409 and an early 200 with an unread 26 MiB body,
+   asserting the client receives the JSON) and an end-to-end test through a real Caddy (HTTP/2) with the same two
+   cases. Rejected alternatives: two requests (blob first, then descriptor) need a staging table, its
    GC and its quota, and authorize the blob before its descriptor; `multipart/form-data` needs a streaming parser
    with its own limits and gives nothing the frame lacks.
 
-3. **Check order of the `PUT`** (each refusal stops; nothing is stored before step 9):
-   1. transport: a declared `Content-Length` above `8 + 1 MiB + max_blob` → 413 `too_large`, before anything else
-      (P3-D17 "caps apply to streamed bytes as well as declared Content-Length");
+3. **Check order of the `PUT`** (each refusal stops; nothing is stored before step 11):
+   1. transport: no `Content-Length` (a chunked body) → 400 `malformed`; a declared `Content-Length` above
+      `8 + 512 KiB + max_blob` → 413 `too_large`, before anything else (P3-D17 "caps apply to streamed bytes as
+      well as declared Content-Length");
    2. session (401), principal (403 `not_eligible` for a `drop:` device or a non-member), buckets (P3-D35 read
-      class, then the upload bucket, item 8);
+      class, then the upload bucket), then an upload slot (item 8: 429 `quota_exceeded` per device, person or
+      workspace; 503 `overloaded` relay-wide);
    3. `If-Match` (428 `precondition_required`, §10.6);
-   4. the frame's magic and `head_len` (400 `malformed`; 413 above 1 MiB), the head read and parsed strictly;
-   5. the descriptor (§10.4 field set, suite, `object_id` equals the path, `space_kind` is `workspace`,
-      `object_kind`, the expiry rules of item 5) → 400 `malformed`; the author: `author_kind`/`author_id` must
-      be the session's principal (a device session writes `author_kind: "device"` with its own id, a W session
-      `"workspace"` with its own id) → 403 `not_eligible`; the signature under the registry `dk_sig_pub` or the
-      card's `wsk_pub` → 401 `bad_signature`; the space: the principal may write to `space_id` (a current member
-      with `operate`, or that workspace's W(g)) → 403 `not_eligible`;
-   6. an **exact retry**: if version `version` is stored and its descriptor's `cj(o)` equals this one's, answer
+   4. the frame's magic and `head_len` (400 `malformed`; 413 above 512 KiB), the head read and parsed strictly;
+   5. the descriptor → 400 `malformed` unless: the §10.4 field set and suite; `cj(descriptor)` ≤ 96 KiB and the
+      decoded `meta` ≤ 64 KiB + 16 bytes (the phone's `Drop.maxMetaBytes`; Opus H1); `object_id` equals the path;
+      `space_kind` is `workspace`; `object_kind`; `recipients` is `"inbox"` (only with `object_kind: "file"`, M7)
+      or a sorted unique list of at most 1 024 ids, each either `space_id` or a current member device of it (M1);
+      the expiry rules of item 5; and `Content-Length = 8 + head_len + content_len` (M3). An `expires_ms` at or
+      before `now` is 410 `expired` (a resent body that has expired; orch-f1 R4). The author: `author_kind`/
+      `author_id` must be the session's principal (a device session writes `author_kind: "device"` with its own
+      id, a W session `"workspace"` with its own id) → 403 `not_eligible`; the signature under the registry
+      `dk_sig_pub` or the card's `wsk_pub` → 401 `bad_signature`; the space: the principal may write to
+      `space_id` (a current member with `operate`, or that workspace's W(g)) → 403 `not_eligible`;
+   6. the object's state: an object id that exists in another space is 403 `not_eligible` (never its `current`);
+      an expired or tombstoned object (item 5) is 410 `expired`. This precedes the exact retry (Opus L1), so a
+      retry never answers 200 for an object that is gone;
+   7. an **exact retry**: if version `version` is stored and its descriptor's `cj(o)` equals this one's, answer
       200 `{version}` at once (no blob read, no CAS; the stored wraps stay). This precedes the CAS, as for
       membership (P3-D7 "Retries"), so a lost 201 never turns into a 409 for the phone to reconcile;
-   7. the CAS of §10.6 against a read snapshot: `If-Match == current`, `parent == current`,
+   8. the CAS of §10.6 against a read snapshot: `If-Match == current`, `parent == current`,
       `version == current + 1`, `parent_hash` = the hash of the current head, and for `current > 0` the same
-      `object_kind`, `space_id` and `space_kind` as the head; a `file` takes only version 1. Otherwise 409
-      `version_conflict` with `current`. An object id that exists in another space is 403 `not_eligible` (never
-      its `current`). An object id whose tombstone is live (item 5) is 410 `expired`;
-   8. the wraps (item 4) → 400 `malformed`, 409 `stale_epoch` (`epoch`) or 409 `bad_wxk_version`; then the quota
-      reservation of `content_len + head_len` (item 8) → 429 `quota_exceeded` or 503 `overloaded`;
-   9. the blob: streamed to `drop/tmp/<random>` (mode 0600), at most `content_len` bytes; a short or long body
-      is 400 `malformed`, `H(blob) ≠ content_hash` is 400 `malformed`; the file is `fsync`ed;
-   10. the commit, under the directory lock in one write transaction: re-run 5's eligibility, 7 and 8 on live
-       state (a concurrent writer gets 409 `version_conflict`), `rename` the file to `drop/blobs/<o>/<v>`,
-       `fsync` the directory, insert the rows (§14.5), charge the usage, commit; 201 `{version}` with
-       `ETag: "<version>"`. A failure after the rename unlinks the file; a crash leaves an orphan file that the
-       start-up sweep deletes (a row never points to a missing file because the file lands first).
+      `object_kind`, `space_id` and `space_kind` as the head; a `file` takes only version 1; a claimed object
+      takes no new version (403 `not_eligible`; M7). Otherwise 409 `version_conflict` with `current`;
+   9. the wraps (item 4) → 400 `malformed`, 409 `stale_epoch` (`epoch`), 409 `bad_wxk_version` or (pending owner
+      question 6) 409 `rotation_required`; then the quota reservation of the blob bytes and the head bytes
+      (item 8) → 429 `quota_exceeded` or 503 `overloaded`;
+   10. the blob: streamed to `drop/tmp/<random>` (mode 0600), at most `content_len` bytes; its first 40 bytes
+       must be an ORD2 header with this descriptor's suite, `object_id` and `version`, and `content_len` must be
+       consistent with the header's chunk size (Opus L10: no arbitrary non-ORD2 storage); a short or long body is
+       400 `malformed`, `H(blob) ≠ content_hash` is 400 `malformed`; the file is `fsync`ed and renamed to a
+       unique final path `drop/blobs/<o>/<v>.<rand>` (recorded in the row) and the directory `fsync`ed, all
+       **before** the directory lock (Opus L8: no `fsync` under the global write lock);
+   11. the commit, under the directory lock in one write transaction: re-run 5's eligibility, 6, 8 and 9 on live
+       state (a concurrent writer gets 409 `version_conflict`), insert the rows (§14.5), charge the usage,
+       commit; 201 `{version}` with `ETag: "<version>"`. A failure before the commit unlinks the file; a crash
+       leaves an orphan file that the start-up sweep deletes (a row never points to a missing file because the
+       file lands first). The reservation is released in `finally`, also on `ClientDisconnect` and cancellation.
 
    The relay never checks `content_hash` against anything but the bytes it received, never opens metadata, and
    never checks `dek_commit` (it has no `DEK`). Readers do all three (§10.4).
 
 4. **Wrap checks at the relay** (defence in depth; readers rely on `content_hash` and `dek_commit`, not on these).
    Each wrap record has the §10.3 field set with `object_id` and `version` of this descriptor, a `wrap` of at most
-   1 KiB with the §5.3 suite framing (as P3-D7 checks grants), at most 1 024 records, unique
-   `(target_kind, target_id, key_version)`:
+   512 B with the §5.3 suite framing (as P3-D7 checks grants; Opus L9), at most 1 024 records (the 512 KiB head
+   bounds them further), unique `(target_kind, target_id, key_version)`:
    - `wk`: `target_id` = the space's workspace, `key_version` = that workspace's **current list epoch**, else 409
-     `stale_epoch` with `{"epoch": current}` (the unsigned hint of P3-D8: the phone refetches the signed list and
-     grants, bounded, and reseals with a fresh `DEK` only after a read-back shows the slot empty). This closes the
-     phone's "residual rotation race" (gaps.md Slice 5): an upload can no longer land under a `WK` that a removed
-     device holds. A device author MUST include one `wk` wrap (the member-writer wrap of §10.3); a W author MAY
-     omit it only when the object is addressed to devices only;
-   - `wxk`: `target_id` names a workspace with a card, `key_version` = its card's current `wxk_version`, else 409
-     `bad_wxk_version`;
+     `stale_epoch` with `{"epoch": current}` (the unsigned hint of P3-D8). The phone refetches the signed list
+     and grants, bounded, and **rewraps the same `DEK`** under `WK_{e+1}`, keeping the blob and the signed
+     descriptor (the descriptor does not bind the wraps), so the exact-retry identity holds and 26 MiB is not
+     re-encrypted; a fresh `DEK` and reseal follow only a `version_conflict` (Opus M6; Q-F4). This closes the
+     phone's "residual rotation race" (gaps.md Slice 5) **for removals**, which publish a new epoch. It does not
+     close it for a revoked device while the workspace's `rotation_due` row is open: the epoch is unchanged
+     until the host rotates, so an upload lands under the `WK_e` that the revoked device holds. The relay
+     already refuses that device a session, so this matters only against a hostile relay (R-D7). Recommended,
+     pending owner question 6: refuse `wk` wraps with 409 `rotation_required` while the workspace has an open
+     `rotation_due` row. It is cheap (one indexed lookup on the existing `rotation_due` table, re-run in the
+     commit) but blocks uploads until the host rotates; if the owner declines, R-D7 stays documented. A device
+     author MUST include one `wk` wrap (the member-writer wrap of §10.3); a W author MAY omit it only when the
+     object is addressed to devices only;
+   - `wxk`: `target_id` MUST be `space_id` (400 `malformed` otherwise: cross-workspace targets are P6, Opus M1),
+     `key_version` = the card's current `wxk_version`, else 409 `bad_wxk_version`;
    - `device`: `target_id` is a current member of the space's workspace (or the author) with an unrevoked,
-     unexpired certificate, else 403 `not_eligible`;
+     unexpired certificate, else 403 `not_eligible`; `key_version` is 0 (a device wrap has no key version);
    - `sk`: 400 `malformed` until shared spaces exist (P6).
 
-   `recipients` is `"inbox"` or a sorted unique list of at most 1 024 ids (§10.4). The relay records, for the list
-   route, which workspaces may see the object: the space's workspace, every workspace with a `wxk` wrap, and every
-   workspace id named in `recipients` (item 7).
+   **Restricted content (orch-52 Q-H4).** The relay cannot tell what an object is about and enforces nothing
+   about restricted tickets beyond membership. The host MUST address an object about a restricted ticket with
+   `device` wraps only (no `wk` wrap, which every member device can open) and `recipients` = the devices that may
+   see it; the W-author rule above allows exactly that.
 
-5. **Expiry and retention (JUDGEMENT CALL on the numbers).** A `file` MUST carry `expires_ms` with
-   `now < expires_ms ≤ now + 7 d` (`ORCH_RELAY_DROP_MAX_TTL_MS`, default 604,800,000; the FakeRelay's rule). A
-   `document` version carries `expires_ms: null` or a value in the same window; the object's expiry is its
-   head's. When `now ≥ expires_ms` the object is invisible at once (reads 410 `expired`), a sweeper deletes its
-   blobs and wraps within 10 minutes and releases the usage, and a **tombstone** (the `drop_objects` row with
-   `tombstone_ms`) is kept 30 days, so a reused id is 410 rather than a fresh version 1 that a reader holding the
-   old head would read as a rollback. Superseded document versions keep their descriptors forever (readers check
-   the chain from version 1) but their **blobs** are pruned when they are neither among the newest 8 versions
-   nor younger than 30 days; a pruned blob reads 410 `expired`. A document has at most 1 024 versions (the
-   phone's chain cap); the 1 025th is 429 `quota_exceeded`, permanent (§10 checklist 6 applies).
+   `recipients` is `"inbox"` or a sorted unique list of at most 1 024 ids (§10.4), each `space_id` or a current
+   member device of it (step 5). Every object is therefore visible only within its own workspace (in P4 a claim
+   is by that same workspace), so no per-object access table is needed (§14.5).
 
-6. **Reads.** A W session reads the objects its workspace may see (item 4's set, and after a claim only the
-   claimer, §10.5). A device session reads an object when it is a current member of the object's workspace (the
-   space, or the claimer) with `look`, and the object is not addressed by `recipients` away from both that
-   workspace and the device. An unclaimed `inbox` object is invisible to devices (the phone already refuses to
-   download an unclaimed inbox). `GET .../blob` streams the file with `Content-Length: content_len`,
+5. **Expiry, retention and the document lifecycle (JUDGEMENT CALL on the numbers; Opus M5, owner question 3).**
+   A `file` MUST carry `expires_ms` with `now < expires_ms ≤ now + 7 d + 300 s` (`ORCH_RELAY_DROP_MAX_TTL_MS`,
+   default 604,800,000; the FakeRelay's rule, plus 300 s for clock skew, orch-f1 R4); `expires_ms ≤ now` is 410
+   `expired` (a resent body that has expired), above the window 400 `malformed`. A `document` version MUST carry
+   `expires_ms: null` in P4 (400 otherwise): with a settable expiry any `operate` member could write a version
+   expiring in 1 ms and let the sweeper destroy the whole history. When `now ≥ expires_ms` a file is invisible at
+   once (reads 410 `expired`), a sweeper deletes its blob and wraps within 10 minutes and releases the usage, and
+   a **tombstone** (the `drop_objects` row with `tombstone_ms`) is kept 30 days, so a reused id is 410 rather
+   than a fresh version 1 that a reader holding the old head would read as a rollback. Superseded document
+   versions keep their descriptors (readers check the chain from version 1) but their **blobs** are pruned when
+   they are neither among the newest 8 versions nor younger than 30 days; pruning releases the blob bytes (the
+   head bytes stay charged), and a pruned blob reads 410 `expired`. A document has at most 1 024 versions (the
+   phone's chain cap); the 1 025th is 429 `quota_exceeded`.
+   **Retire** (`POST /v2/drop/{o}/retire`, W(g) of the space, fenced, body `{}`): the host tombstones a document
+   at once (reads 410; the sweeper frees its blobs, wraps and head bytes; the id stays 410 for 30 days). This is
+   the only way out of the per-document and per-workspace document caps, so no workspace can reach a permanent
+   429: the host retires a full or abandoned document after copying what it keeps into a new object. A `file`
+   is 403 `not_eligible` (it expires on its own); a retired object answers 200 again while its tombstone lives
+   (idempotent). Members cannot retire (a removed device's history stays until the host acts).
+
+6. **Reads.** A W session reads the objects of its workspace (the space, or the claimer, §10.5). A device
+   session reads an object when it is a current member with `look` of the object's workspace and `recipients`
+   does not exclude the device (a device-only list without it). **Unclaimed `inbox` objects stay listable and
+   their descriptors and wraps readable by member devices** (orch-f1 R1: the phone's claim flow starts with the
+   device seeing the item; this also gives the author its own upload in `sending`, Opus L14); only `GET .../blob`
+   is 403 `not_eligible` until the object is claimed. An absent object or version is 404 on every read, never
+   403 (orch-f1 R5: the phone's pre-`PUT` read-back treats 404 as "slot empty"); an object of a workspace the
+   caller cannot see is 403. `GET .../blob` streams the file with `Content-Length: content_len`,
    `Content-Type: application/octet-stream`, `ETag: "<v>"`, `Cache-Control: no-store`, in 64 KiB reads, never
    buffered; no `Range` in P4. `GET .../wraps` and the list return only the wraps the caller can use: for a W
    session the `wk` and `wxk` wraps of its workspace; for a device also its own `device` wraps (JUDGEMENT CALL:
    the FakeRelay returns every wrap; filtering bounds an entry to a few KiB and stops one member enumerating the
-   others' device wraps). `claimed_by` is always present (null when unclaimed).
+   others' device wraps). `claimed_by` is present in every list entry and wraps answer (null when unclaimed).
 
-7. **List and change positions.** `POST /v2/drop/list` with `{workspace_id, direction, after?, limit?}` →
-   `{objects: [{n, descriptor, wraps, claimed_by}], next}`. `direction` is `received` (author ≠ caller) or
-   `sending` (author = caller). Each visible object appears once, with its newest version, at its **change
-   position** `n`: a relay-wide counter assigned by every version commit, wrap change and claim of the object
-   (the §19.5 cursor pattern), so a client that keeps `after` sees only what changed. Default and maximum
-   `limit` 64; at most 4 MiB per response (§19). The host learns of new objects through a new host-poll notice
-   `drop` (the newest change position visible to the workspace; §14.9 Q-H1), then lists `after` its stored
-   position. `GET /v2/drop/{o}/descriptors?after=&limit=` pages the chain (`limit` ≤ 256, default 256): the phone's
-   1 024-version walk becomes at most 4 requests instead of 1 024.
+7. **List, change positions and page bounds.** `POST /v2/drop/list` with `{workspace_id, direction, after?,
+   limit?}` (D(m) with `look` in `workspace_id`, or W of `workspace_id`) → `{objects: [{n, descriptor, wraps,
+   claimed_by}], next}`. `direction` is `received` (author ≠ caller) or `sending` (author = caller). Each visible
+   object appears once, with its newest version, at its **change position** `n`: a relay-wide counter assigned by
+   every version commit, wrap change, claim and retire of the object (the §19.5 cursor pattern), so a client
+   that keeps `after` sees only what changed. The relay-wide counter tells a host roughly how much Drop activity
+   other tenants have (Opus L7): accepted (R-D8). The host learns of new objects through a new host-poll notice
+   `drop` (the newest change position of the workspace; §14.9 Q-H1), then lists `after` its stored position.
+   `GET /v2/drop/{o}/descriptors?after=&limit=` pages the chain (`limit` ≤ 256, default 256): the phone's
+   1 024-version walk becomes a few requests instead of 1 024.
+   **Every page is cut by bytes as well as by count (Opus H1):** a list page stops before 2 MiB of JSON and a
+   descriptor page before 1 MiB, always returning at least one entry (one entry is at most ~100 KiB: the 96 KiB
+   descriptor plus the caller's few wraps), with `next` set as usual. Default and maximum list `limit` 64. The
+   list's **request** body is capped at 16 KiB (the JSON-route cap); its **response** page at 2 MiB (orch-52 nit
+   7: the earlier "4 MiB" is replaced by 2 MiB, and a host's 4 MiB read cap covers it).
+   **Read concurrency:** at most 8 list or descriptor-page reads in flight relay-wide (503 `overloaded`,
+   `Retry-After: 1`) and 2 per device (429 `quota_exceeded`); the page is built and serialized inside its slot.
+   Peak: 8 × 2 MiB × ~3 (CPython objects behind the JSON) ≈ 48 MiB, in the peak-RSS bench.
 
-8. **Quotas, buckets, disk and memory (arithmetic).**
+8. **Quotas, slots, buckets, disk and memory (arithmetic).**
    - **Per object:** blob ≤ `ORCH_RELAY_DROP_MAX_BLOB_BYTES`, default 26 MiB = 27,262,976 bytes (1..256 MiB). The
      phone's 25 MiB plaintext cap gives 40 + 26,214,400 + 25 × 16 = 26,214,840 bytes of ORD2 at 1 MiB chunks, which
-     fits. A whole request is at most 8 + 1,048,576 + 27,262,976 = 28,311,560 bytes.
-   - **Stored bytes** (blob plus head, so descriptors and wraps count too): per workspace 512 MiB and 4 096 live
-     versions; per owner account (all its workspaces) 1 GiB; per device per workspace 256 MiB authored (so one
+     fits. A whole request is at most 8 + 524,288 + 27,262,976 = 27,787,272 bytes.
+   - **Blob bytes:** per workspace 512 MiB and 4 096 live versions (a live version is one whose blob is
+     `stored`); per owner account (all its workspaces) 1 GiB; per device per workspace 256 MiB authored (so one
      `operate` member cannot fill its workspace); global `ORCH_RELAY_DROP_GLOBAL_BYTES`, default 4 GiB public,
-     1 GiB recommended for the internal instance. Exceeding a workspace, account or device cap is 429
-     `quota_exceeded`; the global ceiling is 503 `overloaded` (P3-D17 convention), with `Retry-After` up to the
-     next expiry sweep (≤ 600 s). Usage is reserved in memory at step 8 and charged in the commit, so concurrent
-     uploads cannot overshoot; a crash drops reservations and the temp files with them.
-   - **Disk.** Drop's worst case is the global ceiling plus in-flight temp files (≤ 8 concurrent uploads ×
-     28.3 MB ≈ 216 MiB) plus tombstones (≤ ~100 B each): public 4 GiB + int 1 GiB + 0.4 GiB ≈ 5.8 GB. With the
-     dev-deploy-plan §4.3 checkpoint bound of ~15 GB and ~35 GB free, the worst case leaves ~14 GB free; the plan's
-     "≥ 20 GB free" soak criterion is about real usage and still holds for the invited users (files live ≤ 7
-     days). A larger ceiling needs the disk recomputed (§10 checklist 2 gains a Drop line).
-   - **Memory.** Per upload: the head (≤ 1 MiB) plus a 64 KiB buffer; per download 64 KiB. At most 8 concurrent
-     uploads relay-wide (503 `overloaded`) and 2 per device (429 `quota_exceeded`); at most 32 downloads (503) and
-     4 per device (429). Peak ≈ 8 × 1.06 MiB + 32 × 64 KiB ≈ 10.5 MiB, on top of the ~618 MB public peak of
-     §10 checklist 1: ~630 MB of the 900 MB `MemoryMax` (30 % headroom). No blob is ever held in memory.
+     1 GiB recommended for the internal instance.
+   - **Head bytes (separate; Opus M4, L5):** descriptors and every stored wrap, including host re-wraps and claim
+     wraps, charged to the workspace: per workspace 32 MiB, global `ORCH_RELAY_DROP_GLOBAL_HEAD_BYTES` 512 MiB
+     public, 128 MiB internal. Heads live in SQLite, so this cap is what bounds the database, its WAL and
+     `VACUUM` space; blobs live in files. Per workspace at most 256 documents that are not tombstoned.
+   - Exceeding a workspace, account or device cap is 429 `quota_exceeded`; a global ceiling is 503 `overloaded`
+     (P3-D17 convention).
+   - **`Retry-After` (orch-52 item 7).** Every Drop 429 and 503 carries `Retry-After` (integer seconds, ≥ 1). For
+     429 `rate_limited`, a slot cap and 503 `overloaded` it is the time until a token or slot frees, or the next
+     expiry sweep (≤ 600 s) for a global ceiling: these are transient. A **stored-bytes** 429 `quota_exceeded`
+     also carries `Retry-After: 600` (the sweep period) for uniformity, but is **not** transient: its body names
+     the cap, `{"error": "quota_exceeded", "quota": "drop_ws" | "drop_head_ws" | "drop_account" |
+     "drop_device" | "drop_versions" | "drop_documents"}`, and it stays until expiry, pruning or a retire frees
+     usage (Q-H6). A slot cap's 429 carries `"quota": "slot"` and is transient. Usage is reserved in memory at
+     step 9 and charged in the commit, so concurrent uploads cannot overshoot; a crash drops reservations and the
+     temp files with them.
+   - **Slots (Opus M2).** Uploads: 16 relay-wide (503 `overloaded`), and 2 per device, 3 per person and 4 per
+     workspace (429 `quota_exceeded`). Downloads: 32 relay-wide (503), 4 per device and 8 per person (429). Both
+     directions: an idle timeout of 30 s between body reads or writes, a **minimum average rate of 64 KiB/s**
+     after the head (a 26 MiB body may take about 7 minutes), and a maximum duration of 10 minutes; a breach
+     closes the connection and frees the slot and the reservation. One person (any number of devices) therefore
+     holds at most 3 of 16 upload slots.
+   - **Disk.** Drop's worst case is the blob ceilings (public 4 GiB + internal 1 GiB), the head ceilings in SQLite
+     counted twice for WAL and `VACUUM` (2 × 0.625 GiB), in-flight temp files (16 × 27.8 MB ≈ 0.44 GB) and
+     tombstones (≤ ~100 B each): ≈ 7.2 GB. With the dev-deploy-plan §4.3 checkpoint bound of ~15 GB and ~35 GB
+     free, the worst case leaves ~12.8 GB free; the plan's "≥ 20 GB free" soak criterion is about real usage and
+     still holds for the invited users (files live ≤ 7 days). A larger ceiling needs the disk recomputed (§10
+     checklist 2 gains a Drop line).
+   - **Memory.** Per upload: the head (≤ 512 KiB) plus a 64 KiB buffer; per download 64 KiB. Peak ≈ 16 × 0.56 MiB
+     + 32 × 64 KiB ≈ 11 MiB for transfers, ≈ 48 MiB for Drop JSON reads (item 7), ≈ 45 MB for the push queue and
+     its dedup LRU (P3-D40 item 6): ~105 MB on top of the ~618 MB public peak of §10 checklist 1, ~720 MB of the
+     944 MB `MemoryMax` (24 % headroom). The 618 MB includes a 250 MB baseline where U9 measured ~50 MB per unit,
+     so the real headroom is larger. No blob is ever held in memory.
+   - **Event loop (Opus L8).** Drop gets its own async endpoint (the existing one buffers the whole body and runs
+     `Directory.handle` on the shared 40-token threadpool): file writes, hashing and `fsync` run off the event
+     loop through a dedicated limiter (16 tokens), so transfers cannot starve the JSON routes.
    - **Buckets (P3-D35 form, in memory, overrides `burst/per-minute`).** Upload: one token per started MiB of
      body, per device burst 64 and 32/min (`ORCH_RELAY_THROTTLE_DROP_UP`), per workspace burst 256 and 128/min
      (a 5-attachment, 25 MiB compose costs about 27 tokens: no 429). Download: one token per started MiB served,
@@ -2555,35 +2647,57 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
      bounds tombstones to ~30 000 per workspace (~3 MB).
 
 9. **Claims and host re-wraps (D39b).** `POST /v2/drop/{o}/claim` is §10.5 verbatim (one transaction, the
-   five-step order, idempotent, `claimed_by` to the loser), with three relay details: the object must be `inbox`
-   and unexpired (403 `not_eligible` otherwise, as the FakeRelay does); the claim's change position is new, so
-   the claimer's list shows it; every other workspace's visibility row is deleted with its wraps.
-   `PUT /v2/drop/{o}/versions/{v}/wraps` with `{wraps: [wrap]}` (exactly one record) stores the host's
-   current-epoch `wk` wrap for its own workspace: the object version must be addressed to the workspace (its space,
-   or claimed by it; an unclaimed inbox is 403 `not_eligible`, the FakeRelay's `rewrapSource`), the wrap
-   `target_kind` `wk`, `target_id` the workspace and `key_version` its current epoch (409 `stale_epoch`
-   otherwise). An identical record is a 200 no-op; other bytes for the same `(target, key_version)` are 409
-   `wrap_conflict` (as G0a review 10 for card-key wraps: the host persists the wrap before sending and resends the
-   same bytes, never reseals). The FakeRelay replaces silently; this tightens it.
+   five-step order, idempotent, `claimed_by` to the loser), with relay details: the object must be an `inbox`
+   `file` and unexpired (403 `not_eligible` otherwise, as the FakeRelay does); in P4 the claimer is the object's
+   own workspace (M1); the claim's change position is new, so lists show it; a claimed object takes no new
+   version (M7). `PUT /v2/drop/{o}/versions/{v}/wraps` with `{wraps: [wrap]}` (exactly one record) stores the
+   host's current-epoch `wk` wrap for its own workspace: the object version must be addressed to the workspace
+   (its space, claimed by it if `inbox`; an unclaimed inbox is 403 `not_eligible`, the FakeRelay's
+   `rewrapSource`), the wrap `target_kind` `wk`, `target_id` the workspace and `key_version` its current epoch
+   (409 `stale_epoch` otherwise). An identical record is a 200 no-op; other bytes for the same
+   `(target, key_version)` are 409 `wrap_conflict` (as G0a review 10 for card-key wraps: the host persists the
+   wrap before sending and resends the same bytes, never reseals). The 409 `wrap_conflict` body carries what a
+   host that lost its local copy needs to recognize its own earlier wrap (orch-52 Q-H5): `{"error":
+   "wrap_conflict", "wrap": <the stored record>, "dek_commit": <the version descriptor's>}`; the host opens the
+   stored wrap with its `WK_e`, checks `dek_commit`, and treats a match as success. The caller is already
+   authorized for that version's wraps, so nothing new is disclosed. The FakeRelay replaces silently; this
+   tightens it. Re-wraps are charged to the workspace's head bytes (L5).
 
 10. **Revocation and removal.** `prune_device` (members.py) gains the Drop table keyed by device:
     `drop_wraps` rows with `target_kind = 'device'` and `target_id` = the device, in every workspace on
     revocation and in the workspace on removal. Objects a removed or revoked device authored stay (their
     signatures stay valid; readers apply their own author rule, gaps.md Slice 5). The device's usage share is
-    released only by expiry.
+    released only by expiry, pruning or retire.
 
 11. **What the relay sees and stores.** Routing ids, object ids, space, kind, version, author id, recipients
     (ids), sizes, expiries, timing, claims, and the opaque ciphertext of blobs, metadata and wraps. Never a
     `DEK`, `WK`, `WXK`, file name, MIME type or plaintext. The §2 "never stored" grep test extends to an uploaded
     fixture's name, MIME type and content.
 
-**Pinned by (D39a, D39b).** HTTP fixtures (§14.6), the `drop` vector sections, and tests for: every refusal in
-the check order with nothing stored; the exact retry before the CAS; two concurrent writers of version N+1
-(one 201, one 409, one blob file on disk); a killed upload mid-blob (no row, the temp file swept); a crash after
-the rename (orphan swept at start-up, no row without its file); quota reservation under concurrency; the
-`stale_epoch` wrap after a rotation; expiry, tombstone and pruned-blob reads (410); wrap filtering per caller;
-list positions moving on a new version, a wrap and a claim; revocation pruning device wraps; peak RSS of 8
-concurrent 26 MiB uploads (a bench, as P3-D33's).
+12. **Sweeps and backups (Opus M4; owner question 4).** The expiry, tombstone and pruning sweeps work in
+    batches of at most 256 rows per write transaction (never a 1 024 × 1 024 cascade under the global write
+    lock), unlink files only after the batch commits, and log and skip an object whose sweep fails (for example a
+    usage underflow against `CHECK bytes >= 0`), so one bad row never wedges the sweeper. **Backups:** the
+    database backup carries every descriptor and wrap; `<data>/drop/` is **excluded** from backups and from the
+    reset runbook's moves by default (recommended; owner question 4), because files live at most 7 days and
+    pruned document blobs are already "gone" to readers. A database restored without its blob files is
+    consistent: the start-up sweep marks each `stored` row whose file is missing as `pruned` and releases its
+    blob bytes. If the owner wants Drop blobs backed up, the runbook copies `data/drop/` after the database and
+    counts twice its size on disk.
+
+**Pinned by (D39a1, D39a2, D39b).** HTTP fixtures (§14.6), the `drop` vector sections, and tests for: every
+refusal in the check order with nothing stored; the tombstone check before the exact retry; the exact retry
+before the CAS; the `Content-Length` frame check; the descriptor and `meta` caps; foreign `wxk` and `recipients`
+refused; two concurrent writers of version N+1 (one 201, one 409, one blob file on disk); a killed upload
+mid-blob (no row, the temp file swept, the reservation released); a crash after the rename (orphan swept at
+start-up, no row without its file); quota reservation under concurrency; slot caps per device, person and
+workspace and the minimum rate on both directions; the `stale_epoch` wrap after a rotation and the same-`DEK`
+rewrap retry; expiry, tombstone and pruned-blob reads (410); retire; byte-cut pages; wrap filtering per caller;
+an unclaimed inbox listed with its descriptor but a 403 blob; 404 (not 403) for an absent version; list
+positions moving on a new version, a wrap, a claim and a retire; revocation pruning device wraps; batched sweeps
+and a failing row skipped; a restore without `data/drop/`; early answers with an unread body over a real socket
+and through Caddy (item 2); peak RSS of 16 concurrent 26 MiB uploads plus 8 concurrent maximal descriptor pages
+(a bench, as P3-D33's).
 
 ### 14.3 P3-D40: push registration and APNs sending
 
@@ -2595,8 +2709,10 @@ concurrent 26 MiB uploads (a bench, as P3-D33's).
    `io.severin.orch`), else 400 `malformed`; `token` is b64u of 32 to 100 bytes (Apple's tokens are 32 bytes
    today and may grow). One registration per `(device, workspace, env, topic)`: a new `registration_id` for the
    tuple retires the old one in the same transaction. The same id and body is 200 and refreshes `last_seen_ms`
-   (free of rate windows, as exact retries are in P3-D5); the same id with another body is 409
-   `registration_conflict` (new code). A token held by **another device of the same person** moves: that
+   (free of rate windows, as exact retries are in P3-D5); the same id with another body, or an id that belongs
+   to another device, is 409 `registration_conflict` (new code; the id lookup matches `device_id` too, so device
+   B replaying A's exact body cannot refresh A's row, Opus L2). A `drop:` scoped device is 403 `not_eligible`.
+   An `env` without a configured key on this relay is 400 `malformed`. A token held by **another device of the same person** moves: that
    device's registrations with this token are deleted (a phone reset gives new device keys but keeps its token;
    without the move the old identity's pushes would reach the new one as generic text). Another person's
    registrations of the same token are not touched (JUDGEMENT CALL: a token is secret to Apple, the app and the
@@ -2611,7 +2727,8 @@ concurrent 26 MiB uploads (a bench, as P3-D33's).
    token whose `last_seen_ms` is not after Apple's timestamp), `400 BadDeviceToken` (that token in that `env`) or
    `400 DeviceTokenNotForTopic`; when the certificate expires (skipped at send, deleted by the daily sweep); and
    when not refreshed for 60 days (the app re-registers at every launch with the same body, which is free).
-4. **The host's send route** (`POST /v2/workspaces/{ws}/push`, W(g)):
+4. **The host's send route** (`POST /v2/workspaces/{ws}/push`, W(g), **fenced** like every W write: a missing or
+   stale `Orch-Holder` or an expired lease is 409 `fenced`, P3-D10, and nothing is queued; orch-52 nit 7):
    `{targets: [device_id], outer: {v, ws, epoch, c}, priority: "high" | "normal", ttl_s}` → `{accepted}`.
    - `outer` is §9's outer object, sealed under `K_push(e)` with the `WSK` signature inside; the relay checks only
      its exact field set, `v = 2`, `ws` = the path, `c` canonical b64u, `|cj(outer)| ≤ 3,072` (else 400
@@ -2625,7 +2742,8 @@ concurrent 26 MiB uploads (a bench, as P3-D33's).
    - `priority` maps to `apns-priority` 10 or 5; `ttl_s` (0..86,400) to `apns-expiration`: 0 is APNs' "once,
      then drop", otherwise `now_s + ttl_s`. The NSE drops anything older than 24 h anyway (§9 step 6).
    - **Idempotency.** The relay remembers `(ws, H(cj(outer)), device)` for 24 h in memory (an LRU of at most
-     65,536 entries, ~6.5 MB): an exact retry sends nothing to a device that already got it. A restart forgets,
+     65,536 entries keyed by a 32-byte digest of the triple in a bounded `OrderedDict`; ~20–30 MB with CPython
+     object overhead, Opus L6): an exact retry sends nothing to a device that already got it. A restart forgets,
      so a retry right after a restart can duplicate, which the NSE drops as a replay and shows as generic text
      (A12). The host MUST persist the outer bytes before sending and resend them unchanged (never reseal: a new
      `c` is a new push).
@@ -2640,12 +2758,15 @@ concurrent 26 MiB uploads (a bench, as P3-D33's).
      `thread-id`, `category` or other key: the visible fallback is the relay's constant generic text, the same
      words the NSE shows on any drop (A12), so a relay never carries content in clear. Size: `cj(outer)` ≤ 3,072
      plus 12 escaped quotes plus 91 bytes of wrapper = at most 3,175 bytes, under APNs' 4,096 (921 bytes spare);
-   - the JWT is ES256 with header `{alg: "ES256", kid: <key id>}` and claims `{iss: <team id>, iat}`, cached and
-     renewed every 40 minutes (Apple refuses tokens older than an hour and throttles renewals more often than every
-     20 minutes).
+   - the JWT is ES256 with header `{alg: "ES256", kid: <key id mapped to that env>}` and claims
+     `{iss: <team id>, iat}`, signed with the key mapped to the registration's `env` (§14.7: a per-environment
+     mapping; today both environments map to the one key `TD27F9Z9V7`), cached **per (key, environment)** and
+     renewed every 40 minutes (Apple refuses tokens older than an hour and
+     throttles renewals more often than every 20 minutes).
 6. **Sender.** An in-memory queue per instance (JUDGEMENT CALL: best effort, no durable outbox): at most 4 096
-   queued sends (each ≤ ~3.3 KB, ≤ ~13.5 MB) and 1 024 per workspace; a send request whose sends do not all fit is
-   503 `overloaded` with `Retry-After` and queues nothing. One HTTP/2 connection per enabled `env`, at most 16
+   queued sends (each ≤ ~3.3 KB, ≤ ~13.5 MB), 1 024 per workspace and 2 048 per owner account (so one account's
+   workspaces cannot fill the queue; Opus L6); a send request whose sends do not all fit is 503 `overloaded` with
+   `Retry-After` and queues nothing (the host retries after `Retry-After`; never a permanent failure). One HTTP/2 connection per enabled `env`, at most 16
    concurrent streams; a send waiting longer than `min(ttl_s, 600 s)` is dropped. APNs answers:
 
    | APNs answer | Relay action |
@@ -2653,8 +2774,8 @@ concurrent 26 MiB uploads (a bench, as P3-D33's).
    | 200 | done |
    | 410 `Unregistered` | delete the registrations with that token whose `last_seen_ms` ≤ Apple's timestamp |
    | 400 `BadDeviceToken`, `DeviceTokenNotForTopic` | delete that registration |
-   | 403 `ExpiredProviderToken`, `InvalidProviderToken` | renew the JWT once and retry once; then log `apns_auth` (no token, no key material) and disable that `env` until restart or the next key load |
-   | 400 `TopicDisallowed`, `BadTopic` | configuration error: log, disable that `env` |
+   | 403 `ExpiredProviderToken`, `InvalidProviderToken` | renew the JWT once and retry once; then log `apns_auth` (no token, no key material) and pause that `env` for a backoff of at least 20 minutes (Apple's renewal floor), doubling up to 2 h, then renew and retry (Opus L3: a transient 403 never disables push until a restart) |
+   | 400 `TopicDisallowed`, `BadTopic` | configuration error: log, pause that `env` with the same backoff |
    | 429 `TooManyRequests` (per device) | drop the send |
    | 413 `PayloadTooLarge` | a relay bug: log and drop |
    | 500, 503, connection errors | retry at most twice with backoff while within the send's deadline |
@@ -2668,6 +2789,8 @@ concurrent 26 MiB uploads (a bench, as P3-D33's).
    - global: at most 50 APNs sends per second per instance (the queue absorbs bursts; then 503);
    - registrations: per device 30 state-changing registrations per hour (429 `rate_limited`), at most 2 per
      (device, workspace) by construction and 128 per device in all (429 `quota_exceeded`).
+   The budgets **ignore `priority`**: a `high` and a `normal` push cost the same, and over budget either is
+   skipped. Hosts merge repeated pushes per ticket and keep their own, stricter budget (orch-52 Q-H2, H13a).
    A WSK holder can therefore notify its own members at most ~2/min per device in steady state; a member device
    cannot send at all (no route for a D session); nobody can target a non-member.
 8. **Token privacy at rest (JUDGEMENT CALL).** The relay must hold tokens in clear to send, but its database is
@@ -2677,18 +2800,22 @@ concurrent 26 MiB uploads (a bench, as P3-D33's).
    `push-token.key` held like the APNs key (§14.7) and never backed up with the database. A database dump alone
    then reveals no token; losing the secret loses the registrations only (delete them; apps re-register at their
    next launch).
-9. **Disabled push.** A relay without APNs configuration (key id, team id, topic, key credential, token secret)
-   answers 404 `not_found` on all three push routes, as a relay without a route does (the H12d convention); the
-   phone treats that as "push unavailable on this relay". The relay refuses to start when the configuration is
-   partial (some of it set), so a misconfiguration is loud.
+9. **Disabled push.** A relay without APNs configuration (team id, topic, token secret, and at least one
+   environment's key id and key file) answers 404 `not_found` on all three push routes, as a relay without
+   a route does (the H12d convention); the phone treats that as "push unavailable on this relay". The relay
+   refuses to start when the configuration is partial (an environment with a key id but no key, or the reverse;
+   a key without the token secret), so a misconfiguration is loud. An environment that is not configured is
+   400 `malformed` at registration (item 1).
 
 **Pinned by (D40a, D40b).** HTTP fixtures (§14.6), and tests for: registration idempotency, retirement per tuple,
-conflict, same-person move, cross-person non-move; unregister of null, absent and another device's id; pruning on
-revocation and removal; the stale sweep; the send route's checks and `accepted` count; 409 `stale_epoch`; the
-exact-retry LRU; queue admission all-or-nothing; every row of the APNs table against a fake APNs transport (a
-scripted HTTP/2-shaped fake that verifies the JWT under the test key's public half, the path, the headers and
-the exact body bytes); token sealing (no token bytes in the database file, a grep test); no token, JWT or key in
-logs (a log-capture test); refusal to start on partial configuration.
+conflict, another device's id (409), a `drop:` device refused, same-person move, cross-person non-move;
+unregister of null, absent and another device's id; pruning on revocation and removal; the stale sweep; the send
+route's checks and `accepted` count; 409 `stale_epoch`; the exact-retry LRU; queue admission all-or-nothing and
+the per-account queue cap; every row of the APNs table against a fake APNs transport (a scripted HTTP/2-shaped
+fake that verifies the JWT under the public half of the key mapped to that environment, the path, the headers and the exact
+body bytes), including the 403 backoff and its recovery; one JWT cache per (key, environment), with one key
+mapped to both; token sealing (no token bytes in the database file, a grep test); no token, JWT or key in logs (a log-capture test); refusal to start on partial
+configuration.
 
 ### 14.4 Threat model delta
 
@@ -2704,15 +2831,18 @@ replay shows generic text at most). It cannot tell a host which devices have pus
 knows from its own tables.
 
 **Hostile host (a `WSK` holder).** It can notify its own members within the budgets, with any label it signs
-(it is the workspace authority), upload within its account's quota, claim inbox objects addressed to it, and
-re-wrap objects of its own space. It cannot target a non-member, learn a device's token or whether it registered,
-read another workspace's objects, or exceed its account's stored bytes (1 GiB) or its per-device notification
-budget.
+(it is the workspace authority), upload within its account's quota, claim its own workspace's inbox objects,
+re-wrap objects of its own space, and retire its documents. It cannot target a non-member, learn a device's
+token or whether it registered, read or address another workspace's objects (P4 has no cross-workspace
+addressing), or exceed its account's stored bytes (1 GiB) or its per-device notification budget.
 
 **Hostile member device (or a stolen unlocked phone, D49).** With `operate` it can upload within its 256 MiB share
 and the workspace caps, and write the next version of a document of its workspace (the model: documents are
-collaborative; readers apply the author rule). It cannot send pushes, read other workspaces' objects, see other
-members' device wraps (filtered), or register a token for a workspace it is not a member of. It can register a
+collaborative; readers apply the author rule). It cannot destroy a document's history (documents carry no
+expiry in P4 and only the host retires), address other workspaces (M1), hold more than 3 upload slots for its
+person, or force a large read (descriptors ≤ 96 KiB, byte-cut pages, bounded read slots; Opus H1). It cannot
+send pushes, read other workspaces' objects, see other members' device wraps (filtered), or register a token for
+a workspace it is not a member of. It can register a
 victim's token if it learns it (it cannot from the relay); the victim then receives generic text for this
 device's workspaces, bounded by P3-D40 item 7's budgets.
 
@@ -2724,17 +2854,19 @@ take back what was read; spec §6.4).
 `mutable-content` that skip the NSE (gaps.md row 19), to any token it knows. Tokens come only from the relay's
 database, where they are sealed (D40 item 8), so the key alone is not enough. Response: revoke the key in the
 Apple developer account (immediate), place the replacement (§14.7), restart. The app treats every notification's
-`userInfo` as a lookup key, never an instruction, and re-verifies on tap (NSE comment; U10). Recommended: a key
-restricted to the orch topic, so a stolen key cannot reach the owner's other apps (§14.9 Q-F8).
+`userInfo` as a lookup key, never an instruction, and re-verifies on tap (NSE comment; U10). The existing key is
+team-scoped (owner's note), so a stolen copy also reaches the owner's other apps' tokens, if the thief has them;
+a later replacement by topic-specific, per-environment keys (§14.7) would narrow this (owner question 2).
 
 **Apple (APNs).** Sees each token, the topic, timing, priority, the outer object (a random workspace id, an
-epoch and ciphertext) and the generic text. It cannot read labels. New accepted leak: the workspace id and epoch
+epoch and ciphertext) and the generic text. It cannot read labels, but it can read their length (R-D6). New accepted leak: the workspace id and epoch
 reach Apple (the NSE needs `ws` to pick keys without trial decryption).
 
-**Network attacker.** TLS to the relay and to APNs; the upload frame adds nothing new. A slow uploader holds an
-upload slot: per-device 2 and global 8 slots, plus an idle timeout of 30 s between body reads and a minimum
-average rate of 64 KiB/s after the head (else the relay closes and frees the reservation). Caddy's per-IP limits
-(§10 checklist 7) remain the bound on unauthenticated floods.
+**Network attacker.** TLS to the relay and to APNs; the upload frame adds nothing new. A slow uploader or
+downloader holds a slot: the per-device, per-person and per-workspace slot caps of P3-D39 item 8, plus an idle
+timeout of 30 s, a minimum average rate of 64 KiB/s and a 10-minute maximum in both directions (else the relay
+closes and frees the slot and the reservation). Caddy's per-IP limits (§10 checklist 7) remain the bound on
+unauthenticated floods.
 
 **Residuals.**
 
@@ -2742,17 +2874,29 @@ average rate of 64 KiB/s after the head (else the relay closes and frees the res
   unavoidable on iOS (the NSE cannot suppress), bounded only by the operator's honesty.
 - R-D2. Push is best effort: a restart loses queued sends and the dedup memory (a duplicate shows generic text).
 - R-D3. Global Drop ceiling saturation (4 GiB) by the invited accounts together denies uploads until files
-  expire (≤ 7 days), as the staging ceiling did before P3-D34; the per-account cap (1 GiB) bounds one account.
+  expire (≤ 7 days), as the staging ceiling did before P3-D34; the per-account cap (1 GiB) bounds one account
+  (the numbers against ~10 invited accounts are owner question 4).
 - R-D4. The relay learns recipients, sizes and claim outcomes, as spec §4 accepts.
 - R-D5. Old document blobs are pruned (item 5): a reader that never downloaded version 3 cannot get it later;
-  the chain stays verifiable.
+  the chain stays verifiable. A host retire removes a document for everyone.
+- R-D6. §9 has no padding, so the push ciphertext's length reveals the label's length to the byte, and often the
+  kind (`drop.new`, `question` and `question.closed` differ), to the relay and to Apple; the target set shows the
+  relay which devices a push is for, and in P8 which devices see a restricted ticket (Opus L11, orch-52 Q-H4).
+  A padding field would be a sealed-format change, out of scope here. *Recommended host mitigation* (no format
+  change): the host pads the **label** to a fixed 80 code points with spaces that the NSE trims; until then the
+  length leak is accepted.
+- R-D7. While a revocation's `rotation_due` is open, uploads land under the `WK_e` the revoked device holds
+  (P3-D39 item 4); only a hostile relay could serve them to it. Closed if the owner adopts the
+  `rotation_required` refusal (owner question 6).
+- R-D8. The relay-wide change position `n` tells a host roughly how much Drop activity other tenants have
+  (Opus L7). Accepted for P4; per-workspace positions would remove it.
 
 ### 14.5 Migration plan (0017, 0018)
 
 Conventions as before: numbered `.sql` files run by `db.migrate`, integer ms of the relay clock, ids as lower-case
 hex, signed objects stored as received `cj`. 0008 stays reserved.
 
-**0017_drop.sql** (D39a; D39b adds no table):
+**0017_drop.sql** (D39a1; D39b adds no table):
 
 ```sql
 CREATE TABLE drop_objects (
@@ -2764,10 +2908,13 @@ CREATE TABLE drop_objects (
     inbox INTEGER NOT NULL CHECK (inbox IN (0, 1)),
     claimed_by TEXT,                        -- §10.5; NULL until claimed
     expires_ms INTEGER,                     -- the head's; NULL for a document without expiry
-    tombstone_ms INTEGER,                   -- set when expired and swept; row deleted 30 d later
-    n INTEGER NOT NULL,                     -- latest change position (version, wrap, claim)
+    tombstone_ms INTEGER,                   -- set when expired or retired; row deleted 30 d later
+    n INTEGER NOT NULL,                     -- latest change position (version, wrap, claim, retire)
     created_ms INTEGER NOT NULL
 );
+-- The list scan: in P4 an object is visible only within its own workspace (P3-D39 item 4),
+-- so no per-object access table is needed (Opus M1).
+CREATE INDEX drop_objects_scan ON drop_objects(workspace_id, n);
 CREATE INDEX drop_objects_expiry ON drop_objects(expires_ms)
     WHERE expires_ms IS NOT NULL AND tombstone_ms IS NULL;
 CREATE INDEX drop_objects_tombstone ON drop_objects(tombstone_ms) WHERE tombstone_ms IS NOT NULL;
@@ -2783,6 +2930,7 @@ CREATE TABLE drop_versions (
     content_len INTEGER NOT NULL,
     head_len INTEGER NOT NULL,
     blob TEXT NOT NULL CHECK (blob IN ('stored', 'pruned')),
+    blob_path TEXT,                         -- '<o>/<v>.<rand>' under drop/blobs; NULL once pruned
     received_ms INTEGER NOT NULL,
     PRIMARY KEY (object_id, version)
 );
@@ -2800,22 +2948,15 @@ CREATE TABLE drop_wraps (
 );
 CREATE INDEX drop_wraps_target ON drop_wraps(target_kind, target_id);
 
--- Who may list an object: the space, every wxk-addressed workspace, every workspace in recipients;
--- after a claim only the claimer. n mirrors drop_objects.n for the (workspace, n) scan.
-CREATE TABLE drop_access (
-    workspace_id TEXT NOT NULL,
-    object_id TEXT NOT NULL REFERENCES drop_objects(object_id) ON DELETE CASCADE,
-    n INTEGER NOT NULL,
-    PRIMARY KEY (workspace_id, object_id)
-);
-CREATE INDEX drop_access_scan ON drop_access(workspace_id, n);
-
 -- Charged usage; scope 'workspace' | 'account' | 'device' (key "ws:device") | 'global' (id '').
+-- Blob bytes and head bytes are separate quotas (Opus M4); head_bytes includes every stored wrap (L5).
 CREATE TABLE drop_usage (
     scope TEXT NOT NULL,
     id TEXT NOT NULL,
-    bytes INTEGER NOT NULL CHECK (bytes >= 0),
-    versions INTEGER NOT NULL CHECK (versions >= 0),
+    blob_bytes INTEGER NOT NULL CHECK (blob_bytes >= 0),
+    head_bytes INTEGER NOT NULL CHECK (head_bytes >= 0),
+    versions INTEGER NOT NULL CHECK (versions >= 0),       -- live versions (blob stored)
+    documents INTEGER NOT NULL CHECK (documents >= 0),     -- documents not tombstoned
     PRIMARY KEY (scope, id)
 );
 
@@ -2823,7 +2964,7 @@ CREATE TABLE drop_usage (
 -- columns, and no REPLACE (which deletes without a DELETE trigger) over an existing version.
 CREATE TRIGGER drop_versions_immutable
 BEFORE UPDATE OF object_id, version, author_kind, author_id, descriptor, parent_hash_next,
-                 content_hash, content_len, head_len ON drop_versions
+                 content_hash, content_len, head_len, received_ms ON drop_versions
 BEGIN SELECT RAISE(ABORT, 'drop_versions is immutable'); END;
 CREATE TRIGGER drop_versions_no_replace
 BEFORE INSERT ON drop_versions
@@ -2831,12 +2972,15 @@ WHEN EXISTS (SELECT 1 FROM drop_versions WHERE object_id = NEW.object_id AND ver
 BEGIN SELECT RAISE(ABORT, 'drop_versions is immutable'); END;
 ```
 
-Deletion happens only in the expiry sweep (cascades from `drop_objects` after its 30-day tombstone; blobs and
-wraps at tombstoning) and in blob pruning (`blob` → `'pruned'`, the one column that may change). `wrap_conflict`
-and the claim's "delete every other wrap" are ordinary deletes on `drop_wraps`. Files live in
-`<data>/drop/blobs/<o>/<v>` and `<data>/drop/tmp/`, directories 0700, files 0600, on the database's filesystem so
-`rename` is atomic. The start-up sweep (before serving) deletes `tmp/*`, blob files without a `stored` row, and
-marks a `stored` row whose file is missing as `pruned` with an error log.
+Deletion happens only in the sweeps, in batches of at most 256 rows per transaction (P3-D39 item 12): at
+tombstoning (expiry or retire) the sweeper deletes the object's versions and wraps and releases all its bytes,
+keeping only the `drop_objects` row, which it deletes 30 days later; blob pruning sets `blob` → `'pruned'` and
+`blob_path` → NULL (the only columns that may change). `wrap_conflict` and the claim's "delete every other wrap"
+are ordinary deletes on `drop_wraps`. Files live in `<data>/drop/blobs/<o>/<v>.<rand>` and `<data>/drop/tmp/`,
+directories 0700, files 0600, on the database's filesystem so `rename` is atomic; files are unlinked after the
+batch commits. The start-up sweep (before serving) deletes `tmp/*`, blob files without a `stored` row, and marks
+a `stored` row whose file is missing as `pruned` with an error log, releasing its blob bytes (this also makes a
+database restored without `data/drop/` consistent).
 
 **0018_push.sql** (D40a):
 
@@ -2865,148 +3009,254 @@ No audit table: registrations are not evidence. No push send is stored.
 
 HTTP fixtures (`tests/http_fixtures/`, MANIFEST revision bumped, one file per route role as §19.6):
 `drop_put.json` (201; 200 exact retry; 428 missing and malformed `If-Match`; 409 `version_conflict` with
-`current`; 409 `stale_epoch`; 409 `bad_wxk_version`; 403 `not_eligible` for a `drop:` device and for another
-space; 401 `bad_signature`; 400 bad frame, short blob, wrong hash; 410 tombstoned id; 413 head and declared
-length; 429 `quota_exceeded`; 503 `overloaded`), with the frame given as hex; `drop_list.json` (positions,
-`direction`, wrap filtering for a device and a W session, `next`); `drop_descriptors.json`;
-`drop_descriptor_get.json` (with `ETag`); `drop_wraps_get.json`; `drop_blob_get.json` (headers, 410 pruned);
+`current`; 409 `stale_epoch`; 409 `bad_wxk_version`; 403 `not_eligible` for a `drop:` device, for another
+space and for a claimed object; 401 `bad_signature`; 400 bad frame, missing `Content-Length`, a `Content-Length`
+that does not match the frame, short blob, wrong hash, a non-ORD2 blob header, a descriptor or `meta` over its
+cap, a foreign `wxk` target or `recipients` id, a document with an expiry, an `inbox` document; 410 tombstoned
+id, and a tombstoned id resent as an exact retry; 410 an expired `expires_ms`; 413 head and declared length; 429
+`quota_exceeded`; 503 `overloaded`), with the frame given as hex; `drop_list.json` (positions, `direction`, wrap
+filtering for a device and a W session, an unclaimed inbox listed for a device, `claimed_by` in every entry,
+`next`, the byte cut); `drop_descriptors.json` (the byte-cut page); `drop_descriptor_get.json` (with `ETag`; 404
+for an absent version); `drop_wraps_get.json`; `drop_blob_get.json` (headers, 403 unclaimed inbox, 410 pruned);
 `drop_wraps_put.json`; `drop_claim.json` (won, idempotent, lost with `claimed_by`, not inbox);
-`host_poll.json` (the `drop` notice); `push_register.json` (200, idempotent refresh, 409
-`registration_conflict`, 400 env/topic/token, 403 `not_eligible`, 404 when disabled); `push_unregister.json`;
-`push_send.json` (200 `accepted`, skipped non-member, 409 `stale_epoch`, 400 oversized outer, 503 queue full);
-`apns_request.json` (the exact outbound request for a fixed outer, key id, team id and `iat`, with the JWT's
-signing input; the signature itself is not fixed because ES256 is randomized).
+`drop_retire.json` (200, idempotent, 403 for a file); `host_poll.json` (the `drop` notice);
+`push_register.json` (200, idempotent refresh, 409 `registration_conflict` for another body and for another
+device's id, 400 env/topic/token and an unconfigured env, 403 `not_eligible` and a `drop:` device, 404 when
+disabled); `push_unregister.json`; `push_send.json` (200 `accepted`, skipped non-member, 409 `stale_epoch`, 400
+oversized outer, 503 queue full); `apns_request.json` (the exact outbound request for a fixed outer, key id,
+team id and `iat`, for each environment's mapping, with the JWT's signing input; the signature itself is not fixed because
+ES256 is randomized).
 
-Vectors (`tests/vectors_v2.json`, relay-owned sections): `drop.upload_frame` (encodings, a head at the cap, a blob
-one byte short and long); `drop.relay_put` (a chain of PUT steps against one state: create with `If-Match: 0`,
-the next version, a stale writer, a fork attempt with another `parent_hash`, a file's version 2, an exact retry
-after the head moved, a `wk` wrap at an old epoch); `push.apns_envelope` (outer → APNs body bytes, the 3,072-byte
-edge giving 3,175 bytes). The existing `drop` and `push` sections (descriptors, claims, chains, NSE cases) are
-unchanged and are what the phone and host already run.
+Beyond fixtures, D39a1 adds the **real-socket** early-answer test and the **Caddy (HTTP/2)** end-to-end test of
+P3-D39 item 2 (an early 409 and an early 200 with an unread 26 MiB body reach the client intact).
+
+Vectors (`tests/vectors_v2.json`, relay-owned sections): `drop.upload_frame` (encodings, big-endian `head_len`,
+a head at the cap, a blob one byte short and long); `drop.relay_put` (a chain of PUT steps against one state:
+create with `If-Match: 0`, the next version, a stale writer, a fork attempt with another `parent_hash`, a
+file's version 2, an exact retry after the head moved, a `wk` wrap at an old epoch and the same-`DEK` rewrap
+that follows, "tombstoned then retry", "inbox document refused"); `push.apns_envelope` (outer → APNs body bytes,
+the 3,072-byte edge giving 3,175 bytes). The existing `drop` and `push` sections (descriptors, claims, chains,
+NSE cases) are unchanged and are what the phone and host already run.
 
 ### 14.7 Secret handling for the APNs key (owner decision)
 
-- **Creation.** orch-f1 creates a **new** APNs auth key on the owner's team (§14.9 Q-F8 on the API), restricted
-  to the orch topic if Apple offers it, valid for sandbox and production (D48: Xcode builds use sandbox,
-  TestFlight production, even against the dev relay). It reports the **key id** and the **team id** (not secret)
-  to orch-d6. The `.p8` is downloadable once.
-- **Transfer.** The owner moves the `.p8` from the download straight to the VPS as root (`scp` to a root-only
-  path, then `install`), and deletes the laptop copy or stores it in the owner's password manager. It never
-  enters a repository, an issue, a chat, an agent transcript or a shell history line; agents never `cat`, `less`,
-  `base64` or upload it, and never ask for its contents.
-- **Placement.** `/etc/orch/credentials/apns.p8` and `/etc/orch/credentials/push-token.key` (32 bytes from
-  `/dev/urandom`, made on the VPS), directory `root:root 0700`, files `root:root 0600`. The public unit gets a
-  drop-in (as dev-deploy-plan §4.3's `local-env.conf`, never written by `provision.sh`):
-  `LoadCredential=apns.p8:/etc/orch/credentials/apns.p8` and
-  `LoadCredential=push-token.key:/etc/orch/credentials/push-token.key`. systemd exposes them read-only to that
-  service alone under `$CREDENTIALS_DIRECTORY` (Ubuntu 24.04 ships systemd 255), unreadable by other units and
-  by the `orch-relay` user's other processes. The relay reads exactly those two files at start-up; outside systemd
-  (development), `ORCH_RELAY_APNS_KEY_FILE` and `ORCH_RELAY_PUSH_TOKEN_KEY_FILE` name the files, and the relay
-  refuses one that is group- or world-accessible or owned by another uid. This replaces dev-deploy-plan R8's
-  `/srv/orch-relay/apns/` (0600 vs 0640 is moot) and `provision.sh`'s `VAPID_*` lines.
-- **Configuration (not secret)** in `/etc/orch/relay.local.env`: `ORCH_RELAY_APNS_KEY_ID`,
-  `ORCH_RELAY_APNS_TEAM_ID`, `ORCH_RELAY_APNS_TOPIC=io.severin.orch`, `ORCH_RELAY_APNS_ENVS=sandbox,production`
-  (the gateways this instance may use; a registration for another `env` is 400 `malformed`). The internal instance
-  gets no push configuration (its routes answer 404) unless orch-d6 decides otherwise.
-- **Never in the database, logs or errors.** The key is parsed once into a `cryptography` private-key object;
-  load errors are reported as `apns key unreadable` without path contents; JWTs are never logged; a test
-  captures logs through a full send and greps for the key's, JWT's and token's bytes.
-- **Per environment.** One key serves both gateways. If Apple's key is environment-restricted, configure
-  `ORCH_RELAY_APNS_KEY_ID_SANDBOX`/`_PRODUCTION` with credentials `apns-sandbox.p8`/`apns-production.p8`; the
-  relay picks per registration `env`. Production (D48 move to `*.orch.severin.io`) gets its own placement on the
-  same VPS layout and fresh registrations (production data starts empty).
-- **Rotation.** Create the new key, place it as `apns.p8.new`, switch the drop-in and `ORCH_RELAY_APNS_KEY_ID`,
-  restart the unit (queued sends are lost: best effort), confirm a test push, then revoke the old key in the
-  Apple account and delete its file. Compromise: revoke first (pushes stop until the new key is in place).
-  `push-token.key` is never rotated in place: rotating it means deleting every registration (apps re-register).
+**The key that exists (owner's note via orch-d6, 15 Oct).** The owner created an APNs auth key on 8 Oct: Key ID
+`TD27F9Z9V7`, **team-scoped** (all topics), valid for **sandbox and production in one key** (an older-style
+key). It is already on the VPS at `/srv/orch-relay/apns/AuthKey_TD27F9Z9V7.p8`, owner `orch-relay:orch-relay`,
+mode 0600. Only the Key ID and that path convention may appear in documents; no agent reads, prints, copies or
+references the file's contents, on the VPS or on the laptop. *Taken from the owner's note, not verified here*:
+that this one key serves both gateways and is team-scoped. D40b's first sandbox send in tests/dev re-verifies it
+once against Apple's token-auth answer (a 403 `InvalidProviderToken` or `TopicDisallowed` would contradict it).
+
+**Configuration is a per-environment mapping** `env → (key id, key file or credential)`, so it works with:
+- **one key for both gateways** (the default today): `sandbox` and `production` both map to `TD27F9Z9V7` and the
+  same file;
+- **two environment-specific keys** later: orch-f1 notes that **new** APNs keys are created for one environment
+  each and may be topic-specific, so a replacement or a production deployment may map each `env` to its own key.
+
+The relay signs a send with the key mapped to the registration's `env` and keeps **one JWT cache per (key,
+environment)**. The topic is `io.severin.orch`.
+
+**Open facts for any new key (owner question 2).** The App Store Connect API has no resource for APNs auth keys
+(it covers bundle IDs, certificates, devices and profiles); keys are made by hand under Certificates,
+Identifiers & Profiles → Keys, and the `.p8` downloads **once**. Apple has historically limited a team to **two**
+APNs keys, so a new key might mean revoking one the owner's other apps use. These are unverified (no network
+here); the owner checks the portal before planning a new key. Creating a key is a **human step** by the owner
+(or the Apple team's admin); agents receive only key ids and the team id (not secret).
+
+- **Which instance holds it.** The two relay instances run as separate users (`orch-relay` for the public
+  instance, `orch-relay-int` for the internal one; Opus L4 makes this an invariant). Only the **public**
+  instance sends push and reads the key; the internal instance gets no push configuration, so its push routes
+  answer 404 (P3-D40 item 9). The runbook checks that `sudo -u orch-relay-int cat
+  /srv/orch-relay/apns/AuthKey_TD27F9Z9V7.p8` fails (permission denied; the check never prints the file).
+- **Default credential handling: keep the existing file.** The relay reads the mapped file at start-up and
+  refuses one that is group- or world-accessible or owned by another uid than the service user. The token
+  secret `push-token.key` (32 bytes from `/dev/urandom`, made on the VPS by root, never copied off it) sits
+  beside it with the same owner and mode. This settles dev-deploy-plan R8's 0600 vs 0640 question: 0600, owned
+  by `orch-relay`; `provision.sh`'s root-owned 0640 comment and its `VAPID_*` lines go (D40c).
+- **Optional at deploy time: `systemd-creds` (`LoadCredentialEncrypted=`).** Exact steps, as root on the VPS
+  (Ubuntu 26.04, systemd 259, dev-deploy-plan U9), for the key and likewise for `push-token`:
+  1. `install -d -m 0700 -o root -g root /etc/credstore.encrypted`;
+  2. `systemd-creds encrypt --name=apns-TD27F9Z9V7 /srv/orch-relay/apns/AuthKey_TD27F9Z9V7.p8
+     /etc/credstore.encrypted/apns-TD27F9Z9V7` (a future key can instead be piped over ssh into
+     `systemd-creds encrypt --name=<name> - <out>` so its plaintext never lands on the VPS disk);
+  3. a drop-in for the public unit (as dev-deploy-plan §4.3's `local-env.conf`, never written by `provision.sh`)
+     with `LoadCredentialEncrypted=apns-TD27F9Z9V7` and `LoadCredentialEncrypted=push-token`, and the mapping
+     pointing at `$CREDENTIALS_DIRECTORY/apns-TD27F9Z9V7`;
+  4. restart, confirm a sandbox test push, then `shred -u` the plaintext files.
+  **Honest bound:** without a TPM, `systemd-creds` encrypts with the host key in
+  `/var/lib/systemd/credential.secret`, so this protects against copies of `/etc`, backups and provider snapshots
+  that lack that file, **not** against root on the host. The plain 0600 file protects against other users only.
+- **Configuration (not secret)** in `/etc/orch/relay.local.env`: `ORCH_RELAY_APNS_TEAM_ID`,
+  `ORCH_RELAY_APNS_TOPIC=io.severin.orch`, and per environment `ORCH_RELAY_APNS_SANDBOX_KEY_ID`,
+  `ORCH_RELAY_APNS_SANDBOX_KEY_FILE`, `ORCH_RELAY_APNS_PRODUCTION_KEY_ID`, `ORCH_RELAY_APNS_PRODUCTION_KEY_FILE`
+  (today both ids `TD27F9Z9V7` and both files the one path), plus `ORCH_RELAY_PUSH_TOKEN_KEY_FILE`. An
+  environment is enabled when both its key id and its file are set (P3-D40 item 9).
+- **Never in the database, logs or errors.** Each key is parsed once into a `cryptography` private-key object;
+  load errors are reported as `apns key unreadable (<env>)` without path contents; JWTs are never logged; a test
+  captures logs through a full send and greps for the test key's, JWTs' and token's bytes. The key is never
+  committed, pasted into an issue, chat or transcript, or uploaded.
+- **Production deployment** (D48 move to `*.orch.severin.io`) gets its own placement on the same layout and
+  fresh registrations (production data starts empty).
+- **Rotation.** The owner creates the new key (one environment each, per orch-f1), places it beside the old one,
+  switches that environment's mapping, restarts the unit (queued sends are lost: best effort), confirms a test
+  push, then revokes the old key in the portal (only once no environment maps to it) and deletes its file.
+  Compromise: revoke first (pushes stop until the new key is in place). `push-token.key` is never rotated in
+  place: rotating it means deleting every registration (apps re-register).
 
 ### 14.8 Out of scope (public launch hardening and P6)
 
-Personal and shared spaces and `SK` grants; `drop:` scoped agents; leases; public and upload links; delete or
-recall; byte ranges and resumable uploads; cross-relay addressing; a durable push outbox and delivery receipts;
-multiple instances sharing APNs connections; an HSM or KMS for the APNs key; hot key reload; per-account Drop
-quota overrides (as P3-D36's workspaces override); malware or content scanning (impossible on ciphertext);
-abuse reporting and takedown; metrics and alerting on APNs failures; Caddy bandwidth limits for uploads (§10
-checklist 7 grows a Drop line before a public deploy).
+Cross-workspace Drop addressing (ws→ws mailboxes, foreign `wxk` and inbox claims, P6 #20); personal and shared
+spaces and `SK` grants; `drop:` scoped agents; leases; public and upload links; recall (beyond the host's
+document retire); byte ranges and resumable uploads; cross-relay addressing; a durable push outbox and delivery
+receipts; multiple instances sharing APNs connections; an HSM or KMS for the APNs key; hot key reload;
+per-account Drop quota overrides (as P3-D36's workspaces override); malware or content scanning (impossible on
+ciphertext); abuse reporting and takedown; metrics and alerting on APNs failures; localized generic push text
+(English only in P4, owner question 5); padding of §9's ciphertext (R-D6); Caddy bandwidth limits for uploads
+(§10 checklist 7 grows a Drop line before a public deploy).
+
+**Not out of scope: the Caddy body cap (Opus H2).** The dev deploy's Caddyfile (dev-kit PR #27,
+dev-deploy-plan P5 and §4.2) sets `request_body max_size 8MB`, which Caddy reads as **8,000,000 bytes**, on
+`relay.` and `relay-internal.`. Every Drop upload above that would get Caddy's own 413, not the relay's JSON. So
+the Caddy exception must be deployed **before D39 ships** to any deployed relay: a matcher scoped to
+`PUT /v2/drop/*/versions` with `max_size` 27,787,272 bytes (8 + 512 KiB + 26 MiB; recomputed if
+`ORCH_RELAY_DROP_MAX_BLOB_BYTES` changes), the 8 MB cap everywhere else, and Caddy read and idle timeouts above
+the slowest upload the relay allows (10 minutes, P3-D39 item 8). D40c carries it; dev-deploy-plan P5 records it.
 
 ### 14.9 Implementation breakdown and questions
 
 **PRs** (each lands its protocol text, fixtures and vectors first, then code; Opus security review each; never
-merged before its review and green CI). Efforts are implementer days:
+merged before its review and green CI). Efforts are implementer days (re-estimated after the Opus review):
 
 | PR | Content | Effort | Depends |
 |---|---|---|---|
-| D39a | Drop write, list, read: migration 0017, the frame parser and streamed upload (temp file, hash, `fsync`, rename), the check order and exact retry, the CAS, the `wk` epoch and other wrap checks, list with positions and the host `drop` notice, descriptor, descriptor-page and blob GET (streamed), quotas, reservations, buckets, slots, expiry sweeper, tombstones, blob pruning, start-up sweep, the peak-RSS bench | 4 + 1 review | this design |
-| D39b | Claims and host re-wraps: `POST claim` (§10.5 transaction, visibility rows), `PUT .../wraps` (`wrap_conflict`), the round trip with `test_round_trip_drop_claim` | 2 + 0.5 | D39a |
-| D40a | Push register and unregister: migration 0018, token sealing with the token secret, same-person move, pruning on revocation and removal, the stale sweep, the disabled-push 404, the partial-configuration refusal | 1.5 + 0.5 | this design |
-| D40b | The host send route and APNs delivery: checks, budgets, the dedup LRU, the in-memory queue, the HTTP/2 client (a new runtime dependency: `httpx[http2]`, pinned), ES256 JWT, the answer table, credential loading, the fake APNs transport, log hygiene tests, the end-to-end test | 3 + 1 | D40a |
-| D40c | Operations (infra session, outside this repo's code): the unit drop-ins, `provision.sh` without VAPID, the runbook for key placement and rotation, dev-deploy-plan R8 | 0.5 | D40b |
+| D39a1 | Drop write and read, storage: migration 0017, the dedicated async endpoint and file limiter, the frame parser and streamed upload (temp file, hash, `fsync`, unique rename outside the lock), the check order, exact retry, CAS, wrap and recipients checks, the early-answer drain, list with positions and byte cuts, the host `drop` notice, descriptor, descriptor-page and blob GET (streamed), read concurrency bound, slots and minimum rates, the start-up sweep, the real-socket and Caddy early-answer tests; the explicit `PLANNED` route list in `tests/test_http_fixtures.py` (Opus L13), emptied as routes land | 3.5–4 + 0.75 review | this design |
+| D39a2 | Drop limits and lifecycle: blob and head quotas, document count, reservations, buckets, the expiry, tombstone and pruning sweepers (batched), retire, the `rotation_required` refusal if the owner adopts it, the peak-RSS bench (uploads plus descriptor pages) | 2.5–3 + 0.75 | D39a1 |
+| D39b | Claims and host re-wraps: `POST claim` (§10.5 transaction), `PUT .../wraps` (`wrap_conflict`), the round trip with `test_round_trip_drop_claim` | 2 + 0.5 | D39a1 |
+| D40a | Push register and unregister: migration 0018, token sealing with the token secret, device-bound ids, same-person move, pruning on revocation and removal, the stale sweep, the disabled-push 404, the partial-configuration refusal | 1.5 + 0.5 | this design |
+| D40b | The host send route and APNs delivery: checks, budgets, the dedup LRU, the in-memory queue and its per-account cap, the HTTP/2 client (a new runtime dependency: `httpx[http2]`, pinned), ES256 JWT per environment key, the answer table with the 403 backoff, credential loading, the fake APNs transport, log hygiene tests, the end-to-end test | 3.5–4 + 1 | D40a |
+| D40c | Operations (infra session, outside this repo's code): the Caddy body-size exception and timeouts for the Drop upload path (§14.8; deployed before D39 ships), the push configuration on the public unit only (the existing key file, optionally `LoadCredentialEncrypted`), the separate-users credential check, `provision.sh` without VAPID and its 0640 comment, the runbook for key placement and rotation and for `data/drop/` in backups and resets, dev-deploy-plan R8 and P5 | ~1 | D40b (the Caddy part before any D39 deploy) |
 
-The **smallest end-to-end slice** is D39a + D40a + D40b (~11 days with reviews): a Python harness with a device
-(suite 2, the ref client) uploading a file to its workspace, the host stub seeing the `drop` notice, listing and
-downloading it, uploading a reply, and sending `drop.new` through the fake APNs transport, whose captured body
-the ref NSE logic (`push` vectors' receiver) opens and verifies. D39b follows before the phone's inbox demo runs
-against the real relay.
+The **smallest end-to-end slice** is D39a1 + D39a2 + D40a + D40b + D40c (**~14–15 days** with reviews, up from
+~11): a Python harness with a device (suite 2, the ref client) uploading a file to its workspace, the host stub
+seeing the `drop` notice, listing and downloading it, uploading a reply, and sending `drop.new` through the fake
+APNs transport, whose captured body the ref NSE logic (`push` vectors' receiver) opens and verifies. D39b
+follows before the phone's inbox demo runs against the real relay.
+
+**Questions for the owner (open; the owner has not answered; recommended defaults in italics, used by D39/D40
+unless the owner decides otherwise):**
+
+1. Cross-workspace Drop addressing (`wxk` to other workspaces, foreign inbox claims; Opus M1): in P4 or later?
+   *Defer to P6*: `wxk` targets and workspace ids in `recipients` must equal the object's own workspace. If
+   wanted in P4: at most 4 foreign targets per object, a per-source-workspace daily cap, and list access only for
+   workspaces with a wrap.
+2. APNs key facts (§14.7): the existing key `TD27F9Z9V7` is, per the owner's note, team-scoped and valid for
+   both gateways; *use it for both environments now and re-verify once with a sandbox send in D40b*. For any
+   **new** key: the possible two-key team limit (which could force revoking a key the owner's other apps use)
+   and per-environment, topic-specific keys. *Confirm in the portal before planning a new key*; the owner (or
+   the team admin) creates it by hand.
+3. Document expiry and lifecycle (Opus M5): *P4 documents carry `expires_ms: null` only*, with the host's
+   retire route as the way out of the per-document (1 024 versions) and per-workspace (256 documents) caps, so
+   no workspace reaches a permanent 429. Alternative: a version-cap policy instead of retire.
+4. Drop ceilings and backups: 4 GiB global and 1 GiB per account against ~10 invited accounts (R-D3), and are
+   Drop blobs in backups? *Keep the numbers; back up the database (descriptors, wraps); exclude `data/drop/`
+   by default, stated in the runbook* (P3-D39 item 12).
+5. Generic push text "orch" / "New activity in orch": *English only for P4* (a `loc-key` later is cosmetic).
+6. Refuse Drop uploads while a revocation's `rotation_due` is open (Opus M6)? *Refuse with 409
+   `rotation_required`, because it is cheap* (one indexed lookup on the existing table), accepting that uploads
+   wait for the host's rotation; if the owner declines, R-D7 stays documented.
 
 **Questions for orch-52 (host side), with recommended answers:**
 
-- **Q-H1.** Add `drop` to the host poll's exact `notices` set (the newest Drop change position visible to the
-  workspace, 0 if none)? *Recommend yes*; the host lists `after` its durable position.
+- **Q-H1.** Add `drop` to the host poll's exact `notices` set (the newest Drop change position of the workspace,
+  0 if none)? *Recommend yes*; the host lists `after` its durable position. **Rollout order (Opus L12):**
+  §19.6 defines `notices` as an exact key set, so hosts must accept the `drop` key **before** the relay ships
+  it; D39a1 emits it only once orch-52 confirms a host release that tolerates it. The device visibility filter
+  applies on top.
 - **Q-H2.** Push sending: the host targets explicit devices, persists the outer before sending, resends identical
-  bytes on a lost response, never seals under an old epoch (409 `stale_epoch` → refetch), and never sends `join`
-  (the phone does not show it, gap 13). *Recommend* `question` and `question.closed` at `high` with `ttl_s`
-  86,400; `ticket.update` at `normal` with 3,600; `drop.new` at `high` with 86,400.
+  bytes on a lost response, never seals under an old epoch (409 `stale_epoch` → refetch, reseal, which gives a
+  new `c` and so a new push: expected), and never sends `join` (the phone does not show it, gap 13). After a
+  host state restore the push planner applies the 11A.4 start fence (events before `meta.start_ms` without a push
+  row are never pushed; pushes older than their `ttl_s` are deleted unsent), because the relay's dedup memory
+  does not survive a restart and the NSE shows replays as generic text (orch-52 item 6).
+  *Recommend* `question` and `question.closed` at `high` with `ttl_s` 86,400; `ticket.update` at `normal` with
+  3,600; `drop.new` at `high` with 86,400.
 - **Q-H3.** `ts_ms` per `(ws, id)` strictly increasing even within one millisecond (gap 17): *recommend*
   `max(now, last + 1)` as FakeHost does.
 - **Q-H4.** Restricted tickets: the host filters targets by visibility, because the label is readable by every
-  `K_push` holder it reaches. *Recommend* making this a host MUST now, before P8.
+  `K_push` holder it reaches, and addresses Drop objects about them with `device` wraps only (P3-D39 item 4).
+  The relay cannot tell and enforces nothing here. *Recommend* making this a host MUST now, before P8. orch-52
+  agrees and adds the seal gate (seal a `wk` wrap or a push only at the committed epoch with the rotation gate
+  down) and label padding (R-D6).
 - **Q-H5.** Host Drop writes: a `PUT` with `author_kind: "workspace"`, W(g)-fenced like every write; a
-  `drop_rewrap` persists its wrap before the `PUT .../wraps` (409 `wrap_conflict` otherwise). *Recommend yes.*
-- **Q-H6.** Handling 429 `quota_exceeded` on Drop (per device, workspace, account): permanent until expiry; the
-  host shows it, never retries unchanged in a loop (as the P3-D34 permanent quotas).
+  `drop_rewrap` persists its wrap before the `PUT .../wraps` (409 `wrap_conflict` otherwise); documents are
+  retired, never expired. *Recommend yes.* orch-52 agrees and persists the whole `ODU2` frame before the first
+  `PUT`; a `wrap_conflict` after lost host state is resolved with the stored wrap and `dek_commit` in the 409
+  body (P3-D39 item 9). The relay lets a W author write document versions; orch-52 restricts its host to
+  `file` objects until a merge rule exists.
+- **Q-H6.** Handling 429 `quota_exceeded` on Drop (per device, workspace, account): permanent until expiry,
+  pruning or a retire; the host shows it, never retries unchanged in a loop (as the P3-D34 permanent quotas).
+  The body's `quota` field names the cap (P3-D39 item 8). 503 `overloaded`, 429 `rate_limited` and a slot
+  429 are retryable after `Retry-After`, never permanent.
 
-**Questions for orch-f1 (phone side), with recommended answers:**
+orch-52's review (15 Oct, SOUND WITH CHANGES) also lists host-side work recorded in orch-core, not here: R6's
+typed `BridgeKeys` methods (`seal_push`, `wrap_dek_wk`, `open_wrap_wk`), the H13a push planner and outbox, the
+H13b Drop client, the H13c core carriage, and about 11 core days for the host end of the slice.
 
-- **Q-F1.** Move every Drop route under `/v2` (the write and claim too). *Already agreed.*
+**Questions for orch-f1 (phone side).** orch-f1 agreed Q-F1 to Q-F7 and Q-F9 (15 Oct) and supplied Q-F8;
+its blocker R1 (inbox visibility) and its R3–R6 are folded in above; its blocker R2 (new keys are one
+environment each) is met by the per-environment key mapping, which today maps both environments to the owner's
+existing both-gateway key (orch-d6 correction, 15 Oct).
+
+- **Q-F1.** Move every Drop route under `/v2` (the write and claim too). *Agreed.*
 - **Q-F2.** Replace the JSON upload body with the `ODU2` frame (P3-D39 item 2), keeping the stored-bytes,
-  resend-unchanged discipline. *Recommend yes*; this is the main FakeRelay conflict.
+  resend-unchanged discipline, with an exact `Content-Length` and a descriptor read-back (404 = slot empty)
+  before any resend (Opus M3). *Agreed*; uploads run in the app, the share extension only stages.
 - **Q-F3.** `If-Match: 0` creates version 1 (`current = 0` for an absent object): adopted, with a protocol
   clarification in §19.9 rather than a §10.6 change. The relay also emits `ETag: "<v>"` and accepts `If-Match`
-  as the bare decimal or that quoted form.
-- **Q-F4.** Handle 409 `stale_epoch` on a Drop `PUT` with the existing `EpochRefetchLimiter`, then reseal only
-  after a read-back shows the slot empty. *Recommend yes.*
-- **Q-F5.** Wraps are filtered per caller and the list is paged by position (`after`, `next`); the descriptor
-  page route replaces 1 024 single fetches (F4). *Recommend adopting both in the FakeRelay.*
-- **Q-F6.** Push registration: `env` only `sandbox` or `production` at a real relay; token b64u of 32..100 bytes;
-  `topic` exactly the configured bundle ID; re-register at every launch (refreshes; 60 days unrefreshed deletes);
-  404 means push is off on that relay. *Recommend yes.*
+  as the bare decimal or that quoted form. *Agreed.*
+- **Q-F4.** Handle 409 `stale_epoch` on a Drop `PUT` with the existing `EpochRefetchLimiter`, then **rewrap the
+  same `DEK`** under the new epoch and resend the same blob and descriptor in a new frame; reseal with a fresh
+  `DEK` only after `version_conflict` (Opus M6; changed from "reseal after a read-back"). *Agreed in principle;
+  the rewrap detail is new in revision 2.* A 409 `rotation_required` (owner question 6) is retried after the
+  host's rotation, through the same limiter.
+- **Q-F5.** Wraps are filtered per caller, the list is paged by position (`after`, `next`) and cut by bytes,
+  and the descriptor page route replaces 1 024 single fetches (F4); unclaimed inbox objects are listed with
+  their descriptors, only the blob waits for the claim. *Agreed.*
+- **Q-F6.** Push registration: `env` only `sandbox` or `production` (and configured) at a real relay; token b64u
+  of 32..100 bytes; `topic` exactly `io.severin.orch`; re-register at every launch (refreshes; 60 days
+  unrefreshed deletes); `registration_id` bound to the device (another device's is 409); `drop:` devices are
+  refused; 404 means push is off on that relay. *Agreed.*
 - **Q-F7.** The APNs body (P3-D40 item 5): generic `aps.alert` "orch" / "New activity in orch",
-  `mutable-content: 1`, `o` as a string, no badge, sound, thread or collapse id. Does the NSE need anything else
-  in `aps` (a `category`)? *Recommend nothing else*; the NSE sets what it shows.
-- **Q-F8.** The App Store Connect API historically cannot create APNs auth keys (they are made under
-  Certificates, Identifiers & Profiles → Keys in the developer portal). If the API cannot, the owner creates the
-  key there by hand. Either way: topic-restricted if offered, sandbox and production, and only the key id and
-  team id are reported; the `.p8` goes from the download to the VPS by the owner (§14.7).
-- **Q-F9.** Pruned old document versions answer 410 `expired` on the blob, and tombstoned ids 410 on every
-  read: the phone treats 410 as "gone", never as a fork. *Recommend yes.*
+  `mutable-content: 1`, `o` a string of at most 3,072 bytes holding exactly `{v, ws, epoch, c}`, no badge,
+  sound, thread or collapse id (the NSE replaces by entity key). *Agreed.*
+- **Q-F8.** Keys and transfer: §14.7. The owner's existing key `TD27F9Z9V7` serves both environments through
+  the per-environment mapping; orch-f1's facts (keys made by hand in the portal, new keys one environment each,
+  topic-specific) shape the mapping and any future key, and its `systemd-creds` pipe is the optional
+  deploy-time step. *Adopted with the owner's correction.*
+- **Q-F9.** Pruned old document versions answer 410 `expired` on the blob, tombstoned or retired ids 410 on
+  every read, and 410 on a `PUT` means "use a new object id": the phone treats 410 as final, never as a fork.
+  *Agreed.*
 
 **FakeRelay versus the protocol (conflicts and proposals):**
 
 | FakeRelay today | Protocol and this design | Proposal |
 |---|---|---|
 | `PUT /drop/{o}/versions`, `POST /drop/{o}/claim` without `/v2` | P3-D1: everything under `/v2` | move (agreed) |
-| JSON `{descriptor, wraps, blob: b64u}`, 36 MiB | streamed `ODU2` frame | change the packaging (Q-F2) |
-| 201 only; a lost 201 then a stale `If-Match` is 409 | exact retry is 200 before the CAS | adopt; keep the read-back reconciliation as a fallback |
-| `wk` wraps at any epoch | `wk` at the current epoch, else 409 `stale_epoch` | adopt (closes the phone's rotation race) |
+| JSON `{descriptor, wraps, blob: b64u}`, 36 MiB | streamed `ODU2` frame, exact `Content-Length` | change the packaging (Q-F2) |
+| 201 only; a lost 201 then a stale `If-Match` is 409 | exact retry is 200 before the CAS; descriptor read-back before resend | adopt; keep the read-back reconciliation |
+| `wk` wraps at any epoch | `wk` at the current epoch, else 409 `stale_epoch`; rewrap the same `DEK` | adopt (closes the race for removals) |
+| `wxk` to any workspace | `wxk` and `recipients` within the object's own workspace (P4) | adopt (owner question 1) |
+| documents may expire | documents carry no expiry; the host retires | adopt (owner question 3) |
 | all wraps returned on list and wraps GET | the caller's usable wraps only | adopt (Q-F5) |
-| no pagination on list | `after`/`next` by change position | adopt |
+| no pagination on list | `after`/`next` by change position, byte-cut pages | adopt |
 | host rewrap in process, silent replace | `PUT .../wraps`, `wrap_conflict` on other bytes | adopt |
-| global 1 024 versions / 100 MiB | per device, workspace, account and global caps | adopt the numbers in the fake's limits |
-| expired objects vanish (404) | 410 `expired` for 30 days, then 404 | adopt |
+| global 1 024 versions / 100 MiB | per device, workspace, account and global caps, separate head bytes | adopt the numbers in the fake's limits |
+| expired objects vanish (404) | 410 `expired` for 30 days, then 404; absent versions 404 | adopt |
 | no ETag | `ETag: "<v>"` on PUT and descriptor GET | adopt (informational) |
 | push routes answer 404 | §19.10 routes | implement |
 
-**Sealed formats.** No defect found in §9's or §10's sealed or signed formats; none is changed. Text-only
-amendments made with this design: §9 now points to §19.10 for delivery (the "Web Push payload" and
-"service worker" wording stays as gaps.md row 7's open protocol amendment), and §10.5/§10.6 point to §19.9 for the
-`/v2` paths and the upload packaging.
+**Sealed formats.** No defect found in §9's or §10's sealed or signed formats; none is changed (§9's missing
+padding is residual R-D6). Text-only amendments made with this design: §9 now points to §19.10 for delivery
+(the "Web Push payload" and "service worker" wording stays as gaps.md row 7's open protocol amendment), and
+§10.5/§10.6 point to §19.9 for the `/v2` paths and the upload packaging.
