@@ -198,3 +198,78 @@ def usage(path):
         return {
             (r[0], r[1]): tuple(r[2:]) for r in con.execute("SELECT * FROM drop_usage").fetchall()
         }
+
+
+def apply_op(d, op):
+    """The production side of ref/drop_relay.apply: state changes without a D39a1 route (the
+    D39a2 retire and sweeps, the D39b claim), a clock move and a new member-list epoch."""
+    kind = op["op"]
+    if kind == "clock":
+        d.clock = lambda: op["now_ms"]
+        return
+    with closing(db.connect(d.path)) as con, con:
+        if kind == "epoch":
+            seq = con.execute("SELECT coalesce(max(list_seq),0)+1 FROM member_lists").fetchone()[0]
+            con.execute("INSERT INTO member_lists VALUES (?,?,?,'{}')", (WS, seq, op["epoch"]))
+            return
+        o_id = op["object_id"]
+        con.execute("UPDATE drop_counter SET n=n+1")
+        n = con.execute("SELECT n FROM drop_counter").fetchone()[0]
+        con.execute("UPDATE drop_objects SET n=? WHERE object_id=?", (n, o_id))
+        if kind in ("retire", "expire_sweep"):
+            if kind == "retire":
+                con.execute(
+                    "UPDATE drop_objects SET tombstone_ms=?, tombstone_kind='retired' "
+                    "WHERE object_id=?",
+                    (d.clock(), o_id),
+                )
+            else:
+                con.execute(
+                    "UPDATE drop_objects SET tombstone_ms=expires_ms, tombstone_kind='expired' "
+                    "WHERE object_id=?",
+                    (o_id,),
+                )
+                con.execute("DELETE FROM drop_audience WHERE object_id=?", (o_id,))
+            con.execute("DELETE FROM drop_versions WHERE object_id=?", (o_id,))
+        elif kind == "claim":
+            con.execute(
+                "UPDATE drop_objects SET claimed_by=? WHERE object_id=?", (op["workspace_id"], o_id)
+            )
+        elif kind == "prune":
+            con.execute(
+                "DELETE FROM drop_wraps WHERE object_id=? AND version=(SELECT current FROM "
+                "drop_objects WHERE object_id=?)",
+                (o_id, o_id),
+            )
+            con.execute(
+                "UPDATE drop_versions SET blob='pruned', blob_path=NULL WHERE object_id=? AND "
+                "version=(SELECT current FROM drop_objects WHERE object_id=?)",
+                (o_id, o_id),
+            )
+        else:
+            raise ValueError(kind)
+
+
+def token_for(principal):
+    return TOKENS[principal["id"]]
+
+
+def send_step(client, step):
+    """One `put` step of a `drop` vector over HTTP."""
+    if "body_recipe" in step:
+        r = step["body_recipe"]
+        body = (
+            bytes.fromhex(r["prefix_hex"])
+            + bytes([r["byte"]]) * r["count"]
+            + bytes.fromhex(r["suffix_hex"])
+        )
+    else:
+        body = bytes.fromhex(step["body_hex"])
+    h = {"Authorization": "Bearer " + token_for(step["principal"])}
+    if step["if_match"] is not None:
+        h["If-Match"] = step["if_match"]
+    if step.get("holder") is not None:
+        h["Orch-Holder"] = step["holder"]
+    if "content_length" in step:
+        h["Content-Length"] = str(step["content_length"])
+    return client.put(f"/v2/drop/{step['object_id']}/versions", content=body, headers=h)
