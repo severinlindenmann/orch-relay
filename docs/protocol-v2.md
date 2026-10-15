@@ -3486,8 +3486,8 @@ version absent → 404.
 with `look` of the object's workspace and `recipients` does not exclude it. An unclaimed `inbox` object is
 visible only to the W session and to its author device (amendment A2; this replaces A1's rule that every member
 device lists it): its author lists it under `sending` and reads its descriptor and its own `device` wrap, but
-its blob waits for the claim (403); every other member device gets no list entry and 403 on reads and on a
-`PUT`, live or tombstoned. Once claimed, it is visible to every `look` member (the claim raises `n`). An expired or
+its own descriptor read-back works, and only its blob waits for the claim (403); every other member device gets no list entry and 403 on reads and on a
+`PUT`, live or tombstoned, with the same body as every other 403 (`{"error": "not_eligible"}`, no extra key). Once claimed, it is visible to every `look` member (the claim raises `n`). An expired or
 retired object answers 410 `expired` for 30 days to callers that still see it (its tombstone; a `PUT` of the id
 too), then 404. An expired device-only file loses its audience rows at the expiry sweep: before the sweep its
 audience (author included) gets 410, after it every device gets 403 on reads and `PUT`, and only the W session
@@ -3586,12 +3586,14 @@ only until the tombstone is deleted (P3 design §14.2 P3-D39 item 13, §14.9 Q-H
 that the relay changes only when its Drop dataset is restored or replaced) and `until` (the walk's
 high-watermark position). A request without `until` starts a walk: the relay returns its current newest change
 position as `until` and the entries with `after < n ≤ until`; the following pages pass that `until` (and the
-`generation`) and are cut at it; `next` null ends the walk, and the client then stores `(generation, until)` and
+`generation`) and are cut at it; every page of the walk, the last one (`next` null) included, echoes
+`generation` and `until`, and a non-null `next` is above the request's `after` and at most `until`; `next` null ends the walk, and the client then stores `(generation, until)` and
 starts its next walk with `after = until`. An object that changes during a walk gets an `n` above `until` and is
 listed by the next walk, so a walk ends and never lists an object twice; a client concludes that an object is
 gone only if it is absent from a full walk and from the follow-up walk from its `until`. A request whose
 `generation` differs from the relay's, or whose `after` or `until` is above the relay's current position, is
-409 `generation_changed`: relist from the beginning (no `after`, `until` or `generation`) and replace the whole
+409 `generation_changed`, exactly `{"error": "generation_changed"}` with no other key (the wraps and claim answers
+gain no new keys): relist from the beginning (no `after`, `until` or `generation`) and replace the whole
 set. `generation` is required with `until`, and with `after` for `direction: "all"`; `after` > `until` is 400.
 `direction: "all"` lists both authors' objects and is for W sessions only (a device gets 403 `not_eligible`).
 The relay regenerates `generation` when its Drop dataset was restored or replaced, detected at start before
