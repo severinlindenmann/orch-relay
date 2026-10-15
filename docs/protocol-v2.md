@@ -3636,7 +3636,7 @@ not transient, and its body names the cap: `quota` is one of `drop_ws`, `drop_he
 of the workspace counters: 256 MiB blob bytes, 8 MiB head bytes, 1 024 live versions, 64 documents; a
 decide-only device's uploads also spend the decide-class budget above (amendment A2). Buckets (one
 token per started MiB): upload per device 64 / 32 per min, per workspace 256 / 128 per min; download per device
-256 / 256 per min, per person twice that (`ORCH_RELAY_THROTTLE_DROP_UP`, `ORCH_RELAY_THROTTLE_DROP_DOWN`).
+256 / 256 per min, per person 512 / 512 per min (`ORCH_RELAY_THROTTLE_DROP_UP`, `..._DROP_UP_WORKSPACE`, `..._DROP_DOWN`, `..._DROP_DOWN_PERSON`, each "burst/per-minute"). A device's workspace bucket is charged as soon as the device is eligible to write there (step 5), so every later refusal and the exact retry spend it; it is never refunded. With Drop on, the relay refuses to start when a burst is below the tokens of a maximal body; an upload whose cost exceeds a bucket's burst is 413 `too_large`.
 
 **Deployment.** A proxy in front of the relay must allow request bodies up to the whole-body maximum on the
 upload path only (slightly above the relay's maximum, so the relay answers its own 413), with timeouts above the

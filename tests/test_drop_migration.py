@@ -148,3 +148,17 @@ def test_no_code_writes_drop_objects_by_position_or_replace():
             assert "OR REPLACE" not in statement and "OR IGNORE" not in statement, path
             assert re.match(r"INSERT INTO drop_objects \(", statement), (path, statement)
         assert not re.search(r"REPLACE INTO drop_objects", text), path
+
+
+def test_object_id_is_immutable_so_update_or_replace_cannot_reset_claimed_ms(con):
+    con.execute(OBJECT, ("a" * 32,))
+    con.execute("UPDATE drop_objects SET claimed_by='w', claimed_ms=99")
+    con.execute(OBJECT, ("b" * 32,))
+    for verb in ("UPDATE", "UPDATE OR REPLACE"):
+        with pytest.raises(sqlite3.IntegrityError, match="object_id is immutable"):
+            con.execute(
+                f"{verb} drop_objects SET object_id=? WHERE object_id=?", ("a" * 32, "b" * 32)
+            )
+    assert con.execute(
+        "SELECT claimed_ms FROM drop_objects WHERE object_id=?", ("a" * 32,)
+    ).fetchone() == (99,)

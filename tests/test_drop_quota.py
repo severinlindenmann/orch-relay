@@ -8,8 +8,9 @@ import pytest
 from directory_support import DEVICE, NOW, WS
 from drop_support import DAY, LAPTOP, TOKENS, descriptor, frame, object_id, put, rows, setup, upload
 from fastapi.testclient import TestClient
-from test_drop_transfer import Harness
+from test_drop_transfer import Harness, Peer, split
 from test_drop_transfer import put as aput
+from test_drop_transfer import scope as tscope
 
 from orch_relay import db
 from orch_relay import drop_quota as Q
@@ -581,7 +582,7 @@ def test_bucket_defaults_and_environment_overrides():
     assert 5 * 5 + 2 <= 64
 
 
-def test_a_refused_put_still_spends_the_read_class_token_once(client):
+def test_a_put_adds_a_session_bucket_entry(client):
     d = client.app.state.directory
     s, _w, b = upload("a")
     before = d.buckets.table
@@ -602,3 +603,254 @@ def test_the_drop_notice_is_absent_with_drop_off(monkeypatch):
     assert Bridge(D()).drop_notice is True
     monkeypatch.setenv("ORCH_RELAY_DROP_NOTICE", "0")
     assert Bridge(D()).drop_notice is False
+
+
+# --- Opus review round 2 ----------------------------------------------------------------------------
+
+
+def revive(client, now):
+    """Move the clock and keep sessions, certificates and the holder lease alive."""
+    d = client.app.state.directory
+    d.clock = lambda: now
+    with closing(db.connect(path_of(client))) as con, con:
+        con.execute("UPDATE sessions SET expires_ms=?", (now + 900_000,))
+        con.execute("UPDATE devices SET expires_ms=?", (now + 30 * DAY,))
+        con.execute("UPDATE holders SET lease_until_ms=?", (now + 40_000,))
+
+
+def ws_bucket(client, ident=WS):
+    return client.app.state.directory.buckets.table.get(("drop-up-workspace", ident))
+
+
+def test_r1_every_eligible_request_spends_the_workspace_bucket(client):
+    """Exact retries, step 6-9 refusals and the creations 429 cost the device's workspace bucket
+    as soon as step 5 passed; nothing is refunded (R-D12's per-workspace bound)."""
+    s, _w, b = upload("a")
+    assert put(client, s, b).status_code == 201
+    exhaust(client, **{"drop-up-workspace": (4, 1), "drop-up": (1000, 1000)})
+    client.app.state.directory.buckets.clear()
+    assert put(client, s, b).status_code == 200  # the exact retry: 1
+    c, _w, cb = upload("c")
+    assert put(client, c, cb, if_match="3").status_code == 409  # step 8 refusal: 2
+    client.app.state.drop.quotas.dev_creations = 1  # the device already created "a" today
+    assert put(client, c, cb).status_code == 429  # the creations 429 (step 9): 3
+    assert put(client, s, b).status_code == 200  # 4
+    r = put(client, s, b)  # the bucket is empty: even a retry that stores nothing is refused
+    assert (r.status_code, r.json()) == (429, {"error": "rate_limited"})
+    other, _w, ob = upload("o", author=LAPTOP)  # and so is another member's upload
+    assert put(client, other, ob, author=LAPTOP).status_code == 429
+
+
+def test_r1_an_ineligible_device_cannot_drain_a_workspace_bucket(client):
+    from drop_support import WS_B
+
+    exhaust(client, **{"drop-up-workspace": (4, 1)})
+    foreign, _w, body = upload("f", space=WS_B)
+    for _ in range(6):
+        assert put(client, foreign, body).status_code == 403  # no write scope in WS_B
+    assert ws_bucket(client, WS_B) is None and ws_bucket(client) is None
+
+
+def test_r2_the_reservation_is_released_when_the_commit_returns(tmp_path):
+    """A's commit landed but its response send is slow: B fits on the committed rows alone and
+    must not get a false, non-transient quota_exceeded."""
+    h = Harness(tmp_path)
+    first, _w1, body1 = upload("a")
+    second, _w2, body2 = upload("b", author=LAPTOP)
+    h.drop.quotas.ws_blob = first["o"]["content_len"] + second["o"]["content_len"] + 10
+
+    async def go():
+        gate, reached = asyncio.Event(), asyncio.Event()
+
+        class Slow(Peer):
+            async def send(self, message):
+                if message["type"] == "http.response.start":
+                    reached.set()
+                    await gate.wait()
+                await super().send(message)
+
+        peer = Slow(split(body1), then="end")
+        o_id = first["o"]["object_id"]
+        sc = tscope(
+            "PUT", f"/v2/drop/{o_id}/versions", {"o": o_id}, author=DEVICE, length=len(body1)
+        )
+        one = asyncio.create_task(h.drop.endpoint(sc, peer.receive, peer.send, "put"))
+        await asyncio.wait_for(reached.wait(), 10)
+        assert h.drop.reserved.view() == {}  # committed, so no longer reserved
+        b = await aput(h, body2, second, author=LAPTOP)
+        gate.set()
+        await one
+        return b
+
+    assert asyncio.run(go()).status == 201
+
+
+@pytest.mark.parametrize(
+    ("attr", "status", "who"),
+    [("dev_blob", 429, DEVICE), ("account_blob", 429, LAPTOP), ("global_blob", 503, LAPTOP)],
+)
+def test_concurrent_uploads_are_bounded_on_the_device_account_and_global_keys(h, attr, status, who):
+    """Reservations sit on every key a version charges, not only the workspace's."""
+    first, _w1, body1 = upload("a")
+    second, _w2, body2 = upload("b", author=who)
+    setattr(h.drop.quotas, attr, first["o"]["content_len"] + 10)  # room for one, not two
+
+    async def go():
+        gate, reached = asyncio.Event(), asyncio.Event()
+
+        async def hold(plan):
+            reached.set()
+            await gate.wait()
+
+        h.drop.hooks["before_commit"] = hold
+        one = asyncio.create_task(aput(h, body1, first))
+        await reached.wait()
+        refusal = await aput(h, body2, second, author=who)
+        gate.set()
+        return refusal, await one
+
+    refusal, win = asyncio.run(go())
+    assert (win.status, refusal.status) == (201, status)
+
+
+def test_a_creations_refusal_comes_before_any_blob_byte(h):
+    h.drop.quotas.dev_creations = 1
+    first, _w, body1 = upload("a")
+    assert asyncio.run(aput(h, body1, first)).status == 201
+    second, _w, body2 = upload("b")
+    head_end = 8 + int.from_bytes(body2[4:8], "big")
+    # only the head arrives, then the client stalls: the refusal must not wait for the blob
+    peer = asyncio.run(aput(h, body2, second, chunks=[body2[:head_end]], length=len(body2)))
+    assert (peer.status, peer.json) == (429, {"error": "rate_limited", "quota": "drop_creations"})
+    assert peer.read == head_end
+
+
+def test_a_device_only_audience_counts_in_the_head_need():
+    class Plan:
+        o = {"content_len": 100}  # noqa: RUF012
+        descriptor = "x" * 10
+        wrap_texts = ("y" * 5,)
+
+    Plan.devices = ()
+    base = Q.Need.of(Plan, False).head
+    Plan.devices = ("a", "b", "c")
+    assert Q.Need.of(Plan, False).head == base + 3 * Q.AUDIENCE_ROW
+
+
+def test_creations_follow_the_utc_midnight_boundary(client):
+    drop = client.app.state.drop
+    drop.quotas.dev_creations = 1
+    midnight = (NOW // DAY + 1) * DAY
+    revive(client, midnight - 1)
+    s, _w, b = upload("a", now=midnight - 1)
+    assert put(client, s, b).status_code == 201
+    s, _w, b = upload("b", now=midnight - 1)
+    assert put(client, s, b).status_code == 429  # still the old day
+    revive(client, midnight)
+    s, _w, b = upload("c", now=midnight)
+    assert put(client, s, b).status_code == 201  # 00:00:00.000 is the new day
+    days = sorted(
+        r["day"] for r in rows(path_of(client), "drop_creations") if r["scope"] == "device"
+    )
+    assert days == [midnight // DAY - 1, midnight // DAY]
+
+
+def test_creations_retry_after_and_day_come_from_the_requests_now(client):
+    drop = client.app.state.drop
+    drop.quotas.dev_creations = 1
+    midnight = (NOW // DAY + 1) * DAY
+    start = midnight - 5000
+    revive(client, start)
+    s, _w, b = upload("a", now=start)
+
+    def hook(plan):  # a rival fills the request's day, and the commit runs after midnight
+        with closing(db.connect(path_of(client))) as con, con:
+            con.execute(
+                "INSERT INTO drop_creations VALUES ('device',?,?,1)",
+                (f"{WS}:{DEVICE}", start // DAY),
+            )
+        revive(client, midnight + 1000)
+
+    drop.hooks["before_commit"] = hook
+    r = put(client, s, b)
+    assert r.status_code == 429 and r.json()["quota"] == "drop_creations"
+    assert r.headers["retry-after"] == "5"  # from the request's now, not ~86,400 from the commit's
+
+
+def test_r3_a_cost_above_the_burst_is_413_not_a_retry_after_that_never_comes(client):
+    exhaust(client, **{"drop-up": (2, 1)})
+    big = upload("big", content=b"\0" * (2 * 1024 * 1024 + 1), chunk=1 << 20)  # 3 started MiB
+    r = put(client, big[0], big[2])
+    assert (r.status_code, r.json()) == (413, {"error": "too_large"})
+    assert "retry-after" not in r.headers
+
+
+def test_r3_a_download_cost_is_clamped_to_the_burst(client):
+    s, _w, b = upload("big", content=b"\0" * (2 * 1024 * 1024 + 1), chunk=1 << 20)
+    assert put(client, s, b).status_code == 201
+    exhaust(client, **{"drop-down": (2, 1), "drop-down-person": (2, 1)})  # the blob costs 3
+    url = f"/v2/drop/{s['o']['object_id']}/versions/1/blob"
+    assert client.get(url, headers={"Authorization": "Bearer " + TOKENS[DEVICE]}).status_code == 200
+
+
+def test_r3_start_up_refuses_a_burst_below_a_maximal_body(client):
+    drop = client.app.state.drop
+    drop.check_buckets()  # the defaults hold the default 26 MiB cap
+    d = client.app.state.directory
+    for name, env in (
+        ("drop-up", "ORCH_RELAY_THROTTLE_DROP_UP"),
+        ("drop-up-workspace", "ORCH_RELAY_THROTTLE_DROP_UP_WORKSPACE"),
+        ("drop-down", "ORCH_RELAY_THROTTLE_DROP_DOWN"),
+        ("drop-down-person", "ORCH_RELAY_THROTTLE_DROP_DOWN_PERSON"),
+    ):
+        saved = d.throttles
+        d.throttles = {**saved, name: (20, 20)}  # a 26 MiB blob needs 26 tokens (27 with the frame)
+        with pytest.raises(ValueError, match=env):
+            drop.check_buckets()
+        d.throttles = saved
+    drop.max_blob = 100 * 1024 * 1024  # a larger blob cap than drop-up's 64 burst allows
+    drop.max_body = 8 + 512 * 1024 + drop.max_blob
+    with pytest.raises(ValueError, match="ORCH_RELAY_THROTTLE_DROP_UP"):
+        drop.check_buckets()
+
+
+def test_start_up_checks_the_buckets_only_with_drop_on(tmp_path, monkeypatch):
+    monkeypatch.setenv("ORCH_RELAY_THROTTLE_DROP_UP", "10/10")
+    monkeypatch.setenv("ORCH_RELAY_DROP", "0")
+    create_app(tmp_path / "off")  # off: nothing of Drop runs
+    monkeypatch.setenv("ORCH_RELAY_DROP", "1")
+    with pytest.raises(ValueError, match="ORCH_RELAY_THROTTLE_DROP_UP"):
+        create_app(tmp_path / "on")
+
+
+def test_the_global_cap_variables_are_parsed_only_with_drop_on(client):
+    from orch_relay.drop import Drop
+
+    app = client.app
+    bad = {"ORCH_RELAY_DROP_GLOBAL_BYTES": "x"}
+    Drop(
+        app.state.directory,
+        app.state.bridge,
+        app.state.data_dir,
+        env={**bad, "ORCH_RELAY_DROP": "0"},
+    )
+    with pytest.raises(ValueError):
+        Drop(
+            app.state.directory,
+            app.state.bridge,
+            app.state.data_dir,
+            env={**bad, "ORCH_RELAY_DROP": "1"},
+        )
+
+
+def test_a_download_over_one_mib_costs_two_tokens(client):
+    s, _w, b = upload("big", content=b"\0" * (1024 * 1024 + 1), chunk=1 << 20)
+    assert put(client, s, b).status_code == 201
+    exhaust(client, **{"drop-down": (3, 1)})
+    client.app.state.directory.buckets.clear()
+    url = f"/v2/drop/{s['o']['object_id']}/versions/1/blob"
+    auth = {"Authorization": "Bearer " + TOKENS[DEVICE]}
+    assert (
+        client.get(url, headers=auth).status_code == 200
+    )  # 2 of 3 tokens (a 1 MiB + 1 B blob + header)
+    assert client.get(url, headers=auth).status_code == 429  # 1 left: a floored cost would pass

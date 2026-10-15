@@ -2965,7 +2965,7 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (Â
      body, per device burst 64 and 32/min (`ORCH_RELAY_THROTTLE_DROP_UP`), per workspace burst 256 and 128/min
      (a 5-attachment, 25 MiB compose costs about 27 tokens: no 429). Download: one token per started MiB served,
      taken before the read for `content_len`, per device burst 256 and 256/min, per person twice that
-     (`ORCH_RELAY_THROTTLE_DROP_DOWN`). Metadata routes take one read-class token as today.
+     (`ORCH_RELAY_THROTTLE_DROP_DOWN`, and `..._DROP_DOWN_PERSON` for the person's: 512 and 512/min; likewise `..._DROP_UP_WORKSPACE`). Metadata routes take one read-class token as today.
    - **Rate of new objects:** at most 1 000 version-1 creations per workspace per day and 250 per device in it
      (429 `rate_limited`), which bounds tombstones to ~30 000 per workspace (~3 MB of uncharged rows; the
      60-second minimum file lifetime of item 5 stops instant-expiry churn, and expired tombstones keep no
@@ -3721,6 +3721,18 @@ unauthenticated floods.
   member; each such claim is visible ("Shared from your phone", `orch status`) and removable at once, and a
   revocation before the claim blocks it, which in practice helps only for uploads the host has not yet
   processed, since the host claims within its poll latency (orch-52 Q-H9).
+
+**D39a2 part 1, Opus review round 2 (15 Oct 2026).** A device's workspace upload bucket is charged inside step 5 as soon as
+the device is eligible to write to the workspace (not earlier: a device must not drain a workspace it may not write
+to), so steps 6 to 9 refusals, the creations 429, the exact-retry 200 and part 2's budget 429 all spend it (R-D12's
+per-workspace bound holds), never refunded; ineligible and unauthenticated requests stay cheap under their own
+throttles. The reservation is released when the commit returns, before the answer is sent. With Drop on, the relay
+refuses to start when a Drop bucket's burst is below the tokens of a maximal body (it names the env var and the
+numbers); an upload whose cost exceeds a burst anyway is 413 `too_large`, a download's cost is clamped to the burst. The
+creations 429's `Retry-After` and the charged day both come from the request's `now`. `drop_objects.object_id` is
+immutable (a trigger: `UPDATE OR REPLACE` could otherwise reset `claimed_ms`). The global-cap variables are parsed only
+with Drop on. Runbook: once 0019 is applied, rolling the code back to a pre-D39a2 build breaks the Drop `PUT` (its
+positional insert has 15 values for 16 columns) when Drop is on; with Drop off nothing breaks.
 
 **D39a2 part 1 decisions (owner, via orch-d6, 15 Oct 2026).** When several caps apply at once, the refusal names
 the author's own share first, then the workspace, the account and the global ceiling (503, no `quota` key). Admission

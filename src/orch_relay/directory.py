@@ -105,9 +105,9 @@ THROTTLES = {
     "drop-down": (256, 256),
     "drop-down-person": (512, 512),
 }
-# Buckets kept per key class (8 classes; ORCH_RELAY_THROTTLE_TABLE), evicting full buckets first.
+# Buckets kept per key class (12 classes; ORCH_RELAY_THROTTLE_TABLE), evicting full buckets first.
 # Only authenticated identities create entries (a flood of bad tokens adds none); about 470 B per
-# entry (measured), ~7.6 MB per full class, ~61 MB if every class were full.
+# entry (measured), ~7.6 MB per full class, ~91 MB if every class were full (the four Drop classes included).
 THROTTLE_TABLE = 16_384
 # P3-D35 item 4: the unauthenticated revocation-pair read per IPv6 /56 (as challenges and pairing).
 REVOCATION_READ_PARENT = 960

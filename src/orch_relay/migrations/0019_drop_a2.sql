@@ -42,3 +42,9 @@ CREATE TRIGGER drop_objects_no_replace
 BEFORE INSERT ON drop_objects
 WHEN EXISTS (SELECT 1 FROM drop_objects WHERE object_id = NEW.object_id)
 BEGIN SELECT RAISE(ABORT, 'drop_objects is never replaced'); END;
+-- object_id is the key the no-replace trigger and claimed_ms hang on: UPDATE OR REPLACE of object_id
+-- onto an existing id would delete that (claimed) row and reset its claimed_ms. No code does it.
+CREATE TRIGGER drop_objects_id_immutable
+BEFORE UPDATE OF object_id ON drop_objects
+WHEN NEW.object_id IS NOT OLD.object_id
+BEGIN SELECT RAISE(ABORT, 'drop_objects.object_id is immutable'); END;
