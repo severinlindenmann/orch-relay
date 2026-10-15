@@ -23,6 +23,7 @@ def create_app(data_dir: Path | str | None = None, instance: str | None = None) 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await run_in_threadpool(db.migrate, data / db.DB_NAME)
+        await run_in_threadpool(app.state.drop.startup_sweep)  # P3-D39, before serving
         tasks = [
             asyncio.create_task(app.state.bridge.maintenance()),
             asyncio.create_task(app.state.checkpoints.maintenance()),
@@ -49,6 +50,9 @@ def create_app(data_dir: Path | str | None = None, instance: str | None = None) 
     from .relay_info import install as install_relay_info
 
     install_relay_info(app)  # H12d (P3-D38)
+    from .drop import install as install_drop
+
+    install_drop(app)  # P3-D39 (D39a1)
 
     @app.get("/healthz")
     def healthz() -> dict:
