@@ -234,7 +234,11 @@ class Bridge:
         # P3-D39 (§14.9 Q-H1, Opus L12): `notices` is an exact key set, so the relay emits `drop`
         # only once hosts tolerate it: off unless ORCH_RELAY_DROP_NOTICE=1 (the rollout switch).
         if drop_notice is None:
-            drop_notice = os.environ.get("ORCH_RELAY_DROP_NOTICE", "0") == "1"
+            # Tied to the Drop switch (D39a2 owner decision): Drop off means the notice is absent.
+            drop_notice = (
+                os.environ.get("ORCH_RELAY_DROP_NOTICE", "0") == "1"
+                and os.environ.get("ORCH_RELAY_DROP", "0") == "1"
+            )
         self.drop_notice = drop_notice
         self.polls = Polls()
         self.waiters = {}  # wake key -> set of asyncio.Event; touched on the event loop only

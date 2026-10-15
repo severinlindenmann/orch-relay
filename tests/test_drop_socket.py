@@ -47,6 +47,10 @@ def relay(tmp_path):
         time.sleep(0.01)
     setup(app.state.directory, now=NOW)
     app.state.drop.limits.drain_idle = 1.0
+    # These tests send several 26 MiB bodies: 26 upload tokens each, and the 64-token device burst
+    # (item 8, D39a2) is the bucket tests' subject, not this file's.
+    d = app.state.directory
+    d.throttles = {**d.throttles, "drop-up": (1000, 1000), "drop-up-workspace": (1000, 1000)}
     yield app, sock.getsockname()[1]
     server.should_exit = True
     thread.join(10)

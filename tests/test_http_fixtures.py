@@ -269,7 +269,7 @@ def test_http_fixture(path):
                 else {"error", "current"}
                 if code == "version_conflict"
                 else {"error", "quota"}
-                if code == "quota_exceeded" and "quota" in response["json"]
+                if code in ("quota_exceeded", "rate_limited") and "quota" in response["json"]
                 else {"error"}
             )
         if response["status"] in (429, 503):

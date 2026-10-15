@@ -382,7 +382,7 @@ def test_other_space_tombstone_and_claimed(client):
     o_id = object_id("foreign")
     sql(
         client,
-        "INSERT INTO drop_objects VALUES (?,?,?, 'file',1,0,NULL,?,NULL,NULL,?,?,'space',1,?)",
+        "INSERT INTO drop_objects VALUES (?,?,?, 'file',1,0,NULL,?,NULL,NULL,?,?,'space',1,?,NULL)",
         o_id,
         WS_B,
         "x",
@@ -849,7 +849,7 @@ def seed_versions(c, o_id, count, size):
     text = '{"o":{"pad":"' + "x" * (size - 20) + '"},"sig":""}'
     with closing(db.connect(path_of(c))) as con, con:
         con.execute(
-            "INSERT INTO drop_objects VALUES (?,?,?,'document',?,0,NULL,NULL,NULL,NULL,?,?,'space',1,?)",
+            "INSERT INTO drop_objects VALUES (?,?,?,'document',?,0,NULL,NULL,NULL,NULL,?,?,'space',1,?,NULL)",
             (o_id, WS, "p", count, DEVICE, "h", NOW),
         )
         for v in range(1, count + 1):

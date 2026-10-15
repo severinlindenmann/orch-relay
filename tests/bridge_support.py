@@ -129,7 +129,7 @@ def prepare_fixture(client, name, case):
                 client.app.state.bridge.drop_notice = True
                 con.execute(
                     "INSERT INTO drop_objects VALUES (?,?,?,'file',1,0,NULL,?,NULL,NULL,?,?,"
-                    "'space',3,?)",
+                    "'space',3,?,NULL)",
                     ("ab" * 16, WS, PERSON, NOW + 86_400_000, DEVICE, "x" * 43, NOW),
                 )
             elif case["name"] == "pair_item":

@@ -129,6 +129,13 @@ def test_defaults_and_their_arithmetic():
         "page-workspace": (11_828, 1200),
         "staging": (28_801, 600),
         "host-answer": (1200, 1200),
+        # P3-D39 item 8 (D39a2): per started MiB of a Drop body; 64 + 32/min per device, 256 + 128/min
+        # per workspace (a 5-attachment, 25 MiB compose costs ~27 tokens), downloads 256 + 256/min
+        # per device and twice that per person.
+        "drop-up": (64, 32),
+        "drop-up-workspace": (256, 128),
+        "drop-down": (256, 256),
+        "drop-down-person": (512, 512),
     }
     # P3-D36: staging is weighted by body size, one token per started 64 KiB (at least one). A
     # set holds at most MANIFEST_PAGES pages plus its manifest and STAGE_CAP bytes in all, so
