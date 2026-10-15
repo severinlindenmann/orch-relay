@@ -254,9 +254,14 @@ def test_upload_slot_caps(h):
             await asyncio.sleep(0.01)
         fourth = await put(h, upload("l2", author=LAPTOP)[2], upload("l2", author=LAPTOP)[0])
         assert fourth.json == {"error": "quota_exceeded", "quota": "slot"}  # 3 per person
+        w = await put(h, upload("w", author=WS)[2], upload("w", author=WS)[0], holder="1")
+        # review F3: the host of the same account counts against the person's 3 slots
+        assert w.json == {"error": "quota_exceeded", "quota": "slot"}
+        h.drop.uploads.caps["person"] = 10
         h.drop.uploads.total = 3
         w = await put(h, upload("w", author=WS)[2], upload("w", author=WS)[0], holder="1")
         assert (w.status, w.json) == (503, {"error": "overloaded"})  # relay-wide
+        h.drop.uploads.caps["person"] = 3
         gate.set()
         for task in [*a, b]:
             assert (await task).status == 201
@@ -267,6 +272,7 @@ def test_upload_slot_caps(h):
 
 def test_workspace_upload_slots(h):
     async def run():
+        h.drop.uploads.caps["person"] = 10  # the workspace cap alone (the account cap is F3's)
         gate = asyncio.Event()
         h.drop.hooks["before_commit"] = lambda plan: gate.wait()
         tasks = []
@@ -480,5 +486,167 @@ def test_download_slots_and_rate(h):
         s = scope("GET", f"/v2/drop/{o_id}/versions/1/blob", {"o": o_id, "v": "1"}, if_match=None)
         await h.drop.endpoint(s, peer.receive, peer.send, "blob")
         assert not peer.complete and h.drop.downloads.count == 0
+
+    asyncio.run(run())
+
+
+# --- review round 2 (F2, F3, F6, F7, F8, F9) ----------------------------------------------------------
+
+
+def test_slow_head_is_cut_off_and_frees_its_slot(h):
+    """F2: the frame and the head have a total deadline from the slot (not only the idle bound)."""
+
+    async def run():
+        h.drop.limits.head_s, h.drop.limits.idle = 0.5, 0.4
+        signed, _, body = upload("slowhead", content=b"\0" * 1000)
+        head_len = int.from_bytes(body[4:8], "big")
+        chunks = [body[:8]] + [body[8 + i : 9 + i] for i in range(head_len)]
+        t = time.monotonic()
+        peer = await put(h, body, signed, chunks=chunks, pause=0.1, then="stall")
+        assert (peer.status, peer.json) == (400, {"error": "malformed"})
+        assert time.monotonic() - t < 1.5 and h.drop.uploads.count == 0
+
+    asyncio.run(run())
+
+
+def test_whole_transfer_deadline_from_the_slot(h):
+    """F2: max_transfer bounds slot to last byte, whatever the rate (rate checks need the grace)."""
+
+    async def run():
+        h.drop.limits.max_transfer, h.drop.limits.head_s = 0.6, 0.6
+        signed, _, body = upload("slowblob", content=b"\0" * 300_000)
+        head = len(body) - signed["o"]["content_len"]
+        chunks = [body[:head]] + split(body[head:], 8192)
+        peer = await put(h, body, signed, chunks=chunks, pause=0.05, then="end")
+        assert (peer.status, peer.json) == (400, {"error": "malformed"})
+        assert h.drop.uploads.count == 0 and list(h.drop.tmp.iterdir()) == []
+
+    asyncio.run(run())
+
+
+def test_account_slot_cap_for_hosts_across_workspaces(h):
+    """F3: two workspaces of one account share the person caps (uploads, reads, downloads)."""
+    from contextlib import closing
+
+    from drop_support import TOKENS, WS_B
+
+    from orch_relay.directory import token_hash
+
+    with closing(db.connect(h.d.path)) as con, con:
+        con.execute(
+            "INSERT INTO workspaces SELECT ?,owner_person_id,wsk_pub,delegation,card,card_seq,"
+            "wxk_version,client_hosted FROM workspaces WHERE workspace_id=?",
+            (WS_B, WS),
+        )
+        con.execute(
+            "INSERT INTO sessions VALUES (?,?,?,?)",
+            (token_hash("FAKE-workspace-b"), "workspace", WS_B, NOW + 900_000),
+        )
+    TOKENS[WS_B] = "FAKE-workspace-b"
+    try:
+        keys_a = h.drop.slot_keys({"kind": "workspace", "subject_id": WS, "person_id": "p"})
+        assert ("person", "p") in keys_a
+        h.drop.reads.take(
+            h.drop.slot_keys(h.drop.admit({"authorization": "Bearer FAKE-workspace"}), None)
+        )
+        h.drop.reads.take(
+            h.drop.slot_keys(h.drop.admit({"authorization": "Bearer FAKE-workspace"}), None)
+        )
+        s_b = h.drop.admit({"authorization": "Bearer FAKE-workspace-b"})
+        h.drop.reads.take(h.drop.slot_keys(s_b))
+        h.drop.reads.take(h.drop.slot_keys(s_b))
+        with pytest.raises(Exception) as err:  # the account's 4 read slots are held
+            h.drop.reads.take(h.drop.slot_keys(s_b))
+        assert err.value.status == 429 and err.value.details == {"quota": "slot"}
+    finally:
+        TOKENS.pop(WS_B)
+
+
+def test_cancellation_after_the_commit_keeps_the_committed_blob(h):
+    """F6: the commit is shielded; the landed file goes only if the commit did not store it."""
+
+    async def run():
+        signed, _, body = upload("cancel")
+        original = h.drop.commit
+
+        def slow_commit(*args):
+            result = original(*args)
+            time.sleep(0.4)
+            return result
+
+        h.drop.commit = slow_commit
+        task = asyncio.create_task(put(h, body, signed))
+        while not rows(h.d.path, "drop_versions"):
+            await asyncio.sleep(0.02)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0.6)
+        (version,) = rows(h.d.path, "drop_versions")
+        assert (h.drop.blobs / version["blob_path"]).is_file()
+        # and a refused commit still unlinks its landed file
+        h.drop.commit = original
+        stale, _, sb = upload("cancel", content=b"other")
+        assert (await put(h, sb, stale)).status == 409
+        assert len([p for p in h.drop.blobs.rglob("*") if p.is_file()]) == 1
+
+    asyncio.run(run())
+
+
+def test_disk_error_is_a_clean_503(h, monkeypatch):
+    """F7: ENOSPC while storing the blob answers 503 overloaded with Retry-After, cleans up."""
+    import errno
+
+    def full(handle, digest, data):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(h.drop, "write", full)
+
+    async def run():
+        signed, _, body = upload("full", content=b"\0" * 200_000)
+        peer = await put(h, body, signed)
+        assert (peer.status, peer.json) == (503, {"error": "overloaded"})
+        assert peer.header(b"retry-after") == b"60"
+        assert list(h.drop.tmp.iterdir()) == [] and h.drop.uploads.count == 0
+        assert rows(h.d.path, "drop_objects") == []
+
+    asyncio.run(run())
+
+
+def test_device_without_operate_anywhere_gets_no_slot(h):
+    """F8: a registered device that is no `operate` member is refused before any slot or drain."""
+    from contextlib import closing
+
+    with closing(db.connect(h.d.path)) as con, con:
+        con.execute("UPDATE members SET scopes=? WHERE device_id=?", (b'["look"]', LAPTOP))
+
+    async def run():
+        drained = []
+        h.drop.hooks["drain"] = lambda: drained.append(1)
+        signed, _, body = upload("nonmember", author=LAPTOP, content=b"\0" * 300_000)
+        taken = []
+        original = h.drop.uploads.take
+        h.drop.uploads.take = lambda keys: taken.append(keys) or original(keys)
+        peer = await put(h, body, signed, chunks=split(body), then="stall")
+        assert (peer.status, peer.json) == (403, {"error": "not_eligible"})
+        assert taken == [] and drained == []
+
+    asyncio.run(run())
+
+
+def test_head_413_drains_after_the_slot(h):
+    """F9: a head_len above 512 KiB arrives after the slot: its 413 is drained, not reset."""
+
+    async def run():
+        drained = []
+        h.drop.hooks["drain"] = lambda: drained.append(h.drop.uploads.count)
+        o_id = object_id("bighead")
+        frame = b"ODU2" + (512 * 1024 + 1).to_bytes(4, "big")
+        body = frame + b" " * 200_000
+        peer = Peer(split(body), then="end")
+        s = scope("PUT", f"/v2/drop/{o_id}/versions", {"o": o_id}, length=len(body))
+        await h.drop.endpoint(s, peer.receive, peer.send, "put")
+        assert (peer.status, peer.json) == (413, {"error": "too_large"})
+        assert drained == [0] and peer.read == len(body)
 
     asyncio.run(run())

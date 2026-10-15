@@ -270,6 +270,9 @@ All of these are read once at start-up. The list is complete for `develop` `601c
 | `ORCH_RELAY_ACCOUNT_EVIDENCE` | `checkpoints.py` | 50,000 | leave the default (~75 MB per account worst case) | — |
 | `ORCH_RELAY_THROTTLE_<CLASS>` (`SESSION`, `PERSON`, `WORKSPACE`, `PAGE_SESSION`, `PAGE_PERSON`, `PAGE_WORKSPACE`, `STAGING`, `HOST_ANSWER`; value `burst/per-minute`) | `directory.py` `throttle_settings` | `THROTTLES` | only `ORCH_RELAY_THROTTLE_STAGING=27777/600`, and only if P3-D36 is **not** in the release (P7) | checklist 8 interim |
 | `ORCH_RELAY_THROTTLE_TABLE` | `directory.py` | 16,384 | leave the default (≤ ~61 MB if all 8 classes fill; dev will not) | — |
+| `ORCH_RELAY_DROP` | `drop.py` (P3-D39, D39a1) | `0`: no Drop routes (404) | **leave unset (off)** until D39a2 (quotas, reservations, upload bucket, expiry sweep, retire) is merged | Deploy gate (Opus review of PR #72, F1): D39a1 alone lets any `operate` member grow SQLite (~100 KB per version) and the blob directory without bound. Migration 0017 and the start-up sweep run either way. D39a2 lifts the requirement or keeps it as a kill-switch |
+| `ORCH_RELAY_DROP_NOTICE` | `bridge.py` (P3-D39) | `0`: no `notices.drop` | leave unset | Q-H1: only once hosts accept the key |
+| `ORCH_RELAY_DROP_MAX_BLOB_BYTES`, `ORCH_RELAY_DROP_MAX_TTL_MS` | `drop.py` | 26 MiB, 7 d | leave unset | only with `ORCH_RELAY_DROP=1` |
 | `ORCH_RELAY_ADMIN_BUSY_MS` | `cli.py` (P3-D36 `account-cap`) | 5000 | operator shell only | — |
 | `VAPID_SUBJECT`, `VAPID_PRIVATE_KEY_FILE`, `VAPID_PUBLIC_KEY_FILE` | **not read by the relay** | — | leave as `provision.sh` writes them | push is not implemented (TODO(P4) in `provision.sh`) |
 | APNs key (`/srv/orch-relay/apns/`) | **not read by the relay** | — | not needed for this deploy | see R8 |

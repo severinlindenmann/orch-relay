@@ -97,7 +97,8 @@ class Limits:
     idle = 30.0  # seconds between body reads or writes
     min_rate = 64 * KIB  # bytes per second, averaged after the head
     grace = 30.0  # seconds before the average rate is judged
-    max_transfer = 600.0
+    max_transfer = 600.0  # from the upload slot to the last byte (review F2)
+    head_s = 30.0  # the frame and the head, from the upload slot (review F2)
     drain_idle = 5.0
     drain_total = 30.0
     brief_bytes = 64 * KIB  # refusals before a slot: read at most this much, or brief_s
@@ -285,13 +286,8 @@ class Drop:
             con = self.bridge.connection("write")
             con.execute("BEGIN IMMEDIATE")
             with con:
-                rows = con.execute(
-                    "SELECT v.*, o.workspace_id, o.owner_person_id, o.current, o.tombstone_ms "
-                    "FROM drop_versions v JOIN drop_objects o ON o.object_id=v.object_id "
-                    "WHERE v.blob='stored'"
-                ).fetchall()
                 known = set()
-                for row in rows:
+                for row in self.stored_rows(con):
                     path = self.blobs / row["blob_path"]
                     if path.is_file():
                         known.add(row["blob_path"])
@@ -315,6 +311,25 @@ class Drop:
                         entry.unlink()
             with suppress(OSError):
                 folder.rmdir()  # only when empty
+
+    @staticmethod
+    def stored_rows(con, batch=1024):
+        """The `stored` versions in key order, in batches of `batch` rows and only the columns the
+        sweep needs (never a descriptor: review F5, a start-up must not load every head)."""
+        last = ("", 0)
+        while True:
+            rows = con.execute(
+                "SELECT v.object_id, v.version, v.author_kind, v.author_id, v.content_len, "
+                "v.blob_path, o.workspace_id, o.owner_person_id, o.current, o.tombstone_ms "
+                "FROM drop_versions v JOIN drop_objects o ON o.object_id=v.object_id "
+                "WHERE v.blob='stored' AND (v.object_id, v.version) > (?, ?) "
+                "ORDER BY v.object_id, v.version LIMIT ?",
+                (*last, batch),
+            ).fetchall()
+            yield from rows
+            if len(rows) < batch:
+                return
+            last = (rows[-1]["object_id"], rows[-1]["version"])
 
     def prune(self, con, row):
         o, v = row["object_id"], row["version"]
@@ -389,6 +404,21 @@ class Drop:
                     fail("not_eligible")
                 if write and session["kind"] == "workspace":
                     d.fence(con, headers, session["subject_id"], now)
+                if write and session["kind"] == "device":
+                    # Review F8 (§14.2 step 2, "a non-member"): a device with `operate` in no
+                    # workspace gets neither an upload slot nor a drain.
+                    scopes = con.execute(
+                        "SELECT scopes FROM members WHERE device_id=?", (session["subject_id"],)
+                    ).fetchall()
+                    need(any("operate" in P.parse_json(r[0]) for r in scopes), "not_eligible", 403)
+                if session["kind"] == "workspace":
+                    # Review F3: a host's slots also count against its account (the card owner),
+                    # so one account's workspaces cannot take every relay-wide slot.
+                    owner = con.execute(
+                        "SELECT owner_person_id FROM workspaces WHERE workspace_id=?",
+                        (session["subject_id"],),
+                    ).fetchone()
+                    session["person_id"] = owner[0] if owner else session["subject_id"]
             except Refusal:
                 d.throttle(session, now)
                 raise
@@ -397,10 +427,12 @@ class Drop:
 
     @staticmethod
     def slot_keys(session, workspace=None):
+        """Device sessions: the device and its person. W sessions: the workspace (uploads) or the
+        session as a device (reads, downloads), and its account under the person caps (F3)."""
         if session["kind"] == "workspace":
-            return [("workspace" if workspace else "device", session["subject_id"])]
-        keys = [("device", session["subject_id"]), ("person", session["person_id"])]
-        return keys
+            first = ("workspace" if workspace else "device", session["subject_id"])
+            return [first, ("person", session["person_id"])]
+        return [("device", session["subject_id"]), ("person", session["person_id"])]
 
     @staticmethod
     def member(con, ws, device):
@@ -930,12 +962,31 @@ class Drop:
             con.execute("BEGIN")
             now = self.d.clock()
             self.object_for_read(con, session, o_id, now)
-            rows = con.execute(
-                "SELECT version, descriptor, descriptor_len FROM drop_versions WHERE object_id=? "
+            # Review F4: the cut is chosen from the stored lengths, then only the descriptors
+            # that fit are read (never limit + 1 full descriptors for a 1 MiB page).
+            sizes = con.execute(
+                "SELECT version, descriptor_len FROM drop_versions WHERE object_id=? "
                 "AND version>? ORDER BY version LIMIT ?",
                 (o_id, after, limit + 1),
             ).fetchall()
-        return splice(rows[:limit], len(rows) > limit, "descriptors", PAGE_BYTES)
+            more = len(sizes) > limit
+            chosen, size = [], NEXT_RESERVE + len("descriptors")
+            for row in sizes[:limit]:
+                if chosen and size + row["descriptor_len"] + 1 > PAGE_BYTES:
+                    more = True
+                    break
+                chosen.append(row["version"])
+                size += row["descriptor_len"] + 1
+            rows = (
+                con.execute(
+                    "SELECT version, descriptor, descriptor_len FROM drop_versions WHERE "
+                    "object_id=? AND version>=? AND version<=? ORDER BY version",
+                    (o_id, chosen[0], chosen[-1]),
+                ).fetchall()
+                if chosen
+                else []
+            )
+        return splice(rows, more, "descriptors", PAGE_BYTES)
 
     def list_page(self, session, raw):
         """POST /v2/drop/list (§14.2 item 7): by change position, the caller's visible objects,
@@ -1116,6 +1167,8 @@ class Drop:
             device = session["subject_id"]
             slot = self.uploads.take(self.slot_keys(session, workspace=True))
             mode = "full"  # from here on early answers drain
+            held = time.monotonic()
+            body.deadline = held + min(self.limits.head_s, self.limits.max_transfer)
             request_now = self.d.clock()
             # 3. If-Match
             expected = if_match(headers.get("if-match"))
@@ -1124,10 +1177,10 @@ class Drop:
             need(frame[:4] == MAGIC)
             head_len = int.from_bytes(frame[4:8], "big")
             if head_len > MAX_HEAD:
-                mode = "none"
-                no("too_large", 413)
+                no("too_large", 413)  # after the slot: drained like steps 3-9 (review F9)
             need(declared >= 8 + head_len)
             raw = await body.read_exact(head_len)
+            body.deadline = held + self.limits.max_transfer  # the whole transfer (review F2)
             await self.hook("head")
             # 5-9 on a read snapshot, before any blob byte
             outcome, value = await run_in_threadpool(
@@ -1156,15 +1209,23 @@ class Drop:
             final = await self.io(self.land, tmp, plan.o)
             tmp = None
             await self.hook("before_commit", plan=plan)
-            # 11. the commit
-            status, version, ws = await run_in_threadpool(
-                self.commit, headers, plan, expected, final, request_now
+            # 11. the commit, shielded: a cancellation after the commit never unlinks the
+            # committed file (review F6); the outcome decides whether the file stays.
+            landed, final = self.blobs / final, None
+            commit = asyncio.ensure_future(
+                run_in_threadpool(
+                    self.commit,
+                    headers,
+                    plan,
+                    expected,
+                    landed.relative_to(self.blobs).as_posix(),
+                    request_now,
+                )
             )
-            if status == 200:  # a concurrent identical upload committed first
-                await self.io(self.unlink, self.blobs / final)
-            elif self.d.changed:
+            commit.add_done_callback(lambda f, path=landed: self.settle(f, path))
+            status, version, ws = await asyncio.shield(commit)
+            if status != 200 and self.d.changed:
                 self.d.changed(("ws", ws))
-            final = None
             return await self.answer(send, body, status, {"version": version}, etag(version))
         except Refusal as error:
             return await self.answer(
@@ -1173,13 +1234,19 @@ class Drop:
                 error.status,
                 error_body(error),
                 retry_headers(error),
-                mode=mode if error.status != 413 else "none",
+                mode=mode,
                 device=device,
             )
         except Disconnected:
             return None  # nothing to answer; the reservation and files go below
         except (TimeoutError, Breach):
             return await self.answer(send, body, 400, b'{"error":"malformed"}', mode="none")
+        except OSError:  # after TimeoutError, an OSError subclass
+            # Review F7: a disk error (ENOSPC, EIO) while storing the blob: transient, retryable.
+            log.exception("drop upload: storage error")
+            return await self.answer(
+                send, body, 503, b'{"error":"overloaded"}', [(b"retry-after", b"60")], mode="none"
+            )
         except (ValueError, TypeError, KeyError, AttributeError):
             return await self.answer(
                 send, body, 400, b'{"error":"malformed"}', mode=mode, device=device
@@ -1190,6 +1257,12 @@ class Drop:
             if final is not None:
                 await self.io(self.unlink, self.blobs / final)
             free()
+
+    def settle(self, commit, path):
+        """After the commit's thread finished (also when the request was cancelled meanwhile):
+        the landed file stays only if this commit stored it (201)."""
+        if commit.cancelled() or commit.exception() is not None or commit.result()[0] != 201:
+            self.unlink(path)
 
     async def stream(self, body, handle, o):
         """Step 10: exactly `content_len` bytes in 64 KiB writes, hashed as they land, the ORD2
@@ -1296,14 +1369,19 @@ class Body:
         self.declared = None
         self.received = 0
         self.start = None
+        self.deadline = None  # monotonic: the head or the whole transfer must end by then
 
     async def more(self, timeout=None):
         if self.done:
             return False
+        if timeout is None:  # a transfer read (a drain passes its own bounds)
+            timeout = self.limits.idle
+            if self.deadline is not None:
+                timeout = min(timeout, self.deadline - time.monotonic())
+                if timeout <= 0:
+                    raise Breach("duration")
         try:
-            message = await asyncio.wait_for(
-                self.receive(), self.limits.idle if timeout is None else timeout
-            )
+            message = await asyncio.wait_for(self.receive(), timeout)
         except TimeoutError as exc:
             raise Breach("idle") from exc
         if message["type"] == "http.disconnect":
@@ -1496,9 +1574,19 @@ ROUTES = (
 )
 
 
-def install(app):
+def enabled(env=None):
+    """Review F1 (deploy gate): D39a1 alone has no quotas, reservations, upload bucket, expiry
+    sweeper or retire, so any `operate` member could fill the disk. The Drop routes exist only
+    with ORCH_RELAY_DROP=1 (default off: they answer 404 as absent routes). Migration 0017 and the
+    start-up sweep run either way. D39a2 decides whether the switch stays as a kill-switch."""
+    env = os.environ if env is None else env
+    return env.get("ORCH_RELAY_DROP", "0") == "1"
+
+
+def install(app, env=None):
     drop = Drop(app.state.directory, app.state.bridge, app.state.data_dir)
     app.state.drop = drop
-    for route, path, method in ROUTES:
-        app.router.routes.append(Route(path, Endpoint(drop, route), methods=[method]))
+    if enabled(env):
+        for route, path, method in ROUTES:
+            app.router.routes.append(Route(path, Endpoint(drop, route), methods=[method]))
     return drop

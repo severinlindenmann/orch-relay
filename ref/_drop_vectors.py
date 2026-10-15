@@ -59,6 +59,11 @@ def add_drop_relay(out):
         return chain(state, 2)[0]
     case("create_with_if_match_0_then_the_next_version", create)
 
+    def if_match_only(state):
+        f = b.upload("vector if-match")
+        return [step(state, ph, f, "1"), step(state, ph, f, "00"), step(state, ph, f, "0")]
+    case("the_same_upload_with_a_wrong_then_the_right_if_match", if_match_only)
+
     def stale(state):
         steps, v1 = chain(state, 1)
         steps.append(step(state, lap, b.upload(d, kind="document", version=2, parent=v1, author=lap), "1"))

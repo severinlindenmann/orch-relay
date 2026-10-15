@@ -3433,7 +3433,7 @@ written as a method followed by a separate path span until the PR that implement
 fixtures and spells it as one span (`tests/test_http_fixtures.py` requires a fixture for every such route; D39a1
 adds an explicit list of planned routes to that test, so a forgotten re-spelling fails). D39a1 implements the `PUT`
 of versions, the list, the descriptor pages and the descriptor, wraps and blob reads; the re-wrap, claim (D39b),
-retire (D39a2) and §19.10 rows stay planned.
+retire (D39a2) and §19.10 rows stay planned. A relay serves the Drop routes only when its operator enables them (P3 design §14.9 deploy gate); otherwise they answer 404 like any absent route.
 
 Design: P3 design §14.2 (revision 2, after the Opus and phone reviews; amendment A1 of 15 Oct 2026: the host retire covers files with an expected-head precondition, list entries carry a `state` and `tombstone_until_ms`, fenced writes re-check the holder inside their transaction). Workspace spaces only
 (`space_kind: "workspace"`); `personal` and `shared` are 400 `malformed` until P6. Member ↔ own workspace only:

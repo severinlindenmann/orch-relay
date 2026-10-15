@@ -816,3 +816,173 @@ def test_relay_never_stores_name_mime_or_plaintext(client):
         data += blob.read_bytes()
     for needle in (b"PLAINTEXT-MARKER", b"f.txt", b"text/plain"):
         assert needle not in data
+
+
+# --- review round 2: F1, F4, F5 and the test gaps A04, A23, A26, A42, A43 ---------------------------
+
+
+def test_drop_routes_are_off_unless_enabled(tmp_path, monkeypatch):
+    """F1: without ORCH_RELAY_DROP=1 every Drop route answers 404 as an absent route."""
+    monkeypatch.setenv("ORCH_RELAY_DROP", "0")
+    o_id = object_id("off")
+    with TestClient(create_app(tmp_path)) as c:
+        setup(c.app.state.directory)
+        signed, _, body = upload("off")
+        assert put(c, signed, body).status_code == 404
+        h = {"Authorization": "Bearer FAKE-device"}
+        assert (
+            c.post(
+                "/v2/drop/list", json={"workspace_id": WS, "direction": "received"}, headers=h
+            ).status_code
+            == 404
+        )
+        for what in ("descriptor", "wraps", "blob"):
+            assert c.get(f"/v2/drop/{o_id}/versions/1/{what}", headers=h).status_code == 404
+        assert c.get(f"/v2/drop/{o_id}/descriptors", headers=h).status_code == 404
+        assert rows(path_of(c), "drop_objects") == []  # migration 0017 still applied
+    monkeypatch.setenv("ORCH_RELAY_DROP", "1")
+    assert DR.enabled() and not DR.enabled({}) and not DR.enabled({"ORCH_RELAY_DROP": "yes"})
+
+
+def seed_versions(c, o_id, count, size):
+    """`count` document versions with descriptors of `size` bytes, written directly."""
+    text = '{"o":{"pad":"' + "x" * (size - 20) + '"},"sig":""}'
+    with closing(db.connect(path_of(c))) as con, con:
+        con.execute(
+            "INSERT INTO drop_objects VALUES (?,?,?,'document',?,0,NULL,NULL,NULL,NULL,?,?,'space',1,?)",
+            (o_id, WS, "p", count, DEVICE, "h", NOW),
+        )
+        for v in range(1, count + 1):
+            con.execute(
+                "INSERT INTO drop_versions VALUES (?,?,'device',?,?,'h','c',100,1,?,'stored',?,?)",
+                (o_id, v, DEVICE, text, len(text), f"{o_id}/{v}.x", NOW),
+            )
+    return text
+
+
+def test_descriptor_page_reads_only_what_fits(client):
+    """F4: a 1 MiB page over 257 maximal descriptors stays near its own size in memory."""
+    import tracemalloc
+
+    o_id = object_id("big pages")
+    text = seed_versions(client, o_id, 257, 96 * 1024)
+    session = client.app.state.drop.admit({"authorization": "Bearer FAKE-device"})
+    tracemalloc.start()
+    page = client.app.state.drop.descriptors_page(session, o_id, {})
+    peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    assert len(page) <= DR.PAGE_BYTES and page.count(text.encode()) == 10
+    assert page.endswith(b',"next":10}')
+    assert peak < 5 * 1024 * 1024, peak  # was ~25 MB: every descriptor fetched before the cut
+
+
+def test_startup_sweep_never_loads_descriptors(client):
+    """F5: the sweep reads stored versions in batches without their descriptor text."""
+    import tracemalloc
+
+    drop = client.app.state.drop
+    o_id = object_id("sweep many")
+    seed_versions(client, o_id, 300, 90 * 1024)
+    (drop.blobs / o_id).mkdir()
+    for v in range(1, 301):
+        (drop.blobs / o_id / f"{v}.x").write_bytes(b"x")
+    tracemalloc.start()
+    drop.startup_sweep()
+    peak = tracemalloc.get_traced_memory()[1]
+    tracemalloc.stop()
+    assert peak < 5 * 1024 * 1024, peak  # was ~27 MB
+    assert {r["blob"] for r in rows(path_of(client), "drop_versions")} == {"stored"}
+
+
+def test_a_device_in_two_workspaces_cannot_move_an_object(client):
+    """A04: another space's object id is 403 even for a member of both workspaces."""
+    from directory_support import CARD
+
+    with closing(db.connect(path_of(client))) as con, con:
+        con.execute(
+            "INSERT INTO workspaces SELECT ?,owner_person_id,wsk_pub,delegation,card,card_seq,"
+            "wxk_version,client_hosted FROM workspaces WHERE workspace_id=?",
+            (WS_B, WS),
+        )
+        con.execute(
+            "INSERT INTO members VALUES (?,?,?,?)",
+            (WS_B, DEVICE, CARD["o"]["owner_person_id"], P.cj(["look", "decide", "operate"])),
+        )
+        con.execute("INSERT INTO member_lists VALUES (?,1,1,'{}')", (WS_B,))
+    o_id = object_id("two spaces")
+    v1, _, b1 = upload(o_id, kind="document", space=WS_B, recipients=[WS_B])
+    assert put(client, v1, b1).status_code == 201
+    v2, _, b2 = upload(o_id, kind="document", version=2, parent=v1["o"])  # says space A
+    assert put(client, v2, b2, if_match="1").json() == {"error": "not_eligible"}
+    (obj,) = rows(path_of(client), "drop_objects")
+    assert (obj["workspace_id"], obj["current"]) == (WS_B, 1)
+
+
+def test_device_wrap_to_a_revoked_or_expired_target(client):
+    """A23: a device wrap to a revoked or expired member certificate is 403."""
+    from directory_support import PERSON, RECORD
+
+    def attempt(label):
+        s, _, _ = upload(label)
+        data = __import__("drop_support").blob(s["o"]["object_id"], 1)[0]
+        return put(client, s, frame(s, [wrap(s["o"], "wk"), wrap(s["o"], "device", LAPTOP)], data))
+
+    sql(client, "UPDATE devices SET expires_ms=? WHERE device_id=?", NOW, LAPTOP)
+    assert attempt("expired target").json() == {"error": "not_eligible"}
+    sql(client, "UPDATE devices SET expires_ms=NULL WHERE device_id=?", LAPTOP)
+    assert attempt("fine target").status_code == 201
+    sql(
+        client,
+        "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
+        LAPTOP,
+        PERSON,
+        P.cj(RECORD),
+        "lost",
+        NOW,
+        7,
+    )
+    assert attempt("revoked target").json() == {"error": "not_eligible"}
+
+
+def test_tombstone_leaves_the_list_after_30_days(client):
+    """A26: listed until tombstone_until_ms, then gone without a new position."""
+    s, _, b = upload("ends")
+    assert put(client, s, b).status_code == 201
+    sql(client, "UPDATE drop_objects SET tombstone_ms=?, tombstone_kind='retired'", NOW)
+    sql(client, "UPDATE sessions SET expires_ms=?", NOW + 60 * DAY)
+    client.app.state.directory.clock = lambda: NOW + 30 * DAY - 1
+    assert [e["state"] for e in listing(client, LAPTOP).json()["objects"]] == ["retired"]
+    client.app.state.directory.clock = lambda: NOW + 30 * DAY
+    assert listing(client, LAPTOP).json() == {"objects": [], "next": None}
+
+
+def test_commit_rechecks_the_object_state(client):
+    """A42: a retire or an expiry between the head checks and the commit is 410 at the commit."""
+    o_id = object_id("recheck")
+    v1, _, b1 = upload(o_id, kind="document")
+    assert put(client, v1, b1).status_code == 201
+    v2, _, b2 = upload(o_id, kind="document", version=2, parent=v1["o"])
+    client.app.state.drop.hooks["before_commit"] = lambda plan: sql(
+        client, "UPDATE drop_objects SET tombstone_ms=?, tombstone_kind='retired'", NOW
+    )
+    assert put(client, v2, b2, if_match="1").json() == {"error": "expired"}
+    assert len(rows(path_of(client), "drop_versions")) == 1
+    f, _, fb = upload("expires in transfer", expires=NOW + 120_000)
+
+    def late(plan):
+        client.app.state.directory.clock = lambda: NOW + 120_000
+
+    client.app.state.drop.hooks["before_commit"] = late
+    assert put(client, f, fb).json() == {"error": "expired"}
+    assert len(files(client)[0]) == 1
+
+
+def test_commit_uses_the_request_now_for_the_60_s_floor(client):
+    """A43 (Opus delta 2, L-c): a slow upload that met the floor at admission is not refused."""
+    f, _, fb = upload("floor at commit", expires=NOW + 60_000)
+
+    def slow(plan):
+        client.app.state.directory.clock = lambda: NOW + 30_000
+
+    client.app.state.drop.hooks["before_commit"] = slow
+    assert put(client, f, fb).status_code == 201
