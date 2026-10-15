@@ -996,3 +996,40 @@ def test_startup_sweep_batches_cover_every_row_in_key_order(client):
         con.row_factory = __import__("sqlite3").Row
         got = [(r["object_id"], r["version"]) for r in DR.Drop.stored_rows(con, batch=7)]
     assert got == [(o_id, v) for v in range(1, 24)]
+
+
+def test_sweep_keyset_spans_objects(client):
+    """D32: the keyset is (object_id, version): two objects with interleaved versions across a
+    batch boundary are all visited exactly once."""
+    a, b = sorted([object_id("keyset a"), object_id("keyset b")])
+    seed_versions(client, a, 5, 100)
+    seed_versions(client, b, 5, 100)
+    with closing(db.connect(path_of(client))) as con:
+        con.row_factory = __import__("sqlite3").Row
+        got = [(r["object_id"], r["version"]) for r in DR.Drop.stored_rows(con, batch=3)]
+    assert got == [(a, v) for v in range(1, 6)] + [(b, v) for v in range(1, 6)]
+
+
+def test_member_lookup_by_device_uses_an_index(client):
+    """N4: the PUT admission's members lookup by device never scans the table."""
+    with closing(db.connect(path_of(client))) as con:
+        plan = " ".join(
+            str(r[-1])
+            for r in con.execute(
+                "EXPLAIN QUERY PLAN SELECT scopes FROM members WHERE device_id=?", (DEVICE,)
+            )
+        )
+    assert "members_device" in plan and "SCAN" not in plan
+
+
+def test_descriptor_len_must_match_the_descriptor(client):
+    import sqlite3
+
+    o_id = object_id("badlen")
+    seed_versions(client, o_id, 1, 100)  # a valid row first: the CHECK, not the foreign key
+    with pytest.raises(sqlite3.IntegrityError, match="CHECK"):
+        sql(
+            client,
+            "INSERT INTO drop_versions VALUES (?,2,'device','d','{}','h','c',1,1,3,'stored','p',1)",
+            o_id,
+        )

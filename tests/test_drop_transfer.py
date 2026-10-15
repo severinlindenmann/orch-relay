@@ -683,3 +683,78 @@ def test_transfer_deadline_counts_from_the_slot_not_the_blob(h):
         assert rows(h.d.path, "drop_objects") == []
 
     asyncio.run(run())
+
+
+# --- review round 3 (N1, N2, D21) ------------------------------------------------------------------
+
+
+def test_settle_keeps_the_file_unless_the_commit_certainly_stored_nothing(h, tmp_path):
+    """N1: a cancelled or unknown commit outcome keeps the landed file (the sweep removes
+    orphans); a refusal, a database error or a 200 (another upload's file) unlinks it."""
+    import sqlite3
+
+    from orch_relay.directory import Refusal
+
+    async def run():
+        loop = asyncio.get_running_loop()
+
+        def outcome(set_):
+            f = loop.create_future()
+            set_(f)
+            path = tmp_path / f"blob{len(list(tmp_path.iterdir()))}"
+            path.write_bytes(b"x")
+            h.drop.settle(f, path)
+            return path.exists()
+
+        assert outcome(lambda f: f.cancel())
+        assert outcome(lambda f: f.set_exception(RuntimeError("unknown")))
+        assert outcome(lambda f: f.set_result((201, 1, WS)))
+        assert not outcome(lambda f: f.set_exception(Refusal("fenced")))
+        assert not outcome(
+            lambda f: f.set_exception(sqlite3.OperationalError("database is locked"))
+        )
+        assert not outcome(lambda f: f.set_result((200, 1, WS)))
+
+    asyncio.run(run())
+
+
+def test_database_error_at_the_commit_is_a_clean_503(h):
+    """N2: an OperationalError (disk full, busy) at the commit answers 503 overloaded."""
+    import sqlite3
+
+    def full(*args):
+        raise sqlite3.OperationalError("database or disk is full")
+
+    h.drop.commit = full
+
+    async def run():
+        signed, _, body = upload("dbfull")
+        peer = await put(h, body, signed)
+        assert (peer.status, peer.json) == (503, {"error": "overloaded"})
+        assert peer.header(b"retry-after") == b"60"
+        await asyncio.sleep(0.05)
+        assert [p for p in h.drop.blobs.rglob("*") if p.is_file()] == []
+        assert h.drop.uploads.count == 0
+
+    asyncio.run(run())
+
+
+def test_disk_error_closes_without_draining(h, monkeypatch):
+    """D21: a disk error mid-blob answers and closes; the rest of the body is never drained."""
+    import errno
+
+    def full(handle, digest, data):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(h.drop, "write", full)
+    drained = []
+    h.drop.hooks["drain"] = lambda: drained.append(1)
+
+    async def run():
+        signed, _, body = upload("fullpending", content=b"\0" * 400_000)
+        t = time.monotonic()
+        peer = await put(h, body, signed, chunks=split(body)[:3], then="stall")
+        assert (peer.status, peer.json) == (503, {"error": "overloaded"})
+        assert drained == [] and peer.read < len(body) and time.monotonic() - t < 0.5
+
+    asyncio.run(run())

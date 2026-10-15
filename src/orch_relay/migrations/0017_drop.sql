@@ -50,13 +50,16 @@ CREATE TABLE drop_versions (
     content_hash TEXT NOT NULL,
     content_len INTEGER NOT NULL,
     head_len INTEGER NOT NULL,
-    descriptor_len INTEGER NOT NULL,        -- bytes of descriptor: the page byte cut without parsing
+    descriptor_len INTEGER NOT NULL CHECK (descriptor_len = length(CAST(descriptor AS BLOB))),  -- bytes of descriptor: the page byte cut without parsing
     blob TEXT NOT NULL CHECK (blob IN ('stored', 'pruned')),
     blob_path TEXT,                         -- '<o>/<v>.<rand>' under drop/blobs; NULL once pruned
     received_ms INTEGER NOT NULL,
     PRIMARY KEY (object_id, version)
 );
 CREATE INDEX drop_versions_author ON drop_versions(author_id);
+-- Review N4: the PUT's admission ("a device with `operate` in some workspace") looks members up by
+-- device; the members primary key is (workspace_id, device_id), so without this it scans the table.
+CREATE INDEX members_device ON members(device_id);
 
 CREATE TABLE drop_wraps (
     object_id TEXT NOT NULL,

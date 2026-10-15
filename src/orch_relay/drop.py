@@ -1247,6 +1247,12 @@ class Drop:
             return await self.answer(
                 send, body, 503, b'{"error":"overloaded"}', [(b"retry-after", b"60")], mode="none"
             )
+        except sqlite3.OperationalError:
+            # Review N2: the database is full or busy past its timeout at the commit: transient.
+            log.exception("drop upload: database error")
+            return await self.answer(
+                send, body, 503, b'{"error":"overloaded"}', [(b"retry-after", b"60")], mode="none"
+            )
         except (ValueError, TypeError, KeyError, AttributeError):
             return await self.answer(
                 send, body, 400, b'{"error":"malformed"}', mode=mode, device=device
@@ -1260,8 +1266,18 @@ class Drop:
 
     def settle(self, commit, path):
         """After the commit's thread finished (also when the request was cancelled meanwhile):
-        the landed file stays only if this commit stored it (201)."""
-        if commit.cancelled() or commit.exception() is not None or commit.result()[0] != 201:
+        the landed file goes only when the commit certainly stored no row for it: a refusal or a
+        database error (the transaction rolled back) or a concurrent identical upload (200).
+        A cancelled or otherwise unknown outcome keeps the file (review N1): the thread may have
+        committed, and the start-up sweep deletes a file that no `stored` row names."""
+        if commit.cancelled():
+            return
+        error = commit.exception()
+        if error is not None:
+            if isinstance(error, (Refusal, sqlite3.Error)):
+                self.unlink(path)
+            return
+        if commit.result()[0] != 201:
             self.unlink(path)
 
     async def stream(self, body, handle, o):
