@@ -1008,11 +1008,14 @@ Vectors: `bridge.seal`, `hkdf` (`k_bridge_epoch_1`, `k_bridge_epoch_2`, `k_pair`
      from 1 to `reader`, the build's known-answer digest per parsing surface (`view` for a phone); a host checks
      the levels from 1 to the lowest of `reader` and its highest known level and ignores higher keys, so a higher
      unknown level is accepted as at least the host's highest. The KAT corpus and its digest are core-owned
-     (`reader_kat_1`, F1 §11.5); these vectors use FAKE stand-in digests. `cj(reader_decl)` is at most
+     (`reader_kat_1`, F1 §11.5); these vectors carry core's real level-1 digests (`log`, `view`; the level-1 view set
+     is provisional until H12d-2). `cj(reader_decl)` is at most
      **2 KiB** (about 0.6 KiB in practice), well inside the 64 KiB meta (§8.2) and the 64 KiB pair-request body
      (§19.3).
    - **What the bridge checks, and what the host checks.** Step 3.1 refuses as `malformed` a `reader_decl`
-     that is not a signed object (`{"o": {…}, "sig"}`, `null` included) or that exceeds 2 KiB, like any other
+     that is not a signed object (`{"o": {…}, "sig"}`, `null` included; the bridge looks at the shape of the
+     object only, not at the type of `sig`: a `sig` that is not a string passes the bridge and is refused by the
+     host gate as `shape`, pinned by `meta_v2_reader_decl_sig_not_a_string_pending`) or that exceeds 2 KiB, like any other
      shape error. The declaration itself (form, signature, binding, KAT) is checked by the host's H12d gate at
      step 5, before the code is shown and before the primary is asked (orch-v2-host §9.4); it is never a bridge
      refusal. A pairing whose declaration fails that gate, or whose level is below what the workspace requires,
