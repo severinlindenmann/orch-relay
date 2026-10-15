@@ -227,7 +227,11 @@ PR #27 changes both units, plus a new unit, the nft table and the Caddyfile:
   `Environment=ORCH_RELAY_BEHIND_PROXY=1 ORCH_RELAY_TRUSTED_PROXY=127.0.0.1`, and leave `ORCH_RELAY_PUBLISH_HEADS` and `ORCH_RELAY_PUBLISH_WIDTH` unset (the heads cap now defaults to max // 74); the internal unit also sets `ORCH_RELAY_MAX_PUBLICATION_BYTES=4194304`.
 - A new `orch-limits.service`, enabled and started by `provision.sh`, loads `/etc/nftables.d/orch-limits.nft`
   (table `inet orch_limits`).
-- The Caddyfile gains `request_body { max_size 8MB }` on `relay.` and `relay-internal.`.
+- The Caddyfile gains `request_body { max_size 8MB }` on `relay.` and `relay-internal.` (8,000,000 bytes).
+  **Drop (P3-D39) needs an exception before it ships:** a matcher for `PUT /v2/drop/*/versions` with
+  `max_size` 27,852,808 bytes (the relay's 27,787,272-byte maximum plus 64 KiB, so the relay answers its own
+  413) and read/idle timeouts above 10 minutes, the 8 MB cap everywhere else (P3 design
+  §14.8; D40c). Without it every upload above 8,000,000 bytes gets Caddy's 413.
 
 Points to know before running `provision.sh` for these changes:
 
@@ -710,8 +714,12 @@ Ordered by impact:
 - **R8. APNs and push.** The relay has no push code and no push-registration route (gap 16), so APNs keys on the VPS
   are **not** needed for this deploy, and push cannot be tested against the real relay in phase 2.
   - HANDOVER and `e2e/CHECKLIST.md` expect the `.p8` in `/srv/orch-relay/apns/` at mode 0600. `provision.sh`
-    comments say root-owned with mode 0640 and group `orch-relay`. Reconcile this before P4 push work.
-  - Open for orch-d6: when is push registration designed (protocol amendment plus relay)?
+    comments say root-owned with mode 0640 and group `orch-relay`. **Settled by P3 design §14.7 (15 Oct):** the
+    owner's key (Key ID `TD27F9Z9V7`, both gateways, per the owner's note) stays at
+    `/srv/orch-relay/apns/AuthKey_TD27F9Z9V7.p8`, `orch-relay:orch-relay` 0600; only the public instance reads
+    it; the internal instance has push disabled; `systemd-creds` (`LoadCredentialEncrypted=`) is an optional
+    deploy-time step. D40c removes the 0640 comment and the `VAPID_*` lines.
+  - Push registration and sending are designed in P3 design §14.3 and protocol §19.10 (P3-D40).
 - **R9. Mobile pins the relay URL.** The vectors and fixtures use `relay_url = https://relay.dev.severin.io`, and the
   phone requires the signed card's `relay_url` to be byte-equal to the reviewed origin. The relay's
   `ORCH_RELAY_ORIGIN` and the host's card must therefore carry exactly that string; a trailing slash breaks it.
