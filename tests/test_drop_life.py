@@ -503,6 +503,24 @@ def test_a_bad_object_does_not_block_the_good_one_behind_it(client, caplog):
     assert rows_[b_["o"]["object_id"]]["tombstone_kind"] == "expired"  # the next one still goes
 
 
+def test_a_skipped_object_does_not_hide_the_good_one_behind_it_in_a_small_batch(
+    client, monkeypatch
+):
+    a, _w, ab = upload("a", expires=NOW + 3600_000)
+    assert put(client, a, ab).status_code == 201
+    b_, _w, bb = upload("b", expires=NOW + 7200_000, author=LAPTOP)
+    assert put(client, b_, bb, author=LAPTOP).status_code == 201
+    sql(
+        client, "UPDATE drop_usage SET blob_bytes=0 WHERE scope='device' AND id=?", f"{WS}:{DEVICE}"
+    )
+    at(client, NOW + 8000_000)
+    monkeypatch.setattr(L, "BATCH", 1)  # one candidate per query: the bad one comes first
+    life(client).run()
+    rows_ = objects(client)
+    assert rows_[a["o"]["object_id"]]["tombstone_kind"] is None
+    assert rows_[b_["o"]["object_id"]]["tombstone_kind"] == "expired"
+
+
 # --- N3: an EIO after the rename leaves no blob ---------------------------------------------------
 
 

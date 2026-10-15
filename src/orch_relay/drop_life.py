@@ -193,15 +193,16 @@ class Life:
         return progress, changed
 
     def drain(self, work):
-        """Repeat `work(con, now, skip)` in its own transaction until it makes no progress; the
-        workspaces whose `n` moved are returned."""
+        """Repeat `work(con, now, skip)` in its own transaction until it makes no progress and
+        skips nothing new; the workspaces whose `n` moved are returned."""
         skip, changed = set(), set()
         total = 0
         while True:
+            skipped = len(skip)
             progress, moved = self.transaction(lambda con, now: work(con, now, skip))
             changed |= moved
             total += progress
-            if not progress:
+            if not progress and len(skip) == skipped:  # a newly skipped object may unblock more
                 return total, changed
 
     @staticmethod
