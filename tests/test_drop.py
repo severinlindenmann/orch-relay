@@ -986,3 +986,13 @@ def test_commit_uses_the_request_now_for_the_60_s_floor(client):
 
     client.app.state.drop.hooks["before_commit"] = slow
     assert put(client, f, fb).status_code == 201
+
+
+def test_startup_sweep_batches_cover_every_row_in_key_order(client):
+    """F5: the keyset batches advance and miss nothing."""
+    o_id = object_id("batches")
+    seed_versions(client, o_id, 23, 100)
+    with closing(db.connect(path_of(client))) as con:
+        con.row_factory = __import__("sqlite3").Row
+        got = [(r["object_id"], r["version"]) for r in DR.Drop.stored_rows(con, batch=7)]
+    assert got == [(o_id, v) for v in range(1, 24)]

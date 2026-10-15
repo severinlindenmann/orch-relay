@@ -650,3 +650,36 @@ def test_head_413_drains_after_the_slot(h):
         assert drained == [0] and peer.read == len(body)
 
     asyncio.run(run())
+
+
+def test_transfer_deadline_counts_from_the_slot_not_the_blob(h):
+    """F2: the 10-minute bound runs from the upload slot: a head that took most of it leaves
+    the blob only the rest (a bound from the blob's start would let it run longer)."""
+
+    async def run():
+        h.drop.limits.max_transfer, h.drop.limits.head_s = 0.7, 0.7
+        signed, _, body = upload("fromslot", content=b"\0" * 100_000)
+        head = len(body) - signed["o"]["content_len"]
+        blob = split(body[head:], 20_000)
+        chunks = [body[:8], body[8:head]] + blob
+
+        class Paced(Peer):
+            async def receive(self):
+                if len(self.chunks) == len(blob) + 1:  # before the head: most of the budget
+                    await asyncio.sleep(0.5)
+                elif len(self.chunks) <= len(blob):
+                    await asyncio.sleep(0.08)
+                return await super().receive()
+
+        peer = Paced(chunks, then="end")
+        s = scope(
+            "PUT",
+            f"/v2/drop/{signed['o']['object_id']}/versions",
+            {"o": signed["o"]["object_id"]},
+            length=len(body),
+        )
+        await h.drop.endpoint(s, peer.receive, peer.send, "put")
+        assert (peer.status, peer.json) == (400, {"error": "malformed"})
+        assert rows(h.d.path, "drop_objects") == []
+
+    asyncio.run(run())
