@@ -335,7 +335,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if mode == "deep_json":
                 return self.raw(b"[" * 200_000)
             info = {"v": 1, "reader": 1, "max_publication_bytes": 4194304}
-            return self.reply(200, info, {"Cache-Control": "no-store"})
+            cache = {} if mode == "no_cache" else {"Cache-Control": "no-store"}
+            return self.reply(200, info, cache)
         if path == "/v2/session/challenge":
             return self.reply(200, {"challenge": P.b64u(secrets.token_bytes(32))})
         if path == "/v2/accounts":
@@ -343,6 +344,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.reply(400, {"error": body["invite"]})
             if mode == "echo_invite_prefixed":
                 return self.reply(400, {"error": "e_" + body["invite"]})
+            if mode == "echo_invite_part":
+                return self.reply(400, {"error": body["invite"][:20]})
             if mode == "echo_long":
                 return self.reply(400, {"error": "a" * 100})
             if mode == "echo_escape":
@@ -352,12 +355,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if mode == "account_drop":  # committed, but the response is lost
                 self.close_connection = True
                 return None
+            if mode == "wrong_person":
+                return self.reply(200, {"person_id": "p_someone_else"})
             return self.reply(200, {"person_id": cert["o"]["person_id"]})
         if path == "/v2/session/login":
             cert = srv.certs[body["id"]]
             signed = P.auth_bytes(srv.base, P.unb64u(body["challenge"]), "device", body["id"])
             ok = P.SUITE.verify(P.unb64u(cert["o"]["dk_sig_pub"]), P.unb64u(body["sig"]), signed)
-            if not ok and mode != "accept_any_login":
+            if not ok and mode == "login_unknown_device":
+                return self.reply(401, {"error": "unknown_device"})
+            if not ok and not mode.startswith("accept_any_login"):
                 return self.reply(401, {"error": "bad_signature"})
             return self.reply(200, {"token": srv.new_token(), "expires_ms": 1})
         if path.startswith("/v2/devices/"):
@@ -367,11 +374,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.close_connection = True
                 return None
             if bearer in srv.live:
-                return self.reply(200, {"cert": srv.certs[path.rsplit("/", 1)[1]]})
+                cert = srv.certs[path.rsplit("/", 1)[1]]
+                if mode == "wrong_cert":
+                    cert = {**cert, "extra": 1}
+                return self.reply(200, {"cert": cert})
             return self.reply(401, {"error": "unauthorized"})
         if path == "/v2/session/logout":
             srv.logouts.append(bearer)
-            srv.live.discard(bearer)
+            if mode != "logout_noop":
+                srv.live.discard(bearer)
+            if mode == "accept_any_login_logout500":
+                return self.reply(500, {"error": "boom"})
             return self.reply(200, {})
         return self.reply(404, {"error": "not_found"})
 
@@ -428,7 +441,7 @@ def test_redirect_and_environment_proxy_are_never_followed(fake):
 
 
 @pytest.mark.parametrize(
-    "mode", ["echo_invite", "echo_invite_prefixed", "echo_long", "echo_escape"]
+    "mode", ["echo_invite", "echo_invite_prefixed", "echo_invite_part", "echo_long", "echo_escape"]
 )
 def test_error_strings_from_the_relay_are_filtered(fake, mode):
     srv, invite = fake(mode), new_invite()
@@ -466,6 +479,41 @@ def test_wrongly_accepted_wrong_origin_login_is_logged_out(fake):
     assert "FAIL login bound to a wrong origin refused: 200" in r.stdout
     assert "PASS logout of the wrongly accepted session" in r.stdout
     assert len(srv.issued) == 2 and srv.logouts == srv.issued
+
+
+@pytest.mark.parametrize(
+    "mode, line",
+    [
+        ("logout_noop", "FAIL session gone after logout: 200"),
+        ("wrong_cert", "FAIL authenticated read GET /v2/devices/<id>: 200"),
+        ("wrong_person", "FAIL account + device registered: 200"),
+        ("login_unknown_device", "FAIL login bound to a wrong origin refused: 401 unknown_device"),
+        ("accept_any_login", "FAIL login bound to a wrong origin refused: 200"),
+        ("no_cache", "FAIL relay-info: 200"),
+    ],
+)
+def test_the_functional_checks_fail_the_run_against_a_dishonest_relay(fake, mode, line):
+    srv, invite = fake(mode), new_invite()
+    r = fake_run(srv, invite)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert_quiet(r, invite, *srv.issued)
+    assert line in r.stdout.splitlines(), r.stdout
+    assert "PASS all checks" not in r.stdout
+    assert r.stdout.splitlines()[-1].startswith("FAIL ")
+    if mode == "wrong_person":  # the run stops at the account
+        assert srv.issued == []
+
+
+def test_a_failed_logout_of_the_stray_session_is_a_failure(fake):
+    srv, invite = fake("accept_any_login_logout500"), new_invite()
+    r = fake_run(srv, invite)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert_quiet(r, invite, *srv.issued)
+    assert "FAIL logout of the wrongly accepted session: 500" in r.stdout
+
+
+def test_the_body_cap_is_one_mebibyte():
+    assert SM.MAX_BODY == 1024 * 1024
 
 
 def test_person_id_is_printed_before_the_account_post(fake):
@@ -553,6 +601,10 @@ def test_piped_invite_needs_the_explicit_flag(fake):
         "https://relay-internal.dev.severin.io:8443",
         "https://relay-internal.dev.severin.io:0443",
         "https://relay-internal.dev.severin.io:",
+        "http://evillocalhost",
+        "http://localhost-evil",
+        "http://notlocalhost:80",
+        "http://attacker127.0.0.1",
         "http://localhost.evil.com",
         "http://2130706433",
         "http://0x7f.0.0.1",
@@ -627,6 +679,7 @@ INTERNAL = "https://relay-internal.dev.severin.io"
         (INTERNAL + ":8443", INTERNAL + ":8443", [], "port 443"),
         ("http://[::1", "http://[::1", [], "malformed"),
         ("http://127.0.0.1:1", "http://[::1", [], "malformed"),
+        ("http://127.0.0.1:1", "https://relay.dev.severin.io", [], "needs --public"),
     ],
 )
 def test_main_refuses_before_any_network_access(
@@ -748,7 +801,10 @@ def test_the_printer_withholds_secrets_and_control_characters(monkeypatch, capsy
     monkeypatch.setattr(SM, "SECRETS", ["smokesecret_0123456789"])
     SM.say("FAIL x: smokesecret_0123456789")
     SM.say("PASS y: \x1b[2J\nok")
-    assert capsys.readouterr().out == "FAIL <unprintable>\nPASS y: ?[2J?ok\n"
+    SM.say("PASS z: \x7f\x9b\u202e\u200b\u2066\ufeff\u0301\x00\x85\u2028")
+    assert capsys.readouterr().out == (
+        "FAIL <unprintable>\nPASS y: ?[2J?ok\nPASS z: " + "?" * 10 + "\n"
+    )
 
 
 def test_control_characters_in_a_refused_host_are_not_echoed(monkeypatch, capsys, no_network):
