@@ -30,7 +30,10 @@ PLANNED = {
     ("POST", "/v2/workspaces/{ws}/push"),  # D40b
 }
 # Refusals a route's row names that its own PR does not produce yet (with the PR that adds them).
-DEFERRED = {("PUT", "/v2/drop/{o}/versions"): {"rotation_required"}}  # D39a2, owner question 6
+DEFERRED = {
+    ("PUT", "/v2/drop/{o}/versions"): {"rotation_required"},  # D39a2, owner question 6
+    ("POST", "/v2/drop/list"): {"generation_changed"},  # D39a2, amendment A2
+}
 # Backticked names in the registry and refusal cells that are answer fields, not error codes.
 FIELDS = {"epoch", "current", "state", "claimed_by", "devices", "server_ms", "quota"}
 
