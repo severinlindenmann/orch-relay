@@ -1,0 +1,317 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "POST",
+    "path": "/v2/revocations",
+    "role": "client",
+    "auth": "none"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/revocations",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "record": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "revocation",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "revoked_ms": 1790000000000,
+              "reason": "lost"
+            },
+            "sig": "5f5fIS1e8IWcHR3xFb8yPc3J6P5Kskox6EbXdnqZOMWP1Hd7rysykdtEsNaUGA0ZuWAmI_fLtEeLjN9nKwLZjQ"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "device_id": "4177b27d8e4ac182e8d388b247d2b136"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "revocations_post: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/revocations",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "record": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "revocation",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "revoked_ms": 1790000000000,
+              "reason": "lost"
+            },
+            "sig": "5f5fIS1e8IWcHR3xFb8yPc3J6P5Kskox6EbXdnqZOMWP1Hd7rysykdtEsNaUGA0ZuWAmI_fLtEeLjN9nKwLZjQ"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_wrong_suite",
+      "given": {
+        "scenario": "wrong_suite",
+        "now_ms": 1790000000000,
+        "condition": "revocations_post: Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/revocations",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "record": {
+            "o": {
+              "v": 2,
+              "suite": 1,
+              "kind": "revocation",
+              "person_id": "c0ba4c0e49f25a37022cc22323a15986",
+              "device_id": "ed2a9b65180497dd0022753339a5a378",
+              "revoked_ms": 1790000000000,
+              "reason": "lost"
+            },
+            "sig": "IKv8swerxQPfithV5BiZoynDnpluFxStWR7_uk4UJ4nBKkaOmt34QPAW6AYwd7x697ff08zgpxjBqMfigjh0Ag"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "wrong_suite"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_bad_signature",
+      "given": {
+        "scenario": "bad_signature",
+        "now_ms": 1790000000000,
+        "condition": "revocations_post: Trusted directory verification key differs from the artifact's signing key; artifact remains valid under its fixture key."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/revocations",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "record": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "revocation",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "revoked_ms": 1790000000000,
+              "reason": "lost"
+            },
+            "sig": "5f5fIS1e8IWcHR3xFb8yPc3J6P5Kskox6EbXdnqZOMWP1Hd7rysykdtEsNaUGA0ZuWAmI_fLtEeLjN9nKwLZjQ"
+          }
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "bad_signature"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_other_person",
+      "given": {
+        "scenario": "other_person",
+        "now_ms": 1790000000000,
+        "condition": "revocations_post: No account for the signed person, or certificate/request person is neither owner nor authorized person."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/revocations",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "record": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "revocation",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "revoked_ms": 1790000000000,
+              "reason": "lost"
+            },
+            "sig": "5f5fIS1e8IWcHR3xFb8yPc3J6P5Kskox6EbXdnqZOMWP1Hd7rysykdtEsNaUGA0ZuWAmI_fLtEeLjN9nKwLZjQ"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "other_person"
+        }
+      }
+    },
+    {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "revocations_post: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/revocations",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 16385,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_rate_limited",
+      "given": {
+        "scenario": "rate_limited",
+        "now_ms": 1790000000000,
+        "condition": "revocations_post: Applicable full-duration address/person rate window or outstanding challenge cap is full."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/revocations",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "record": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "revocation",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "revoked_ms": 1790000000000,
+              "reason": "lost"
+            },
+            "sig": "5f5fIS1e8IWcHR3xFb8yPc3J6P5Kskox6EbXdnqZOMWP1Hd7rysykdtEsNaUGA0ZuWAmI_fLtEeLjN9nKwLZjQ"
+          }
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "rate_limited"
+        }
+      }
+    },
+    {
+      "name": "exact_retry",
+      "given": {
+        "scenario": "exact_bytes_already_committed",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/revocations",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "record": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "revocation",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "revoked_ms": 1790000000000,
+              "reason": "lost"
+            },
+            "sig": "5f5fIS1e8IWcHR3xFb8yPc3J6P5Kskox6EbXdnqZOMWP1Hd7rysykdtEsNaUGA0ZuWAmI_fLtEeLjN9nKwLZjQ"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "device_id": "4177b27d8e4ac182e8d388b247d2b136"
+        }
+      }
+    }
+  ]
+}

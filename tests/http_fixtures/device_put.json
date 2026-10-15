@@ -1,0 +1,571 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "PUT",
+    "path": "/v2/devices/{device}",
+    "role": "client",
+    "auth": "none"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "device_id": "4177b27d8e4ac182e8d388b247d2b136"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_cert_expired",
+      "given": {
+        "scenario": "cert_expired",
+        "now_ms": 1790000000000,
+        "condition": "Device certificate used by device_put has expired (400)."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": 1789999999999,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "gSw_2V2cma0cJQcPyrXrZzx2LlH1zE63zhnbMFdIEbHm_Uu6kA_NSMZ5GSuftnYUUTyjFRhGovID0NL-6k9aDw"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "cert_expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_cert_invalid",
+      "given": {
+        "scenario": "cert_invalid",
+        "now_ms": 1790000000000,
+        "condition": "device_put: Directory certificate validation fails (certificate absent, invalid shape, key or PK binding)."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "cert_invalid"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "device_put: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_wrong_suite",
+      "given": {
+        "scenario": "wrong_suite",
+        "now_ms": 1790000000000,
+        "condition": "device_put: Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 1,
+              "kind": "device_cert",
+              "device_id": "ed2a9b65180497dd0022753339a5a378",
+              "person_id": "c0ba4c0e49f25a37022cc22323a15986",
+              "dk_sig_pub": "OO4iFA8qjHRITQA_xYVCaNIf6Iyic1Ccae5HsJooTng",
+              "dk_kx_pub": "kbiLVbp7bnYEXa-QcX5Onjaj8-KXzk-dl1LR7gmvZB4",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-foG1ZQpeaBUBlX-rZM8LixY7bCo_w",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "55BQotkDF79MwLjBlT7wKCyLUkHdNR12XEYB5xovE19vOiFL--6rRQhsZfom6Zs4XdjvKOn65OSE6dK0yFvQAw"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "wrong_suite"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_other_person",
+      "given": {
+        "scenario": "other_person",
+        "now_ms": 1790000000000,
+        "condition": "device_put: No account for the signed person, or certificate/request person is neither owner nor authorized person."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "other_person"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_revoked",
+      "given": {
+        "scenario": "revoked",
+        "now_ms": 1790000000000,
+        "condition": "The target device for device_put is revoked."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "revoked"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_cert_conflict",
+      "given": {
+        "scenario": "cert_conflict",
+        "now_ms": 1790000000000,
+        "condition": "device_put: A certificate with different canonical content is already committed for this device id."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "cert_conflict"
+        }
+      }
+    },
+    {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "device_put: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 16385,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_rate_limited",
+      "given": {
+        "scenario": "rate_limited",
+        "now_ms": 1790000000000,
+        "condition": "device_put: Applicable full-duration address/person rate window or outstanding challenge cap is full."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "rate_limited"
+        }
+      }
+    },
+    {
+      "name": "resigned_identical",
+      "given": {
+        "scenario": "Same canonical signed object, different valid P-256 signature; no state change",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1790000000000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "nBF2V4wJb4ebEegxUjC-N0-SnNtIhge5flF5lKQchNtyHCnxEuaXYQGFF7eJkGB43VcR1YktFGTZ-H08YreGzA"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "device_id": "4177b27d8e4ac182e8d388b247d2b136"
+        }
+      }
+    },
+    {
+      "name": "exact_retry",
+      "given": {
+        "scenario": "exact_bytes_already_committed",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/devices/4177b27d8e4ac182e8d388b247d2b136",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1789913600000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "I4l5kFDWCSHvaAYAMnYc8clxU5xQDfq_gy0hLiyCoFy01h4gWptRIRFlJDzJlNaje-H7iRYB0F-khVAM_vF-5w"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "device_id": "4177b27d8e4ac182e8d388b247d2b136"
+        }
+      }
+    }
+  ]
+}

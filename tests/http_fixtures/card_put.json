@@ -1,0 +1,1080 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "PUT",
+    "path": "/v2/workspaces/{ws}/card",
+    "role": "host",
+    "auth": "first|W(g)"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card_seq": 1
+        }
+      }
+    },
+    {
+      "name": "refusal_400_delegation_mismatch",
+      "given": {
+        "scenario": "delegation_mismatch",
+        "now_ms": 1790000000000,
+        "condition": "card_put: The supplied card's delegation binds a different workspace or WSK than its card."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BM4v-fnQ3spQQ0mJyJVLXg2Ph_eHk6XQuPC7AaiX7qeygwPq7ItHHbYSc_Gtg0zhunk2ZVkb7nU_Lwbe-urVGmU",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1790000000000
+              },
+              "sig": "OjHN5D28OLaBnvhhg5T4527jYC_PnUFS9wN2QnCyDqB4t0wrH5bxkxjDSG0PRlYhZCgz5pXP09shGYUhYUA6cA"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "delegation_mismatch"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "card_put: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_wrong_suite",
+      "given": {
+        "scenario": "wrong_suite",
+        "now_ms": 1790000000000,
+        "condition": "card_put: Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 1,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "UJSjZsAS_obtd4Ob42R7s99sRMU_tokzRoazVMGqJpo",
+                "owner_person_id": "c0ba4c0e49f25a37022cc22323a15986",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "N0ADdrsfsn3a4axF7zQe0dwTE4RHPQOSevzsAnZvOB4W6PNFe-B22PpOQKS6Tn0icHhMPs5fWEtdBhd1W51cAg"
+            },
+            "o": {
+              "v": 2,
+              "suite": 1,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "UJSjZsAS_obtd4Ob42R7s99sRMU_tokzRoazVMGqJpo",
+              "wxk_pub": "vbok5Cs2PVHx_6i-UVSNDMOtYleVYmJQYyL70NIksWs",
+              "wxk_version": 1,
+              "owner_person_id": "c0ba4c0e49f25a37022cc22323a15986",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "MXHOCbi_1nMdp9J0GmUkiOazzKuad60zBcngI8cIBTA",
+              "ck_commit": "d9Hpn_1ivmNzp2yZ18A1J9zsLW7i7ogNFMQkHrktONk"
+            },
+            "sig": "10cgCxONdBuev8kaX5NFjKVHzUEqtJRtJoCUwz-4aXcjnX7heI0FKGTBO6BA8Pp21lX6RL5SiLgM6Lh50uUJAQ",
+            "sealed": "oF510UAbcmqxiwNhT4CWfHkP0V7-ymiTMhUqkd5_CP7qOm5MbHMJcpAW_CBFETTIPt9wmO11eSjQnHOrFaCpX-CILSnm4CoVbEBQY1mPYLDApD3HBXttJK4F9SXS2-2UcXupaEyNVWBW9lFQkC01ArTL-OjOLd6XmX6YyGqTTsczS98WN3CYk28"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "wrong_suite"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_bad_signature",
+      "given": {
+        "scenario": "bad_signature",
+        "now_ms": 1790000000000,
+        "condition": "card_put: Trusted directory verification key differs from the artifact's signing key; artifact remains valid under its fixture key."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "WLo2NnXEb_9QgKpwvqKhZVIEkaCexmLgg64VyaYhAJFzyKARgFqP7uZ9d_JpYQgytpIzTbPWrcchbzvb7QNNLQ",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "bad_signature"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "card_put: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by card_put."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_other_person",
+      "given": {
+        "scenario": "other_person",
+        "now_ms": 1790000000000,
+        "condition": "card_put: No account for the signed person, or certificate/request person is neither owner nor authorized person."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "other_person"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_bad_wxk_version",
+      "given": {
+        "scenario": "bad_wxk_version",
+        "now_ms": 1790000000000,
+        "condition": "card_put: Held card's WXK version does not allow the submitted version/key transition."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "bad_wxk_version"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_delegation_changed",
+      "given": {
+        "scenario": "delegation_changed",
+        "now_ms": 1790000000000,
+        "condition": "card_put: Held card's delegation differs from this card's delegation."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "delegation_changed"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_fenced",
+      "given": {
+        "scenario": "fenced",
+        "now_ms": 1790000000000,
+        "condition": "card_put: Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "0",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "fenced"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_other_workspace",
+      "given": {
+        "scenario": "other_workspace",
+        "now_ms": 1790000000000,
+        "condition": "card_put: Authenticated/route workspace differs from the signed object's workspace."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "other_workspace"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_stale_card",
+      "given": {
+        "scenario": "stale_card",
+        "now_ms": 1790000000000,
+        "condition": "card_put: Card sequence is behind held state (or an unequal card at the same sequence); wraps name an old card sequence."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "stale_card"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_wsk_changed",
+      "given": {
+        "scenario": "wsk_changed",
+        "now_ms": 1790000000000,
+        "condition": "card_put: Held card has another WSK; replacement is forbidden."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "wsk_changed"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_wxk_changed_without_version",
+      "given": {
+        "scenario": "wxk_changed_without_version",
+        "now_ms": 1790000000000,
+        "condition": "card_put: Held card has this WXK version but a different exchange key."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "wxk_changed_without_version"
+        }
+      }
+    },
+    {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "card_put: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 65537,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_rate_limited",
+      "given": {
+        "scenario": "rate_limited",
+        "now_ms": 1790000000000,
+        "condition": "card_put: Applicable full-duration address/person rate window or outstanding challenge cap is full."
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "rate_limited"
+        }
+      }
+    },
+    {
+      "name": "first_card_without_session",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "PUT",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card_seq": 1
+        }
+      }
+    }
+  ]
+}

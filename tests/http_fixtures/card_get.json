@@ -1,0 +1,217 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "GET",
+    "path": "/v2/workspaces/{ws}/card",
+    "role": "client",
+    "auth": "D(m)|W"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "card": {
+            "delegation": {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "ws_delegation",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+                "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+                "client_hosted": false,
+                "issued_ms": 1789913600000
+              },
+              "sig": "IBOllkcbGVq-WVuQ1UC8j7yl9hYN4HskjFjo3VpUWBnV77R3Xowa5AJS50DOsooJ-WlsHOjrpK2esZq_wxVZ8w"
+            },
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "card",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "wsk_pub": "BGvpqoOs1QvQFfX3zyr2MZ_vqZGXoojPjT_JQ1htqPKMFRqUXJf0gmPHCHA2Wr7nb6Xacb2eo8e3JpBZNyvp0Z8",
+              "wxk_pub": "BGY55sKt9zprDZ64Uqi7Sd07WORWYog9Xvd9Ans6geri4rKobER_E0nImGpKmepMzWeO9nMH_L9fgd9dOR2XrcI",
+              "wxk_version": 1,
+              "owner_person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "relay_url": "https://relay.dev.severin.io",
+              "card_seq": 1,
+              "issued_ms": 1790000000000,
+              "sealed_hash": "yn-_6ZfHSsu19QBEsykUoBcXH1xbJSltDYnidcI2BuY",
+              "ck_commit": "bjMabCGdDIBEgW3sSD94IDdF4Z_lpsdlYetFKymUA-A"
+            },
+            "sig": "AP8kCqRMkFSAoZa0tKDx6o8y8kYDrI4EHsdj9P0KCjnJrHNs-99nhJCvIq8u1Gqe7WIJT4IgdxrnYqitJ_CZhg",
+            "sealed": "9ALgLEgGCPM7UVhVqlPAN6nUgUp8fKl5UT_p2JW8x1ghAHBZ9J_mjSGURb-ylJt6tuA_dnSFeiwNLY4lVevDvGXBx5et9_cQ00irzIRvCj1U134B_7kWEOWYBUDrVmzCqXKb9Fu6IpHlbd26-OapZGjrKaMScRa-cXIBaKAqiqtiHCN_Yuuekgs"
+          }
+        }
+      }
+    },
+    {
+      "name": "refusal_400_cert_expired",
+      "given": {
+        "scenario": "cert_expired",
+        "now_ms": 1790000000000,
+        "condition": "Device certificate used by card_get has expired (400)."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "cert_expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "card_get: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "card_get: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {}
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by card_get."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_revoked",
+      "given": {
+        "scenario": "revoked",
+        "now_ms": 1790000000000,
+        "condition": "The device authenticating card_get is revoked."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "revoked"
+        }
+      }
+    },
+    {
+      "name": "refusal_404_not_found",
+      "given": {
+        "scenario": "not_found",
+        "now_ms": 1790000000000,
+        "condition": "card_get: Authorized resource is absent, or certificate request retention has ended."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/card",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_found"
+        }
+      }
+    }
+  ]
+}

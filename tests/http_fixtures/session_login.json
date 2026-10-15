@@ -1,0 +1,325 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "POST",
+    "path": "/v2/session/login",
+    "role": "client",
+    "auth": "none"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/session/login",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "challenge": "-Up1eSQAzXTjTJ6-mM7vz1RQRMWhuFzuE3PdM4sSdKE",
+          "kind": "device",
+          "id": "4177b27d8e4ac182e8d388b247d2b136",
+          "sig": "b96TcVeVOvwUUZQR21XLT4gY7DSGmWiej7fSkTzcCJTpbPr2a1bOcmjx0xsYetsfIJI19Ecw-BRPqY2eqYyZ0w"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "token": "OmwoD5AW_1FwnuVyTpjI_mOIQ6xErC6xUkGEQfcHMzE",
+          "expires_ms": 1790000900000
+        }
+      }
+    },
+    {
+      "name": "refusal_400_cert_expired",
+      "given": {
+        "scenario": "cert_expired",
+        "now_ms": 1790000000000,
+        "condition": "Device certificate used by session_login has expired (400)."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/session/login",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "challenge": "-Up1eSQAzXTjTJ6-mM7vz1RQRMWhuFzuE3PdM4sSdKE",
+          "kind": "device",
+          "id": "4177b27d8e4ac182e8d388b247d2b136",
+          "sig": "b96TcVeVOvwUUZQR21XLT4gY7DSGmWiej7fSkTzcCJTpbPr2a1bOcmjx0xsYetsfIJI19Ecw-BRPqY2eqYyZ0w"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "cert_expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_cert_invalid",
+      "given": {
+        "scenario": "cert_invalid",
+        "now_ms": 1790000000000,
+        "condition": "session_login: Directory certificate validation fails (certificate absent, invalid shape, key or PK binding)."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/session/login",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "challenge": "-Up1eSQAzXTjTJ6-mM7vz1RQRMWhuFzuE3PdM4sSdKE",
+          "kind": "device",
+          "id": "4177b27d8e4ac182e8d388b247d2b136",
+          "sig": "b96TcVeVOvwUUZQR21XLT4gY7DSGmWiej7fSkTzcCJTpbPr2a1bOcmjx0xsYetsfIJI19Ecw-BRPqY2eqYyZ0w"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "cert_invalid"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "session_login: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/session/login",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "challenge": "-Up1eSQAzXTjTJ6-mM7vz1RQRMWhuFzuE3PdM4sSdKE",
+          "kind": "device",
+          "id": "4177b27d8e4ac182e8d388b247d2b136",
+          "sig": "b96TcVeVOvwUUZQR21XLT4gY7DSGmWiej7fSkTzcCJTpbPr2a1bOcmjx0xsYetsfIJI19Ecw-BRPqY2eqYyZ0w"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_bad_signature",
+      "given": {
+        "scenario": "bad_signature",
+        "now_ms": 1790000000000,
+        "condition": "session_login: Trusted directory verification key differs from the artifact's signing key; artifact remains valid under its fixture key."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/session/login",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "challenge": "-Up1eSQAzXTjTJ6-mM7vz1RQRMWhuFzuE3PdM4sSdKE",
+          "kind": "device",
+          "id": "4177b27d8e4ac182e8d388b247d2b136",
+          "sig": "b96TcVeVOvwUUZQR21XLT4gY7DSGmWiej7fSkTzcCJTpbPr2a1bOcmjx0xsYetsfIJI19Ecw-BRPqY2eqYyZ0w"
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "bad_signature"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_expired",
+      "given": {
+        "scenario": "expired",
+        "now_ms": 1790000000000,
+        "condition": "The single-use login challenge has expired."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/session/login",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "challenge": "-Up1eSQAzXTjTJ6-mM7vz1RQRMWhuFzuE3PdM4sSdKE",
+          "kind": "device",
+          "id": "4177b27d8e4ac182e8d388b247d2b136",
+          "sig": "b96TcVeVOvwUUZQR21XLT4gY7DSGmWiej7fSkTzcCJTpbPr2a1bOcmjx0xsYetsfIJI19Ecw-BRPqY2eqYyZ0w"
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unknown_challenge",
+      "given": {
+        "scenario": "unknown_challenge",
+        "now_ms": 1790000000000,
+        "condition": "session_login: Challenge is absent from the relay's outstanding challenge set (also after prior use)."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/session/login",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "challenge": "-Up1eSQAzXTjTJ6-mM7vz1RQRMWhuFzuE3PdM4sSdKE",
+          "kind": "device",
+          "id": "4177b27d8e4ac182e8d388b247d2b136",
+          "sig": "b96TcVeVOvwUUZQR21XLT4gY7DSGmWiej7fSkTzcCJTpbPr2a1bOcmjx0xsYetsfIJI19Ecw-BRPqY2eqYyZ0w"
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unknown_challenge"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_revoked",
+      "given": {
+        "scenario": "revoked",
+        "now_ms": 1790000000000,
+        "condition": "The device authenticating session_login is revoked."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/session/login",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "challenge": "-Up1eSQAzXTjTJ6-mM7vz1RQRMWhuFzuE3PdM4sSdKE",
+          "kind": "device",
+          "id": "4177b27d8e4ac182e8d388b247d2b136",
+          "sig": "b96TcVeVOvwUUZQR21XLT4gY7DSGmWiej7fSkTzcCJTpbPr2a1bOcmjx0xsYetsfIJI19Ecw-BRPqY2eqYyZ0w"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "revoked"
+        }
+      }
+    },
+    {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "session_login: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/session/login",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 16385,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_quota_exceeded",
+      "given": {
+        "scenario": "quota_exceeded",
+        "now_ms": 1790000000000,
+        "condition": "Eight live device tokens exist; the earliest expires in 20 seconds."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/session/login",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "challenge": "-Up1eSQAzXTjTJ6-mM7vz1RQRMWhuFzuE3PdM4sSdKE",
+          "kind": "device",
+          "id": "4177b27d8e4ac182e8d388b247d2b136",
+          "sig": "b96TcVeVOvwUUZQR21XLT4gY7DSGmWiej7fSkTzcCJTpbPr2a1bOcmjx0xsYetsfIJI19Ecw-BRPqY2eqYyZ0w"
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "quota_exceeded"
+        }
+      }
+    }
+  ]
+}

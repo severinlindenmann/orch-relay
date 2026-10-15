@@ -1,0 +1,316 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "GET",
+    "path": "/v2/cert-requests/{id}",
+    "role": "host",
+    "auth": "W"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "state": "challenged",
+          "challenge": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_challenge",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "primary_nonce": "yesM0_LxxCdgLnjQyCidWCugy84uyRV-fp_2sZojk54",
+              "expires_ms": 1790000600000
+            },
+            "sig": "q4SL5Gf0KRTnqCyOoKXIBxoDCuuDSOwm4rrakWcxCZYH6NMVcsJOCFiuEciwOV8ZAmKCmXiAAbYz-IURjYG5dA"
+          },
+          "cert": null,
+          "rejection": null
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "cert_request_get: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "cert_request_get: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9",
+        "query": {},
+        "headers": {}
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by cert_request_get."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_404_not_found",
+      "given": {
+        "scenario": "not_found",
+        "now_ms": 1790000000000,
+        "condition": "cert_request_get: Authorized resource is absent, or certificate request retention has ended."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace"
+        }
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_found"
+        }
+      }
+    },
+    {
+      "name": "open",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "state": "open",
+          "challenge": null,
+          "cert": null,
+          "rejection": null
+        }
+      }
+    },
+    {
+      "name": "signed",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "state": "signed",
+          "challenge": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_challenge",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "primary_nonce": "yesM0_LxxCdgLnjQyCidWCugy84uyRV-fp_2sZojk54",
+              "expires_ms": 1790000600000
+            },
+            "sig": "q4SL5Gf0KRTnqCyOoKXIBxoDCuuDSOwm4rrakWcxCZYH6NMVcsJOCFiuEciwOV8ZAmKCmXiAAbYz-IURjYG5dA"
+          },
+          "cert": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "device_cert",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "dk_sig_pub": "BD2Dg9RJWGAgStutYIvl34rrr__njS3IVnPx-xdTgtHzKgnufKnunMhRRuxxkmRnOm-hDyUPo45zTlXo5KgPoWA",
+              "dk_kx_pub": "BA6jKo71E8uehnS2iG7rOJHEmRAgE0djQ7olFCtULq9PNcuGHshTXJ0QbakdPfTM2GiY5okQ4H9EPgusWZFGpRw",
+              "label_sealed": "Rp0gYPV3JJuTsT4doXbj-SRG_nt3e1RvqGbxB1rwrRS7ojDEYA",
+              "created_ms": 1790000000000,
+              "expires_ms": null,
+              "scopes_max": [
+                "look",
+                "decide",
+                "operate",
+                "type"
+              ]
+            },
+            "sig": "DlzEwKb_9MgPwuWyYqcj4d47zE3p_fbB2vVfJmH3E8yr1t_-RXXdj7_AndlqgUKq06nHA-GsUwl9i8KAnOkpSA"
+          },
+          "rejection": null
+        }
+      }
+    },
+    {
+      "name": "rejected",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "state": "rejected",
+          "challenge": null,
+          "cert": null,
+          "rejection": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_rejection",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_hash": "KMPfKGmqmnZdjDcE4WmogkomtBsqXHCgib78OJHP3CI",
+              "expires_ms": 1790000600000
+            },
+            "sig": "8I6EN8xZVAc9Z2QMX-jZObnPqVUFTpFG81arYLSFymWWYhwgwDHFCwHv2nWu45JrEG5DU-bUo4zjaZC3XhXLiw"
+          }
+        }
+      }
+    },
+    {
+      "name": "expired",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/cert-requests/1995f17e92ddbfe28475cc5ad02be4c9",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "state": "expired",
+          "challenge": null,
+          "cert": null,
+          "rejection": null
+        }
+      }
+    }
+  ]
+}

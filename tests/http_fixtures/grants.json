@@ -1,0 +1,212 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "GET",
+    "path": "/v2/workspaces/{ws}/grants",
+    "role": "device",
+    "auth": "D(m)"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/grants",
+        "query": {
+          "epoch": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "grants": [
+            {
+              "o": {
+                "v": 2,
+                "suite": 2,
+                "kind": "wk_grant",
+                "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+                "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+                "epoch": 1,
+                "sealed": "BFOD_F0Wv0lLCiUj1w--BzcHI3acUUD8gx6pUF98AdlWHsQV-_4-_JtxYrMi_oLz2mER1SnDFSOBRnPvHSVVGCN0_urrUHSuD6ZOTF7XjqXoTsaNwG2OrseShIX21GEJFgqyzrhXDKLM8S8ThBpMRiw"
+              },
+              "sig": "4pgxPG_bcF9_nV9ktmaGP4PXKe9SFsdAnFubIFOx9TcX8n9sGg5mfYLdBaZM2tbSdMZA6UvXHw_3Ph2qhi8aqA"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "refusal_400_cert_expired",
+      "given": {
+        "scenario": "cert_expired",
+        "now_ms": 1790000000000,
+        "condition": "Device certificate used by grants has expired (400)."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/grants",
+        "query": {
+          "epoch": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "cert_expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "grants: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/grants",
+        "query": {
+          "epoch": "1",
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "grants: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/grants",
+        "query": {
+          "epoch": "1"
+        },
+        "headers": {}
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by grants."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/grants",
+        "query": {
+          "epoch": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_revoked",
+      "given": {
+        "scenario": "revoked",
+        "now_ms": 1790000000000,
+        "condition": "The device authenticating grants is revoked."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/grants",
+        "query": {
+          "epoch": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "revoked"
+        }
+      }
+    },
+    {
+      "name": "refusal_404_not_found",
+      "given": {
+        "scenario": "not_found",
+        "now_ms": 1790000000000,
+        "condition": "grants: Authorized resource is absent, or certificate request retention has ended."
+      },
+      "request": {
+        "method": "GET",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/grants",
+        "query": {
+          "epoch": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device"
+        }
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_found"
+        }
+      }
+    }
+  ]
+}

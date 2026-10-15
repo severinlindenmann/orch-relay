@@ -1,0 +1,227 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "POST",
+    "path": "/v2/workspaces/{ws}/pair/{offer}/{rid}",
+    "role": "device",
+    "auth": "none"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/pair/3588c9fcc1601503d3e17ae7a5a31607/fde154f24ef24b8eccff1cb87c930438",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/octet-stream"
+        },
+        "body_b64u": "T1JCMgIBAAJwXUCru4wckDVKGsqpTJNcQXeyfY5KwYLo04iyR9KxNv3hVPJO8kuOzP8cuHyTBDg1iMn8wWAVA9PheueloxYHAAAAAAAAAAAAAAGgxFBsAAAAAAD-jZx5bF2kUDGXCxaJKGZDGKAvKjADrGAV29sVtqaWkF2X7Clorbwu7ghf5gqwVxG9tsFFimwlT6HB0vfKa_pDE6WyG75txKQ0eG58woGWntwQBwB-_GlXff-YZ--H9U4IP-ZpvGfzEDXy7PzNKi8Wv6uYwpIsQ3P-OghqzztsFS3YMwDmpgZ1lLzK0MU4VkC8gbzPR7HnYJ4yK72vupw0mSsMoVrnPdLAL-B-HXaEdu-7zFP8rwa7wbXCnwvTq97JfuJB9SR6NGaC9w40gX7vOlHeRsmkTGNscD5RPt2MPADxsdS-BujS_WQwK1-X_58-NrSVMeFxEkgOsslLqvHhreuALX1uZ-flLpCq-XXgBxy_8_vxii_TZ0H25qFwfVf6GjRUKAhb1HDfMZ6gs_PSwFeqIb6brmJQSYskoz68blB07CgxMq3G0Gq8iEZVILMSla6NGWnM2hA6l7Uu4Eg8TEI"
+      },
+      "response": {
+        "status": 202,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {}
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "pair_device_post: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/pair/3588c9fcc1601503d3e17ae7a5a31607/fde154f24ef24b8eccff1cb87c930438",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Content-Type": "application/octet-stream"
+        },
+        "body_b64u": "T1JCMgIBAAJwXUCru4wckDVKGsqpTJNcQXeyfY5KwYLo04iyR9KxNv3hVPJO8kuOzP8cuHyTBDg1iMn8wWAVA9PheueloxYHAAAAAAAAAAAAAAGgxFBsAAAAAAD-jZx5bF2kUDGXCxaJKGZDGKAvKjADrGAV29sVtqaWkF2X7Clorbwu7ghf5gqwVxG9tsFFimwlT6HB0vfKa_pDE6WyG75txKQ0eG58woGWntwQBwB-_GlXff-YZ--H9U4IP-ZpvGfzEDXy7PzNKi8Wv6uYwpIsQ3P-OghqzztsFS3YMwDmpgZ1lLzK0MU4VkC8gbzPR7HnYJ4yK72vupw0mSsMoVrnPdLAL-B-HXaEdu-7zFP8rwa7wbXCnwvTq97JfuJB9SR6NGaC9w40gX7vOlHeRsmkTGNscD5RPt2MPADxsdS-BujS_WQwK1-X_58-NrSVMeFxEkgOsslLqvHhreuALX1uZ-flLpCq-XXgBxy_8_vxii_TZ0H25qFwfVf6GjRUKAhb1HDfMZ6gs_PSwFeqIb6brmJQSYskoz68blB07CgxMq3G0Gq8iEZVILMSla6NGWnM2hA6l7Uu4Eg8TEI"
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "pair_device_post: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/pair/3588c9fcc1601503d3e17ae7a5a31607/fde154f24ef24b8eccff1cb87c930438",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/octet-stream"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 65537,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_wrong_suite",
+      "given": {
+        "scenario": "wrong_suite",
+        "now_ms": 1790000000000,
+        "condition": "pair_device_post: Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/pair/3588c9fcc1601503d3e17ae7a5a31607/fde154f24ef24b8eccff1cb87c930438",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/octet-stream"
+        },
+        "body_b64u": "T1JCMgIBAAFwXUCru4wckDVKGsqpTJNc7SqbZRgEl90AInUzOaWjeP3hVPJO8kuOzP8cuHyTBDgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGgxFBsAAAAAAFkwvC2Ae-BJ7La_ZRDQpQjCABgPY3Ue9UMfXvaJ6ycLTHXE_t0_l5G0PvO758yRYKnu1gp0JMt4RI-u2K2qwF6JAM6jgsZ-6MTWiaONp0c3GJyi4lY9ZD0egNyiovnsdHr2WFKqYYi210XQgUV67InBQ"
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "wrong_suite"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unknown_workspace",
+      "given": {
+        "scenario": "unknown_workspace",
+        "now_ms": 1790000000000,
+        "condition": "pair_device_post: No card exists for the route workspace."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/pair/3588c9fcc1601503d3e17ae7a5a31607/fde154f24ef24b8eccff1cb87c930438",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/octet-stream"
+        },
+        "body_b64u": "T1JCMgIBAAJwXUCru4wckDVKGsqpTJNcQXeyfY5KwYLo04iyR9KxNv3hVPJO8kuOzP8cuHyTBDg1iMn8wWAVA9PheueloxYHAAAAAAAAAAAAAAGgxFBsAAAAAAD-jZx5bF2kUDGXCxaJKGZDGKAvKjADrGAV29sVtqaWkF2X7Clorbwu7ghf5gqwVxG9tsFFimwlT6HB0vfKa_pDE6WyG75txKQ0eG58woGWntwQBwB-_GlXff-YZ--H9U4IP-ZpvGfzEDXy7PzNKi8Wv6uYwpIsQ3P-OghqzztsFS3YMwDmpgZ1lLzK0MU4VkC8gbzPR7HnYJ4yK72vupw0mSsMoVrnPdLAL-B-HXaEdu-7zFP8rwa7wbXCnwvTq97JfuJB9SR6NGaC9w40gX7vOlHeRsmkTGNscD5RPt2MPADxsdS-BujS_WQwK1-X_58-NrSVMeFxEkgOsslLqvHhreuALX1uZ-flLpCq-XXgBxy_8_vxii_TZ0H25qFwfVf6GjRUKAhb1HDfMZ6gs_PSwFeqIb6brmJQSYskoz68blB07CgxMq3G0Gq8iEZVILMSla6NGWnM2hA6l7Uu4Eg8TEI"
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unknown_workspace"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_quota_exceeded",
+      "given": {
+        "scenario": "quota_exceeded",
+        "now_ms": 1790000000000,
+        "condition": "pair_device_post: Applicable device/workspace storage, concurrent poll, chunk or open-request cap is full."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/pair/3588c9fcc1601503d3e17ae7a5a31607/fde154f24ef24b8eccff1cb87c930438",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/octet-stream"
+        },
+        "body_b64u": "T1JCMgIBAAJwXUCru4wckDVKGsqpTJNcQXeyfY5KwYLo04iyR9KxNv3hVPJO8kuOzP8cuHyTBDg1iMn8wWAVA9PheueloxYHAAAAAAAAAAAAAAGgxFBsAAAAAAD-jZx5bF2kUDGXCxaJKGZDGKAvKjADrGAV29sVtqaWkF2X7Clorbwu7ghf5gqwVxG9tsFFimwlT6HB0vfKa_pDE6WyG75txKQ0eG58woGWntwQBwB-_GlXff-YZ--H9U4IP-ZpvGfzEDXy7PzNKi8Wv6uYwpIsQ3P-OghqzztsFS3YMwDmpgZ1lLzK0MU4VkC8gbzPR7HnYJ4yK72vupw0mSsMoVrnPdLAL-B-HXaEdu-7zFP8rwa7wbXCnwvTq97JfuJB9SR6NGaC9w40gX7vOlHeRsmkTGNscD5RPt2MPADxsdS-BujS_WQwK1-X_58-NrSVMeFxEkgOsslLqvHhreuALX1uZ-flLpCq-XXgBxy_8_vxii_TZ0H25qFwfVf6GjRUKAhb1HDfMZ6gs_PSwFeqIb6brmJQSYskoz68blB07CgxMq3G0Gq8iEZVILMSla6NGWnM2hA6l7Uu4Eg8TEI"
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "quota_exceeded"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_rate_limited",
+      "given": {
+        "scenario": "rate_limited",
+        "now_ms": 1790000000000,
+        "condition": "pair_device_post: Applicable full-duration address/person rate window or outstanding challenge cap is full."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/pair/3588c9fcc1601503d3e17ae7a5a31607/fde154f24ef24b8eccff1cb87c930438",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/octet-stream"
+        },
+        "body_b64u": "T1JCMgIBAAJwXUCru4wckDVKGsqpTJNcQXeyfY5KwYLo04iyR9KxNv3hVPJO8kuOzP8cuHyTBDg1iMn8wWAVA9PheueloxYHAAAAAAAAAAAAAAGgxFBsAAAAAAD-jZx5bF2kUDGXCxaJKGZDGKAvKjADrGAV29sVtqaWkF2X7Clorbwu7ghf5gqwVxG9tsFFimwlT6HB0vfKa_pDE6WyG75txKQ0eG58woGWntwQBwB-_GlXff-YZ--H9U4IP-ZpvGfzEDXy7PzNKi8Wv6uYwpIsQ3P-OghqzztsFS3YMwDmpgZ1lLzK0MU4VkC8gbzPR7HnYJ4yK72vupw0mSsMoVrnPdLAL-B-HXaEdu-7zFP8rwa7wbXCnwvTq97JfuJB9SR6NGaC9w40gX7vOlHeRsmkTGNscD5RPt2MPADxsdS-BujS_WQwK1-X_58-NrSVMeFxEkgOsslLqvHhreuALX1uZ-flLpCq-XXgBxy_8_vxii_TZ0H25qFwfVf6GjRUKAhb1HDfMZ6gs_PSwFeqIb6brmJQSYskoz68blB07CgxMq3G0Gq8iEZVILMSla6NGWnM2hA6l7Uu4Eg8TEI"
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "rate_limited"
+        }
+      }
+    },
+    {
+      "name": "refusal_503_overloaded",
+      "given": {
+        "scenario": "overloaded",
+        "now_ms": 1790000000000,
+        "condition": "pair_device_post: Global queued-body or concurrent-poll budget is full; existing state is not evicted."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/pair/3588c9fcc1601503d3e17ae7a5a31607/fde154f24ef24b8eccff1cb87c930438",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/octet-stream"
+        },
+        "body_b64u": "T1JCMgIBAAJwXUCru4wckDVKGsqpTJNcQXeyfY5KwYLo04iyR9KxNv3hVPJO8kuOzP8cuHyTBDg1iMn8wWAVA9PheueloxYHAAAAAAAAAAAAAAGgxFBsAAAAAAD-jZx5bF2kUDGXCxaJKGZDGKAvKjADrGAV29sVtqaWkF2X7Clorbwu7ghf5gqwVxG9tsFFimwlT6HB0vfKa_pDE6WyG75txKQ0eG58woGWntwQBwB-_GlXff-YZ--H9U4IP-ZpvGfzEDXy7PzNKi8Wv6uYwpIsQ3P-OghqzztsFS3YMwDmpgZ1lLzK0MU4VkC8gbzPR7HnYJ4yK72vupw0mSsMoVrnPdLAL-B-HXaEdu-7zFP8rwa7wbXCnwvTq97JfuJB9SR6NGaC9w40gX7vOlHeRsmkTGNscD5RPt2MPADxsdS-BujS_WQwK1-X_58-NrSVMeFxEkgOsslLqvHhreuALX1uZ-flLpCq-XXgBxy_8_vxii_TZ0H25qFwfVf6GjRUKAhb1HDfMZ6gs_PSwFeqIb6brmJQSYskoz68blB07CgxMq3G0Gq8iEZVILMSla6NGWnM2hA6l7Uu4Eg8TEI"
+      },
+      "response": {
+        "status": 503,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "overloaded"
+        }
+      }
+    }
+  ]
+}

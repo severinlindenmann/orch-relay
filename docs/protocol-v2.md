@@ -1,0 +1,3552 @@
+# orch protocol, version 2
+
+This document is the wire contract of orch v2. It fixes the exact bytes that the three implementations
+exchange, and what each of them does with an input that is not right:
+
+- **orch-core**: the workspace host (`orch serve` / `orch host`);
+- **orch-relay**: directory, relay (bridge v2), drop and push;
+- **orch-mobile**: the native app (D45/D46, P3 design §7).
+
+orch-publish implements §12.1.
+
+Status: **draft for review**, written for P0 of the orch v2 plan. The design it implements is
+`orch-core/docs/architecture/orch-v2.md` ("the spec"; §-references to it are written *spec §n*). The spec
+is the source of truth for *what* is built. This document decides *how it looks on the wire*. Where this
+document had to choose something the spec leaves open, the choice is marked **DECIDED HERE:**, and §17
+lists every such choice. A reviewer should read §17 first.
+
+The contract is [`tests/vectors_v2.json`](../tests/vectors_v2.json). The reference implementation that
+produces it, [`ref/orch_protocol_ref.py`](../ref/orch_protocol_ref.py) and its builder `ref/_vectors.py`,
+is **test support only and is never shipped or imported by shipped code**. Where the reference and this
+document disagree, this document wins and the reference has a bug. As in bridge v1, every side tests
+against the vectors, not against the other sides. Run `uv run pytest tests/test_vectors.py -x -q` to
+check that the reference reproduces the file and that every case replays from its JSON.
+
+Conventions:
+
+- Integers on the wire are unsigned big-endian unless a field says otherwise.
+- `||` is concatenation.
+- Labels are ASCII byte strings written in double quotes.
+- `H(x)` is SHA-256.
+- "hex" is lower case; "b64u" is canonical base64url without padding (§2.2).
+- `lp16(x)` is a 2-byte length followed by `x`; `u8`, `u32` and `u64` are integers of 1, 4 and 8 bytes.
+- "MUST" and "MUST NOT" are requirements; everything else is explanation.
+
+## Changes since bridge v1
+
+Bridge v1 (`orch-tix/docs/bridge-protocol.md`, with its vectors and reference) is the base. Version 2
+keeps v1's good parts unchanged in substance:
+
+- encrypt-then-sign envelopes with a 16-byte salt per message and a zero nonce;
+- the plaintext framing (`meta_len || meta || data`) and strict request meta;
+- sequence windows and the request store;
+- the silence-before-the-tag rule and the refusal budgets;
+- the clock-offset rule;
+- the pinned host key;
+- the WebAuthn binding, and the `shown` cleaning.
+
+What changes:
+
+- **Keys.** A random workspace key `WK_e` per epoch, sealed to each member device (spec D2). `MK` no
+  longer exists. Every use of `WK_e` goes through HKDF with its own label (§3). `K_bridge` replaces
+  `K_ws`.
+- **Suites (D46, P3 design §7).** Suite 2 (P-256) is the only deployment suite. Suite 1 remains
+  test-only; suites are never negotiated (§1).
+- **Header.** The magic is now `"ORB2"`, the version 2. The `key_version` byte becomes `suite`, and a 4-byte
+  `epoch` is added before the salt: 108 bytes in all (§8.1). v1 envelopes are dropped.
+- **Identities.**
+  - The device key comes from a device certificate signed by the person key `PK` (§6).
+  - The host key is the workspace signing key `WSK`, pinned through the pairing link and the card.
+  - Device ids derive from the device's signing key alone. They no longer include the workspace,
+    because the relay must link a device across workspaces to enforce revocations (§4).
+- **Pairing.**
+  - The link carries `PK`'s pin too, and the pairing request is sealed under a key derived from the link
+    secret (epoch 0).
+  - v1's MAC is gone: the AEAD tag proves the secret.
+  - The fingerprint is a 6-character code bound to a host nonce, the `cert_pending` state is new, and so is
+    the request to the primary device. The primary answers that request with a `PK`-signed challenge that
+    the phone checks against its own keys (§8.3, §8.4).
+- **Refusals.**
+  - `not_paired` becomes `not_member`.
+  - New codes: `stale_epoch`, `other_person`, `cert_invalid`, `cert_expired`, `already_answered` and
+    `question_changed` (§14).
+  - Every refusal to an epoch-0 request carries `wsk_pub`, where v1 carried `host_pub`.
+- **New constructions:**
+  - sealing to a device or to a workspace exchange key (§5.3);
+  - certificates and revocations (§6);
+  - cards, member lists and WK grants (§7);
+  - push payloads (§9);
+  - Drop content, wraps, claims and documents (§10);
+  - ws→ws envelopes (§11);
+  - publish request signing (§12).
+
+## 1. Suites
+
+### 1.1 The two suites
+
+**D45/D46 (P3 design §7).** Deployments MUST use suite 2. Suite 1 and its vectors are test-only.
+Native devices use platform cryptography; references below to browser/WebCrypto behavior describe
+the historical suite-1 client, not a deployment requirement.
+
+| | Suite 1 `ed25519-x25519` (test-only, D46) | Suite 2 `p256` (deployment, D46) |
+|---|---|---|
+| Signature | Ed25519 (RFC 8032, pure), 64 bytes | ECDSA P-256 with SHA-256, raw `r \|\| s`, 64 bytes (IEEE P1363) |
+| Signing public key | 32 bytes | 65 bytes, uncompressed point |
+| Key agreement | X25519, 32-byte keys, 32-byte shared secret | ECDH P-256, 65-byte keys, the 32-byte x-coordinate |
+| Hash, KDF, AEAD | SHA-256; HKDF-SHA-256 (RFC 5869); AES-256-GCM with a 96-bit nonce and a 128-bit tag | the same |
+
+Primitives come only from WebCrypto and the Python `cryptography` package. There is no compression
+anywhere.
+
+- **One suite per deployment, never negotiated (spec D22).** A relay is configured with one suite id. Its
+  directory, every certificate, card and member list, and every header carry that id. A verifier MUST
+  compare the id with its own configured suite, and MUST drop (or refuse as `wrong_suite` at an HTTP API)
+  anything else. Nobody ever tries a second suite. The suite id is in the AAD and in the signed bytes of
+  every construction, so it cannot be changed in transit.
+- Switching a deployment from one suite to the other is a fresh start: new keys, new ids and new
+  pairings. **DECIDED HERE:** suite ids are `1` and `2`. They are carried as one byte in binary layouts and
+  as the integer `suite` in JSON objects.
+- Each device holds **two** key pairs: a signing key `dk_sig` and a key-agreement key `dk_kx`. A workspace
+  likewise has `WSK` (signing) and `WXK` (key agreement). **DECIDED HERE:** the spec's "DK, signing + key
+  agreement" is two keys, because neither Ed25519/X25519 nor WebCrypto allows one key for both uses. Both
+  private halves are non-extractable on a browser.
+
+### 1.2 Validation
+
+**Suite 1.**
+
+- A signature is accepted only if:
+  - it is 64 bytes;
+  - its `S` (the last 32 bytes, little-endian) is below the group order `L`;
+  - the public key passes the next rule;
+  - then RFC 8032 verification passes.
+- A public signing key MUST be:
+  - 32 bytes;
+  - a canonical encoding (`y < p`, and not `x = 0` with the sign bit set);
+  - decodable;
+  - **not of small order**.
+
+  The 8 canonical small-order encodings are listed in the vectors as `ed25519_small_order`. A browser
+  that cannot do point arithmetic MUST check the encoding against that list, plus the canonical-encoding
+  rule. Vectors: `sign` (`s_plus_l_not_canonical`, `small_order_public_key`, `identity_public_key`,
+  `non_canonical_y_public_key`).
+- An X25519 agreement whose shared secret is all zero MUST fail. WebCrypto and `cryptography` both raise
+  on it.
+
+**Suite 2.** This is bridge v1 §3.4 unchanged:
+
+- A signature MUST be 64 bytes, with `r` and `s` in `1 … n-1`.
+- A public key MUST be a 65-byte uncompressed point on the curve.
+- ECDSA is malleable (`(r, n−s)` verifies; vector `high_s_twin_verifies`), so no signature is ever used as
+  an identifier, in either suite.
+
+**Both suites.** The reference signs deterministically (Ed25519 always is; ECDSA via RFC 6979) only so
+that the vectors are reproducible. A real signer may randomise.
+
+## 2. Encodings
+
+### 2.1 Binary
+
+Binary layouts (headers, AADs, signed byte strings) are defined field by field below. Ids are always 16
+raw bytes in binary and 32 hex characters in text.
+
+### 2.2 Text forms of bytes
+
+- **hex** is used for ids (16 bytes) and nothing else in JSON. It MUST be lower case and of the exact
+  length.
+- **b64u** is used for every other byte string in JSON: keys, signatures, ciphertexts, hashes and nonces.
+  It MUST be canonical. A decoder MUST refuse:
+  - padding;
+  - the standard alphabet (`+`, `/`);
+  - a length of `4k+1`;
+  - non-zero trailing bits (`"AAF"` is not `"AAE"`).
+
+  It MUST also check the decoded length where the field has one. Vectors: `encodings.b64u`.
+
+**DECIDED HERE:** ids in hex and every other byte string in b64u, as in v1's meta and TIX's links.
+
+### 2.3 JSON
+
+Every JSON object that is signed, sealed, or carried in a bridge meta uses one subset, and one canonical
+form.
+
+**The subset.**
+
+- Values are objects, arrays, strings, booleans, `null`, and integers in `±(2^53 − 1)`.
+- **No floating-point numbers at all.** `1.0` and `1e3` are refused, even though they denote integers.
+- Object keys are non-empty ASCII.
+- Strings are Unicode scalar values only: no lone surrogates.
+- Nesting is at most 16 levels: the root container is level 1, so 16 nested containers are accepted and 17 are
+  refused (a scalar adds no level).
+
+**DECIDED HERE:** the subset rules (no floats, ASCII keys, safe integers). With them, JavaScript and
+Python produce the same bytes without special cases: with ASCII keys, sorting by code point and sorting by
+UTF-16 unit agree.
+
+**Canonical form** (`cj`): TIX's `canonicalJson`, that is, Python's
+`json.dumps(o, sort_keys=True, separators=(",", ":"), ensure_ascii=False)` encoded as UTF-8.
+
+**Strict parsing.** A receiver MUST parse with every one of these refused:
+
+- a duplicate key;
+- `NaN` or `Infinity`;
+- a float;
+- an integer outside the safe range;
+- a non-ASCII key;
+- invalid UTF-8.
+
+Vectors: `encodings.strict_parse` (including `depth_16`, `depth_17` and `minus_zero`, where `-0` parses to the
+integer `0` and is written `0`), `encodings.canonical_json`.
+
+**Signatures cover `cj(o)`, not the received bytes.** The verifier re-serialises the strictly parsed object
+and verifies over that. Because the subset has one canonical form, a signer that signs `cj(o)` and a
+verifier that re-serialises agree.
+
+### 2.4 Signed objects
+
+A signed object travels as `{"o": <object>, "sig": <b64u>}`, with exactly those two keys.
+
+- Every object carries `"v": 2`, `"suite"` and `"kind"`.
+- `sig = Sign(key, label(kind) || cj(o))`, where `label(kind)` comes from §3.
+- A verifier MUST check, before anything else:
+  - the two keys;
+  - `v`, `suite` and `kind`;
+  - the signature.
+- Each kind then has an **exact field set**: an object with an extra or a missing field is refused.
+
+The card (§7.1) is the one exception to this shape: it carries a delegation and a sealed part beside `o` and `sig`.
+
+### 2.5 Text that a person reads
+
+Labels (device names, pairing labels) and WebAuthn `shown` text are cleaned as bridge v1 §9.3 says:
+
+- remove every code point of category Cc (except LF), Cf, Zl, Zp, Co and Cn;
+- remove every Default_Ignorable_Code_Point;
+- do not normalise;
+- truncate to **80 code points**.
+
+The receiving host cleans for display. Signatures over the device's original label are always verified over the
+original bytes, before any cleaning. A displaying device does not clean again. Vector:
+`pair_with_a_label_full_of_controls`.
+
+## 3. Domain separation
+
+Every derivation, signature, AEAD associated data, hash and MAC has its own label. Rules:
+
+- **HKDF `info`** is `label` followed by fields, each field preceded by `"|"`. A field is one of:
+  - an id as 32 hex characters;
+  - an integer in decimal ASCII without leading zeros;
+  - a purpose name from a closed list.
+
+  Example: `"orch/v2/bridge|3e7a…b890|2"`.
+- **Signed bytes, AADs, hashes and MACs** are `label || bytes`. Their labels end in `"|"`, and no one of
+  them is a prefix of another (checked by `test_no_signature_or_aad_label_is_a_prefix_of_another`).
+- **`WK_e`, `SK_e`, `DEK`, `CK`, `PVK` and the pairing secret `S` are never used directly** as an AEAD or
+  MAC key. Each use goes through HKDF with its own label (spec §6.2).
+- An empty HKDF salt means 32 zero bytes (RFC 5869 §2.2), as in WebCrypto.
+
+| Name in vectors | Label | Kind | IKM / signer | Output, or what it covers |
+|---|---|---|---|---|
+| `kdf_bridge` | `orch/v2/bridge` + `\|ws\|epoch` | HKDF | `WK_e` | `K_bridge`, the bridge channel key (spec §6.2) |
+| `kdf_bridge_msg` | `orch/v2/bridge-msg` | HKDF, salt = header salt | `K_bridge` or `K_pair` | `K_msg`, one envelope |
+| `kdf_push` | `orch/v2/push` + `\|ws\|epoch` | HKDF | `WK_e` | `K_push` (spec §6.3) |
+| `kdf_push_msg` | `orch/v2/push-msg` | HKDF, salt = 16 random bytes | `K_push` | one push payload |
+| `kdf_wrap_wk` | `orch/v2/wrap-wk` + `\|ws\|epoch` | HKDF | `WK_e` | key for DEK wraps under the workspace |
+| `kdf_wrap_sk` | `orch/v2/wrap-sk` + `\|space\|epoch` | HKDF | `SK_e` | key for DEK wraps under a shared space |
+| `kdf_wrap_msg` | `orch/v2/wrap-msg` | HKDF, salt = 16 random bytes | either wrap key | one wrap |
+| `kdf_pair` | `orch/v2/pair` + `\|ws\|offer` | HKDF | link secret `S` | `K_pair`, the epoch-0 channel key |
+| `kdf_seal` | `orch/v2/seal` + `\|purpose\|recipient` | HKDF, salt = `eph_pub \|\| rcpt_pub` | the shared secret | a sealing key (spec §5.1) |
+| `kdf_card` | `orch/v2/card` + `\|ws\|card_seq` | HKDF | card key `CK` | key for the card's sealed part |
+| `kdf_drop_content` | `orch/v2/drop-content` + `\|object\|version` | HKDF | `DEK` | content key |
+| `kdf_drop_meta` | `orch/v2/drop-meta` + `\|object\|version` | HKDF | `DEK` | metadata key |
+| `kdf_label` | `orch/v2/label` + `\|person` | HKDF | personal vault key `PVK` | the label key |
+| `kdf_label_msg` | `orch/v2/label-msg` | HKDF, salt = 16 random bytes | the label key | one sealed label |
+| `aad_seal` | `orch/v2/seal-aad\|` | AAD | | §5.3 |
+| `aad_push` | `orch/v2/push-aad\|` | AAD | | §9 |
+| `aad_wrap` | `orch/v2/wrap-aad\|` | AAD | | §10.3 |
+| `aad_card` | `orch/v2/card-aad\|` | AAD | | §7.1 |
+| `aad_label` | `orch/v2/label-aad\|` | AAD | | §5.4 |
+| `aad_drop_meta` | `orch/v2/drop-meta-aad\|` | AAD | | §10.2 |
+| `sig_device_cert` | `orch/v2/sig/device-cert\|` | signature | `PK` | device certificate |
+| `sig_revocation` | `orch/v2/sig/revocation\|` | signature | `PK` | revocation |
+| `sig_card_wsk` | `orch/v2/sig/card-wsk\|` | signature | `WSK` | card (every `card_seq`) |
+| `sig_ws_delegation` | `orch/v2/sig/ws-delegation\|` | signature | owner's `PK` | the one-time workspace delegation (§7.1) |
+| `sig_cert_challenge` | `orch/v2/sig/cert-challenge\|` | signature | owner's `PK` | the primary's challenge (§8.4) |
+| `sig_push` | `orch/v2/sig/push\|` | signature | `WSK` | push payload (§9) |
+| `sig_decision` | `orch/v2/sig/decision\|` | signature | `dk_sig` | detached signature of a decision (§13) |
+| `sig_member_list` | `orch/v2/sig/member-list\|` | signature | `WSK` | member list |
+| `sig_wk_grant` | `orch/v2/sig/wk-grant\|` | signature | `WSK` | a `WK_e` sealed to one device |
+| `sig_sk_grant` | `orch/v2/sig/sk-grant\|` | signature | the space owner | an `SK_e` sealed to one device |
+| `sig_bridge` | `orch/v2/sig/bridge\|` | signature | `dk_sig` (requests), `WSK` (responses) | bridge envelope |
+| `sig_cert_request` | `orch/v2/sig/cert-request\|` | signature | `WSK` | request to the primary device |
+| `sig_cert_rejection` | `orch/v2/sig/cert-rejection\|` | signature | `PK` | primary rejection (P3-D11, §8.4) |
+| `sig_enroll_request` | `orch/v2/sig/enroll-request\|` | signature | the new agent device key | scoped agent enrolment |
+| `sig_drop_object` | `orch/v2/sig/drop-object\|` | signature | author `dk_sig` or `WSK` | Drop version descriptor |
+| `sig_drop_claim` | `orch/v2/sig/drop-claim\|` | signature | `WSK` | claim |
+| `sig_ws_envelope` | `orch/v2/ws-envelope\|` | signature | sender's `WSK` | ws→ws envelope (spec §9, literal) |
+| `sig_ws_cosign` | `orch/v2/sig/ws-cosign\|` | signature | phone `dk_sig` | human co-signature |
+| `sig_webauthn_bind` | `orch/v2/sig/webauthn-bind\|` | signature | `dk_sig` | binds a passkey to a device |
+| `sig_relay_auth` | `orch/v2/sig/relay-auth\|` | signature | `dk_sig` or `WSK` | relay session login |
+| `sig_publish` | `orch/v2/publish\|` | signature | `WSK` | publish request (spec §10, literal) |
+| `sig_ticket_event` | `orch/v2/sig/ticket-event\|` | signature | `dk_sig` | a person event in a ticket log (ticket format F1 §5.3) |
+| `sig_ws_event` | `orch/v2/sig/ws-event\|` | signature | `dk_sig` | a person event in the workspace log (F1 §5.3) |
+| `sig_host_event` | `orch/v2/sig/host-event\|` | signature | `WSK` | the host's signature over a log line (F1 §5.5) |
+| `sig_genesis_pin` | `orch/v2/sig/genesis-pin\|` | signature | owner device | immutable genesis pin (P3-D18) |
+| `sig_reader_decl` | `orch/v2/sig/reader-decl\|` | signature | the declaring device's `dk_sig` | a reader declaration (H12d, §8.3; orch-core orch-v2-host §9.3, F1 §11.5) |
+| `h_checkpoint` | `orch/v2/checkpoint-hash\|` | hash | — | `cj(C.o)`, exactly F1 (P3-D13) |
+| `h_log_acc` | `orch/v2/log-acc\|` | hash | — | two decoded 32-byte hashes, exactly F1 (P3-D19) |
+| `sig_checkpoint` | `orch/v2/sig/checkpoint\|` | signature | `WSK` | a checkpoint (F1 §5.10) |
+| `h_device_id` | `orch/v2/id/device\|` | hash | | device id |
+| `h_person_id` | `orch/v2/id/person\|` | hash | | person id |
+| `h_pin_person` | `orch/v2/pin/person\|` | hash | | `pk_pin` |
+| `h_pin_workspace` | `orch/v2/pin/workspace\|` | hash | | `wsk_pin` |
+| `h_sas` | `orch/v2/sas\|` | hash | | the 6-character pairing code |
+| `h_sas_cert` | `orch/v2/sas-cert\|` | hash | | the 6-character code of the primary's challenge |
+| `h_dk_hash` | `orch/v2/dk-hash\|` | hash | | `dk_hash`: both keys of one pairing attempt (§8.4, G3b P3-D28) |
+| `h_dek_commit` | `orch/v2/dek-commit\|` | hash | | key commitment for a DEK |
+| `h_card_key_commit` | `orch/v2/card-key-commit\|` | hash | | key commitment for a card key `CK` |
+| `h_wk_commit` | `orch/v2/wk-commit\|` | hash | | key commitment for `WK_e`, the member list's `wk_commit` (§7.2, G2b) |
+| `h_drop_parent` | `orch/v2/drop-parent\|` | hash | | a document version's parent link |
+| `h_ws_envelope` | `orch/v2/ws-envelope-hash\|` | hash | | what a co-signature covers |
+| `h_question` | `orch/v2/question\|` | hash | | a question's `content_hash` |
+| `h_section` | `orch/v2/section\|` | hash | | a ticket section's text (F1 §5.6) |
+| `h_value` | `orch/v2/value\|` | hash | | `cj` of a `ticket.json` value (F1 §5.6) |
+| `h_gate` | `orch/v2/gate\|` | hash | | a gate hash (F1 §5.7) |
+| `h_policy` | `orch/v2/policy\|` | hash | | an effective gate policy (F1 §5.6) |
+| `h_people` | `orch/v2/people\|` | hash | | the ticket roles a gate depends on (F1 §5.6) |
+| `h_question_id` | `orch/v2/question-id\|` | hash | | a question's `qid`, first 16 bytes (F1 §5.6) |
+| `h_event` | `orch/v2/event\|` | hash | | an event head: `prev`, `based_on`, genesis (F1 §5.5) |
+| `h_grant_secret` | `orch/v2/grant-secret\|` | hash | | the stored hash of a grant secret (F1 §5.6) |
+| `h_assert` | `orch/v2/assert\|` | hash | | WebAuthn assertion challenge |
+| `h_webauthn_reg` | `orch/v2/webauthn-reg\|` | hash | | WebAuthn registration challenge |
+| `mac_enroll` | `orch/v2/enroll\|` | HMAC-SHA-256 | the enrolment code | scoped agent enrolment |
+
+The `sig_ticket_event` … `h_grant_secret` rows come from orch-core's ticket format F1 (§5.6), and `sig_reader_decl` from
+F1's H12d label (added to F1's `DEVICE_KEY_LABELS`, orch-v2-host §9.11); the table stays
+prefix-free with them, and `h_question` is the same label F1 calls the question hash (same preimage; F1 writes the digest as
+`sha256:` + hex, §13 as b64u).
+
+The spec writes two signature domains without a trailing `"|"` (`orch/v2/ws-envelope`,
+`orch/v2/publish`). **DECIDED HERE:** both get the trailing `"|"` like every other domain, so that the table
+stays prefix-free. Every label starts with `orch/v2/`, so nothing here can be confused with v1's
+`sharing/…/v1` labels.
+
+## 4. Identifiers, pins and the pairing code
+
+```
+person_id  = H("orch/v2/id/person|" || suite || pk_pub)[0:16]
+device_id  = H("orch/v2/id/device|" || suite || dk_sig_pub)[0:16]
+pk_pin     = H("orch/v2/pin/person|" || suite || pk_pub)                 (32 bytes)
+wsk_pin    = H("orch/v2/pin/workspace|" || suite || wsk_pub)             (32 bytes)
+workspace_id, offer_id, rid, object_id, request_id, envelope id: 16 CSPRNG bytes
+```
+
+**Ids derived from keys.** `person_id` and `device_id` are derived from the key, so an id cannot be claimed
+without the key, and every holder can recompute it. The cost is that one device has one id in every
+workspace. v1 avoided this, but v2's relay must enforce a revocation across all of a person's workspaces
+anyway (spec §5.2). The owner accepted this in review, and spec §4 is being amended to say so.
+`workspace_id` is random (spec §5.3).
+
+**The pairing code (SAS).**
+
+```
+sas = base32(H("orch/v2/sas|" || suite || workspace_id || offer_id || lp16(dk_sig_pub) || lp16(dk_kx_pub)
+               || lp16(wsk_pub) || sas_nonce (32)))[0:6]
+```
+
+- It is shown as 6 characters of the RFC 4648 alphabet `A–Z2–7`, which is 30 bits.
+- `sas_nonce` is drawn by the host **when it creates the offer**, and revealed **only** in the signed
+  `pending` answer to the device that consumed the offer (§8.3). The device's key is therefore fixed before
+  anyone outside the host knows the nonce. The offer is single-use, so whoever holds the link gets exactly
+  one try, at 2^-30.
+- **DECIDED HERE:** the code binds a host nonce. A plain `H(pub)[…6 chars]` (v1's fingerprint idea,
+  shortened to the spec's 6 characters) could be ground in seconds by anyone who saw the honest device's
+  key. Vectors: `bridge.sas`, `host_cases.pair_first_time`, `pair_answers.pending_accepted_shows_the_code`.
+- This code protects the link against whoever else holds it. It cannot protect against the **host**,
+  which chooses `sas_nonce`. That is why the primary's confirmation in `cert_pending` uses a second code,
+  over a challenge that the primary signs with a nonce of its own (§8.4):
+
+  ```
+  cert_code = base32(H("orch/v2/sas-cert|" || suite || cj(challenge.o)))[0:6]
+  ```
+
+## 5. Symmetric constructions and sealing
+
+### 5.1 SALTED-AEAD
+
+For keys that many messages share and no one can count for (`K_push`, the wrap keys, the label key):
+
+```
+SALTED-AEAD(K, msg_label, aad, pt) = salt (16 CSPRNG bytes)
+                                   || AES-256-GCM(HKDF(K, salt, msg_label), nonce = 12 zero bytes, pt, aad)
+```
+
+This is v1's per-envelope key construction (Tink's AES-GCM-HKDF), with the same bound: a collision
+needs two salts to collide under one `K`, at most `q²/2^129`. The bridge uses the same construction with
+the salt in its header (§8.2). A sealer MUST draw the salt freshly for every seal. Vector: `salted_aead`.
+
+### 5.2 Keys and where they live
+
+| Key | Bytes | Made by | Distributed as | Used through |
+|---|---|---|---|---|
+| `PK` (person) | suite signing key | primary device, once | its public half in the directory account; `pk_pin` in pairing links | signs certificates, revocations, workspace delegations, cert challenges |
+| `dk_sig`, `dk_kx` (device) | suite keys | each device | the certificate (§6.1) | requests, co-signatures, relay login / sealed-to |
+| `WSK` (workspace) | suite signing key | the host, at workspace creation | the card; `wsk_pin` in pairing links | responses, member lists, grants, claims, ws envelopes, publish |
+| `WXK` (workspace exchange) | suite kx key, versioned | the host, rotated with the 90-day epoch | the card (`wxk_pub`, `wxk_version`) | ws→ws bodies, Drop wraps to the workspace |
+| `WK_e` | 32 random bytes | the host, per epoch | WK grants (§7.3) | `K_bridge`, `K_push`, the wrap key |
+| `SK_e` | 32 random bytes | the space owner, per epoch | SK grants | the shared-space wrap key |
+| `DEK` | 32 random bytes | the writer, **per object version** | wraps (§10.3) | content and metadata keys |
+| `CK` | 32 random bytes | the host, per `card_seq` | sealed to each device the card is shared with (purpose `card`) | the card's sealed part |
+| `PVK` | 32 random bytes | the primary device | sealed to the person's full devices (purpose `vault`) | sealed device labels (§5.4) |
+| `S` (pairing secret) | 32 random bytes | the host, per offer | the link fragment only | `K_pair` |
+
+`WSK` does not rotate. **DECIDED HERE:** the spec gives `WSK` no rotation. The relay refuses a card that
+changes `wsk_pub` (`wsk_changed`), so a lost `WSK` means a new workspace. A `DEK` is fresh for every
+document version (**DECIDED HERE**), so no content key ever encrypts two plaintexts.
+
+### 5.3 Sealing to a device or to a workspace exchange key
+
+This is the HPKE-shaped construction of spec §5.1. Recipients:
+
+- a device: its `dk_kx`, with recipient id `device_id`;
+- a workspace: its `WXK` of a given version, with recipient id `workspace_id`.
+
+```
+eph            = a fresh key-agreement key pair (MUST be fresh for every seal)
+ss             = KX(eph_priv, rcpt_pub)                              (all-zero is an error)
+K              = HKDF(IKM = ss, salt = eph_pub || rcpt_pub,
+                      info = "orch/v2/seal|" || purpose || "|" || hex(recipient_id))
+AAD            = "orch/v2/seal-aad|" || suite (1) || u8(len(purpose)) || purpose || object_id (16)
+                 || u32(epoch) || extra
+sealed         = eph_pub || AES-256-GCM(K, nonce = 12 zero bytes, pt, AAD)
+```
+
+The zero nonce is safe because `K` is single-use: a fresh `eph` gives a fresh `ss`. The salt binds both
+public keys, as HPKE's `kem_context` does. A wrong purpose, recipient, object, epoch or key fails the tag
+(vectors `seal`, `seal_open`).
+
+**Purposes** (closed list; `object_id`, `epoch` and `extra` per purpose):
+
+| Purpose | Recipient | `object_id` | `epoch` | `extra` | Plaintext |
+|---|---|---|---|---|---|
+| `wk` | device | workspace_id | epoch | — | `WK_e` (32) |
+| `sk` | device | space_id | space epoch | — | `SK_e` (32) |
+| `card` | device | workspace_id | card_seq | — | `CK` (32) |
+| `cert-request` | the primary device | request_id | 0 | — | `cj(inner)` (§8.4) |
+| `drop-dek` | workspace (WXK) or device | object_id | `wxk_version`, or 0 for a device | `u8(1 wxk / 2 device) \|\| u32(version)` | `DEK` (32) |
+| `ws-envelope` | workspace (WXK) | envelope id | `wxk_version` | the 60-byte header (§11.1) | `cj(body)` |
+| `vault` | device | person_id | 0 | — | `PVK` (32), reserved |
+
+Sealing authenticates nothing about the sender (HPKE base mode). Wherever the sender matters, the sealed
+blob sits inside something the sender signs: WK grants (§7.3), cert requests (§8.4), ws envelopes (§11),
+Drop descriptors with their DEK commitment (§10.4), and cards with their CK commitment (§7.1).
+
+### 5.4 Sealed device labels
+
+A certificate's `label_sealed`:
+
+```
+label_sealed = SALTED-AEAD(HKDF(PVK, "", "orch/v2/label|" || hex(person_id)), "orch/v2/label-msg",
+                           "orch/v2/label-aad|" || suite || device_id, UTF-8(label))
+```
+
+It is readable by the person's devices that hold `PVK`, and by nobody else (spec §4, "sealed, not
+leaked"). Hosts keep the labels they learned at pairing in their own registry. **DECIDED HERE:** the label
+is sealed under a key from the personal vault key. The spec names the field `label_sealed` without saying
+to whom. Vector: `label_sealed`.
+
+## 6. Device certificates and revocation
+
+### 6.1 Device certificate
+
+**P3-D5.** Certificate upload is session-less and PK-authorized, under the recovery quotas
+of §19.1. (G0a review 3) After signature verification, identical `cj(o)` is a free idempotent
+repeat (200, no state change), even with a different signature. Different canonical certificate
+content for the same device is 409 `cert_conflict`.
+
+A signed object (§2.4), signed by `PK` with `sig_device_cert`, of kind `device_cert`, with exactly these
+fields:
+
+| Field | Value |
+|---|---|
+| `v`, `suite`, `kind` | `2`, the suite, `"device_cert"` |
+| `device_id` | hex, MUST equal `device_id(dk_sig_pub)` |
+| `person_id` | hex, MUST equal `person_id(pk_pub)` of the signer |
+| `dk_sig_pub`, `dk_kx_pub` | b64u, valid keys of the suite (§1.2) |
+| `label_sealed` | b64u (§5.4) |
+| `created_ms` | integer |
+| `expires_ms` | integer greater than `created_ms`, or `null` for none |
+| `scopes_max` | see below |
+
+`scopes_max` is either:
+
+- a non-empty **prefix** of `["look", "decide", "operate", "type"]`; or
+- exactly one `"drop:<space_id hex>"`, which makes a scoped agent device (spec D15). A scoped agent's
+  `expires_ms` MUST NOT be `null`.
+
+**DECIDED HERE:** scopes are v1's ordered levels, written as the list of levels a device holds, so the
+spec's plural `scopes` keeps v1's order. The spec's `expires?` is a field that is always present, `null`
+when absent, so the canonical form is unique.
+
+A verifier refuses:
+
+- `cert_invalid` for:
+  - a bad signature or field set;
+  - an id not of its key;
+  - bad scopes;
+  - `created_ms > now + 300 s`;
+- `cert_expired` when `now ≥ expires_ms`;
+- `revoked` when a revocation for `device_id` is known.
+
+Vectors: `certs.cases` (16 cases, including a certificate signed under the revocation label).
+
+### 6.2 Revocation
+
+**P3-D5/D7.** Submission is session-less and PK-authorized (§19.1). The relay atomically
+deletes sessions, mailboxes, queued responses, grants and card-key wraps and records durable
+`rotation_due` obligations (§19.5). Public revocation lookup remains available without a session.
+Reason upgrades preserve the stronger reason (`compromised > lost = retired`).
+
+A signed object, signed by `PK` with `sig_revocation`, of kind `revocation`, with exactly the fields
+`{v, suite, kind, person_id, device_id, revoked_ms, reason}`. `reason` is one of `lost`, `retired` or
+`compromised`.
+
+**The relay MUST:**
+
+- verify it against the account's `PK`;
+- check that the device's certificate names the same person;
+- store it permanently;
+- **at once**:
+  - end the device's sessions;
+  - delete its mailboxes, its WK and SK grants, and its push subscriptions;
+  - refuse it on every route (spec §5.2).
+
+**Pushing a revocation to hosts.** The primary also sends the record to each of the owner's workspaces as
+the bridge op `{"op": "revocation", "record": <signed revocation>}`, so hosts do not wait for their next
+directory poll. The authority is `PK`'s signature, not the sender: any member may relay the record. The
+host checks, in this order:
+
+1. the exact meta shape → `malformed`;
+2. the signature with the owner's `PK` → `bad_signature`;
+3. the record's field set and reason → `malformed`;
+4. `person_id` is the owner → `other_person`.
+
+It then records the device as revoked and removes it from its member list. If the device was a member, or was
+sent a grant for the current epoch in any publication body the host exposed (§7.2 H5, G2b), it **rotates** before
+it seals anything new.
+
+**Hosts and devices.** A host that learns of a revocation (through this op, its directory poll, or at
+startup) MUST rotate its epoch (§7.2) before it seals anything new. There is no un-revoke: a device that
+was revoked pairs again with new keys.
+
+**DECIDED HERE:** the closed `reason` list, and no un-revoke. Vectors: `revocations`, `revocation_op`.
+
+### 6.3 Removing a device from one workspace
+
+This is the bridge op `member_remove` (§8.7), `{"op": "member_remove", "device_id": hex}`, from a member
+with the `operate` scope (spec §5.2). The host applies it as a rotation: a new epoch without that device.
+
+### 6.4 Scoped agent devices (spec D15)
+
+The owner's primary device issues an enrolment link
+`v2.<person_id hex>.<space_id hex>.<code_id hex>.<code b64u>`, with a 32-byte `code`, one use and an
+expiry. The agent generates its two keys and posts an `enroll_request` to the relay's person queue:
+
+```
+{"v":2, "suite", "kind":"enroll_request", "person_id", "space_id", "code_id", "dk_sig_pub", "dk_kx_pub",
+ "mac": b64u(HMAC-SHA-256(code, "orch/v2/enroll|" || suite || space_id || lp16(dk_sig_pub) || lp16(dk_kx_pub)))}
+```
+
+The request is self-signed with `sig_enroll_request` as proof of possession. **The primary checks, in
+order:**
+
+1. the self-signature with the request's own `dk_sig_pub` → `bad_signature`;
+2. the field set, and that `person_id` is its own → `malformed`;
+3. the code is known → `unknown_code`, unused → `used`, and unexpired → `expired`;
+4. the space and the MAC, compared in constant time → `bad_mac`.
+
+It then marks the code used, and signs a certificate with `scopes_max = ["drop:<space_id>"]` and the
+expiry it chose. A primary never makes a drop-scoped certificate any other way (§8.4). The relay enforces
+the drop scope on every route. Vectors: `enroll` (valid then reused, expired, unknown code, a MAC over
+other keys, a wrong self-signature, another space).
+
+### 6.5 Recovery kit
+
+The recovery kit (spec §5.2, D21) never crosses an orch protocol boundary except as an opaque blob that the
+relay stores. **DECIDED HERE:** its format (the memory-hard KDF and its parameters) is deferred to P1 and
+is not part of this contract.
+
+## 7. Workspace card, member list, grants
+
+### 7.1 The directory card
+
+**P3-D4.** First publication is self-authenticating and session-less; later writes require
+W(g). The same verified card is idempotent, including its signed cleartext and sealed hash.
+A conflicting card at the same sequence remains `stale_card`. See §19.1 for quotas.
+
+The card has two layers (spec §5.3):
+
+- **A one-time delegation**, signed by the owner's `PK` once, when the workspace is created. It never
+  changes.
+- **The card itself**, signed by `WSK` alone. It changes on every `card_seq`, including each 90-day `WXK`
+  rotation, without the owner's primary device.
+
+```
+delegation = {"o": {"v":2, "suite", "kind":"ws_delegation", "workspace_id", "wsk_pub", "owner_person_id",
+                    "client_hosted": bool, "issued_ms"},
+              "sig": b64u(Sign(PK_owner, "orch/v2/sig/ws-delegation|" || cj(o)))}
+
+card = {"delegation": <delegation>,
+        "o": {"v":2, "suite", "kind":"card", "workspace_id", "wsk_pub", "wxk_pub", "wxk_version",
+              "owner_person_id", "relay_url", "card_seq", "issued_ms", "sealed_hash", "ck_commit"},
+        "sig": b64u(Sign(WSK, "orch/v2/sig/card-wsk|" || cj(o))),
+        "sealed": b64u(sealed part)}
+```
+
+**Why a delegation.** **DECIDED HERE.** The spec has both parts of the card signed by `WSK` and by `PK`.
+Taken literally, every 90-day `WXK` rotation would need the owner's primary device online, and the host
+could not rotate by itself (spec §5.4: "Rotation is automatic"). With the delegation, `PK` vouches once that
+this `WSK` speaks for this workspace of this owner, and `WSK` signs everything that rotates.
+
+**`client_hosted`** is in the clear (the relay learns that the workspace runs on someone else's machine).
+The text "hosted by …" stays in the sealed part (spec D29).
+
+**Showing the marker.** The sealed `hosted_by` is signed only by `WSK`, so a malicious client host could
+publish `hosted_by: null`. Readers MUST therefore decide on the marker from the `PK`-signed delegation:
+
+- **Readers MUST show the client-hosted marker whenever `delegation.client_hosted` is true.** The sealed
+  `hosted_by` only supplies the name.
+- If `hosted_by` is `null` (or empty) while the flag is true, readers show "hosted by (unknown)".
+- If the flag is false but `hosted_by` names someone, readers show the marker with that name too. A host
+  can only add the warning, never remove it.
+
+Vector: `card.hosted_marker`.
+
+**The sealed part:**
+
+- It is `AES-256-GCM(HKDF(CK, "", "orch/v2/card|ws|card_seq"), zero nonce,
+  cj({name, description, capabilities, hosted_by}), "orch/v2/card-aad|" || suite || ws || u32(card_seq))`.
+- `CK` is fresh for every `card_seq` (so the zero nonce is safe), and sealed (purpose `card`) to every
+  device the owner shares the card with.
+- `sealed_hash = b64u(H(sealed))` puts the sealed part under the signature.
+- `ck_commit = b64u(H("orch/v2/card-key-commit|" || workspace_id || u32(card_seq) || CK))`. A reader that
+  unwrapped `CK` MUST check it against `ck_commit` before decrypting. Sealed wraps are not authenticated
+  to their sender (§5.3), and AES-GCM is not key-committing, so without it a wrap could hand two readers two
+  different `CK`s. **DECIDED HERE.**
+- `hosted_by` is `null`, or the text shown as "hosted by …".
+
+**`relay_url`** is `https://<lower-case host>[:port]` with no path and no trailing slash. For development
+only, it may be `http://localhost`, `http://127.0.0.1` or `http://[::1]`, with an optional port.
+
+**What the relay, orch-publish and peers check, in order:**
+
+1. the field set, valid keys, the URL form, integers ≥ 1;
+2. `owner_person_id == person_id(PK_owner)` → `other_person`;
+3. the delegation: its signature with the account's `PK` → `bad_signature`; its field set → `malformed`;
+4. the delegation's `workspace_id`, `wsk_pub` and `owner_person_id` equal the card's → `delegation_mismatch`;
+5. the card's signature with `wsk_pub` → `bad_signature`;
+6. `sealed_hash` against the sealed bytes → `bad_signature`.
+
+**Update rules (relay).**
+
+- `workspace_id` and `owner_person_id` never change (`other_workspace`).
+- `wsk_pub` never changes (`wsk_changed`).
+- The delegation never changes, byte for byte in its canonical form (`delegation_changed`).
+- `card_seq` strictly increases (`stale_card`), except the same verified card is an idempotent retry
+  (P3-D4).
+- `wxk_version` stays the same with the same key, or rises by exactly 1 with a different key
+  (`wxk_changed_without_version`, `bad_wxk_version`).
+
+**DECIDED HERE:** the delegation and its labels; `sealed_hash`; `ck_commit`; `card_seq`; the URL form; and
+the update rules. Vectors: `card.cases` (16, including a rotation signed by `WSK` alone, a delegation
+signed by another person, a delegation for another `WSK`, and a changed delegation), and the round trip
+`test_round_trip_card`.
+
+### 7.2 Member list and epochs
+
+**P3-D6 / D39.** A signed object, signed by `WSK` with `sig_member_list`:
+
+```
+{"v":2, "suite", "kind":"member_list", "workspace_id", "epoch", "list_seq", "issued_ms",
+ "wk_commit",                                                  b64u, 32 bytes (G2b)
+ "persons": [person_id, ...],                                  sorted, unique hex ids
+ "members": [{"device_id": hex, "person_id": hex, "scopes": [...]}, ...]}          sorted by device_id, no duplicates
+
+wk_commit = b64u(H("orch/v2/wk-commit|" || workspace_id || u32(epoch) || WK_epoch))
+```
+
+`list_seq` counts every list, and `epoch` counts keys. Adding a device does not change the epoch; removing
+one does. **DECIDED HERE:** a separate `list_seq`, because the spec's `{epoch, members}` alone cannot
+order two lists of one epoch.
+
+**G2b (P3-D26): one `WK` per epoch, ever.** `wk_commit` has the form of `ck_commit` (§7.1) and is required.
+Every list at one epoch carries the same `wk_commit`; the host never creates a second key for an epoch
+number. A publication that is refused or abandoned after it left the host **burns** its `list_seq` and, if
+it introduced a new epoch, that epoch: the next attempt uses a fresh key at a **higher** epoch. So `list_seq`
+and epochs may have gaps. Epochs never fall. The epoch number stays the only key identifier (grants, the
+bridge header, Drop `key_version`, push keys). `epoch` is a u32, `1 … 2^32−1`, everywhere it is parsed.
+
+**What the relay checks before it accepts a list:**
+
+1. the signature with the card's `wsk_pub`;
+2. the shape: field set (including `wk_commit`, canonical b64u of exactly 32 bytes), sorted unique hex ids,
+   `1 ≤ epoch ≤ 2^32−1`, `1 ≤ list_seq ≤ 2^53−1` (`malformed`);
+3. `workspace_id` is the card's, **including on the first list** (`other_workspace`);
+4. the first list has `1 ≤ epoch ≤ 2^16` and any valid `list_seq` (`bad_epoch`; G2b: a refused first
+   publication burns `(1, 1)`, and the retry at `(2, 2)` is a valid first list); it must include a
+   certificate-bound member device of the delegation owner (`other_person`), keeping the owner in `ever_persons`;
+5. `list_seq` strictly increases (`stale_list`); gaps are allowed;
+6. `previous.epoch ≤ epoch ≤ previous.epoch + 2^16` (`bad_epoch`). **Epochs may skip; they never fall.** The
+   cap keeps a buggy host from exhausting the u32 space in one step;
+7. if any previous member is missing, `epoch > previous.epoch` (`rotation_required`); a skip satisfies it;
+7b. if `epoch == previous.epoch`, `wk_commit` equals the previous list's `wk_commit` (409 `wk_commit_changed`).
+   There is no legacy exception: a stored list without `wk_commit` refuses every same-epoch list, and the host
+   recovers by rotating to a higher epoch. Relay databases from before G2b are development data and MUST be wiped;
+8. for every member:
+   - not revoked (`revoked`);
+   - a stored, valid, unexpired certificate whose person equals the entry's `person_id`, and is
+     the card owner **or is in this list's `persons`** (`other_person`; P3-D6 / D39);
+     the certificate verifies under that person's directory account key;
+   - not a scoped agent, and `scopes` a prefix no longer than its `scopes_max` (`scope_exceeded`);
+9. a WK grant is supplied for **every** member at this list's epoch in the same publication
+   (`missing_grant`; P3-D7).
+
+**Order (normative).** Checks 1–7b run before any grant is looked at; then the grants (shape, `other_workspace`,
+`not_for_this_device`, `grant_conflict`); then checks 8 and 9 per member in list order (certificate, then that
+member's grant). So a host that regenerated a key at the held epoch and re-sealed its grants gets
+`wk_commit_changed`, not `grant_conflict`, and the same body at the held `list_seq` gets `stale_list` (vectors
+`p3.resealed_same_epoch_wk_commit_changed_before_grant_conflict`,
+`p3.resealed_same_list_seq_stale_list_before_grant_conflict`).
+
+A list after the first may have no members: checks 8 and 9 then have nothing to check, and check 7 still requires a
+higher epoch when any previous member is missing.
+
+**What the relay cannot check (G2b).** Grants are sealed, so the relay cannot compare a grant's `WK` with
+`wk_commit`. Its part is the field's presence and shape, the epoch ranges, and same-epoch consistency (7b).
+Devices check every grant they use against the list's `wk_commit` (§7.3 D3, D4).
+
+**P3-D6.** `persons` is a WSK-signed authorization statement, not proof of F1 roles. A WSK
+holder can add a foreign person (and can already leak WK). In P3 lists have one person in practice.
+Devices verify signed snapshots and persist increasing `list_seq` and non-decreasing epochs; they
+need not see every intermediate list, so may accept forward epoch jumps of any size. The
+`2^16` window above is for relay publication. Restricted tickets are deferred to P8 (P3-D14); P3 hosts refuse `not_visible`.
+F1's existing signature context, `roster_v`, `grant.issued` and `auth` supersede #24's older
+`list_seq`, session-grant and `presence` event proposal (P3 design §7).
+
+**P3-D7.** The publication body is exactly `{member_list, grants: [wk_grant],
+card_key_wraps?: {card_seq, wraps: [{device_id, sealed}]}}`. It is an authenticated HTTP
+container, **not another signed kind**: the list and each grant carry their existing signatures.
+All grants must name this workspace, this epoch and a member of this list; no duplicate devices.
+Wrap devices are unique current-list members and `card_seq` equals the current card. Sealed
+values use §5.3. The relay cannot check their plaintext. Limits: 1,024 members, 2 MiB whole body.
+The relay checks all signatures and certificates against the proposed list's `persons`, including
+new people, and commits the list, grants and wraps together or changes nothing. Different bytes
+for an existing `(device, epoch)` grant are `grant_conflict`. An exact-body retry returns its
+committed result before freshness checks, after session and holder authorization. Hosts persist
+the key and sealed publication bytes before sending; they resend those bytes, never reseal.
+There is no rotation-abandon route or label: a refused publication is abandoned by the host alone,
+which burns its epoch and `list_seq` (H4 below). Lost keys after commit require the next rotation.
+
+On acceptance, the relay deletes mailboxes, queued responses, grants and card-key wraps of departed
+devices (P3-D7; push subscriptions from P4).
+Vectors: `member_lists`.
+
+**Host rules (spec §5.4).**
+
+- **When it rotates.** The host rotates at startup and once a day:
+  - if the epoch is 90 days old;
+  - on a revocation it learns of;
+  - on a removal;
+  - on `orch keys rotate`.
+- **How it rotates:**
+  1. generate and durably persist `WK_E` at the next unused epoch `E = EHW + 1` (H1, H2; P3-D7). Epochs may
+     skip, never fall;
+  2. seal and persist a grant for every remaining device, and sign the list with `wk_commit` for `WK_E`;
+  3. publish the list, grants and optional card-key wraps atomically;
+  4. seal everything new under `E` once the relay has accepted that list (2xx). After a revocation or removal
+     the rotation gate is up from the decision on, and nothing new is sealed under the old epoch in between.
+- **What it keeps.** It keeps every old `WK` to read old content, and every burned `WK` (H4). It never seals new
+  content under an old epoch (§8.5).
+- **New devices (spec D26).** A device that joins at epoch `e` is granted `WK_e` and later epochs only.
+
+**Publication host rules (G2b, P3-D26; orch-core host §11, orch-core #382).** A publication body is **exposed**
+from the moment its first send starts. After that the host never assumes it was not stored: a hostile relay can
+store and serve a body it reports as refused.
+
+- **H1, durable allocation.** In the same durable store as `WSK`, the host keeps `LHW` (the highest `list_seq`
+  ever signed, not the committed one), `EHW` (the highest epoch it ever generated a key for) and, per epoch, the
+  **holder set**: every device sent a grant for that epoch in any exposed body. Exactly one writer: the fenced
+  holder. `list_seq` is never derived from `roster_v` or the log.
+- **H2, write-ahead.** Before the first send it persists atomically the signed list, grants and body bytes,
+  `LHW := list_seq`, for a new epoch `WK_E` and `EHW := E`, and the holder-set additions. At most one body is
+  exposed at a time.
+- **H3, outcomes.**
+  - 2xx: install it; activate `WK_E`.
+  - **Transient** (lost response, connection error, timeout, 5xx, 429, 401 `unauthenticated`/`expired` then
+    re-login, `fenced` then an explicit re-hold): resend the **exact bytes**. After a re-login or a re-hold the
+    host first does `GET members`; if the verified list is above `LHW`/`EHW`, or is not a body it exposed, H7.
+  - **Container-only** (`stale_card`, `wrap_conflict`): resend the **same signed list and grants** with corrected
+    or omitted `card_key_wraps`. Nothing is burned; devices see an identical `cj(o)`.
+  - **Content** (`revoked`, `cert_expired`, `cert_invalid`, `other_person`, `scope_exceeded`, `malformed`,
+    `bad_signature`, `other_workspace`, `missing_grant`, `not_for_this_device`) or **divergence** (`stale_list`,
+    `bad_epoch`, `rotation_required`, `grant_conflict`, `wk_commit_changed`), or any decision to change the list
+    while a body is exposed: **abandon** the body (H4).
+- **H4, abandoning burns.** The abandoned `list_seq` is never signed again; the next list uses `LHW + 1`. If the
+  body introduced an epoch `E` above the committed one, `E` is **burned**: every later list has an epoch above
+  `E` (a list that needs no rotation still rotates to `EHW + 1`), and the next key is generated at `EHW + 1`.
+  The host stops sending the old body before it persists the burn, never resends a burned body, and does not
+  adopt a burned body the relay later shows as committed. **A burned `WK_E` is kept like an old epoch key**
+  and deleted under the same retention. It is never activated. Under it the host only opens requests to answer
+  the §8.5 `stale_epoch`. **It never seals anything else under it**: no data response, no `drop_rewrap` output,
+  no other content. **There is never a second key for an epoch, and the host never reseals at a refused epoch.**
+- **H5, holder rule.** A list at epoch `E` includes every device in `E`'s holder set; otherwise the next list
+  uses a new epoch. The rotation gate (no new sealing under `E`) goes up as soon as the host decides to drop
+  such a device. Example: a same-epoch addition of X refused `revoked` or `cert_*` means X may hold the
+  committed `WK_e` through the relay, so the host rotates as for a revoked member (§6.2).
+- **H6, one list per `list_seq`.** The host never signs two different `cj(o)` under one `list_seq`. It never
+  re-signs; it resends persisted bytes.
+- **H7, host-state loss** (backup restore, disk loss, a missing or torn store while the `WSK` exists, the
+  relay's verified list above `LHW`/`EHW` or with content the host never exposed, no local `WK` for the relay's
+  committed epoch, or a takeover by an instance without the latest store): `GET members` and verify it with the
+  `WSK`; set `LHW := max(local, relay list_seq) + 1024` and `EHW := max(local, relay epoch) + 1024`; rotate at
+  once to `EHW + 1`.
+- **The clamp (liveness limit).** The rotation target is `min(EHW + 1, committed + 2^16)`, and **the clamp wins**:
+  the relay refuses anything above `committed + 2^16` (check 6), and every epoch up to `EHW` is already allocated,
+  so a target below `EHW + 1` is never usable (it would be a second key for a burned epoch). When
+  `EHW + 1 > committed + 2^16` the host does not rotate: it alarms and keeps the rotation gate up, and the workspace
+  is frozen for new sealing until an operator intervenes (for example a fresh workspace). Reaching it takes about
+  65,000 burns, or about 63 H7 jumps of 1024 with no commit in between.
+- **H8, refusal alarms** (the orch-52 / #382 definition). The host counts the **content and divergence**
+  refusals of H3 only; transient outcomes neither count nor back off. The count resets on a 2xx. After **3
+  consecutive** counted refusals it raises an operator alarm (`host.status`) and backs off exponentially between
+  attempts, capped at 5 minutes; each attempt burns at most one epoch, so the u32 space lasts for centuries.
+  Separately it alarms when **a rotation stays uncommitted for 10 minutes** for any reason, transient errors
+  included (a hostile relay can answer 5xx forever). Backoff never lowers the rotation gate.
+
+**DECIDED HERE (G2b):** burned epochs instead of a second key per epoch or explicit key ids; the `2^16`
+first-list and skip window; `wk_commit` with the relay check `wk_commit_changed` as defence in depth.
+Vectors: `member_lists` (34 cases), `wk_commit`, the host-conformance list in orch-core host §11.
+
+### 7.3 WK grants
+
+```
+{"o": {"v":2, "suite", "kind":"wk_grant", "workspace_id", "device_id", "epoch",
+       "sealed": b64u(seal_to(device dk_kx, purpose "wk", object = workspace_id, epoch, WK_e))},
+ "sig": b64u(Sign(WSK, "orch/v2/sig/wk-grant|" || cj(o)))}
+```
+
+- **The grant is signed.** **DECIDED HERE.** Without a signature, the relay could seal a `WK` of its own to
+  the device, which would then send requests the relay can read. A device MUST verify the grant with the
+  `WSK` it pinned at pairing before it uses the key.
+- **Where it lives.** The relay stores grants per `(workspace, device, epoch)`. Devices fetch them at
+  connect, and whenever they get a `stale_epoch` refusal (§8.5).
+- **The device's current epoch never moves backwards.** A device MUST persist the highest epoch for which
+  it holds a verified grant, per workspace, and use that one. An older grant is kept only to read older
+  content. **DECIDED HERE.**
+
+An SK grant (shared Drop spaces) is the same, with `kind: "sk_grant"`, `space_id` in place of
+`workspace_id`, purpose `sk`, and signed by the space owner's key (`WSK`, or the owning device's `dk_sig`).
+Vectors: `wk_grants`.
+
+**P3-D8.** A current epoch is confirmed by a verified member list as well as its signed grant;
+an unsigned HTTP hint never raises a device's epoch.
+
+**Device rules (G2b, P3-D26).** Vectors: `member_list_snapshots`.
+
+- **D1, persisted head.** Per workspace, a device persists atomically the highest verified list's
+  `(list_seq, epoch, H(cj(o)), wk_commit)`, and the `wk_commit` of every epoch it has seen in a verified list.
+- **D2, snapshot acceptance.** First contact takes any `epoch ≥ 1` and `list_seq ≥ 1`. A lower `list_seq` is
+  refused and not adopted (`stale_list`). The same `list_seq` with the same `cj(o)` is a no-op: **the signature
+  bytes are never compared**, so a high-s twin is not a conflict. The same `list_seq` with another `cj(o)`
+  raises `conflicting_snapshot`. An epoch below the head's is refused (`bad_epoch`), and so is a removal without
+  a higher epoch (`rotation_required`). **New:** two verified lists at one epoch with different `wk_commit` raise
+  the local alarm `wk_commit_conflict`; the device stops sealing at that epoch until a verified list at a
+  **higher** epoch arrives. The alarm is checked **before** the `stale_list` refusal: a lower `list_seq` at a known
+  epoch with another `wk_commit` is WSK-signed proof of two keys at one epoch, so it raises `wk_commit_conflict`
+  (vector `lower_list_seq_other_wk_commit_alarm`). A list at the head's own `list_seq` with other content raises
+  `conflicting_snapshot` even if its `wk_commit` differs too, and that alarm does **not** block sealing: D3's
+  grant/commit match against the head still keeps the device off the other key (vector
+  `same_list_seq_other_wk_commit_conflicting_snapshot_no_block`).
+- **D3, sealing key.** The device seals and sends only under `head.epoch`, with a WSK-verified grant whose
+  unsealed `WK` matches `head.wk_commit`. A grant that does not match is discarded for sealing. If none matches,
+  **sending is blocked** (`no_key`): the device refetches grants and never falls back to an older epoch.
+- **D4, reading.** For the head epoch or an older one, any WSK-verified grant for that epoch opens content; if
+  the device holds a verified list for that epoch, the key must match its `wk_commit` (otherwise
+  `wk_commit_mismatch`). A device that jumped epochs keeps reading old content. An epoch above the head (or any
+  epoch before a first verified list) is refused locally (`future_epoch`): epochs move only per D5.
+- **D5, epoch moves** are unchanged: only on a verified list, or on a verified host `stale_epoch` naming a higher
+  epoch, after which the device demands a list at `≥` that epoch. If bounded refetches bring nothing, it shows
+  "relay is withholding the new key", not a timeout.
+- **D6, Drop repair (MAY, deferrable).** When the device moves off an epoch `E` and the relay has no grant at `E`
+  for it (404), `E` was probably burned. The device **re-wraps its own Drop objects** that it wrapped under `E`,
+  at the current epoch. The host does **not** serve `drop_rewrap` under a burned key (H4): under it, it answers
+  only `stale_epoch`. Wrong answers from a hostile relay only cost an extra re-wrap.
+
+### 7.4 WXK rotation (spec D27)
+
+`WXK` rotates with the 90-day epoch. The new card carries `wxk_version + 1`.
+
+- The host records `retired_ms`, the moment the old key stopped being current. It keeps the old private
+  key, and accepts envelopes and wraps sealed to it, while `now < retired_ms + 14 days`. Then it deletes it.
+- Senders take `wxk_version` from the card. On `stale_wxk` (§11.5), they refetch the card and reseal.
+- **The resealed envelope MUST get a new `id`**, and a new `sent` entry (the old entry is dropped). The
+  receiver keeps the refused envelope's outcome under `(from_ws, id)`, so the same id with other bytes is an
+  `id_conflict` and is dropped (§11.4). Vector `reseal_after_stale_wxk_needs_a_new_id`.
+
+Vectors: `ws_envelopes.previous_wxk_inside_14_days`, `previous_wxk_after_14_days`.
+
+### 7.5 Re-wrapping old objects for a new device (spec D26)
+
+A device asks with the bridge op `{"op": "drop_rewrap", "object_id", "version"}`. The host:
+
+1. checks that the device's scope allows reading the object;
+2. opens the object's `wk` wrap of the old epoch;
+3. uploads a new `wk` wrap under the current epoch (§10.3), over its workspace session.
+
+## 8. Bridge v2
+
+### 8.1 Envelope and header
+
+```
+envelope = header (108) || ciphertext || tag (16) || signature (64)          overhead 188 bytes
+```
+
+The size limits are v1's: a request is at most 1 MiB decoded, a response chunk at most 256 KiB, and meta
+at most 64 KiB.
+
+| Offset | Size | Field | Request (to host) | Response chunk (to device) |
+|---|---|---|---|---|
+| 0 | 4 | magic | `"ORB2"` | `"ORB2"` |
+| 4 | 1 | version | 2 | 2 |
+| 5 | 1 | direction | 1 | 2 |
+| 6 | 1 | flags | only `STREAM` 0x02 | `LAST` 0x01, `STREAM` 0x02, `REFUSAL` 0x04 (REFUSAL requires LAST) |
+| 7 | 1 | suite | the deployment's suite | same |
+| 8 | 16 | workspace | workspace_id | same |
+| 24 | 16 | device | the sender's device_id | the device the response is for |
+| 40 | 16 | rid | request id = the mailbox id | the request's rid |
+| 56 | 16 | stream | the stream acted on, or zeros; **at epoch 0: the offer_id** | the stream's rid for frames, else zeros; at epoch 0, the offer_id |
+| 72 | 8 | seq | device sequence number, from 1 | chunk index, from 0 |
+| 80 | 8 | ts_ms | sender clock (+ offset) | host clock |
+| 88 | 4 | epoch | `WK` epoch, or 0 for pairing | the request's epoch |
+| 92 | 16 | salt | 16 CSPRNG bytes | 16 CSPRNG bytes |
+
+The whole header is the AAD and is signed. **DECIDED HERE:**
+
+- the new magic `"ORB2"`, so a v1 parser fails at once (vector `old_magic_v1_dropped`);
+- `key_version` is replaced by `suite`;
+- `epoch` is a `u32` placed before the salt;
+- the offer id travels in `stream` at epoch 0.
+
+### 8.2 Keys, sealing and signing
+
+```
+channel key  = K_bridge(e) = HKDF(WK_e, "", "orch/v2/bridge|" || hex(ws) || "|" || dec(e))      epoch e ≥ 1
+             = K_pair      = HKDF(S,    "", "orch/v2/pair|"   || hex(ws) || "|" || hex(offer))  epoch 0
+K_msg        = HKDF(channel key, salt = header.salt, "orch/v2/bridge-msg")
+body         = AES-256-GCM(K_msg, 12 zero bytes, plaintext, AAD = header)
+signature    = Sign(signer, "orch/v2/sig/bridge|" || header || body)
+plaintext    = u32(meta_len) || cj(meta) || data                     (meta_len ≤ 65,536)
+```
+
+- **Signers.** Requests are signed by the device's `dk_sig`, as named by its certificate. Responses are
+  signed by `WSK`. At epoch 0, the pairing request is signed by the new `dk_sig` as proof of possession.
+- **Who can read.** Only member devices holding `WK_e` can read epoch-`e` traffic, which is v1's open
+  problem D1 solved by spec D2. At epoch 0, only holders of the link can read.
+
+Vectors: `bridge.seal`, `hkdf` (`k_bridge_epoch_1`, `k_bridge_epoch_2`, `k_pair`, `k_msg_bridge`).
+
+### 8.3 Pairing v2 (spec §7, D6)
+
+1. **Link.** The host's Remote tab shows, as a QR code (10 minutes, single use):
+
+   ```
+   https://<relay>/pair#v2.<workspace_id hex>.<offer_id hex>.<b64u S>.<b64u wsk_pin>.<b64u pk_pin>
+   ```
+
+   **D45/D46 (P3 design §7).** The native link is also
+   `orch://pair?relay=<percent-encoded relay origin>#v2.<the same five fields>`.
+   `/app/pair` remains an HTTPS alias. Passkey registration is removed from native pairing;
+   the exact checkpoint baseline is `{n, hash}`, or null only when none exists; see §19.8 (P3-D13/D20).
+
+   The spec's link has four fields after `v2`. **DECIDED HERE:** a fifth, `pk_pin`, because spec §7 step 4
+   says the QR carries a pin of the owner's `PK`. The phone parses the link strictly (vectors
+   `bridge.links`):
+   - exactly `v2`;
+   - lower-case hex ids;
+   - canonical 43-character b64u of 32 bytes for each of the last three fields.
+
+   The fragment never reaches a server. The host creates the offer with `S`, `sas_nonce` (32 bytes) and the
+   scope.
+
+   **Every answer to an epoch-0 request carries `wsk_pub`:** each `pair_status` state and every refusal.
+   The device checks it against the link's pin before it reads anything else (step 4).
+
+2. **Pair request** (epoch 0, sealed under `K_pair`, header `stream` = `offer_id`, signed by the new
+   `dk_sig`; the header `device` is `device_id(dk_sig_pub)`):
+
+   ```
+   meta = {"op":"pair", "dk_sig_pub", "dk_kx_pub", "label": text, "cert": null | <signed device_cert>,
+           "attempt": hex(16 CSPRNG bytes)
+           [, "reader_decl": <signed reader_decl>]}                          meta v2 (H12d, P3-D38)
+   ```
+
+   - The field set is exact: these six fields, or these six and `reader_decl`. Nothing else.
+   - **`reader_decl` (meta v2, H12d; orch-core orch-v2-host §9.1, §9.3).** The phone's declaration of its reader
+     level, signed by the same new `dk_sig` that signs the envelope, under `sig_reader_decl`:
+
+     ```
+     reader_decl = {"o": {"v":1, "kind":"reader_decl", "suite", "workspace_id": hex, "device_id": hex,
+                          "dk_hash": b64u, "who": {"pk_pin": b64u} | {"person_id": hex}, "reader": uint,
+                          "kat": {"1": {"view": "sha256:" + hex, "log"?: ...}, ...},
+                          "bind": {"via":"pair", "offer_id": hex, "attempt": hex}, "created_ms": int},
+                    "sig": b64u(Sign(dk_sig, "orch/v2/sig/reader-decl|" || cj(o)))}
+     ```
+
+     Each field set is exact. `suite` is the deployment's. `workspace_id` is the link's (the offer stream's: the
+     meta itself names no workspace); `device_id` derives from this meta's `dk_sig_pub`; `dk_hash` (§8.4) is that of
+     this meta's two keys; `who` is `{"pk_pin"}`, the link's `pk_pin` as it appears in the link (b64u), for a phone
+     without a certificate, or `{"person_id"}`, its certificate's person, for a phone that sends one; `bind.offer_id`
+     and `bind.attempt` are this offer and this meta's `attempt`. So a declaration cannot be lifted into another
+     workspace, device, key pair, person, offer or attempt. `reader` is 0 … 2^31 − 1: an absent declaration
+     means 0 (an old build), and 0 is valid (an H12d-aware build of a lower level). `kat` holds, for each level
+     from 1 to `reader`, the build's known-answer digest per parsing surface (`view` for a phone); a host checks
+     the levels from 1 to the lowest of `reader` and its highest known level and ignores higher keys, so a higher
+     unknown level is accepted as at least the host's highest. The KAT corpus and its digest are core-owned
+     (`reader_kat_1`, F1 §11.5); these vectors carry core's real level-1 digests (`log`, `view`; the level-1 view set
+     is provisional until H12d-2). `cj(reader_decl)` is at most
+     **2 KiB** (about 0.6 KiB in practice), well inside the 64 KiB meta (§8.2) and the 64 KiB pair-request body
+     (§19.3).
+   - **What the bridge checks, and what the host checks.** Step 3.1 refuses as `malformed` a `reader_decl`
+     that is not a signed object (`{"o": {…}, "sig"}`, `null` included; the bridge looks at the shape of the
+     object only, not at the type of `sig`: a `sig` that is not a string passes the bridge and is refused by the
+     host gate as `shape`, pinned by `meta_v2_reader_decl_sig_not_a_string_pending`) or that exceeds 2 KiB, like any other
+     shape error. The declaration itself (form, signature, binding, KAT) is checked by the host's H12d gate at
+     step 5, before the code is shown and before the primary is asked (orch-v2-host §9.4); it is never a bridge
+     refusal. A pairing whose declaration fails that gate, or whose level is below what the workspace requires,
+     is refused with the short `rejected` form (no reason on the wire; the host screen explains, orch-v2-host
+     §9.15 Q4). The host keeps the declaration verbatim. The relay reference checks form and
+     signature only: a host refuses a `created_ms` more than 300 s ahead of its clock as `time` at admission
+     (orch-v2-host §0.8.6 9.3), so the vector `created_ms_2_53_minus_1_accepted` is accepted on form alone.
+   - **Compatibility.** An old host refuses a meta v2 as `malformed` (an unknown key): that fails closed. A new
+     host accepts a meta without `reader_decl` (level 0). A phone sends `reader_decl` only to a host that
+     understands it; R6's first release ships both (orch-v2-host §9.11, Q7), so no negotiation is defined.
+     The relay never sees the meta (it is sealed under `K_pair`) and changes nothing for it.
+   - **The pairing attempt (G3b, P3-D28).** `attempt` is a nonce the device draws when it starts a pairing
+     attempt. A resend or `pair_status` poll of the same attempt keeps it (also across an app restart); a new
+     attempt, including a new scan of the same link, draws a new one. A phone **without** a certificate MUST
+     draw **fresh device keys** (`dk_sig`, `dk_kx`) for every new attempt. It MUST persist the new
+     attempt's `device_id`, `dk_hash` (§8.4) and `attempt` **before it sends the pair request**, moving the
+     previous attempt's `(device_id, dk_hash)` to its list of earlier attempts in the same write; and it MUST
+     keep each earlier attempt's `(device_id, dk_hash)` for at least 10 minutes after that attempt ends (the
+     challenge lifetime), so it can recognise its own earlier attempt's challenge or rejection (round 2, F1/F4).
+     A phone that lost this memory treats such an object as foreign (the alarm): fail closed. The host cannot
+     know the attempt nonce or the fresh keys before the attempt starts, so it cannot prepare a PK-signed
+     challenge or rejection for it.
+   - A phone that is already one of the owner's devices sends its certificate. If the certificate's
+     person differs from `pk_pin`, the phone shows "this workspace belongs to someone else" and sends
+     nothing.
+   - **DECIDED HERE:** there is no MAC. The AEAD tag under `K_pair` already proves knowledge of `S`, and
+     unlike v1's `K_ws`, nobody else holds that key.
+
+3. **Host checks**, in this order, after §8.6 steps 1–3, which give silence for an unknown offer or a bad
+   tag:
+   1. the meta shape, including `attempt` as 32 lower-case hex characters → `malformed`;
+   2. the offer is open and unused. A resend by the device that holds the pending pairing, with the same
+      two keys and the same `attempt`, is answered `pending` again. Otherwise → `pairing_closed`;
+   3. `device_id(dk_sig_pub)` equals the header's, and the signature verifies → `bad_signature`;
+   4. the time window → `stale_timestamp` (`host_ms`);
+   5. if `cert` is present:
+      - its person is the card owner → `other_person`;
+      - it is valid → `cert_invalid`, `cert_expired` or `revoked`;
+      - it is for these two keys → `cert_invalid`.
+
+   Every refusal counts against the offer's own budget (5 per minute) and **carries `wsk_pub`**. The host
+   then marks the offer used, records the cleaned label, and answers:
+
+   ```
+   {"state":"pending", "wsk_pub", "sas_nonce", "dk_sig_pub", "dk_kx_pub"}          exactly these five
+   ```
+
+4. **The device checks every answer to an epoch-0 request** (vectors `bridge.pair_answers`), in this
+   order:
+   1. the shape, with `epoch = 0` and `stream = offer`;
+   2. a pending rid;
+   3. the tag under `K_pair`;
+   4. `wsk_pin(wsk_pub) == link pin`;
+   5. the signature with that `wsk_pub`;
+   6. the chunk order;
+   7. the window, **for every answer, refusals included**. The one exception: a verified `stale_timestamp`
+      refusal is exempt from the window and adopts its clock once per pending rid, within 24 h (v1 §5.1).
+      Vector `refusal_outside_the_window`.
+
+   For `pending`, the echoed `dk_sig_pub`/`dk_kx_pub` MUST be its own. Otherwise the device drops the
+   answer and **raises the alarm** (`not_my_key`): someone is pairing another key with this link. It then
+   shows `sas(...)` (§4) and pins `wsk_pub`. No answer within 60 s, or `pairing_closed`, shows v1's "this
+   link was used by someone else: reject it on your Mac".
+
+5. **Human confirmation on the host.** The default is Reject. Approve becomes available once the owner has
+   compared the code on both screens.
+   - If the phone sent a valid certificate, or the host *is* the owner's primary device (it signs
+     locally), the host goes on to step 6.
+   - Otherwise it enters **`cert_pending`** (§8.4).
+   - **No `WK` is sealed before a valid certificate exists** (spec §7).
+
+6. **Approval.** The host:
+   1. uploads the certificate to the directory, if new;
+   2. uploads a WK grant for the current epoch;
+   3. publishes the new member list;
+   4. completes native pairing; no platform passkey registration (D45/D46, P3 design §7).
+
+   Items 2 and 3 are one relay call: the relay takes the grants inside the member-list publication body (§7.2
+   P3-D7), not as separate uploads. Only the certificate (item 1) goes to the directory on its own.
+
+The device polls with `{"op":"pair_status"}` (epoch 0, signed with its new key, read-only). Answers are
+exactly one of:
+
+```
+{"state":"pending", "wsk_pub", "sas_nonce", "dk_sig_pub", "dk_kx_pub"}     the same five fields as step 3
+{"state":"cert_pending", "primary_label": text, "pk_pub": b64u, "challenge": <signed cert_challenge> | null,
+ "wsk_pub"}
+{"state":"approved", "scopes": [...], "cert": <signed device_cert>, "pk_pub": b64u, "epoch": e,
+ "list_seq": n, "card_seq": n, "baseline": {"n", "hash"} | null, "wsk_pub"}
+{"state":"rejected", "wsk_pub"}                                  rejected on the host (step 5), or unknown
+{"state":"rejected", "wsk_pub", "pk_pub": b64u, "rejection": <signed cert_rejection>}   rejected on the primary
+{"state":"expired", "wsk_pub"}            cert_pending ran 10 minutes without a certificate
+```
+
+The two `rejected` forms are exact (G3b, P3-D28): a `rejected` answer matching neither field set is an
+unattributed refusal with reason `not_a_pairing_answer`. In the second the host relays the primary's PK-signed
+`cert_rejection` (§8.4) unchanged, as it relays the challenge.
+
+`pending` repeats the full five-field answer, with the key echo, so a device whose first answer was lost can
+still check the echo and show the code. A device ignores fields it does not know.
+
+On `cert_pending`, the device checks `pk_pin(pk_pub)` against the link. If `challenge` is not `null`, it
+checks the challenge as §8.4 says and shows its `cert_code`.
+
+On `approved`, the device checks:
+
+- `pk_pin(pk_pub)` against the link;
+- the certificate's signature, its two keys (they must be its own) and its validity;
+- `scopes`;
+- the **join anchor** (G3b, P3-D28; F1 Q6): `epoch` an integer `1 … 2^32 − 1`; `list_seq` and `card_seq`
+  safe integers `≥ 1`; `baseline` present, either `null` or exactly `{"n": safe integer ≥ 0, "hash":
+  "sha256:" + 64 lower-case hex}` (§19.8). Otherwise the answer is dropped (`not_a_pairing_answer`).
+
+`list_seq` is the sequence of the list the host published in step 6.3 (the one that adds this device),
+`card_seq` the host's current card. **Host requirement (orch-core; round 2, F7):** `epoch`, `list_seq` and
+`card_seq` are those of the head list and card **the relay accepted**, never of a publication the relay refused
+or that is still unconfirmed: under G2b (P3-D26) a refused publication burns its numbers, and an anchor above
+every accepted object would make the phone refuse every list or card until something higher is published.
+
+The device **persists** `{epoch, list_seq, card_seq, scopes, baseline}` as its join floor before it fetches
+anything, and keeps it across join retries and restarts. A later `approved` (a re-poll) only raises it: each
+number is the maximum; the baseline is replaced only by one with a strictly higher `n` (an equal `n` with
+another hash keeps the stored one); the scopes are replaced only by an answer with a strictly higher
+`list_seq`. The device shows the floor's scopes (round 2, F5/F6). At join (vectors `approved_anchor.join`):
+
+- the first member list it accepts MUST have `epoch ≥` the floor's epoch and `list_seq ≥` the floor's
+  `list_seq` (else `below_anchor`) and MUST contain this device (else `not_a_member`: it was removed after
+  approval; the device stops retrying and shows the pairing as ended). At exactly the floor's `list_seq` its
+  entry MUST carry **exactly** the approved `scopes` (else `scopes_mismatch`); above it the list's scopes
+  are authoritative (a newer WSK-signed list, e.g. an owner's scope change after approval; round 2, F2);
+- the first card it accepts MUST have `card_seq ≥` the floor's (else `below_anchor`).
+
+A refused object leaves the floor and the device's state unchanged; the device retries the fetch, except after
+`not_a_member`. This
+closes a relay rollback **below** the approval point; withholding newer objects stays possible (design
+§5.2). After first contact the normal monotonic rules apply (§7.2, §7.3, §18 R6). It then logs in to the
+relay (§12.2) and fetches its WK grant (§7.3).
+
+On `rejected`, the device shows a verified **"Denied by the owner"** only if every check below passes, in
+this order (G3b, P3-D28; F1 Q8). Otherwise it shows the unattributed "The pairing was refused" and raises
+no alarm, because the host could have sent the short form anyway. The only exception is step 4's alarm.
+
+1. the long form's field set is exact (`not_a_pairing_answer`) and `pk_pin(pk_pub)` matches the link
+   (`pk_pin`);
+2. the signature verifies under `pk_pub` with `orch/v2/sig/cert-rejection|`, and the field set is exact
+   (`rejection_signature`);
+3. `workspace_id` is the link's and `person_id == person_id(pk_pub)` (`not_for_this_workspace`);
+4. the device: `device_id` and `dk_hash` are this attempt's own. Otherwise: an expired rejection
+   (`now ≥ expires_ms`) is unattributed without alarm (`rejection_expired`); a `(device_id, dk_hash)` pair
+   equal to one of the phone's own earlier attempts is unattributed (`stale_attempt`, no alarm; **both** must
+   match, so the phone's old signing key with another key is not stale); **any other device raises the
+   alarm** (`not_my_key`): the owner rejected someone else's request for this workspace;
+5. `attempt` is this attempt's nonce and `offer_id` the link's offer (`not_for_this_pairing`);
+6. if the phone saw a challenge in this attempt, `request_id` equals that challenge's
+   (`not_for_this_pairing`);
+7. `now < expires_ms` (`rejection_expired`).
+
+The device and attempt checks run **before** the offer, and also when no challenge was seen (`open →
+rejected`), so a host-chosen `offer_id` cannot turn the alarm into a silent refusal. The denial is attributed
+to the **pinned owner** (the person of `pk_pin`), never to the host-supplied `primary_label`: the signature
+authenticates `PK`, not a device name.
+
+**DECIDED HERE:** the answer shapes,
+the `expired` state, that every answer carries `wsk_pub`, and that `approved` carries `pk_pub` and the
+certificate. Vectors: `host_cases` `pair_*`, `pair_status_*`, `pair_answers`, and the round trip
+`test_round_trip_pairing_through_cert_pending`. G3b (P3-D28): `cert_binding` (`relay`, `primary`, `host`,
+`challenges`), `rejected_forms` and `approved_anchor` (`answers`, `join`), and the round trip
+`test_round_trip_rejection_on_the_primary_is_attributed`.
+
+### 8.4 `cert_pending`: the request to the primary device and its challenge
+
+A first-time phone needs a certificate from the owner's primary device. The host cannot make one, and a
+host must not be able to get one for a key of its choosing. The flow is:
+
+1. **The host's request.** The host posts a `cert_request` to the relay's queue for
+   `(person_id, primary_device_id)`:
+
+   ```
+   {"o": {"v":2, "suite", "kind":"cert_request", "request_id", "workspace_id", "person_id", "primary_device_id",
+          "offer_id", "attempt", "device_id", "dk_hash",
+          "created_ms", "expires_ms" (= created + 10 min),
+          "sealed": b64u(seal_to(primary dk_kx, "cert-request", object = request_id, epoch 0, cj(inner)))},
+    "sig": b64u(Sign(WSK, "orch/v2/sig/cert-request|" || cj(o)))}
+   inner = {"device_id", "dk_sig_pub", "dk_kx_pub", "label", "scopes_max", "offer_id", "attempt"}   exactly these
+   dk_hash = b64u(H("orch/v2/dk-hash|" || suite || lp16(dk_sig_pub) || lp16(dk_kx_pub)))
+   ```
+
+   `inner` carries **no host nonce**. Anything the host chooses could be ground against a 30-bit code.
+   `attempt` is the device's nonce from the pair request (§8.3 step 2), copied unchanged.
+
+   **G3b (P3-D28).** `offer_id`, `attempt`, `device_id` and `dk_hash` also travel **in clear** in `o`, so the
+   relay can bind the primary's challenge and rejection to the attempt (P3-D11). `offer_id` is not secret from
+   the relay (it is in the pair path); `attempt`, `device_id` and `dk_hash` reveal no key. The primary
+   checks that they equal the sealed inner (step 2.7).
+
+2. **The primary checks, in order:**
+   1. the card is its own person's → `other_person`;
+   2. `sig` against the card's `WSK` (the card's delegation already verified) → `bad_signature`;
+   3. it is the addressee, for its own person → `not_for_this_device`;
+   4. `created − 300 s ≤ now < expires`, with `expires − created ≤ 10 min` → `expired`;
+   5. the `request_id` was never seen before → `replayed`;
+   6. no other request of this workspace is open → `request_open` (at most one open request per
+      workspace). **A request is open while it is unexpired and neither signed nor rejected**, so an
+      expired or rejected request never blocks the workspace;
+   7. the field sets of `o` and `inner` are exact, the keys are valid, `device_id` derives from `dk_sig_pub`,
+      the scopes are valid, and `o`'s clear `offer_id`, `attempt`, `device_id` equal `inner`'s and `o.dk_hash`
+      is `dk_hash` of `inner`'s keys (G3b) → `malformed`;
+   8. `scopes_max` is not a `drop:` scope → `scope_exceeded` (scoped agents enrol only through §6.4).
+
+   If the card's delegation says `client_hosted`, the primary goes on, but shows a **warning**: "this
+   workspace runs on a machine that someone else administers".
+
+3. **The primary's challenge.** The primary now draws `primary_nonce`, 32 CSPRNG bytes, **after** the keys
+   reached it. It keeps the challenge as the only thing it will ever certify for this request, and posts it
+   to the relay's queue for `(workspace_id, request_id)`:
+
+   ```
+   {"o": {"v":2, "suite", "kind":"cert_challenge", "request_id", "workspace_id", "person_id", "offer_id",
+          "attempt", "device_id", "dk_sig_pub", "dk_kx_pub", "primary_nonce", "expires_ms" (= the request's)},
+    "sig": b64u(Sign(PK, "orch/v2/sig/cert-challenge|" || cj(o)))}
+   cert_code = base32(H("orch/v2/sas-cert|" || suite || cj(challenge.o)))[0:6]
+   ```
+
+   `offer_id` and `attempt` are copied from the inner (G3b). The primary shows `cert_code` with the label and
+   asks for a confirmation.
+
+4. **The host relays the challenge** unchanged, in its `cert_pending` answer (§8.3). Until it arrives,
+   `challenge` is `null`, and both screens say "Open orch on <primary>".
+
+5. **The phone checks the challenge** before it shows anything (G3b order, P3-D28):
+   1. `pk_pin(pk_pub)` against the link;
+   2. the signature with that `pk_pub`, and the exact field set → `challenge_signature`;
+   3. `workspace_id` is the link's, and `person_id` is `person_id(pk_pub)` → `not_for_this_workspace`;
+   4. `device_id`, `dk_sig_pub` and `dk_kx_pub` are **its own current** keys. Otherwise: an expired
+      challenge (`now ≥ expires_ms`) → drop without alarm (`challenge_expired`); a `(device_id,
+      dk_hash(dk_sig_pub, dk_kx_pub))` pair equal to one of its own earlier attempts → drop without alarm
+      (`stale_attempt`; **both** must match: the phone's old signing key with a host-chosen `dk_kx_pub` is
+      foreign); anything else → drop and **raise the alarm** (`not_my_key`): someone asked the primary to
+      certify another key for this pairing;
+   5. `attempt` is this attempt's nonce, and `offer_id` the link's offer → `not_for_this_pairing`;
+   6. if it already accepted a challenge in this attempt, `request_id` equals that one's →
+      `not_for_this_pairing`;
+   7. `now < expires_ms` → `challenge_expired`.
+
+   The keys are checked **before** the attempt and the offer: the host chooses `inner.offer_id`, so with
+   the offer first an R1 host could write a wrong `offer_id` and turn the alarm into a silent drop. Only an
+   **expired** foreign object is silent (round 2, F3): it can never make the phone show a code, and a host can
+   always silence the alarm by not relaying; the rule stops a host from replaying old PK-signed objects as
+   alarm noise. For this attempt's own keys, the attempt and offer checks (5, 6) still precede the expiry. The phone
+   persists the accepted challenge's `request_id` with the attempt (also across a restart). Then it shows
+   `cert_code`.
+
+6. **The human compares the code on the primary and the phone, and confirms on the primary.**
+   - The primary signs a certificate (§6.1) **for exactly the two keys of its own stored challenge**, once
+     per request (`already_signed` afterwards), and uploads it to the directory. It signs only while the
+     challenge is unexpired (`expired`) and not rejected (`rejected`).
+   - A human who rejects on the primary closes the request, whether it is open or challenged; nothing is ever
+     signed for it.
+   - The host polls the directory for the certificate, then continues with §8.3 step 6.
+
+**UI rules for the two codes (R8).** The phone shows two codes in turn. To keep them apart:
+
+- When `cert_pending` begins, the phone **clears the first (pairing) code** from its screen.
+- It labels `cert_code` "compare with <primary>", using `primary_label`.
+- It **stops showing `cert_code` after the challenge's `expires_ms`**.
+- The primary shows `cert_code` under the same label, and the phone's label.
+
+**Why this closes R1.** **DECIDED HERE:** the challenge. The host never chooses anything the code depends
+on. `PK` signs the keys, and the nonce is drawn after the keys are fixed. Only the primary holds `PK`, so the
+host cannot forge a challenge for the phone's keys.
+
+A host that sends the primary a request for a key of its own gets a challenge that names that key. The
+honest phone refuses that challenge with the alarm, so it shows no code, and the human has nothing to
+match. The primary allows one open request per workspace, so the host cannot run a second request beside
+the honest one.
+
+This replaces the first draft's rule that a client-hosted workspace may not ask for a certificate; that
+rule is now a warning.
+
+**What the spec said.** Spec §7 says the primary shows "the same fingerprint" as the host step. With this
+fix it shows the challenge's code instead, which the phone also shows. The owner accepted this in review.
+
+Vectors: `cert_request.cases` (valid; expired; signed by another workspace; client-hosted with a warning;
+not for this device; the card of another person; a drop scope; a replayed request id; a second open
+request; an inner object with a host nonce), `cert_request.open_cases` (the next request after one expired
+or was rejected, signing after a rejection or after expiry), `cert_request.challenge`, `cert_code`, `signed_cert`,
+`sign_again`, `attack_challenge`, and `pair_answers` (`cert_pending_with_the_primarys_challenge_shows_its_code`,
+`r1_attack_challenge_for_another_key_raises_the_alarm`, `challenge_signed_by_the_host_not_pk`,
+`challenge_for_another_workspace`, `challenge_expired`, `cert_pending_with_a_pk_not_of_the_pin`). Round
+trips: `test_round_trip_pairing_through_cert_pending`, `test_round_trip_r1_attack_fails`.
+
+**P3-D11.** Queue routes are in §19. The primary uses a device session of the addressee,
+including for a challenge or rejection. A rejection is exactly (G3b, P3-D28):
+
+```
+{"o": {"v":2, "suite", "kind":"cert_rejection", "request_id", "workspace_id", "person_id", "offer_id",
+       "attempt", "device_id", "dk_hash", "expires_ms" (= the request's)},
+ "sig": b64u(Sign(PK, "orch/v2/sig/cert-rejection|" || cj(o)))}
+```
+
+The primary copies every field from the request it opened (step 2). The rejection names the attempt
+(`offer_id`, `attempt`), the device and both its keys (`device_id`, `dk_hash`), and carries a signed expiry,
+so a captured rejection cannot be re-enveloped into a later attempt or after the request's lifetime.
+
+The relay verifies requests under the card's WSK and challenges/rejections under the account PK.
+Identifiers must match the stored request; a challenge has the request's expiry, valid device keys
+and the derived device id; a rejection has the request's expiry. **G3b:** before storing, the relay also
+requires a challenge's `offer_id`, `attempt`, `device_id` and `dk_hash(dk_sig_pub, dk_kx_pub)`, and a
+rejection's `offer_id`, `attempt`, `device_id` and `dk_hash`, to equal the stored request's clear fields
+(403 `not_for_this_device`). The relay cannot open the inner; the primary's step 2.7 ties the clear fields
+to it. The state machine is `open → challenged → signed`, with `rejected`
+from open or challenged, and `expired` from either at `expires_ms`. Challenges cannot be replaced:
+(G0a review 3) a valid signature over identical `cj(o)` is idempotent (200, no state change),
+including re-signed challenges and rejections; different canonical challenge content is `replayed`. Rejection after signing is `already_signed`;
+challenge or certificate completion after rejection is `replayed`. Verified canonical terminal retries are
+idempotent while the record is retained. Expired non-terminal requests return 410 `expired`.
+The request becomes signed only when a stored, valid certificate matches **both keys**, device and
+person of its challenge. An unrelated certificate can be stored but cannot complete the request.
+Scopes are sealed: the host checks them. Terminal records remain until `expires_ms + 60 s`.
+
+### 8.5 Epochs on the bridge
+
+- A request MUST use the host's current epoch.
+  - A request at a **lower** epoch whose key the host still holds: after its signature verifies, it is
+    recorded and refused `stale_epoch` with `"epoch": current`. The refusal is sealed under the
+    request's own (old) epoch, so the device can read it. It contains nothing else.
+  - A request at a **higher** epoch, or at an epoch whose key the host deleted, is dropped: there is no key
+    to open it with.
+  - (G2b) A **burned** epoch's key (§7.2 H4) counts as held. A phone pinned to a burned epoch by a withholding
+    relay gets the host-signed `stale_epoch` sealed under that key, and nothing else is ever sealed under it.
+    This holds for a burned epoch **above** the committed one too, despite "a higher epoch is dropped": the request
+    gets only a signed `stale_epoch` under the burned key, naming the pending epoch, or `EHW + 1` if none is
+    pending. The burned key is held for that refusal only, never to seal data (orch-v2-host §11A.15.2, C5).
+- **The device** answers `stale_epoch` by fetching its grant and sending the request again as a new
+  request (new rid, new seq). The refused seq is consumed (vector
+  `stale_epoch_consumes_its_seq_then_a_new_request_runs`).
+- A device MUST drop a `stale_epoch` refusal whose `epoch` is not higher than its request's epoch
+  (vector `stale_epoch_refusal_not_higher_than_the_request`). Its current epoch never moves backwards
+  (§7.3).
+- A response chunk MUST carry the epoch of its request. The device drops anything else
+  (`response_in_another_epoch_than_the_request`).
+- **On rotation, the host:**
+  - ends every open stream with `LAST | REFUSAL` `stale_epoch`;
+  - answers a request that ran but has not finished sending with `already_done` / `status: "unknown"`,
+    instead of more data under the old epoch.
+
+  **DECIDED HERE:** no new data is ever sealed under an epoch that a revoked device may hold.
+
+Vectors: `previous_epoch_refused_stale_epoch`, `future_epoch_dropped`,
+`epoch_whose_key_the_host_deleted_dropped`, `sealed_under_another_epochs_key_dropped`, device
+`stale_epoch_refusal`.
+
+### 8.6 What the host does with a request (normative order)
+
+This is v1 §6.1, with the v2 changes in bold. The rule is unchanged: **silence for anything a party without
+the channel key could have produced, and a sealed, host-signed refusal for everything after the tag
+verified.**
+
+1. **Shape.** Drop on any of:
+   - a size outside 188 … 1 MiB;
+   - a magic other than `"ORB2"` or a version other than 2;
+   - direction ≠ 1, or a flag other than `STREAM`;
+   - **a suite ≠ the deployment's**;
+   - another workspace;
+   - a mailbox id ≠ rid.
+2. **Key.** **Epoch > current and not a burned epoch (§8.5): drop. Epoch 0: the offer named by `stream`, otherwise drop. Otherwise
+   `WK_epoch`, otherwise drop.**
+3. **Tag.** Drop on failure. **At epoch 0, go to §8.3.**
+4. **Device.** Each of these is a refusal within the host-wide budget (10 per minute), and is dropped
+   once the budget is spent:
+   - revoked → `revoked`;
+   - **not in the current member list → `not_member`**;
+   - signature (with the certificate's `dk_sig_pub`) → `bad_signature`.
+5. **Replay.** A known rid gets v1 §5.3's answer, with these v2 changes (P3-D27):
+   - **An answer that was posted to the relay is replayed as the exact chunk bytes already posted**, never
+     re-sealed or re-stamped: the relay refuses other bytes at a known chunk index (`chunk_conflict`). The
+     host persists each response envelope's exact bytes with the rid record **before the first POST**,
+     including a POST whose outcome was uncertain (a timeout may still have been accepted). The relay
+     stores an identical chunk again after its copy expired, bounded (§19.3).
+   - v1's re-seal and re-stamp apply only to an answer none of whose chunks was ever posted; such a
+     re-sent stored `stale_epoch` carries the current epoch.
+   - **A resend of a known rid whose op is still running gets no answer.** No interim
+     `already_done {status: "unknown"}`: it would take idx 0, and the real answer would then be refused
+     with `chunk_conflict`. The answer is posted once, when the op finishes. `already_done {unknown}`
+     stays for a record without an outcome whose op is not running (after a crash).
+
+   5b. **Quota.** v1 §5.3 unchanged (`busy`; drop past the allowance or `MAX_RECORDS`).
+6. **Framing.** Strict meta (§2.3), with `op` a string. Otherwise record, then refuse `malformed`; the seq
+   is not consumed.
+7. **Sequence.** The v1 window → `stale_sequence` (`high`). It is consumed from here on.
+8. **Time.** ±300 s → `stale_timestamp` (`host_ms`).
+9. **Epoch.** **≠ current → `stale_epoch` (`epoch`).**
+10. **Stream.** Another device's stream → `forbidden_scope`.
+11. **Record and run.** Then the route scope against the member's `scopes`, the assertion requirement
+    (v1 §9), and the op.
+
+Every refusal after step 4 is recorded before it is sent (v1 §5.3). Vectors: `bridge.host_cases`
+(47 per suite, including chains).
+
+**`rd`, the reader declaration digest (H12d, P3-D38; orch-core orch-v2-host §9.5).** A device that has declared
+its reader level (§8.3 `reader_decl`, or later `reader.declare`) carries `"rd": "sha256:" + hex(SHA-256(cj(reader_decl)))`,
+the digest of its **current** declaration, as a field of the meta of every request it sends at epoch ≥ 1 (the
+host's column-R requests). It is inside the seal and signed with the envelope: the relay never sees it
+(relay-blind), and no relay check or route changes for it. The bridge steps above do not read `rd`; the
+host's op layer checks it while the workspace requires a reader level (orch-v2-host §9.5: `no_declaration`,
+`reader_too_old`, `declaration_unknown`). A pre-H12d build sends no `rd`. **A resend or replay** of a rid is the
+same bytes (step 5), so it carries the `rd` of its **first** send; the host answers it from the rid record,
+never by checking that `rd` against the device's newer declaration. A request whose meta has `rd` is otherwise
+unchanged; a meta that is not strict JSON stays `malformed` (step 6). Vectors: `reader_decl.request_meta`.
+
+**H12d rollout order (orch-v2-host §9.8, §9.11).**
+
+1. The relay ships `AUTH_KINDS` with `convenience` (§19.8 R0) and `GET /v2/relay-info` with `reader: 1` (§19.1),
+   and is deployed. This must happen **before** any convenience-signed restore line can be published to it:
+   an older relay refuses such a restore as `restore_invalid`, and publications are one ordered chain, so a held
+   restore blocks every later publication.
+2. orch-core adds the convenience cases to the F1 checkpoint vectors and `reader_kat_1` (F1 §11.5); the relay
+   vendors them and runs them in CI.
+3. Only then may a relay-linked workspace switch convenience signing on: the host reads `relay-info` at link
+   and at every login, and a relay below level 1 (404 included) blocks it.
+4. Phones send `reader_decl` (§8.3) and `rd` (above) from R6's first release, together with the host's gate.
+
+### 8.7 Ops, meta and WebAuthn
+
+**D45/D46 (P3 design §7).** Native clients do not use the WebAuthn ops below. Their replacement
+is deferred with Type (mobile D-5); the historical vectors remain test-only.
+
+**Request ops.** These are v1's, plus five:
+
+- v1's: `http`, `cancel`, `pair`, `pair_status`, `credential_begin`, `credential_finish`, `assert`;
+- `member_remove` (§6.3);
+- `revocation` (§6.2);
+- `drop_rewrap` (§7.5);
+- `decision` (§13);
+- `new_ticket`: a sealed request the host applies (spec §7). Its fields are the host's ticket API
+  (follow-up F3).
+
+**Response meta.** It is v1 §3.5's, and a refusal carries only its code and documented fields (§14).
+
+**WebAuthn.** This is v1 §9 with only the challenges changed:
+
+```
+assert challenge = H("orch/v2/assert|" || ws || device_id || rid || u32(epoch) || u8(purpose) || u8(scope)
+                     || u64(expires_ms) || nonce (32) || H(cj(subject)))
+registration     = H("orch/v2/webauthn-reg|" || ws || device_id || u64(expires_ms) || nonce (32))
+```
+
+The RP id and origin are the relay origin that serves `/app`. **DECIDED HERE:** `epoch` is in the
+assertion challenge, so an assertion cannot be carried across a rotation. Vectors: `webauthn`.
+
+### 8.8 What the device does with a response chunk
+
+This is v1 §7, with the v2 changes in bold. Drop unless, in order:
+
+1. the size is within 188 … 256 KiB;
+2. magic, version 2, direction 2 and the flags are valid;
+3. **the suite**, workspace and device are its own;
+4. the rid is pending;
+5. **the epoch equals the request's**;
+6. the mailbox fields match;
+7. **`WSK`** verifies the signature;
+8. the tag verifies;
+9. seq is the next index;
+10. the window holds, with the `stale_timestamp` exception.
+
+The pin-failure counting and "pair again" after 3 failures are v1's. A `stale_epoch` refusal with a higher
+epoch makes the device fetch grants (`fetch_grants`); any other is dropped (§8.5). Vectors:
+`bridge.device_cases`.
+
+**Replayed answers (P3-D27).** A host replays exact posted bytes (§8.6 step 5), so a replayed chunk keeps
+its original `ts_ms`, `host_ms` and `high`:
+- The phone's last automatic resend of a rid should start no later than about 240 s after its **first**
+  send, so that a replayed answer is likely to pass step 10's ±300 s window. This is best-effort, not a
+  guarantee: acceptance also depends on the clock offset and on how long the host took before stamping the
+  original answer's `ts_ms`. A replay outside the window is dropped, and the device ends `uncertain`, the
+  defined outcome (reissue reads; reconcile writes by `idem`).
+- For a `stale_timestamp` answering a rid that was sent more than once, the device computes its clock
+  offset as `host_ms` minus its device time of the **first** send, not of the latest resend.
+- A replayed `stale_sequence` carries an old `high`; `max(counter, high + 1)` stays correct.
+
+### 8.9 What the relay checks on the bridge
+
+**P3-D8/D9/D10/D16/D17/D22.** §19.3 and §19.6 add epoch hints, replay coalescing,
+non-consuming polls, durable host cursors and holder fencing. Limits cover the whole envelope.
+The relay checks membership; operations and scopes stay sealed. New old-epoch response bytes
+are accepted only for a known rid with `LAST | REFUSAL`; a live identical replay does not
+extend TTL, and an expired identical chunk is stored again only within P3-D27's bounds.
+Request and response epochs must match.
+
+The relay holds no keys. It MUST still enforce, before it queues anything:
+
+- **Route and header.** The route's workspace equals the header's. The magic, version and suite are right.
+  The mailbox id equals the rid.
+- **Device requests (epoch ≥ 1)** come from a device session whose `device_id` equals the header's
+  `device`, and which is in the workspace's current member list and not revoked.
+- **Pairing requests (epoch 0)** arrive on an unauthenticated pairing route. It is limited per workspace
+  and per client address, and the envelope is at most 64 KiB.
+- **Responses** are posted only by the workspace's host session.
+
+Sealed bodies live 60 s (v1). **DECIDED HERE:** the relay checks the header's device against the session
+and the member list. This is defence in depth: a removed device cannot even queue.
+
+## 9. Push
+
+**D45/D46 (P3 design §7).** Delivery uses APNs and the native Notification Service Extension
+(NSE), not Web Push or a service worker. The signed/sealed payload remains as below; delivery
+registration is P4. **P3-D40:** registration, the host's send route and the exact APNs request are §19.10;
+the outer object travels as the string `o` of the APNs body.
+
+The relay sees only the outer object, and forwards it as the Web Push payload (spec §6.3):
+
+```
+{"v":2, "ws": hex, "epoch": e, "c": b64u(SALTED-AEAD(K_push(e), "orch/v2/push-msg",
+                                              "orch/v2/push-aad|" || suite || ws || u32(e), cj(inner)))}
+inner   = {"p": payload, "sig": b64u(Sign(WSK, "orch/v2/sig/push|" || suite || ws || u32(e) || cj(payload)))}
+payload = {"kind", "id", "label", "ts_ms"}                         exactly these four
+```
+
+- `kind` is one of `question`, `question.closed`, `ticket.update`, `drop.new`, `peer.ticket`, `join`.
+- `label` is at most 80 code points.
+- The whole outer object is at most 3,072 bytes.
+
+**The service worker** keeps, per workspace, the pinned `wsk_pub`, the `WK`s it holds, and the highest
+`ts_ms` it showed per `(ws, id)`. It drops the payload if:
+
+1. it is too large, or its outer shape is wrong;
+2. it holds no key for `(ws, epoch)`;
+3. the tag fails, or `inner` is not exactly `{p, sig}`;
+4. **the signature does not verify with the workspace's `WSK`**;
+5. the payload shape is wrong, or the kind unknown;
+6. `ts_ms` is outside `[now − 24 h, now + 300 s]`;
+7. **`ts_ms` is not higher than the last one it showed for `(ws, id)`** (a replay).
+
+Otherwise it shows `label` with `tag = id`, and records `ts_ms`.
+
+**DECIDED HERE:**
+
+- `ts_ms` in the payload: the spec's `{kind, id, label}` would let the relay replay a months-old
+  notification forever.
+- A `WSK` signature inside the sealed payload: a member device holds `K_push` too, and without the
+  signature it could forge a notification in the host's name. That was R3; it is now closed.
+
+Vectors: `push.cases` (including `forged_by_a_member_device`, `replayed`, and
+`older_after_newer_for_the_same_id`).
+
+## 10. Drop
+
+### 10.1 Objects
+
+- A space is `personal`, `workspace` (key `WK_e`) or `shared` (key `SK_e`).
+- An object is a `file` (version 1 only, immutable, with an expiry) or a `document` (versions 1, 2, …).
+- Each version has its own `DEK`, its own content blob and its own signed descriptor.
+
+### 10.2 Content and metadata
+
+The content blob is TIX's SHR1 chunk layout (`crypto.js` `encryptBlob`) under a v2 header and a derived
+key:
+
+```
+header (40) = "ORD2" || u8(2) || u8(suite) || u16(0) || object_id (16) || u32(version) || u32(chunk_size)
+              || nonce_prefix (8)
+K_content   = HKDF(DEK, "", "orch/v2/drop-content|" || hex(object_id) || "|" || dec(version))
+chunk i     = AES-256-GCM(K_content, nonce_prefix || u32(i), chunk, AAD = header || u32(i) || u8(is_last))
+```
+
+- The default chunk size is 1 MiB, at most 64 MiB.
+- Empty content is one empty last chunk.
+- The `is_last` byte stops truncation; the header binds the object and version.
+
+**Metadata** (name, MIME type, size, transcript) is
+`AES-256-GCM(HKDF(DEK, "", "orch/v2/drop-meta|obj|ver"), zero nonce, cj(meta),
+"orch/v2/drop-meta-aad|" || suite || object_id || u32(version))`. The zero nonce is safe because the `DEK`
+is per version.
+
+Vectors: `drop` (`blob` of 3 chunks, `empty_blob`, `meta_sealed`; truncations refused). **P3-D39:** the relay
+transport (`/v2` paths, the streamed `ODU2` upload frame, reads, limits) is §19.9; `content_len` counts the
+ciphertext bytes.
+
+### 10.3 Wraps
+
+A wrap record is `{"object_id", "version", "target_kind", "target_id", "key_version", "wrap"}`.
+
+| `target_kind` | When (spec §6.4) | `wrap` |
+|---|---|---|
+| `wk` | the writer is a member of that workspace | `SALTED-AEAD(HKDF(WK_e, "", "orch/v2/wrap-wk\|ws\|e"), "orch/v2/wrap-msg", AAD, DEK)` |
+| `sk` | shared space | the same with `SK_e` and `orch/v2/wrap-sk\|space\|e` |
+| `wxk` | addressed to a workspace, any writer; inbox | `seal_to(WXK_v, "drop-dek", object, v, DEK, extra = 0x01 \|\| u32(version))` |
+| `device` | addressed to a device | `seal_to(dk_kx, "drop-dek", object, 0, DEK, extra = 0x02 \|\| u32(version))` |
+
+`AAD = "orch/v2/wrap-aad|" || suite || u8(len(kind)) || kind || target_id || object_id || u32(version) ||
+u32(key_version)`. A wrap moved to another object, version or target kind fails (vectors
+`wrap_negative`).
+
+### 10.4 Version descriptor
+
+A signed object, kind `drop_object`, signed by its author: `dk_sig` of a device (`author_kind: "device"`) or
+the workspace's `WSK` (`"workspace"`). Exactly these fields:
+
+```
+object_id, space_id, space_kind, object_kind, version, parent (= version − 1),
+parent_hash (null at version 1, else §10.6), author_kind, author_id,
+content_hash (b64u H(blob)), content_len, dek_commit (b64u H("orch/v2/dek-commit|" || object_id
+|| u32(version) || DEK)), meta (b64u, §10.2), recipients ("inbox" or a sorted unique list of ids),
+origin ("human" | "agent"), created_ms, expires_ms (integer | null)
+```
+
+**Readers MUST:**
+
+1. verify the descriptor with the author's key, and that the author may write to that space;
+2. check `H(blob)`;
+3. after unwrapping, check `dek_commit`, then decrypt.
+
+**Why wraps are unsigned.** The signed `content_hash` and `dek_commit` make substituted blobs and wraps
+fail. **DECIDED HERE:** `dek_commit`. AES-GCM is not key-committing, so without it a malicious author could
+give two recipients two `DEK`s that open one blob to two different plaintexts.
+
+**Agents.** `origin: "agent"` is set by the host for objects an agent sealed through the socket API (spec
+§5.5). Vectors: `drop.descriptor_cases`.
+
+### 10.5 Claim-once
+
+`POST /drop/{id}/claim` with:
+
+```
+{"o": {"v":2, "suite", "kind":"drop_claim", "object_id", "workspace_id",
+       "wrap": <wrap record, target_kind "wk", target_id = workspace_id>},
+ "sig": b64u(Sign(WSK, "orch/v2/sig/drop-claim|" || cj(o)))}
+```
+
+The relay, in **one transaction**:
+
+1. verifies the signature with the claimer's card → 401 `bad_signature`;
+2. checks the shape → 400 `malformed`. The wrap's `version` MUST be the object's version, and its
+   `key_version` MUST be the claimer's current epoch from its accepted member list (§7.2): a claim cannot
+   leave behind a wrap that no current member can open;
+3. if the object is already claimed:
+   - by the same workspace → 200 (idempotent);
+   - otherwise → 409 `already_claimed`, with `claimed_by`;
+4. checks that the claimer holds a `wxk` wrap on the object → 403 `not_eligible`;
+5. stores the new wrap, sets `claimed_by`, and **deletes every other wrap**.
+
+**DECIDED HERE:** claims are idempotent, and the loser learns the winner's workspace id (a routing id).
+Vectors: `drop.claims` (a race won by B, idempotency, a wrong signer, a wrap for another workspace, another
+version, another epoch), and the round trip `test_round_trip_drop_claim`.
+
+### 10.6 Documents
+
+- **Parent hash.** Every version descriptor carries `parent_hash`. It is `null` at version 1, and
+  otherwise `b64u(H("orch/v2/drop-parent|" || cj(parent descriptor o)))`.
+- `PUT /drop/{id}/versions` carries the new descriptor, its wraps and its blob, with `If-Match: <current
+  version>`. **P3-D39:** the route is `PUT /v2/drop/{id}/versions` and the body is the `ODU2` frame of §19.9;
+  an absent object has `current = 0`, so version 1 is written with `If-Match: 0`. The claim route (§10.5) is
+  `POST /v2/drop/{id}/claim`.
+- `If-Match` is a decimal without leading zeros; missing or malformed is 428 `precondition_required`.
+- **The relay accepts only if all hold:**
+  - `If-Match == current`;
+  - `parent == current` and `version == current + 1`;
+  - `parent_hash` is the hash of the current head descriptor.
+
+  Otherwise it answers 409 `version_conflict` with `current` ("fetch first").
+- There is no merge.
+- `POST /drop/{id}/lease` (10 min by default) is advisory and is not checked on `PUT` (spec §6.4).
+- **Readers check the chain.** A reader MUST check that each version's `parent_hash` is the hash of the
+  version before it, from version 1 up (`fork` otherwise). It MUST also persist the highest version it
+  has seen per document, and treat a lower "latest" as an error.
+
+**DECIDED HERE:** `parent_hash`. Without it, a relay could serve two writers two different histories with
+the same version numbers (a fork), and neither would notice. With it, the history every reader sees is one
+hash chain, signed version by version by its authors; a fork shows up at the first diverging version. That
+was R6 for documents; it is now closed.
+
+Vectors: `drop.documents` (including `fork_parent_hash_of_another_version_3` and `first_version`),
+`drop.document_chains` (`valid`, `fork_served_by_the_relay`, `version_missing`).
+
+## 11. ws→ws envelopes (spec §9)
+
+### 11.1 Layout
+
+```
+envelope = header (60) || u32(body_len) || body || signature (64) [ || u32(cosig_len) || cj(cosig) ]
+header   = "ORWX" || u8(2) || u8(suite) || u8(flags) || u8(0) || id (16) || from_ws (16) || to_ws (16)
+           || u32(wxk_version)
+```
+
+- `flags` bit 0x01 is `COSIGNED`, and the co-signature block is present exactly when it is set.
+- `flags` bit 0x02 is `REFUSAL`: the envelope is a refusal (§11.5) and is never answered.
+- Unknown flag bits and a non-zero reserved byte are dropped.
+- The envelope is at most 1 MiB; larger attachments go through Drop.
+
+**DECIDED HERE:** the binary form of the spec's `{v, id, from_ws, to_ws, wxk_version}`, with magic, suite
+and flags added.
+
+### 11.2 Body
+
+```
+body = seal_to(WXK_{wxk_version} of to_ws, "ws-envelope", object = id, epoch = wxk_version, cj(b),
+               extra = header)
+b    = {"kind", "in_reply_to", "depth", "deadline_ms", "ticket", "result", "refusal", "attachments"}
+```
+
+- **`kind`** is one of:
+  - `ticket` (`ticket` set, `in_reply_to` null);
+  - `result` (summary, Drop references and status in `result`);
+  - `refusal` (§11.5);
+  - `question.closed` (spec §8).
+- **The header is in the seal's AAD.** **DECIDED HERE.** Signature alone would let a pinned peer lift
+  another peer's sealed body, re-sign it under its own header, and have the receiver read A's content as
+  B's (vector `body_lifted_under_another_senders_header`).
+- **DECIDED HERE:** the spec's body fields plus `result` and `refusal`, with an exact field set.
+
+### 11.3 Signature and human co-signature
+
+```
+signature    = Sign(WSK_from, "orch/v2/ws-envelope|" || header || body)
+envelope_hash = H("orch/v2/ws-envelope-hash|" || header || body)
+```
+
+The signature covers the `COSIGNED` flag, so a stripped co-signature is detected. A co-signature is one of
+two forms.
+
+**Device key:**
+
+```
+{"type":"device", "cert": <signed device_cert>, "sig": b64u(Sign(dk_sig, "orch/v2/sig/ws-cosign|" || envelope_hash))}
+```
+
+**WebAuthn:**
+
+```
+{"type":"webauthn", "cert", "credential_id", "credential_pub" (65-byte P-256),
+ "bind_sig": b64u(Sign(dk_sig, "orch/v2/sig/webauthn-bind|" || lp16(credential_id) || credential_pub)),
+ "rp_id", "origin", "authenticator_data", "client_data_json", "signature" (DER)}
+```
+
+The receiver checks the chain **DK → certificate → the peer's pinned owner PK** (spec §9):
+
+- the certificate is valid, not revoked, and not a scoped agent;
+- for WebAuthn, also:
+  - `bind_sig`;
+  - `type = "webauthn.get"` and `challenge = b64u(envelope_hash)`;
+  - `origin` equals the sender card's `relay_url`, and `rp_id` is its host;
+  - the rpIdHash;
+  - the UP and UV flags;
+  - the ES256 signature.
+
+The receiver keeps no sign count.
+
+**DECIDED HERE:** the binding signature. A receiver has never seen the sender's passkey, so the passkey's
+key must be vouched for by the device key.
+
+Vectors: `cosigned_by_device_key`, `cosigned_by_webauthn`, `cosigned_by_a_revoked_device`,
+`cosignature_of_another_persons_device`, `cosigned_flag_but_cosignature_stripped`.
+
+### 11.4 What the receiver does (normative order)
+
+1. **Shape.** Size, magic, version, the reserved byte and unknown flags → drop. The suite → drop.
+   `to_ws` is itself → drop.
+2. **Pin.** `from_ws` is in the address book → otherwise drop (an unpinned sender is never answered).
+3. **Signature** with the pinned `wsk_pub` → drop.
+4. **Duplicate.** Seen ids are keyed by **`(from_ws, id)`**. A pair seen before with the same
+   `H(header || body)` returns the stored outcome and does nothing new. Other bytes under a seen pair →
+   drop. The same `id` from another sender is a different envelope (vector `same_id_from_two_senders`).
+5. **Co-signature**, if flagged → `bad_cosignature`. Trailing bytes without the flag → drop.
+6. **WXK version.** Current, or previous with `now < retired_ms + 14 d` → otherwise `stale_wxk` with the
+   current `wxk_version`.
+7. **Open and parse** strictly → `malformed`. This needs:
+   - the exact field set and a known kind;
+   - the `REFUSAL` flag set exactly when `kind` is `refusal`;
+   - for a refusal, a known code.
+8. **For `ticket`:**
+   - `in_reply_to` not `null` → `malformed`;
+   - `depth > 1` → `depth_exceeded`;
+   - `deadline_ms > now + 30 d` → `malformed`;
+   - `deadline_ms + 300 s < now` → `deadline_passed`;
+   - otherwise the inbox, marked `from-peer` (spec D13).
+9. **For the replies** (`result`, `refusal`, `question.closed`): `in_reply_to` MUST name an envelope this
+   workspace sent to `from_ws`, whose reply of that kind has **not been taken yet** → otherwise
+   `unknown_reply`.
+   - `result` and `refusal` are final, and each takes both: after a result, a refusal or a second result
+     for the same envelope is refused, and the other way round. A late replay of an answer can therefore
+     never be delivered.
+   - `question.closed` is taken once on its own.
+   - A result past its deadline is delivered, marked `late`.
+
+**When the envelope carries `REFUSAL`, every "refuse" above becomes a drop** (§11.5).
+
+From step 5 on, the outcome is stored with `(from_ws, id)` until `max(now, deadline) + 7 d`. The sender
+keeps `sent[id] = {to, consumed kinds}` until the ticket's deadline plus 7 d. **DECIDED HERE:** the
+`(from_ws, id)` key and the consumption of replies.
+
+Vectors: `ws_envelopes.cases` (34 per suite), and the round trip
+`test_round_trip_ws_ticket_refusal_and_result`.
+
+### 11.5 Refusals
+
+A refusal is itself an envelope to the sender, sealed to the sender's `WXK`, with **flag `0x02 REFUSAL`**
+set in its signed header:
+
+```
+b = {"kind":"refusal", "in_reply_to": <refused id>, "depth": 0, "deadline_ms": now, "ticket": null,
+     "result": null, "refusal": {"code", "wxk_version"?}, "attachments": []}
+```
+
+The codes are `stale_wxk` (with `wxk_version`), `depth_exceeded`, `deadline_passed`, `bad_cosignature`,
+`unknown_reply` and `malformed`.
+
+- **An envelope with `REFUSAL` is never answered.** Whatever is wrong with it, the receiver drops it. The
+  flag is in the signed header, so neither the relay nor a peer can remove it to start a refusal loop.
+- A body of kind `refusal` without the flag, or the flag on another kind, is `malformed` (dropped when the
+  flag is set).
+- Drops (steps 1–4 of §11.4) are never answered.
+
+**DECIDED HERE:** refusals are sealed envelopes, so the relay does not learn the refusal code; and the
+`REFUSAL` flag. Vectors: `refusal_for_a_ticket_we_sent`, `refusal_after_a_result_refused_silently`,
+`refusal_for_a_ticket_we_never_sent_is_dropped_not_answered`, `refusal_flag_on_a_result_body_is_dropped`,
+`refusal_body_without_the_flag_is_malformed`.
+
+## 12. Publish request signing and relay authentication
+
+### 12.1 orch-publish (spec §10)
+
+**Headers:**
+
+- `Orch-Workspace: <hex>`;
+- `Orch-Ts: <decimal ms, no leading zeros>`;
+- `Orch-Nonce: <32 lower-case hex>`;
+- `Orch-Signature: <b64u>`.
+
+```
+signed = "orch/v2/publish|" || suite || workspace_id || u64(ts_ms) || nonce (16) || lp16(METHOD)
+         || lp16(host) || lp16(request-target) || H(body)
+```
+
+- `host` is the lower-case host the client sent, with a port only if it is not the default.
+- `request-target` is the path and query exactly as sent: not normalised, not decoded.
+
+**orch-publish checks, in order:**
+
+1. header syntax → 400 `malformed`;
+2. `|now − ts| ≤ 120 s` → 401 `stale_timestamp` with `server_ms`;
+3. the card is known (verified against the directory, and cached until it changes or a revocation
+   arrives) → 401 `unknown_workspace`;
+4. the signature → 401 `bad_signature`;
+5. the nonce is unseen for this workspace → 401 `replay`. Then it records the nonce for 240 s.
+
+The signature comes before the nonce store, so junk cannot fill it. 240 s is twice the window, so a replay
+after the nonce expired is stale anyway (vector `replay_after_nonce_retention_is_stale`).
+
+**DECIDED HERE:** the byte layout, the header names, and the nonce length and retention. Vectors:
+`publish.cases`.
+
+### 12.2 Relay sessions
+
+**P3-D2/D17.** See §19.4 for concurrent 15-minute tokens, dummy-key verification for unknown
+ids, refusal of revoked devices after signature verification, expiry/revocation checks on every
+request and at long-poll handoff, and challenge budgets. There is no refresh token.
+
+The client gets `{challenge (32 bytes), expires_ms (60 s)}` from the relay and answers with:
+
+```
+signed = "orch/v2/sig/relay-auth|" || suite || lp16(origin) || challenge || u8(1 device | 2 workspace) || id (16)
+```
+
+It signs this with `dk_sig` (the relay checks the certificate and revocations) or with `WSK` (the relay
+checks the card). The session is an opaque bearer token, valid for 15 minutes. Agents never see it (spec
+§5.5).
+
+**The relay checks, in order:**
+
+1. the challenge is one it issued. It is **removed whatever happens next** → 401 `unknown_challenge`;
+2. `now < expires_ms` → 401 `expired`;
+3. `kind` is `device` or `workspace` → 400 `malformed`;
+4. the signature over the bytes above, built with **the relay's own origin**, never one the client names →
+   401 `bad_signature`.
+
+**DECIDED HERE:** the layout, a single-use challenge of 60 s, the check order, and 15-minute sessions.
+Vectors: `relay_auth`, `relay_auth.cases` (valid then reused, expired, another origin, signed as another
+kind, another key, an unknown kind).
+
+## 13. Questions (spec §8)
+
+**P3 design §7 / D40.** The host records a verified decision verbatim as F1 `evidence`. Every
+`decision_id` and admitted person-event id is single-use forever, across restores. The existing
+F1 `cj({contract, suite, workspace_id, log, event})` context remains the signature input.
+
+- `question_id` of a ticket question is the F1-derived id: the first 16 bytes, in hex, of
+  `H("orch/v2/question-id|" || cj({"workspace_id", "ticket", "question"}))` (ticket format F1 §5.6, row
+  `h_question_id`). It is not random; a question of another origin may use 16 random bytes (hex).
+- `content_hash = b64u(H("orch/v2/question|" || cj({question_id, ticket, text, options})))`.
+- A decision is the bridge op
+  `{"op":"decision", "decision_id": hex, "question_id": hex, "content_hash": b64u, "answer": <JSON>,
+  "sig": b64u}`, with exactly these fields.
+- `sig` is a **detached** signature by the device's `dk_sig`:
+
+  ```
+  sig = Sign(dk_sig, "orch/v2/sig/decision|" || cj({"workspace_id", "question_id", "content_hash",
+                                                   "decision_id", "answer"}))
+  ```
+
+  The bridge envelope already authenticates the request. The detached signature lets the decision travel
+  on as a device-signed ledger entry (spec §12: "decisions from devices carry device-key signatures") and
+  to a peer the question came from. `workspace_id` binds it to one workspace. The host checks the field
+  set → `malformed`, then the signature with the sender's certificate → `bad_signature`, before
+  compare-and-set.
+- A decision is single-use by `decision_id`. Because the qid is derived, the same question id and text can
+  recur (for example after a `restore`); whether a decision bound to an abandoned chain is refused is **open
+  for P3** (F1 §5.10 `abandoned_decisions`), not defined here.
+
+The host applies the first valid decision by compare-and-set, then:
+
+- pushes `question.closed` with label `"Answered on <device label>"` to every member device;
+- sends a `question.closed` ws envelope to the peer, if the question came from a peer.
+
+Refusals:
+
+- a later decision → `already_answered`, with `by_device_label` and `at_ms`;
+- a `content_hash` that is no longer current → `question_changed`, with the current `content_hash`.
+
+Clients reconcile on open by fetching each question's state. **DECIDED HERE:** the hash input, the op, its
+detached signature (the review's `ws` field is spelled `workspace_id`, like everywhere else), and
+`question_changed`. Vectors: `question_hash`, `decisions` (valid, answer changed, replayed into another
+workspace, signed by another device, without signature).
+
+## 14. Refusal codes
+
+A refusal carries its code plus only the fields listed here, and never echoes request content. A device
+shows its own fixed text per code.
+
+**Bridge (sealed, host-signed; v1 codes unchanged unless noted):**
+
+| Code | Fields | Note |
+|---|---|---|
+| `malformed` | — | |
+| `not_visible` | — | restricted ticket, P3-D14 |
+| `not_member` | — | was v1 `not_paired` |
+| `revoked` | — | |
+| `bad_signature` | — | |
+| `rid_conflict` | — | |
+| `already_done` | `status` | |
+| `stale_timestamp` | `host_ms` | |
+| `stale_sequence` | `high` | |
+| `stale_epoch` | `epoch` | new (§8.5) |
+| `pairing_closed` | — | |
+| `other_person` | — | new: a certificate or revocation of another person (spec D1 C) |
+| `cert_invalid`, `cert_expired` | — | new |
+| `forbidden_scope` | — | |
+| `assertion_required`, `lease_required` | v1 §9.4's challenge fields | |
+| `assertion_failed` | — | |
+| `scope_changed`, `stopped` | — | |
+| `busy` | — | |
+| `already_answered` | `by_device_label`, `at_ms` | new (§13) |
+| `question_changed` | `content_hash` | new (§13) |
+
+Every answer to an epoch-0 request, refusals included, also carries `wsk_pub`.
+
+**ws→ws (sealed envelopes with the `REFUSAL` flag, §11.5):** `stale_wxk` (`wxk_version`),
+`depth_exceeded`, `deadline_passed`, `bad_cosignature`, `unknown_reply`, `malformed`.
+
+**Relay and orch-publish HTTP** (`{"error": code, …}`):
+
+| Status | Codes |
+|---|---|
+| 400 | `malformed`, `wrong_suite`, `cert_invalid`, `cert_expired`, `delegation_mismatch`, `too_large` (P3-D1/D17) |
+| 401 | `bad_signature`, `stale_timestamp` (`server_ms`), `unknown_workspace`, `replay`, `unknown_challenge`, `expired`, `unauthenticated` (P3-D2) |
+| 403 | `revoked`, `other_person`, `scope_exceeded`, `not_eligible`, `not_for_this_device`, `cert_expired` (membership publication, P3-D7) |
+| 404 | `not_found` (P3-D1) |
+| 409 | `cursor_ahead` (P3-D31: a position above the relay's newest §19.5 cursor; restart from the beginning), `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version`, `stale_list`, `bad_epoch`, `rotation_required`, `wk_commit_changed` (G2b), `missing_grant`, `already_claimed` (`claimed_by`), `version_conflict` (`current`), `account_exists`, `cert_conflict`, `grant_conflict`, `wrap_conflict` (G0a review 10), `rid_conflict`, `retry_exhausted`, `chunk_conflict`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed` (P3-D3/D5/D7–D11/D22/D27), `no_genesis`, `genesis_mismatch` (P3-D18), `chain_diverged`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation` (`devices`: sorted device IDs; P3-D13/D24), `staging_conflict`, `staging_incomplete` (P3-D20), `checkpoint_time` (P3-D25), `registration_conflict` (P3-D40, §19.10); Drop `PUT` also answers `stale_epoch` (`epoch`), `bad_wxk_version` and (if adopted) `rotation_required` for its wraps, and the re-wrap route `wrap_conflict` (P3-D39, §19.9) |
+| 413 | `too_large` for JSON routes (G0a review 2); before parsing |
+| 410 | `checkpoint_gone` (P3-D19/D20; a previously stored endpoint expired), `expired` (P3-D11; unknown/expired response rid, G0a review 8; P3-D39: an expired, retired or tombstoned Drop object, a pruned superseded blob) |
+| 429 | `rate_limited`, `quota_exceeded` (P3-D5/D17; `Retry-After`) |
+| 503 | `overloaded` (P3-D17; `Retry-After`) |
+| 428 | `precondition_required` |
+
+**Primary device (local, never on the wire):**
+
+- for cert requests (§8.4): `other_person`, `bad_signature`, `not_for_this_device`, `expired`, `replayed`,
+  `request_open`, `malformed`, `scope_exceeded`, `already_signed`, `rejected`, and the warning
+  `client_hosted`;
+- for enrolment (§6.4): `bad_signature`, `malformed`, `unknown_code`, `used`, `expired`, `bad_mac`.
+
+**Phone, on a pairing answer (drops, never sent):** `not_my_key` (raises the alarm),
+`challenge_signature`, `not_for_this_workspace`, `challenge_expired`, `pk_pin`, `wsk_pin`; G3b (P3-D28):
+`stale_attempt` and `not_for_this_pairing` (challenges), and, as the reason of an unattributed `rejected`,
+`rejection_signature`, `rejection_expired`, `not_a_pairing_answer` and the codes above.
+
+**Phone, at join (G3b, P3-D28):** `below_anchor` (a list or card below the `approved` floor, retry),
+`scopes_mismatch` (a list at the anchor's `list_seq` with other scopes for this device, retry),
+`not_a_member` (the first list lacks this device: removed after approval, stop retrying).
+
+**Service worker (drops):** `signature`, `replay`, `stale`, `no_key`, `tag`, `payload`.
+
+**Document reader:** `fork`.
+
+## 15. Clock rules
+
+Every check uses the verifier's own clock. The one exception is the device's clock offset, which a device
+adopts only from a verified `stale_timestamp` refusal, once per pending rid, within ±24 h (v1 §5.1).
+Boundaries are inclusive where the cell says ≤.
+
+| What | Rule |
+|---|---|
+| Bridge request | `\|host_now − ts_ms\| ≤ 300 s`; rid record kept `received_at + 900 s`, never derived from `ts_ms` |
+| Bridge response | `\|device_now + offset − ts_ms\| ≤ 300 s` |
+| Pairing offer | 10 min, single use; the host keeps the offer record 24 h to answer `pairing_closed` |
+| `cert_pending` | 10 min from entering the state, then `expired` |
+| Cert request | `created − 300 s ≤ now < expires`, and `expires − created ≤ 10 min` |
+| Cert challenge | the phone accepts it while `now (+ offset) < expires_ms` (the request's expiry) |
+| Device certificate | `created_ms ≤ now + 300 s`; expired when `now ≥ expires_ms` |
+| Push payload | `now − 24 h ≤ ts_ms ≤ now + 300 s`, and higher than the last shown for `(ws, id)` |
+| ws ticket | `deadline_ms + 300 s ≥ now`, and `deadline_ms ≤ now + 30 d`; seen ids kept to `max(now, deadline) + 7 d` |
+| WXK overlap | previous key accepted while `now < retired_ms + 14 d` |
+| Publish | `\|now − ts\| ≤ 120 s`; nonces kept 240 s |
+| Relay login | challenge 60 s, single use (expired when `now ≥ expires_ms`); session 15 min |
+| Enrolment code | expired when `now ≥ expires_ms`; one use |
+| WebAuthn challenges | 120 s (v1) |
+| Epoch age | rotate at 90 days (host clock), checked at startup and daily |
+| Stream silence | 60 s (v1); keepalive at least every 20 s |
+
+## 16. Test vectors
+
+`tests/vectors_v2.json` holds the same sections for **each suite** (`suites."1"`, `suites."2"`). All keys
+are FAKE (`SHA-256("FAKE orch v2 test vector: " || label)`), and so is every "random" value.
+
+- **Single-call cases** give the exact inputs, the state, the clock and the expected result.
+- **Chains** (`steps`) run against one state, so what a step leaves behind is checked too.
+- The `why` of a drop is informative and not part of the contract.
+
+| Section | Covers |
+|---|---|
+| `labels`, `constants`, `encodings` | every label (§3); limits; canonical JSON, strict parsing, canonical b64u |
+| `ed25519_small_order` | the 8 small-order encodings, computed |
+| `sign` | valid, other key, changed message, short; suite 1: S ≥ L, small-order, identity and non-canonical keys; suite 2: the malleable twin, r = 0, s = n, off-curve key |
+| `hkdf`, `salted_aead` | every derived key with its `info` text; one SALTED-AEAD |
+| `seal`, `seal_open` | sealing to a device with every intermediate; opening with the wrong purpose, recipient, object, epoch or key, and tampered |
+| `label_sealed` | §5.4 |
+| `certs` | 16 cases (§6.1) |
+| `revocations`, `revocation_op` | valid, another person, wrong key, bad reason; the bridge op (§6.2) |
+| `card` | delegation, sealed part, `ck_commit`, card-key wrap, 16 update cases |
+| `wk_grants`, `member_lists` | grants; 34 member-list cases (§7.2), including the G2b first-list, skip, fall, u32, removal and `wk_commit` rules |
+| `wk_commit` | the commitment for given `workspace_id`, epoch and `WK` (§7.2, G2b) |
+| `member_list_snapshots` | device steps (§7.3 D1–D4): high-s twin no-op, conflicting content (also with another `wk_commit`, no sealing block), `wk_commit_conflict` (also from a lower `list_seq`), grant/commit mismatch, no fallback, reading after a jump and `future_epoch`, first contact, lower `list_seq`, fall, removal |
+| `bridge.seal`, `bridge.host_cases`, `bridge.device_cases`, `bridge.pair_answers`, `bridge.links`, `bridge.sas` | §8, including the R1 attack |
+| `cert_request` | 10 primary cases, the challenge and its code, the certificate, a second signature refused, the attack challenge (§8.4) |
+| `enroll`, `webauthn`, `question_hash`, `decisions` | §6.4, §8.7, §13 |
+| `push` | §9: valid, unknown workspace or epoch, 24 h edge, changed epoch, unknown kind, extra field, forged by a member device, replays; P3-D40 (planned, D40b): `push.apns_envelope` (outer → APNs body bytes, the 3 072-byte edge) |
+| `drop` | content blob (3 chunks, empty), metadata, every wrap kind and moved wraps, descriptors, claims (with version and epoch checks), documents, chains and forks; P3-D39 (planned, D39a1): `drop.upload_frame`, `drop.relay_put` (a PUT chain against one relay state) |
+| `ws_envelopes` | layout, both co-signatures and five WebAuthn negatives, refusal envelopes, reply consumption, ids per sender |
+| `publish`, `relay_auth` | §12, including challenge reuse, expiry, another origin, another kind, another key |
+| `reader_decl` | H12d (P3-D38): `decls`, the declaration checks (`verify_reader_decl`: a valid pairing declaration; the wrong workspace, `device_id`, `dk_hash`, offer, attempt or `who`; `reader: 0`; a higher unknown level 7 with `kat["1"]` only; a missing or wrong `kat["1"]`; a signature by another key or under another label; form and the 2 KiB cap); `pair_meta`, the meta v2 at the bridge (§8.3) and the host's gate; `request_meta`, `rd` (§8.6). `kat` digests are FAKE stand-ins; `depends_on_core` marks a digest comparison (core owns `reader_kat_1`) |
+
+**Round trips.** `tests/test_vectors.py` also feeds one side's output into the other side's checks:
+
+- pairing through `cert_pending` (phone → host → primary → host → phone);
+- the R1 attack;
+- a bridge request and a `stale_epoch` refusal;
+- a card;
+- a ws ticket, its refusal and a late result;
+- a Drop claim.
+
+Every implementation (orch-core host, orch-relay, orch mobile) MUST run the vectors of its deployment's
+suite in its own test suite.
+
+**Not covered by vectors yet** (see §18):
+
+- quota and store-limit cases beyond `quota_busy`. They are v1's rules, unchanged, and v1's `quota_*`
+  vectors describe them;
+- SK grants;
+- the `drop_rewrap`, `member_remove` and `new_ticket` ops on the host;
+- WebAuthn registration parsing (v1 F2).
+
+## 17. Decisions taken here
+
+**P3 amendment.** P3-D1–D11, P3-D14–D17, P3-D22 and P3-D27 below and in §19 supersede the earlier
+HTTP, membership and bridge transport rules. D45/D46 select native clients and suite 2.
+Checkpoint/restore decisions P3-D12/D13/D18–D21/D23–D25 are specified in §19.8 (G0b).
+Drop transport (P3-D39) and push registration and sending (P3-D40) are §19.9 and §19.10 (designed ahead
+of R3; no sealed or signed format changes).
+
+Each is marked **DECIDED HERE** where it is used; the reviewer may reverse any of them. Items marked
+*(review)* were added or changed after the first review of PR #23.
+
+1. Suite ids `1` and `2`, a suite byte in every binary layout and a `suite` field in every JSON object; a
+   suite mismatch is dropped (§1.1).
+2. A device has two key pairs, `dk_sig` and `dk_kx` (§1.1).
+3. Ed25519 strictness: canonical S, canonical keys, no small-order keys (§1.2).
+4. Ids in hex, every other byte string in canonical b64u (§2.2).
+5. The JSON subset: no floats, ASCII keys, safe integers, signatures over `cj(o)` after strict parsing
+   (§2.3, §2.4).
+6. Trailing `"|"` on the spec's `orch/v2/ws-envelope` and `orch/v2/publish` domains (§3).
+7. The 6-character pairing code binds a host nonce revealed only to the device that consumed the offer
+   (§4).
+8. `WSK` never rotates; the relay refuses a changed `wsk_pub` (§5.2).
+9. A fresh `DEK` for every document version (§5.2).
+10. The seal purposes, and their `object_id`, `epoch` and `extra` (§5.3).
+11. `label_sealed` under a key derived from the personal vault key (§5.4).
+12. Scopes as a prefix list of v1's ordered levels; `expires_ms` always present (§6.1).
+13. Revocation reasons, and no un-revoke (§6.2).
+14. *(review)* The bridge op `revocation`, authorised by `PK`'s signature whoever relays it (§6.2).
+15. The scoped-agent enrolment link and MAC, and the primary's check order (§6.4).
+16. The recovery kit's format is deferred to P1 (§6.5).
+17. *(review)* The card: a one-time `PK`-signed delegation (with `client_hosted` in the clear), and the
+    rotating card signed by `WSK` alone. The client-hosted marker is decided by the delegation flag, and
+    the sealed name only names. Also `sealed_hash`, `ck_commit`, `card_seq`, the relay URL form and the
+    update rules (§7.1).
+18. `list_seq` beside `epoch`; one `WK` per epoch, ever, committed by `wk_commit`; a refused publication burns
+    its epoch and `list_seq`, so epochs may skip (at most `2^16` per list) and never fall, and the first list
+    takes any epoch `1 … 2^16` (G2b, P3-D26); the relay requires grants before the list, and checks the first
+    list's workspace against the card (§7.2).
+19. WK grants are signed by `WSK`; a device's current epoch never moves backwards (§7.3).
+20. The bridge header: magic `"ORB2"`, `suite` in place of `key_version`, a `u32` epoch, and the offer id in
+    `stream` at epoch 0 (§8.1).
+21. A fifth link field `pk_pin`; no pairing MAC (§8.3).
+22. *(review)* The `pair_status` answer shapes. All carry `wsk_pub`; `pending` repeats the full five fields;
+    `cert_pending` carries `pk_pub` and the challenge; there is an `expired` state. The window applies to
+    every answer except a verified `stale_timestamp` (§8.3).
+23. *(review)* `cert_pending` with a `PK`-signed challenge: the primary draws its nonce, and the phone checks
+    the keys and shows `cert_code`. The primary signs once, only for its own challenge's keys and only while
+    it is unexpired and not rejected. It keeps at most one open request per workspace, where "open" means
+    unexpired and neither signed nor rejected, and refuses drop scopes and replays. Client-hosted is a
+    warning. Also the UI rules for the two codes (§8.4).
+24. `stale_epoch` handling; nothing new is ever sealed under an old epoch; a `stale_epoch` not higher than
+    the request's is dropped (§8.5).
+25. The `epoch` in the WebAuthn assertion challenge (§8.7).
+26. The relay checks the header's device against the session and the member list (§8.9).
+27. *(review)* Push: `ts_ms` with a 24 h maximum age, a `WSK` signature inside the sealed payload, and a
+    replay rule per `(ws, id)`; a 3,072-byte cap (§9).
+28. The Drop content header `"ORD2"`; per-version metadata keys (§10.2).
+29. `dek_commit` in the descriptor (§10.4).
+30. *(review)* Idempotent claims; the loser learns `claimed_by`; the relay checks the wrap's version and its
+    epoch against the claimer's member list (§10.5).
+31. *(review)* `parent_hash` chains document versions; the relay and readers check it (§10.6).
+32. The ws envelope's binary header with magic, suite and flags (§11.1).
+33. The header in the body's AAD; the extra body fields `result` and `refusal` (§11.2).
+34. The WebAuthn co-signature's `bind_sig`, and its origin tied to the sender card's relay (§11.3).
+35. *(review)* Seen ids keyed by `(from_ws, id)`; replies consume the sender's `sent` entry per kind
+    (§11.4).
+36. *(review)* Sealed refusal envelopes with a signed `REFUSAL` flag; such an envelope is never answered
+    (§11.5).
+37. The publish signature layout, its headers and its nonce rules (§12.1).
+38. Relay login layout and lifetimes, and its check order (§12.2).
+39. *(review)* The question hash input, the `decision` op with a detached `dk_sig` signature over
+    `workspace_id` and the decision, and `question_changed` (§13).
+40. **G3b (P3-D28; F1 Q6, Q7, Q8).** The pairing attempt binding: a device nonce `attempt` and, for an
+    uncertified phone, fresh device keys per attempt (MUST); `offer_id` and `attempt` in the challenge;
+    `offer_id`, `attempt`, `device_id`, `dk_hash` and `expires_ms` in the rejection; the clear binding in
+    the cert request, checked by the primary against the inner and by the relay against posted objects;
+    the phone checks keys and device before the attempt and the offer; the two exact `rejected` forms and
+    the verified "Denied by the owner"; the `approved` join anchor `list_seq`, `card_seq` and `baseline`
+    beside `epoch` (§8.3, §8.4, §19.3).
+
+Taken out after review: the first draft's item "the primary refuses cert requests from client-hosted
+workspaces" (now a warning), and "ids derived from keys" (the owner accepted it, and spec §4 is being
+amended).
+
+## 18. Open risks and follow-ups
+
+**Closed in review:**
+
+- **R1, a forged certificate through a malicious host.** Fixed by the primary's `PK`-signed challenge
+  (§8.4). The phone shows a code only for a challenge naming its own keys. Vectors and a round trip show
+  the attack failing.
+- **R3, push forgery by a member device.** Fixed by the `WSK` signature inside the payload (§9).
+- **R6, rollback and forks.**
+  - Documents: closed by `parent_hash` (§10.6).
+  - Cards: `card_seq` rises strictly at the relay, and peers MUST persist the highest `card_seq` they have
+    seen and refuse a lower one.
+  - Epochs: never move backwards on a device (§7.3).
+
+**D45/D46 (P3 design §7):** R2 is closed by native distribution, R5 by suite-2 deployment.
+The historical web risks below apply only to a future browser client.
+
+**Open:**
+
+- **R2, web-delivered JavaScript** (spec §4) is unchanged. A compromised `/app` at pairing time owns the
+  device key. Nothing in this protocol narrows that beyond spec §4.
+- **R4, one device id across workspaces** (§4) lets the relay link a device's traffic across workspaces.
+  The owner accepted this; spec §4 is being amended.
+- **R5, suite 1 depends on spike S1.** If WebCrypto Ed25519/X25519 is unreliable on the oldest supported
+  iOS, deployments use suite 2. Every vector exists for both suites.
+- **R7, the relay learns `client_hosted`** from the delegation (§7.1). The owner names no one; the text
+  stays sealed.
+- **R8, the human compares two codes in `cert_pending`.** The phone shows the pairing code first, then the
+  challenge's code. Mitigated by the UI rules in §8.4: clear the first code, label the second "compare
+  with <primary>", and hide it after `expires_ms`. This remains a usability risk to test on a real phone
+  (iPhone session 1).
+
+**Follow-ups:**
+
+- **F1:** vectors for the v1 quota cases in the v2 layout, SK grants, the host ops `drop_rewrap`,
+  `member_remove` and `new_ticket`, and WebAuthn registration (CBOR).
+- **F2:** a mutation test like v1's (`test_bridge_protocol_mutations.py`), so that every MUST is shown
+  to be pinned by a vector.
+- **F3:** the `http` meta mapping (method, path, header allow-list) and `new_ticket` belong to the host
+  API, as in v1 F3.
+
+
+## 19. Relay HTTP API (P3-D1)
+
+**P3-D1 (routes and fixtures; C3).**
+
+- All routes start with `/v2`.
+- Bodies reuse the FakeRelay's shapes (host-api v0 §1 and §3), without `host_api` and without the `Orch-Host-API`
+  header.
+- Errors use §14's form, `{"error": code, …}`. JSON is strict per §2.3. `Retry-After` is integer
+  delta-seconds.
+- This is more than a prefix change for the phone. G0 therefore publishes request/response fixtures
+  (`tests/http_fixtures/*.json`, one per row below, including refusals) that the relay tests, the phone's
+  adapter and its FakeRelay all consume.
+
+Common semantics:
+
+- **Position cursors** (`after`, `after_n`, `after_seq`) are decimal integers, exclusive, and strictly increasing per
+  stream. **Checkpoint references** (`to`, `hash`) are `h_checkpoint` values. `next` is an opaque string that the
+  client passes back unchanged; the §19.8 checkpoint read routes are the one exception, where `next` is resubmitted
+  as `after_n` (transitions) or `from` (proof), as §19.8 transport detail 3 defines.
+- **Pagination** returns at most `limit` items (the default and maximum are listed per route) and **at most 4 MiB per
+  response on every route**, plus `next` (null at the end).
+- **Long polls** take `wait` from 0 to 25 s.
+
+The **Auth** column uses these codes:
+
+| Code | Meaning |
+|---|---|
+| none | no session |
+| D | device session |
+| W(g) | workspace session that holds the current holder generation `g` (header `Orch-Holder: g`, P3-D10) |
+| W | workspace session, any generation (read routes) |
+| D(m) | device session of a current, unrevoked member of `{ws}` with an unexpired certificate, checked in the same transaction as the read or write |
+| D(p) | device session of the same person |
+
+### 19.1 Directory and sessions
+
+(G0a review 1) Each workspace has durable `ever_persons` and `ever_devices` sets, updated only
+on accepted member-list publication. A device enters `ever_devices` exactly when it is a member
+of an accepted list. A person enters `ever_persons` exactly when an accepted list contains at
+least one member device whose stored certificate belongs to that person (check 8 binds this).
+Every `persons` entry MUST have at least one member device of that person in the same list;
+otherwise publication is refused with 403 `other_person`. Failed publications add no authority.
+W certificate and person-feed reads require `ever_persons`; device reads and feed entries are
+restricted to `ever_devices`. Apply these filters before pagination and to relevant notices.
+Departure never removes historical authority; one workspace's sets never authorize another.
+
+(G0a review 2) Every JSON route below has a whole-body cap in its limits cell, checked before
+JSON parsing, authentication or signature verification; excess is 413 `too_large`. KiB = 1024
+bytes. Membership retains 2 MiB. GET accepts no body. ORB2 keeps its existing binary caps/status.
+Card-key batches may be split across multiple requests within the cap.
+Caps apply to streamed bytes as well as declared Content-Length; never buffer above the cap.
+
+
+| Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
+|---|---|---|---|---|---|
+| `POST /v2/session/challenge` | none | `{}` → `{challenge, expires_ms}` | 60 s, single use; per address (/64 IPv6) ≤ 16 outstanding and 60/min; /56 ≤ 256 outstanding and 960/min (G0a review 9); global ≤ 65 536 outstanding, excess **refused** (P3-D17); JSON cap 16 KiB (G0a review 2) | 429 `rate_limited` | §12.2 |
+| `POST /v2/session/login` | none | `{challenge, kind, id, sig}` → `{token, expires_ms}` | challenge consumed on every attempt; 15 min; ≤ 8 live tokens/device (G0a review 10); JSON cap 16 KiB (G0a review 2) | 400 `malformed`, `cert_expired`, `cert_invalid`; 401 `unknown_challenge`, `expired`, `bad_signature`; 403 `revoked`; 429 `quota_exceeded` (G0a review 10) | §12.2, §4 |
+| `POST /v2/session/logout` | D or W | `{}` → `{}` | idempotent; safe to retry with an expired token (200); JSON cap 16 KiB (G0a review 2) | — | new |
+| `POST /v2/accounts` | none | `{invite, pk_pub, device_cert, challenge, sig}` → `{person_id}` | `sig` is the new device's login signature over a fresh challenge; the exact same request → 200 (by digest); JSON cap 64 KiB (G0a review 2) | 400 `malformed`, `cert_invalid`; 401 `bad_signature`, `unknown_challenge`; 403 `not_eligible` (one code for unknown, used or expired), `revoked` (a new registration: the device id holds a chain-learned revocation of any person, or the new pair is revoked; as for `PUT /v2/devices/{device}`, P3-D30); 409 `account_exists`. The exact same request after the device was revoked still answers 200 from the invite's digest; it writes nothing and grants nothing (login stays refused) | spec §6.1 (P3-D3) |
+| `PUT /v2/devices/{device}` | none | `{cert}` → `{device_id}` | self-authenticating under the account `PK`; per address 30/h; per person 64/day, charged only on verified state changes; canonical retries and refused submissions are free (G0a review 3) (G0a review 5); JSON cap 16 KiB (G0a review 2) | 400 `cert_invalid`, `cert_expired`; 403 `revoked` (P3-D30: a registered device when its registry pair is revoked; a new registration when the id holds a chain-learned revocation of any person or the new pair is revoked), `other_person` (no account); 409 `cert_conflict` | §6.1, §8.3, §8.4 (P3-D5) |
+| `GET /v2/devices/{device}` | D(p), or W whose `ever_persons` contains the person and `ever_devices` contains the device (G0a review 1) | → `{cert}` | | 403 `not_eligible`; 404 `not_found` | §6.1 |
+| `POST /v2/revocations` | none | `{record}` → `{device_id}` | authority is `PK`; per address 10/min; per person 32/day, charged only on verified state changes (G0a review 5), with 8/day reserved for revocations of devices not yet revoked; an exact retry is free; JSON cap 16 KiB (G0a review 2) | 400 `malformed`; 401 `bad_signature`; 403 `other_person` | §6.2 (P3-D5) |
+| `GET /v2/devices/{device}/revocation?after=&limit=` | none | → `{pairs: [{person_id, reason, revocation, provenance}], next}` (P3-D30): every held `(device, person)` pair, the registered person's first on page 1, then `chain` before `feed`, then by §19.5 cursor (never by `person_id`). `next` is opaque and passed back as `after`. `revocation` is the public signed record. `provenance` is `registry` (the relay's verified association), `chain` (some workspace's accepted restore carried it; not authenticated by that person) or `feed`. No certificate or account key is served: the route is unauthenticated | per address 60/min; limit ≤ 32 (default 32); no cap on held pairs | 400 `malformed` (a bad limit or after token); 404 when a request without an after token finds no pair (a valid after token past the end, even for a device with no pairs, is an empty 200 page); 429 | §6.2, gaps 24 |
+| `GET /v2/relay-info` | none | → `{"v": 1, "reader": N, "max_publication_bytes": M}`, exactly these fields (H12d, P3-D38). `reader` is the relay software's reader level, a code constant (`RELAY_READER_LEVEL`), never a setting: 1 = its restore-evidence parser accepts `auth: "convenience"` and refuses every unknown `auth` (`AUTH_KINDS`, §19.8). `max_publication_bytes` is the configured maximum publication size (`ORCH_RELAY_MAX_PUBLICATION_BYTES`, P3-D37). The same answer for every caller: no session is read, no workspace, person or device data is served. An **honest-operator statement**, authenticated only by TLS to the stored origin, **never a security control**: a hostile relay can claim any level. A relay without the route answers 404, which a host reads as level 0 (orch-core orch-v2-host §9.8) | per address 60/min, per IPv6 /56 960/min (§19.4), checked before either is charged; `Cache-Control: no-store` on every answer; no query parameters; GET only | 400 `malformed` (any query parameter); 429 `rate_limited` | new (H12d) |
+| `GET /v2/persons/{person}/revocations?after=&limit=` | D(p), or W whose `ever_persons` contains the person | → `{revocations, next}` | W sees only `ever_devices`, filtered before pagination (G0a review 1); limit ≤ 256 | 403 | §6.2 |
+| `PUT /v2/workspaces/{ws}/card` | none for the first card; W(g) after | `{card}` → `{card_seq}` | first card: per address 10/h, per owner account 10/h charged only after delegation and card signatures verify; at most 32 workspaces per owner account, or the account's operator override (P3-D34/D36, 429 `quota_exceeded`, checked after the signatures, before any window is charged); same-card retries are free (G0a review 5); first writer wins in one transaction; same card → 200; JSON cap 64 KiB (G0a review 2) | §7.1 codes: 400 `malformed`, `wrong_suite`, `delegation_mismatch`; 401 `bad_signature`; 403 `other_person`; 409 `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version` | §7.1 (P3-D4) |
+| `GET /v2/workspaces/{ws}/card` | D(m) or W | → `{card}` | | 403; 404 | §7.1 |
+
+**P3-D3 (accounts; C5).** Accounts come only from single-use invite codes made by the admin CLI
+(`orch-relay invite create --ttl 7d`, stored hashed). The request carries the first device certificate (`PK`-signed)
+and a fresh login signature by that device over a relay challenge. That proves the applicant holds the device key now.
+Invite use and the request digest commit in one transaction. A replay of a captured certificate without the device key
+fails. Registering someone's `pk_pub` would need their device key, and an account alone grants nothing.
+
+**P3-D4 (first card; C5).** The first card takes no session: a workspace login needs a card. It is
+self-authenticating (the account `PK` signs the delegation, `WSK` signs the card). The first writer wins in one
+transaction. Quotas are per owner account and per address, not per attacker-chosen workspace id. A captured genuine
+card that wins first publication is the genuine card; the host then logs in with the same `WSK` and moves `card_seq`
+on.
+
+**P3-D5 (PK-only recovery; C6).**
+
+- Revocations and device certificates are accepted without a session. Each is authorized by its `PK` signature
+  alone, under strict per-address and per-person quotas.
+- So a person who kept only the recovery code, and so `PK` (D50), can bootstrap: upload a new device certificate, log
+  in with it, and revoke the lost device.
+- The public record route reveals whether a known device id is revoked. §8 states this; login adds no further oracle.
+- **Quota denial (challenge 2, finding 10).** Person quotas are charged only after the signature verifies, exact retries
+  are free, windows are kept for their full duration (hour, day), never idle-pruned, and a reserved share stays
+  available for revocations, so invalid or replayed submissions cannot block a recovery.
+- (G0a review 5) Charge recovery/certificate person quotas only in the transaction that changes
+  state. Verified expiry, revoked-device and superseded-revocation refusals, and exact retries,
+  cost nothing. Do not charge first-card owner quota until both signatures verify.
+
+### 19.2 Members and epochs
+
+| Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
+|---|---|---|---|---|---|
+| `PUT /v2/workspaces/{ws}/membership` | W(g) | `{member_list, grants: [wk_grant], card_key_wraps?: {card_seq, wraps}}` → `{list_seq, epoch}` | one transaction; the exact same body → 200; ≤ 1024 members, ≤ 2 MiB; JSON cap 2 MiB (G0a review 2) | 401 `bad_signature`; 403 `revoked`, `other_person`, `scope_exceeded`, `cert_expired`; 409 `other_workspace`, `stale_list`, `bad_epoch`, `rotation_required`, `wk_commit_changed`, `missing_grant`, `grant_conflict`, `stale_card`, `wrap_conflict` (G0a review 10), `fenced`; 429 `quota_exceeded` (at most 4 096 ever-devices per workspace, P3-D31) | §7.2, §7.3 (P3-D7, P3-D26, P3-D31) |
+| `PUT /v2/workspaces/{ws}/card-keys` | W(g) | `{card_seq, wraps: [{device_id, sealed}]}` → `{stored}` | only devices of the current list; same → no-op; JSON cap 64 KiB (G0a review 2) | 403; 409 `stale_card`, `wrap_conflict` (G0a review 10), `fenced` | §5.3 |
+| `GET /v2/workspaces/{ws}/grants[?epoch=e]` | D(m) | → `{grants}` (own device, ascending, from `first_epoch` on) | | 403; 404 | §7.3 |
+| `GET /v2/workspaces/{ws}/members` | D(m) or W | → `{member_list}` | | 403; 404 | §7.2 |
+| `GET /v2/workspaces/{ws}/card-key?card_seq=N` | D(m) | → `{workspace_id, device_id, card_seq, sealed}` | | 403; 404 | host-api §3 |
+
+**P3-D7 (atomic membership publication; replaces the rotation-abandon proposal; C8, C9).** A list, all grants for its
+epoch and optionally the card-key wraps for new devices are published in **one request and one transaction**:
+
+1. Every §7.2 check, with check 8 per P3-D6 and check 9 against the grants in the same body.
+   (G0a review 1) Refuse 403 `other_person` if any `persons` entry lacks a member device.
+2. The write-time re-check of each grant's and wrap's device certificate: stored, owned by the card owner or by a person
+   in **this list's** `persons`, unexpired now, not revoked.
+3. The write.
+
+Consequences:
+
+- **No staging deadlock for a new person (C8).** That person's grants are judged against the list that adds them.
+- **No partial rotation state at the relay (C9).** A refused publication leaves nothing at an honest relay. The host
+  still treats the body as possibly stored (G2b): it burns the epoch and `list_seq` and generates the next key at the
+  next unused epoch (`EHW + 1`). **It never reseals a refused epoch**, and a burned key never seals anything (§7.2 H4).
+- **The host persists `WK_E` durably before sending** (§7.2 H2). If the response is lost, it resends the exact body
+  (idempotent).
+- **If a committed key is lost anyway** (disk loss), the host treats it as host-state loss (§7.2 H7): it jumps its
+  high-water marks by 1024 and rotates at once. Committed grants are never deleted until a later list replaces them.
+- **`wk_commit_changed` (G2b).** A list at the held epoch with another `wk_commit` is refused: one `WK` per epoch.
+  The relay cannot open grants; devices check them against `wk_commit` (§7.3 D3, D4).
+- **The rotation-abandon route and label of orch-mobile's FakeRelay amendment are dropped.** Phones already accept
+  forward epoch jumps.
+- **`grant_conflict`.** Other bytes for an already-committed `(device, epoch)` are refused.
+- **Retries (challenge 2, finding 11).** An exact-body retry of a committed publication returns its result before any
+  freshness check. The host persists the sealed grants it sent and resends the same bytes, never reseals, so a retry
+  never hits `grant_conflict`.
+
+**P3-D6 (persons, D39; C8).** Each member entry is `{device_id, person_id, scopes}`, and the list carries
+`persons: [person_id]` (sorted, unique). Check 8: the certificate's person is the card owner **or** in `persons`
+(`other_person` otherwise). (G0a review 1) Every listed person must also have a member
+device in this list; an unsupported person entry is 403 `other_person`.
+
+The guarantee is narrower than F1:
+
+- `persons` is the host's WSK-signed statement. It does not establish F1 roles; readers of the workspace log still
+  replay `member.added` and roles.
+- A WSK holder could add a foreign person. Such a holder can leak `WK` anyway.
+
+In P3, lists have one person in practice.
+
+### 19.3 Bridge, pairing and the `cert_pending` queues
+
+| Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
+|---|---|---|---|---|---|
+| `POST /v2/workspaces/{ws}/bridge/{rid}` (device) | D(m) | raw ORB2, direction 1 → 202 `{}` | ≤ 1 MiB whole envelope; P3-D9 coalescing; budgets of P3-D17 | 400 `malformed`, `wrong_suite`; 403 `not_for_this_device`, `not_eligible`, `revoked`; 409 `rid_conflict`, `stale_epoch` (`epoch`), `retry_exhausted`; 429 `rate_limited` (G0a review 4) | §8.1, §8.9 |
+| `GET /v2/workspaces/{ws}/bridge/{rid}?after=i&wait=s` (device) | D(m), own mailbox | → `{chunks: [{id, idx, last, stream, envelope}]}` | non-consuming | 401; 403 | §8.8 |
+| `POST /v2/workspaces/{ws}/host/hold` | W | `{gen: int \| null, take_over: bool}` → `{gen, lease_s: 40, cursor}` | `gen` = the current generation: renews the lease, same `gen`; `gen: null`: a new generation when the lease is expired or `take_over` is set, otherwise 409; a stale `gen` → 409 `fenced`; JSON cap 16 KiB (G0a review 2) | 409 `holder_conflict`, `fenced` | P3-D10 |
+| `GET /v2/workspaces/{ws}/host/poll?after=n&wait=s` | W(g) | → `{items: [{n, route, device, rid, offer, envelope}], notices: {revocations_cursor, cert_requests, rotation_due, unpublished}, next}` | non-consuming; `after` acknowledges everything up to it (stored as `holders.cursor`); renews the lease; ≤ 16 items or 4 MiB | 409 `fenced`; 401 | P3-D10 |
+| `POST /v2/workspaces/{ws}/bridge/{rid}` (host) | W(g) | raw ORB2, direction 2 → 202 `{}` | ≤ 256 KiB whole chunk; same `(device, rid, idx)` and bytes → no-op while a copy is live, stored again after it expired within P3-D27's bounds; other bytes → 409; epoch rule P3-D22 | 400; 403 `not_eligible`, `revoked`; 409 `chunk_conflict`, `stale_epoch`, `fenced`, `retry_exhausted` (P3-D27); 410 `expired` (G0a review 8, P3-D27); 429 | §8.1, §8.5, §8.9 |
+| `POST /v2/workspaces/{ws}/pair/{offer}/{rid}` | none (device), W(g) (host answer) | raw epoch-0 ORB2 → 202 | ≤ 64 KiB; per workspace and per address (/64 IPv6) 60/min; /56 480/min (G0a review 9); global 6 000/min | 400; 401 `unknown_workspace`; 409 `fenced` (host answer without a held generation, P3-D10); 429 | §8.3, §8.9 |
+| `GET /v2/workspaces/{ws}/pair/{offer}/{rid}?after=i&wait=s` | none | → `{chunks}` | per address (/64 IPv6) 120/min; /56 960/min (G0a review 9); global 12 000/min | 429 | §8.3 |
+| `POST /v2/persons/{person}/cert-requests` | W(g), card owner = person | `{request}` → `{request_id}` | ≤ 1 open per workspace, ≤ 64 open per person; same → 200; JSON cap 64 KiB (G0a review 2); exact field set with the clear attempt binding (P3-D28) | 400 `malformed`; 401 `bad_signature`; 403 `other_person`, `not_for_this_device`; 409 `request_open`, `replayed` | §8.4 step 1 |
+| `GET /v2/persons/{person}/cert-requests?wait=s` | D(p), addressee only | → `{requests}` | open only | 403 | §8.4 step 2 |
+| `POST /v2/cert-requests/{id}/challenge` | D(p), addressee | `{challenge}` → `{}` | `open` → `challenged` only; same verified `cj(o)` → 200 (G0a review 3); another challenge → 409; JSON cap 16 KiB (G0a review 2); bound to the request's attempt and keys (P3-D28) | 400 `malformed`; 401; 403 `not_for_this_device`; 409 `replayed`; 410 `expired` | §8.4 step 3 |
+| `POST /v2/cert-requests/{id}/rejection` | D(p), addressee | `{rejection}` → `{}` | `open` or `challenged` → `rejected`; same verified `cj(o)` → 200 (G0a review 3); JSON cap 16 KiB (G0a review 2); bound to the request's attempt, device, keys and expiry (P3-D28) | 400 `malformed`; 401; 403 `not_for_this_device`; 409 `already_signed`; 410 | new (P3-D11) |
+| `GET /v2/cert-requests/{id}` | W, the requester | → `{state, challenge, cert, rejection}` | kept until expiry + 60 s | 404 | §8.4 |
+
+**P3-D8 (epoch at the relay; C10).** A device request for a **new** rid, whose header epoch is not the current list
+epoch, is refused with 409 `stale_epoch {"epoch": current}`. This is an unsigned hint. The device:
+
+- refetches the list and its grants (both signed);
+- never raises its epoch from the hint;
+- refetches at most 3 times per minute, then backs off 20, 40 and 60 s.
+
+An **identical resend** of a known rid (P3-D9) skips the epoch check, so the host can answer from its rid store with the
+stored bytes. The relay's order is: session and membership → shape → replay store → epoch.
+
+**P3-D9 (replay store and coalescing; C11).** The relay keeps `(ws, device, rid)` for 900 s from the **first** receipt.
+A resend never extends this; the only exception is that the record lives on until every dependent queued message has
+expired (`keep_until_ms`):
+
+- **Same bytes:**
+  - If an unexpired undelivered copy exists (its `n` is above the holder's acknowledged cursor and now is before its expiry; G0a review 7), the resend is coalesced: 202,
+    nothing new queued.
+  - Otherwise it is queued again, at most once per 10 s and at most 8 times per rid. After that cap the relay answers
+    409 `retry_exhausted`, so a device never takes a 202 for a delivery promise (challenge 2, finding 9). A new copy
+    lives 60 s from its own receipt, and the `rid_seen` and `rid_chunks` rows are kept until every dependent message
+    has expired, so conflict detection never ends before them. Records and chunk digests are bounded per device
+    (P3-D17).
+- **Other bytes:** 409 `rid_conflict`.
+
+The relay never checks `seq` or `ts_ms`: the host's sealed refusals do that. The host's durable rid store stays the only
+exactly-once authority.
+
+**P3-D10 (durable host cursor and fencing; C12).** This replaces the consuming poll:
+
+- **Hold.** The host first takes a holder generation `gen` (`host/hold`). A new generation needs an expired lease or
+  an explicit `take_over` (no silent automatic takeover). The lease is 40 s; the host renews it every 15 s, by a poll or
+  by `host/hold` with `gen` set to its current generation.
+- **One live poll per generation.** A new poll cancels the previous one of the same `gen`.
+- **Compare-and-set (challenge 2, finding 8).** Every cursor move and every host write is a compare-and-set on
+  `(gen, lease unexpired)`, re-checked after a long-poll wakeup before data is handed over.
+- **Fencing.** Every host write carries `Orch-Holder: gen`: response chunks, pair answers, membership, card, card keys,
+  cert requests. A stale generation is 409 `fenced`, so an old host process that wakes up after a
+  takeover cannot interleave writes.
+- **Delivery.** The poll is non-consuming: items have a strictly increasing `n` and stay until their 60 s expiry. The
+  host passes `after` = the end of the **contiguous prefix** of items it has durably completed (recorded in its rid
+  store), never the highest `n` seen; the relay moves the cursor only forward. A lost HTTP response is harmless: the
+  next poll returns the same items. Delivery is **at-least-once within the 60 s retention**; later, the device's
+  resend is the recovery.
+- **Authorization at handoff.** The relay filters each item against membership and revocation in the same transaction
+  that reads it. Devices' response polls do the same.
+- **Limit.** Fencing protects an honest host from its own stale twin. It does not protect against a WSK holder, who
+  can always take over (design §8).
+
+**P3-D11 (cert queues; C13).** One transactional state machine per request:
+
+- **States:** `open` → `challenged` → `signed`; `rejected` from `open` or `challenged`; `expired` from any non-terminal
+  state at `expires_ms`.
+- **Validation.** The relay verifies the request under the card's `WSK`, and the challenge and the rejection under
+  the account's `PK`.
+- **No replacement.** It refuses to replace a challenge.
+- **When the request becomes `signed`.** Only when a certificate is stored (`PUT devices`) whose `dk_sig_pub`,
+  `dk_kx_pub`, `device_id` and person equal the challenge's. Scopes are inside the sealed inner request, so the host
+  checks them, not the relay.
+- **Rejection** is a new signed kind, `cert_rejection {v, suite, kind, request_id, workspace_id, person_id, offer_id,
+  attempt, device_id, dk_hash, expires_ms}` (fields after `person_id`: G3b, P3-D28), under
+  `orch/v2/sig/cert-rejection|`.
+- **FakeRelay change.** The primary must now use a device session; its session-less submission in the FakeRelay
+  changes.
+
+**P3-D28 (pairing attempt binding; G3b; F1 Q6, Q7, Q8).** The cert request carries in clear the attempt binding
+`offer_id`, `attempt`, `device_id`, `dk_hash` (§8.4 step 1); the relay checks its shape (400 `malformed`). A posted
+challenge or rejection must name exactly that binding (a challenge through `dk_hash` of its two keys), else 403
+`not_for_this_device`, checked after the signature, the exact field set, the identifiers and the shape, and before
+any state transition. A rejection's `expires_ms` must equal the request's (400 `malformed`). This is defence in
+depth: the phone's own checks (§8.3, §8.4 step 5) are what make a replayed challenge or rejection harmless; the
+relay only stops an honest primary's object for one attempt from being stored under another attempt's request. No
+schema change: the request is stored as signed JSON. Pre-G3b requests, challenges and rejections are refused as
+`malformed` (pre-deployment; wipe dev databases with queued requests).
+
+**P3-D16 (scopes).** On the bridge the relay enforces membership only. Ops and scopes are sealed. The typing lease has
+no relay part.
+
+**P3-D22 (old-epoch responses; C19, Q10; challenge 2, finding 13).** A defence against honest-host mistakes, not a
+confidentiality boundary against a malicious host (the relay sees a flag, not the sealed refusal). A response chunk's
+epoch must equal its request's (`rid_seen.req_epoch`), and the chunk must answer a known request (rid). Once the list
+epoch has moved past that epoch, the relay accepts an old-epoch chunk only if it has the `LAST | REFUSAL` shape, or if it
+is byte-identical to a chunk already accepted for that rid (a stored replay, `rid_chunks`). An unknown or expired rid is 410 `expired` (G0a review 8). Other epoch violations are 409
+`stale_epoch`. The device validates the refusal itself (§8.8). Replaying stored bytes never extends a live chunk's
+TTL, and an expired old-epoch data chunk is never stored again (P3-D27). This cannot constrain a compromised relay.
+
+**P3-D27 (bounded exact-bytes re-store; Q11).** A host replays an answer as the exact chunk bytes it already
+posted (§8.6 step 5); v1's re-seal could never pass `chunk_conflict`. When a byte-identical chunk arrives for a
+known `(device, rid, idx)` and no unexpired copy of it is queued, the relay stores it again with a fresh 60 s TTL,
+subject to all of these:
+
+- **Gates first.** Holder fencing, the target device's eligibility (current member, not revoked, certificate
+  unexpired) and `chunk_conflict` run before this rule, as for a new chunk. A chunk posted by an old holder
+  generation, or to a device since removed or revoked, is no authorization to store it again.
+- **Epoch.** Only a chunk at the current list epoch, or one with the `LAST | REFUSAL` shape. An expired
+  old-epoch data chunk stays expired: 202, nothing stored (P3-D22). The device then ends `uncertain`.
+- **Deadline.** Only before `rid_seen.first_ms + 900 s`, an immutable deadline from the first receipt; never the
+  extended `keep_until_ms`. After it: 410 `expired`.
+- **No extension.** The copy expires at `min(now + 60 s, keep_until_ms)`. A re-store never changes
+  `keep_until_ms`, so chunks restored in turn cannot keep a rid alive.
+- **Cap.** At most 8 restorations per chunk, counted durably (`rid_chunks.restores`; survives a restart). The
+  ninth is 409 `retry_exhausted`, terminal. The 64-chunk ceiling per rid is unchanged.
+- **Budgets.** A re-store is charged to the host-post rate and the response storage budgets (P3-D17); 429 and
+  503 apply as for a new chunk. A live duplicate stays a free no-op that never changes its TTL.
+- **Pairing answers** (the `pair` route) are never stored again.
+- **Removal.** Removing a device from the workspace (or revoking it) sets its chunks' restoration count to the
+  cap. The rows and digests stay, so `chunk_conflict` still holds, and a re-added device gets nothing
+  restored (409 `retry_exhausted`).
+- **Order.** The epoch rule precedes the deadline (expired old-epoch data past it is a 202 no-op, not 410);
+  the cap precedes the rate and budgets (a capped chunk is 409 and spends nothing).
+
+The device side is in §8.8 (the 240 s resend bound, the `stale_timestamp` offset). This changes only what an
+honest relay stores: a hostile relay could always replay bytes it once held. Vectors: `p3.restore`.
+
+
+### 19.4 Authentication and budgets
+
+**Login** is §12.2 unchanged:
+
+- The signed bytes are `"orch/v2/sig/relay-auth|" || suite || lp16(origin) || challenge || kind || id`.
+- `origin` is the instance's configured origin (`ORCH_RELAY_ORIGIN`), never one the client names.
+- Check order: the challenge is known (and removed whatever follows), unexpired, a valid `kind`, then the signature.
+
+**Unknown ids** are verified against a fixed dummy P-256 key: same timing, the same 401 `bad_signature`, and the
+challenge is consumed. (G0a review 10) Even a signature that verifies under the dummy key MUST
+return 401. Production MUST generate a per-instance random dummy public key and discard its
+private half; the publicly derived reference key is only a test artifact.
+
+**Revoked devices get no session** (the owner's decision):
+
+- The answer is 403 `revoked`, and only after the signature verifies.
+- An expired certificate gets 400 `cert_expired`.
+- The device reads its record session-less and verifies it under its pinned `PK` before wiping.
+
+**P3-D2 (sessions; C4).**
+
+- **Lifetime.** Bearer tokens last 15 minutes, with no refresh. A new login never invalidates other live tokens:
+  clients reauthenticate single-flight and may overlap tokens. (G0a review 10) At most eight
+  unexpired tokens per device across all sessions; additional logins return 429 `quota_exceeded`
+  with Retry-After until the earliest expiry. Consume the challenge, preserve existing tokens.
+- **Every route re-checks** expiry, revocation and certificate expiry against the database at request time. Long polls
+  re-check immediately before handing over data, not only every few seconds.
+- **Scope.** A device token is scoped to the relay; each workspace route authorizes against the current list. A
+  workspace token is scoped to its workspace.
+- **Tokens are stored as SHA-256 hashes.** That protects a database dump. It does not make a stolen bearer useless:
+  a stolen token works until it expires or the device is revoked (design §8).
+- Agents never see tokens (spec §5.5).
+
+**P3-D17 (budgets; C7).** All limits are refusals, never evictions of existing state:
+
+- **Challenges:** 16 outstanding and 60 per minute per address. The global ceiling of 65 536 outstanding is a refusal
+  (429), never the eviction of other clients' challenges.
+- **Per device, across all its sessions:** ≤ 128 live request mailboxes per workspace, 20 posts/s, 6 concurrent long
+  polls, ≤ 8 MiB of queued requests.
+- **Per workspace:** ≤ 1 024 queued requests, ≤ 16 MiB queued requests, ≤ 16 MiB undelivered responses. (G0a review 10) Each device may consume at most
+  2 MiB of that response budget across its sessions; excess is 429 `quota_exceeded`, without eviction.
+- **Global:** ≤ 256 MiB of queued bodies and ≤ 4 096 concurrent long polls (503 `overloaded`).
+- **Anonymous pair long polls (G3 review 2/3):** ≤ 4 concurrent per canonical client address, ≤ 32 per
+  IPv4 /24, ≤ 32 per IPv6 /56 and ≤ 64 per IPv6 /48 (429 `quota_exceeded`), and ≤ 512 in total, a
+  separate share of the 4 096 (503 `overloaded`). At most 16 pair polls wait on one
+  `(ws, offer, rid)` (429 `quota_exceeded`).
+- **Authorization first (G3 review 3):** every bridge, pair, holder and certificate request is
+  authenticated, authorized and fenced by a read-only check before it takes the directory lock, a
+  write transaction, a rate window, a poll slot or a wakeup; only anonymous pairing is admitted
+  without a session, and it is charged only to its own windows. Refusal codes match the
+  transaction's, with one deliberate exception: a non-device session posting a cert challenge or
+  rejection gets 403 `not_eligible` before the request lookup, even for an unknown request id
+  (never 404), so it learns nothing about request ids. Host pair answers use separate
+  pairing windows with the same caps, and host response chunks are rate-limited per (workspace,
+  target device), never against the device's own 20 posts/s.
+- **Directory routes authorize first too (P3-D32, G3 re-review D4).** Every §19.1, §19.2 and §19.5
+  route (sessions, accounts, devices, revocations, cards, membership and keys) runs its checks up to
+  authentication, authorization and fencing on a read-only snapshot before it takes the directory
+  lock or a write transaction; the transaction repeats them. A refused request gets the code, body
+  and check order it always had, and is charged only the windows charged before that refusal: the
+  recovery address windows and the revocation-pair read window (before authentication, by design)
+  and challenge issuance. A login challenge is consumed by the first check whatever follows; an
+  account request on an unused invite is decided by the transaction, so an exact retry still
+  gets its replay; one on a used invite (or one expired for over a minute) is refused by the first
+  check, its challenge consumed. Window checks never charge. Relay operators SHOULD also rate-limit per client
+  address at the reverse proxy.
+- **Session buckets (P3-D35).** Every request with a valid session on a directory (§19.1, §19.2, §19.5), bridge
+  (§19.3, certificate queues included) or checkpoint (§19.8, unpublished included) route is charged to one bucket
+  class after authentication and before any lock, write transaction, poll slot or waiter; a request without a
+  valid session takes nothing. Read class: the device's (or a W session's token's) bucket and the person's (or
+  the workspace's). Page class (proof and transition pages): the page buckets of the same identities, one token
+  per started 1 000 heads returned (a transition page by its bytes at 74 per head), at least one; one token is
+  taken before the read and the rest after it, which may leave the bucket below zero. Staging class (staging page
+  and manifest PUTs): the workspace's staging bucket, one token per started 65 536 bytes of the request body, at
+  least one (P3-D36). Host answers (a W session's direction-2 ORB2 post on the
+  bridge or a pair): the (workspace, target device) bucket when the target has a live request on that rid, all
+  pair answers of a workspace one (workspace, pair) bucket, anything else the host's read buckets. A refusal
+  after authentication takes one read-class token. An empty bucket answers 429 `rate_limited` with `Retry-After` (whole seconds until the tokens are
+  back) in place of the request's answer. Long polls take one token per request. In memory, reset on restart.
+
+  | Bucket | Key | Burst | Refill | Override |
+  |---|---|---|---|---|
+  | session | device (device session) or token (W session) | 600 | 600/min (10/s) | `ORCH_RELAY_THROTTLE_SESSION` |
+  | person | person of a device session | 1 200 | 1 200/min | `ORCH_RELAY_THROTTLE_PERSON` |
+  | workspace | workspace of a W session | 1 200 | 1 200/min | `ORCH_RELAY_THROTTLE_WORKSPACE` |
+  | page-session | as session (pages) | 5 914 | 600/min | `ORCH_RELAY_THROTTLE_PAGE_SESSION` |
+  | page-person | as person (pages) | 11 828 | 1 200/min | `ORCH_RELAY_THROTTLE_PAGE_PERSON` |
+  | page-workspace | as workspace (pages) | 11 828 | 1 200/min | `ORCH_RELAY_THROTTLE_PAGE_WORKSPACE` |
+  | staging | workspace (staging PUTs, weighted by body size) | 28 801 | 600/min (10/s) | `ORCH_RELAY_THROTTLE_STAGING` |
+  | host-answer | (workspace, requesting device) or (workspace, pair) | 1 200 | 1 200/min (20/s) | `ORCH_RELAY_THROTTLE_HOST_ANSWER` |
+
+  Overrides are `burst/per-minute`. Honest clients long-poll or poll at most every few seconds. A first sync walks
+  one proof per grown log: a full 64 MiB set is 17 pages of at most 56 678 heads (913 tokens), and a
+  5 000-ticket workspace adds 5 001 one-page logs, so 5 914 tokens. A new device proves every log from its start,
+  so the cost grows with the workspace's whole history: a first sync waits on no 429 only while the history is at
+  most about 907 000 heads over at most 5 001 logs, and beyond it waits about (heads / 1 000 + logs − 5 914) / 10
+  seconds in all, obeying `Retry-After`. A staging set has at most 27 776 pages (a
+  4 MiB manifest of 150-byte descriptors) plus its manifest and at most 64 MiB in all, so it costs at most
+  27 777 + 64 MiB / 64 KiB = 28 801 tokens: any set uploads at once without a 429 (5 001 small pages and their
+  manifest: about 5 015 tokens; 64 MiB in 4 MiB pages: 1 025). The refill bounds the lock-taking staging writes of
+  a workspace to 10 small PUTs or 640 KiB per second; a full burst is back after about 48 minutes. The public revocation-pair read (§19.5) is
+  limited to 60 per minute per address and 960 per minute per IPv6 /56. `GET /v2/relay-info` (H12d, P3-D38) has its own
+  windows of the same sizes (`relay-info`, `relay-info-parent`), separate from the revocation read's; it takes no session
+  and so no bucket. A relay behind a reverse proxy MUST be
+  configured with the proxy's address (`ORCH_RELAY_TRUSTED_PROXY`); otherwise every client shares one address,
+  and the relay logs a warning.
+- **Waiting long polls** hold no lock, transaction or worker thread. Commits that insert or change
+  rows wake only the affected polls (new requests → that workspace's host; responses → that rid;
+  revocation, logout, certificate store → that device's polls and the hosts of its workspaces;
+  membership → that workspace). Each poll also re-checks at its session/certificate expiry and on a
+  jittered 5–7 s tick, using a read-only check on the event loop; only a ready or refused check
+  re-runs the full fenced transaction. At the deadline host polls rebuild their response with the
+  transaction; device, pair and cert polls re-check on the event loop and answer empty unless ready
+  or refused. Waits of 5 s or more end up to 10 % (≤ 1 s) early, so polls admitted together do not
+  time out together. Identical resends and replays wake nobody.
+- **Host poll notices** make a poll ready only when they differ from the notices last delivered to
+  the current holder generation (a new generation receives them once); a past revocation alone does
+  not keep a host poll from waiting.
+- **Client addresses.**
+  - The peer address is used, or Caddy's `X-Forwarded-For` only when the peer is the configured proxy.
+  - Addresses are canonicalized: IPv4-mapped IPv6 becomes IPv4, and IPv6 is grouped by /64.
+  - Windows are kept for their full duration (minute, hour, day) and pruned only after it ends; per-person windows
+    are charged only on verified state changes (§19.1 P3-D5; G0a review 5).
+- **Per device:** at most 4 096 `rid_seen` records and 64 chunk digests per rid.
+
+
+(G0a review 9) IPv6 challenge and pairing limits are hierarchical: enforce the existing /64
+limits AND a /56 aggregate. Each /56 permits at most 256 outstanding login challenges and
+960 new challenges/min; pairing permits 960 GET/min and 480 POST/min. The existing global
+challenge and pairing limits still apply. A distributed attacker spanning enough /56 networks
+can saturate the global limits and temporarily lock out honest clients; this remaining global
+saturation is an accepted limit of this contract. Do not evict existing state.
+
+### 19.5 The relay side of revocation (#12, §6.2)
+
+On a verified revocation, from the revocation route, the relay does the following in one transaction:
+
+- it stores the revocation, or upgrades the stored reason (compromised over lost/retired);
+- it deletes the device's sessions, request mailboxes, queued responses, grants and card-key wraps in every workspace;
+- it refuses the device on every route;
+- it sets `rotation_due` for each workspace whose current list names the device.
+
+`rotation_due` is durable: one row per obligating device, with the revocation's cursor and epoch. It is cleared only by
+a committed list with a higher epoch that excludes the device, in a transaction serialized with revocation intake, so a
+newer obligation is never cleared by an older publication. The host sees it in its poll until then. There is no
+un-revoke.
+
+**P3-D30 (per-pair cutoff; orch-52 rulings 1 to 4).** Revocations are held per `(device_id, person_id)` pair (§19.8
+transport detail 8). The steps above (sessions, queues, grants, wraps, `rotation_due`, refusal on every route) apply
+to the **registry pair** only: the device id plus the person of its registry row (`devices.person_id`), the only
+person the device authenticates as. The person always comes from the registry row, never from the request.
+
+- Sessions, login, stored-certificate retries (`PUT /v2/devices/{device}` of a registered device), member
+  certificates (§19.2) and the bridge's device checks refuse with 403 `revoked` only when the registry pair is revoked.
+  Another person's pair for the same id (a stranger's self-certified evidence) never cuts the device off.
+- Intake of another person's pair, or of any pair of an unregistered id, stores the pair and the global feed row
+  and does nothing else: no session, queue, grant, wrap or member row can exist for it.
+- A **new registration** (`PUT /v2/devices/{device}` without a registry row, and `POST /v2/accounts`) is refused
+  with 403 `revoked` when any **chain-learned** revocation of the id exists, of any person, or when the new pair itself
+  is revoked. Chain-learned means recorded in `checkpoint_revocations` by an accepted restore of any workspace, the
+  only authenticated-history source the relay has. Out-of-band evidence of another person alone (a global row with
+  no chain row) never refuses a registration, so a squatted id still registers and logs in. This keeps the registry
+  from ever contradicting a chain pair, which would strand the workspace (the accepted F1 §5.10 limit stays
+  unreachable). A residual squat remains: anyone who knows a device's `dk_sig_pub` before it registers can carry a
+  self-certified pair in their own workspace's restore. Clients regenerate the device key on 403 `revoked`.
+- Registry entries created under a verified person-signed certificate (`PUT /v2/devices/{device}`, account
+  creation) are the associations (provenance `registry`); restores create none. Associations decide applicability
+  and publication only (§19.8: which carried entries bind, `unpublished`), never refusal, retention or alarms.
+- `GET /v2/devices/{device}/revocation` is unauthenticated. Each pair it lists carries the public signed record and a
+  provenance label. It serves no device certificate and no account key. `GET /v2/devices/{device}` gates the registry
+  certificate. Evidence carried by a workspace's restore is readable only through that workspace's own routes. Only
+  `registry` is an association the relay verified. `chain` means that some workspace host carried the pair in an
+  accepted restore; any host can do that. A consumer MUST NOT treat a `chain` or `feed` pair as the registered
+  person's. The labels are relay claims, not authentication: **no client decision (refusal, trust, forwarding) may
+  rest on this route**; decisions use the authenticated retrieval route (P3-D31) or the §19.5 feed with verification.
+  The answer is 404 for an id with no revocation, whether the id is registered or unknown, so the route reveals
+  nothing about unrevoked registrations. Pages hold at most 32 pairs. Ordering by provenance and then cursor,
+  never by `person_id`, keeps the registry pair and pairs held before an attack on page 1: an attacker who mints
+  keys chooses person ids, not cursors. A walk is not a snapshot: a pair whose label or cursor changes during it (an
+  upgrade, a `feed` pair carried by a restore mid-walk, a registry pair created after page 1) may be missed or
+  repeated; a client restarts from page 1 for a consistent view. Restore intake is never capped per device, because a cap would let an attacker block a genuine
+  workspace's restore.
+- `notices.revocations_cursor` (§19.3) counts only registry pairs of the workspace's ever-devices, with the
+  `unpublished` eligibility filter (evidence-only persons, P3-D29, excluded). Another person's pair never moves it.
+
+**P3-D31 (retrieval of unpublished evidence).** `GET /v2/workspaces/{ws}/unpublished` (W(g)) serves the global
+pairs this workspace's host still has to publish, as a **derived view**, never a materialized queue. An item exists
+exactly while:
+
+- U1 (eligibility): the §19.5 table holds `(d, p)`; `d` is a G2 ever-device of `ws` (a current or former list
+  member; restore-only `checkpoint_ever_devices` never qualify); `p` is the person the live registry associates with
+  `d` (P3-D29 evidence-only persons excluded, as for `revocations_cursor`). Every other pair of `d` (another person's
+  self-certified "revocation") and every pair of a device the workspace never listed is never served, whatever its
+  reason or arrival order.
+- U2 (unpublished): `STRENGTH[global] > STRENGTH[chain]`, where `chain` is the workspace's
+  `checkpoint_revocations` row of the same pair (strength 0 when absent; equal strength is no item).
+
+An item is retired only when an accepted workspace restore carries the pair at equal or greater strength (the chain
+row then reaches the global one, atomically with the checkpoint). Nothing else retires or hides one: not an ack, not
+time, not a ticket restore, not a host's `device.revoked` append, not a membership change; retention is indefinite
+until then (global revocations are never deleted), bounded by the workspace's ever-devices (one eligible pair each).
+A newer or upgraded global pair moves to a new, higher §19.5 cursor, so an item reappears at its new position.
+
+Item: `{device_id, person_id, reason, revocation, device_cert, pk_pub, provenance: {cursor, digest}, chain_reason}`,
+in ascending `provenance.cursor`. `revocation` is the global record; `device_cert` the registry certificate and
+`pk_pub` the account key (an eligible pair always has both); `provenance.cursor` is the §19.5 cursor and
+`provenance.digest` is `sha256:` over `cj(revocation)`, both equal to the publication's `unpublished_refs` entry, so
+`(device_id, person_id, digest)` identifies identical evidence across re-reads; `chain_reason` is null when the chain
+lacks the pair, else the weaker reason it holds (a chain-pair upgrade: published through `device.revoked`, never
+carried in a restore). A page holds at most `limit` items (default and maximum 64) and at most 256 KiB of
+`cj(response)` as sent; the first item is always included. `cursor` is the opaque position after the last item (the
+request's own position on an empty page) and is never null; `more` says items exist after it. This departs from
+§19.6's `next`-is-null-at-end convention on purpose: the stream is resumable.
+
+Positions are `b64u(cj({v: 1, ws, c}))`, meaning "items with cursor > c". Decoding is strict (400 `malformed`:
+§2.3 JSON, exactly `{v, ws, c}`, `v` 1, `ws` the path's, `c` a safe integer ≥ 0); another workspace's position is
+400 `malformed` after authorization, never 403/404. A position at or below the relay's newest §19.5 cursor is legal
+and re-serves items; one above it is **409 `cursor_ahead`** (a bug, a forgery or a relay restored from backup): the
+host restarts from the beginning and deduplicates. Positions are bound to the workspace, not to the holder
+generation: a takeover continues from any stored position.
+
+`POST /v2/workspaces/{ws}/unpublished/ack` with `{cursor}` → `{acked}` raises the workspace's high-water mark to
+`max(stored, c)` (a lower or equal position is a no-op returning the stored mark; above the relay's state is 409
+`cursor_ahead`). Its only effect is `notices.unpublished` (§19.6): it is **not publication**, retires nothing, hides
+nothing (a fetch from the start after an ack returns every live item) and does not change retention. A new holder
+inherits it. There is no per-item acknowledgement (orch-52: the high-water mark is enough); the optional advisory
+`published` field is not implemented (an ack body with any other field is 400 `malformed`). A host MUST NOT send
+`published` (or any other field) until the relay announces support for it: the field set is exact, so today such an
+ack is refused.
+
+Order of checks: (1) 401 `unauthenticated`; (2) 403 `not_eligible` for any principal but this workspace's W session
+(a device session, another workspace's host), identical whether `{ws}` exists or not: nothing on either route
+answers 404 or 410; (3) 409 `fenced` (missing or stale `Orch-Holder`, expired lease). Steps 1 to 3 run read-only
+before any lock, write transaction or rate window. Then (4) the per-workspace window: fetch 120 per minute and 2 000
+per hour, ack 30 per minute (429 `rate_limited` with `Retry-After`; in memory under their own mutex, never
+`directory.lock`, reset on restart); (5) query or body parsing and the position (400); (6) `cursor_ahead` (409). The
+ack's 1 KiB JSON cap and an unknown query parameter are refused at the transport, before authorization, uncharged,
+as on every §19.8 route. A fetch is one `query_only` snapshot: no lock, no write. The ack re-authorizes and re-checks
+the position under the lock in its write transaction. Each page costs O(|ever_devices(ws)|) primary-key lookups (the
+view is read from `ever_devices` outward, never from the relay-wide table), and membership publication caps
+ever-devices at **4 096 per workspace** (429 `quota_exceeded`, §19.2). Ever-devices never shrink, so this quota is
+**permanent**: despite the 429 and its `Retry-After`, a host MUST NOT retry a membership publication refused with
+`quota_exceeded` unchanged; only a list that names no device new to the workspace can succeed. One item is at most
+about 66 KiB (a registry certificate can arrive through `POST /v2/accounts`, whose body cap is 64 KiB, plus a
+fixed-shape revocation), well under the 256 KiB page bound, so "the first item always" stays bounded.
+
+**Host obligations (normative for the P3 bridge):**
+
+1. **Start.** After every `host/hold` that grants a new generation, after any `cursor_ahead`, and at least once a
+   day, the host MUST read from the start (no `cursor`) until `more` is false. Otherwise it reads from its stored
+   position whenever `notices.unpublished` is non-null.
+2. **Verify each item independently** before use, because the relay is not trusted: `person_id` is the id of
+   `pk_pub`; `device_cert` verifies under `pk_pub` at its own `created_ms` (as R4 does) and names `device_id`; the
+   revocation verifies under `pk_pub` against that certificate; `device_id`, `person_id` and `reason` match it; and
+   `provenance.digest` is `sha256:` over `cj(revocation)`. An item that fails is discarded and logged.
+3. **Check its own association:** accept an item only if the host's store associates `device_id` with `person_id`;
+   otherwise keep it pending or drop it (F1 §5.10).
+4. **Store durably first**, in the pair-keyed host evidence store keyed by `(device_id, person_id,
+   provenance.digest)` (F1 caps; chain provenance sticky), and only then ack the page's `cursor`.
+5. **Publish only as F1 §5.3 permits** (`device.revoked`, or carried in the next workspace restore; a chain-pair
+   upgrade is never carried). It MUST NOT re-append duplicate or weaker evidence and MUST NOT treat an ack as
+   publication.
+
+A malicious relay can withhold or delay items (F1's accepted limit) but cannot forge one. A relay rolled back from a
+backup can skip items silently once new intake passes a stale host position; obligation 1 mitigates this.
+
+
+### 19.6 Exact HTTP shapes and common refusals (P3-D1/D2/D10/D17)
+
+`tests/http_fixtures/*.json` is the executable example corpus (one file per route role).
+`tests/http_fixtures/MANIFEST.json` lists the sha256 of every other file in that directory plus an
+aggregate hash (`uv run python tests/http_fixtures/manifest.py --write|--check`; a pytest fails on a stale
+manifest). Bump `revision` whenever any fixture changes. Consumers (orch-mobile, orch-core) vendor the
+corpus at a named commit and verify the manifest in their CI.
+There are no public invite-management routes: invite creation is the admin CLI (P3-D3).
+Checkpoint, restore, genesis, staging, baseline and proof routes are specified in §19.8 (P3-D12/D13/D18–D25).
+
+Requests and responses use `application/json`, except ORB2 posts (`application/octet-stream`).
+JSON field sets shown above are exact. GET requests have no body. Empty success bodies are `{}`,
+including 202. Bearer authorization is `Authorization: Bearer <token>`; `Orch-Holder` is a decimal
+generation. The first card is the only unfenced workspace write. Logout returns 200 for an
+unknown/expired token as well as an already-logged-out token.
+
+**A host pair answer without a held generation** is 409 `fenced`: this is intended (F1 Q9). The host pair answer
+is a W(g) write (§19.3), and W(g) routes refuse missing, stale or expired holder authority; `holder_conflict` is only
+an answer of `host/hold` itself. A host MUST `POST host/hold` before any write, pair answers included (P3-D10).
+
+All routes can refuse 400 `malformed` for invalid fields, paths, query or strict JSON; bounded
+JSON requests refuse 413 `too_large` before parsing (G0a review 2), except the P3-D20 final checkpoint request (400); bounded ORB2 requests
+retain 400 `too_large`. `too_large` is permanent for those bytes: never retry the same body unchanged. It is
+also the answer, after authorization, when a checkpoint staging set exceeds the deployment's maximum publication
+size (P3-D37, §19.8): 413 on the staging routes, 400 on the final checkpoint request. Authenticated routes can
+refuse 401 `unauthenticated`.
+(G0a review 6) Only D sessions can fail session checks with 400 `cert_expired` or 403 `revoked`;
+W sessions have no device certificate. Membership uses only 403 `cert_expired`, because the
+expired certificate is a proposed member's, not the W session's. Target-device revocation checks
+on membership and host bridge posts still apply. A wrong principal or inaccessible workspace/person is
+403 `not_eligible`. W(g) routes additionally refuse 409 `fenced` for missing, stale or expired
+holder authority. Signature objects of another deployment suite are 400 `wrong_suite`.
+Route-table bare statuses mean: 400 `malformed`, 401 `unauthenticated`, 403 `not_eligible`,
+404 `not_found`, 410 `expired`, 429 `rate_limited` or `quota_exceeded`. Every authenticated route can
+also refuse 429 `rate_limited` from its session's buckets (P3-D35, §19.4). Rate windows return
+429 `rate_limited`; storage/concurrency caps return 429 `quota_exceeded` (also the P3-D34 caps: staged bytes per owner account,
+workspaces per account, stored log nodes per workspace, self-certified restore evidence per owner account, §19.8); shared global bridge
+budgets return 503 `overloaded`. Each 429/503 includes integer delta-seconds `Retry-After`.
+Challenges' global cap specifically uses 429 `rate_limited`.
+
+Identifiers are lower-case 16-byte hex, except §19.8 checkpoint hashes, log accumulators and ticket ULIDs; binary JSON values (including ORB2 poll envelopes,
+challenges, public keys and signatures) are canonical b64u. All positions fit JSON's safe integer
+range. `wait` is an integer 0..25, default 0. Omitted `after` starts before the first item
+(including chunk index 0); supplied positions are exclusive non-negative decimal integers.
+Revocation feed `limit` defaults to 256; each entry is `{cursor, record}`, ascending cursor.
+Host poll `next` is null at end, otherwise an opaque continuation passed as `next` with the
+same `after`; it never acknowledges items. A poll's `after` acknowledges only the host's
+contiguous durably completed prefix and cannot exceed the highest delivered position. Invalid
+forward acknowledgements are 400 `malformed`; older cursors never move the stored cursor back.
+A cancelled same-generation poll returns an empty success; it cannot later deliver stale data.
+
+Host poll `route` is `bridge` or `pair`; `offer` is null for bridge and the offer id for pair.
+`notices` is exactly `{revocations_cursor, cert_requests: [request_id],
+rotation_due: [{device_id, revocation_cursor, epoch}], unpublished}`; arrays are sorted by id. The cursor
+is the latest relevant revocation-feed position (0 if none): a registry pair of one of the workspace's ever-devices
+(§19.5 P3-D30). `unpublished` (P3-D31) is the opaque position of the newest unpublished item while it is above the
+workspace's ack, else null; like every notice it readies a poll only when it differs from the notices last
+delivered to the current generation, so it wakes the host once per intake and once after its own ack. `cert_requests` lists requester
+records with challenge/rejection/certificate results to fetch. Cert-request GET always returns
+all four fields `{state, challenge, cert, rejection}`, using null when absent.
+
+(G0a review 4) (ambiguity 10) During P3-D9's ten-second requeue interval return 429
+`rate_limited` with `Retry-After` equal to the remaining interval rounded up to integer seconds.
+409 `retry_exhausted` is terminal, only once eight requeues have been used (excluding the first
+receipt), when no unexpired undelivered copy remains. After a 202 or 429 the device MUST keep
+polling its mailbox for that rid and MUST NOT automatically reissue the operation under a new
+rid. Terminal exhaustion also MUST NOT trigger automatic reissue under a new rid; continue
+polling for a queued response while retained, then surface failure for explicit user resolution.
+(G0a review 8) (ambiguity 11) P3-D22 returns 410 `expired` for an unknown or expired response rid.
+A stored chunk replay with a live copy returns 202 without refreshing its TTL. An expired identical chunk is
+stored again only within P3-D27's bounds (current epoch or `LAST | REFUSAL`, before first receipt + 900 s,
+at most 8 times, never past `keep_until_ms`); expired old-epoch data is a 202 no-op.
+If a matching known chunk index has different bytes, `chunk_conflict` precedes the epoch rule.
+`LAST | REFUSAL` may also carry `STREAM`; a refusal always has LAST.
+
+Exact-body idempotency means identical HTTP bytes. Send `cj(body)` and persist it. Signature
+verification always uses `cj(o)` independently of HTTP whitespace. Membership retries still
+require current session and holder authorization, but skip certificate/list/card freshness.
+P3-D7 grant checks bind workspace/device/epoch, exact field set and signature; sealed bytes
+are opaque but must have the §5.3 suite framing and valid ephemeral public key. Wraps have
+the same framing check. A malformed grant/wrap is 400 `malformed`, bad grant signature is
+401 `bad_signature`, a grant outside this publication is 403 `not_for_this_device`.
+
+P3-D11 request signature/shape/context precede insertion. Open means open or challenged and
+unexpired, for quota purposes. Request and challenge times use §8.4. Context mismatch is
+403 `other_person` (person), 409 `other_workspace` (workspace), or 403 `not_for_this_device`
+(request/addressee). Invalid certificate keys in a challenge are 400 `malformed`.
+
+
+### 19.7 Implementation notes and orch-mobile changes
+
+(G0a review 10) Keep exact membership publication digests and results scoped per workspace
+for seven days from acceptance (retries do not refresh retention). After a lost response and
+`stale_list`, the host MUST GET the signed members and compare with its persisted publication.
+If equal, treat publication as accepted. If a newer list exists, reconcile it and publish using a
+fresh sequence/epoch under §7.2; never replay an older list over it. If acceptance cannot be
+established, surface a conflict rather than assuming success.
+
+(G0a review 10) For both membership `card_key_wraps` and `PUT card-keys`, an identical wrap
+for `(device, card_seq)` is an idempotent no-op; different sealed bytes for that pair return
+409 `wrap_conflict`, atomically with no partial writes. A newer card sequence may replace the
+older wrap. Hosts MUST persist wraps before sending, as they do grants.
+
+(G0a review 7) Same-card identity includes `sealed_hash` and `ck_commit`; identical sequence
+with different sealed content is 409 `stale_card`. Certificate completion MUST compare both
+`dk_sig_pub` and `dk_kx_pub`. Accepted publication MUST prune grants and wraps for departed
+devices. Boundary limits remain 64 certificates/day, 64 open requests/person, 64 chunks/rid,
+900-second rid retention (extended only for dependent messages), and ten-minute cert requests.
+
+**orch-mobile changes (G0a review 11).** Stream C MUST update FakeRelay and the adapter:
+
+- Parse/sign the new member-list `persons` and per-member `person_id`; enforce the directory
+  admission and historical-device filtering rules (G0a review 1).
+- Replace staged grants with atomic membership publication; remove the abandon route.
+- Require the primary's device session and PK-signed `cert_rejection`.
+- Handle `retry_exhausted`, `stale_epoch` with bounded signed-list/grant refetch, and `not_visible`.
+- Coalesce only live undelivered copies; do not refresh mailbox TTL on retries.
+- Use the `/v2` routes without `host_api` or `Orch-Host-API`.
+- Accept re-signed identical canonical certificates/challenges/rejections as idempotent (G0a review 3).
+- Distinguish interval 429 + Retry-After from terminal 409; keep polling the same rid after
+  202/429 and never automatically reissue under a new rid (G0a review 4).
+- Enforce JSON caps/413, state-change-only quotas, auth-class refusals, unknown-rid 410,
+  wrap conflicts, token and response budgets, and hierarchical IPv6 caps as specified above.
+
+**orch-mobile changes (G2b, P3-D26).** FakeRelay's `checkSequence` (the relay publication rules) becomes, given
+the previous accepted list `p` (or none):
+
+| Input | Result |
+|---|---|
+| shape: `wk_commit` missing, not a string, not canonical b64u, or not 32 bytes; `epoch` outside `1 … 2^32−1` | 400 `malformed` |
+| no previous list, `1 ≤ epoch ≤ 2^16`, any `list_seq ≥ 1` | accept (a refused first publication retries at `(2, 2)`) |
+| no previous list, `epoch > 2^16` | 409 `bad_epoch` |
+| `list_seq ≤ p.list_seq` | 409 `stale_list` (gaps above are fine) |
+| `epoch < p.epoch` or `epoch > p.epoch + 2^16` | 409 `bad_epoch` |
+| a member of `p` missing and `epoch ≤ p.epoch` | 409 `rotation_required` |
+| `epoch == p.epoch` and `wk_commit ≠ p.wk_commit` | 409 `wk_commit_changed` (new code) |
+| otherwise | continue with checks 8 and 9, unchanged |
+
+The order is the relay's: shape, `other_workspace`, `stale_list`, `bad_epoch`, `rotation_required`,
+`wk_commit_changed`, then grants and certificates. `MemberList` parses `wk_commit` (field set), FakeHost
+`discardRefused` keeps `wks[p.epoch]` as a retained, never-activated key and raises its `listSeq` and epoch
+floors to the refused body's, rotating next at `floor + 1`; on `stale_card`/`wrap_conflict` it resends the same
+signed list and grants. Devices implement §7.3 D1–D4 and the `wk_commit_conflict` alarm. Vectors:
+`member_lists`, `member_list_snapshots`, `wk_commit`; fixture `membership.json` (`refusal_409_wk_commit_changed`).
+
+
+### 19.8 Checkpoints, genesis and restore transport (P3-D12/D13/D18–D25)
+
+This section uses F1 §5.3/5.6/5.10 at orch-core `8a07c5ab50c808084b48bdfd0af93d91b382e016` (orch-core #397, the
+row-151 fix: every revocation retained and matched per `(device_id, person_id)`, F1 row 152; it builds on #387,
+receiver revocations split into chain-learned and out-of-band, and #377: receiver vectors with an explicit receiver
+view, `Verdict` with alarms, honest recovery for a host that lost its checkpoints). The relay's F1 vector snapshot
+`tests/vectors/f1` pins the same commit, and `tests/vectors/f1_receiver_8a07c5a.json` extracts its receiver cases
+(132 `transition_cases`, 30 `workspace_n_offers`, sha256 of the source file recorded), which run unchanged against
+the reference device judge. The earlier extracts (f1094b3, orch-52's unmerged branch head, 4f00d9c, e9a26d9) are
+retired. Each shared case gives the receiver's whole view: its clock `now`, the `pinned_delegation`, `known_devices`
+(this workspace's associations, active or revoked, with their person and optional key), `known_revocations`
+(chain-learned, held when judging), `local_revocations` (out of band, held when judging) and
+`learned_later_in_walk`, plus the expected `unpublished`, `unpublished_pairs` and `unpublished_evidence`. Every view
+field is a required input of the judge (orch-core B1, #387): an empty map or list says the receiver knows nothing of
+that kind, and a missing one is an error, never "nothing known".
+F1 defines event/checkpoint bytes; the relay adds storage, transport and present-authority checks.
+**P3-D12:** only `workspace_checkpoint` objects are published, never `ticket_checkpoint` objects.
+
+| Method, path | Auth | Request → response | Idempotency, limits | Refusals | Decision |
+|---|---|---|---|---|---|
+| `PUT /v2/workspaces/{ws}/genesis` | W(g) | `{pin, cert}` → `{}` | JSON cap 64 KiB; once, identical pin is a retry | 401 `bad_signature`; 409 `genesis_mismatch`, `restore_not_owner` | P3-D18 |
+| `PUT /v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/pages/{i}` | W(g) | `{kind, log, after_seq, from_acc, heads, digest}` → `{}` | JSON cap 4 MiB; immutable page; 1 h set expiry; one set at most the maximum publication size (default 16 MiB, 413 `too_large`, P3-D37); 64 MiB per workspace and 512 MiB per owner account across its workspaces (429), 4 GiB per deployment (503 `overloaded`) | 409 `staging_conflict`; 413 `too_large`; 429 `quota_exceeded` | P3-D20/D37 |
+| `PUT /v2/workspaces/{ws}/staging/{source_hash}/{target_hash}/manifest` | W(g) | `{pages: [{i, kind, log, after_seq, count, digest}]}` → `{complete, missing}` | JSON cap 4 MiB; immutable terminal marker; same staging caps as pages; the maximum publication size is checked on the size the manifest implies, before any page | 409 `staging_conflict`; 413 `too_large`; 429 `quota_exceeded` | P3-D20/D37 |
+| `POST /v2/workspaces/{ws}/baselines` | W(g) | `{hash, offer_id}` → `{until_ms}` | JSON cap 16 KiB; 7 days, at most 16 pins | 404 `not_found`; 410 `checkpoint_gone`; 429 `quota_exceeded` | P3-D13/D20 |
+| `DELETE /v2/workspaces/{ws}/baselines/{hash}[?offer_id=o]` | W(g), or D(m) after initialization naming `offer_id` | no body → `{}` | idempotent release; W(g) releases any pin, D(m) only the pin whose `offer_id` it names, otherwise a no-op | — | P3-D13/D20 |
+| `PUT /v2/workspaces/{ws}/checkpoint` | W(g) | `{checkpoint, source_hash, restore?}` with `restore = {line, cert, authz, log}` → `{result: "accepted" or "ignored", n, hash}` | JSON cap 2624 KiB; atomic; exact retry returns prior result; `Orch-Holder` required; at most 16 refusals per holder generation and 48 per workspace in any rolling hour; staged set at most the maximum publication size (400 `too_large`, P3-D37) | 400 `wrong_suite`, `too_large`; 401 `bad_signature`; 409 `fenced`, `no_genesis`, `genesis_mismatch`, `chain_diverged`, `checkpoint_time`, `staging_incomplete`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation`; 429 `quota_exceeded` | P3-D13/D20/D24/D25 |
+| `GET /v2/workspaces/{ws}/checkpoint[?hash=h]` | D(m) or W | `{genesis: {pin, cert}, checkpoint, transitions_head}` | held H or immutable hash h | 404 `not_found`; 410 `checkpoint_gone` | P3-D18/D19 |
+| `GET /v2/workspaces/{ws}/transitions?after_n=k&to=E&limit=` | D(m) or W | `{transitions: [bundle], next}` | ascending target_n; default/max 16, at most 4 MiB | 404 `not_found`; 410 `checkpoint_gone` | P3-D13/D19 |
+| `GET /v2/workspaces/{ws}/proof?log=L&from=acc&to=E&limit=` | D(m) or W | `{heads: [head], next}` | default/max 65 536, at most 4 MiB | 404 `not_found`; 410 `checkpoint_gone` | P3-D19 |
+| `GET /v2/workspaces/{ws}/unpublished?cursor=&limit=` | W(g) | no body → `{items: [{device_id, person_id, reason, revocation, device_cert, pk_pub, provenance: {cursor, digest}, chain_reason}], cursor, more}` | read-only snapshot, no lock; re-fetch from any position; ascending §19.5 cursor; default/max 64 items, ≤ 256 KiB of `cj(response)` (the first item always); 120/min and 2 000/h per workspace, charged after W(g) | 409 `fenced`, `cursor_ahead`; 429 `rate_limited` | P3-D31 |
+| `POST /v2/workspaces/{ws}/unpublished/ack` | W(g) | `{cursor}` → `{acked}` | monotonic `max()`, a lower or equal position is a no-op; not publication; JSON cap 1 KiB; 30/min per workspace, charged after W(g) | 409 `fenced`, `cursor_ahead`; 429 `rate_limited` | P3-D31 |
+
+Common §19.6 refusals and holder fencing apply. The checkpoint's **object** cap is 2 MiB of `cj`
+bytes. The restore event is at most **524,288 bytes including its LF**, measured as the complete signed
+F1 line. The whole final request is at most **2 MiB + 524,288 + 64 KiB = 2,686,976 bytes**.
+An over-cap request is 400 `too_large` on this route (P3-D20, specific exception to §19.6's JSON 413);
+an over-cap checkpoint or line is also 400. Other new JSON routes use 413 before parsing.
+Revocation evidence is never truncated. Hosts refuse `ticket.created` at 1.8 MiB (`checkpoint.capacity`,
+a local host error), before storage approaches the hard limit. About 5 000 tickets remains the conservative
+advertised capacity pending deployment measurements. Fold work and `log_nodes` storage are O(history).
+
+**Genesis (P3-D18).** An owner device signs
+`{o: {v:2, suite, kind:"genesis_pin", workspace_id, wsk_pub, genesis}, sig}` with
+`sig_genesis_pin || cj(o)`. First acceptance checks the card's owner PK, certificate binding,
+`operate` scope, expiry at the relay clock, non-revocation, workspace and card WSK. The relay refuses
+checkpoints without this pin or with a different genesis. An established pin is never replaced, including
+after certificate expiry/revocation; revocation raises an alarm. Devices verify it historically under the
+pairing-pinned owner PK. The pin attests genesis; only hosts with the log validate `workspace.created`.
+**Accepted limit (review 9):** a WSK holder with a stolen, not yet revoked owner device can pin a wrong genesis
+before the honest host's first link. Every later checkpoint is then `genesis_mismatch`; revocation only raises the
+alarm. This is a denial of service, not a rollback (devices verify the pin under the pairing-pinned PK), and its
+recovery is a new workspace. An owner-PK-signed re-pin is deferred to P8.
+
+**Ancestry (P3-D19).** Each log entry is exactly `{seq, head, acc}`. `acc_0` is 32 zero bytes;
+`acc_k = H(h_log_acc || raw32(acc_{k-1}) || raw32(head_k))`, encoded as `sha256:` plus 64 lowercase hex.
+Neither text encodings nor seq are in the preimage. Growth requires exactly `t-s` heads, ending at the signed
+head and folding to the signed acc. Equal seq requires identical head and acc. Every existing log remains.
+`h_checkpoint(C) = H(h_checkpoint-label || cj(C.o))`, in the same hash-string encoding; signatures are excluded.
+Checkpoints use `sig_checkpoint || cj(o)`, with F1's exact workspace object shape and whole-second UTC `at`.
+Equal n requires the same object. A lower n is ignored only when no offered entry is new, higher, or conflicting
+at equal height. It never advances H. Higher n must also satisfy the position-time rules below.
+
+The relay retains immutable branch-agnostic `log_nodes(workspace, log, acc) → (seq, head, prev_acc)`.
+Restores do not delete abandoned nodes. Reads walk backwards from **the requested checkpoint's** acc,
+then return heads in forward order. A proof's source acc must be on that branch. This catches abandonment
+of a receiver's committed prefix with an honest host and withholding relay; it does not establish event
+validity, latestness or disclosure of every restore. A WSK holder can fabricate accumulators.
+
+**Staging and atomicity (P3-D20).** The set is bound to `(source_hash, target_hash)`; null source is spelled
+`null` in the path. `kind` is `appended`, `abandoned` or `retained`; `log` is `workspace` or a ticket ULID.
+`appended` proves ordinary growth; `abandoned` proves the source suffix above `from_seq`; `retained` proves
+the retained endpoint from a held node. Omit retained pages when the relay already holds the path.
+The manifest lists every page, sorted by `(kind, log, after_seq)`, with unique nonnegative page indices and
+contiguous ranges within each kind/log. Its descriptors must match page metadata, counts and digests.
+Pages are nonempty and at most 4 MiB each. Identical retries are no-ops; different HTTP bytes at an existing
+index or a different terminal manifest is `staging_conflict`. A manifest may precede missing pages and
+returns their indices. An unlisted page is a conflict. At most two live sets and 64 MiB of page and manifest
+bytes are allowed per workspace. A deployment also enforces a global ceiling on staged bytes across workspaces
+(default 4 GiB; 503 `overloaded` beyond it, never an eviction); the reference models one workspace and does not
+exercise it. Expiry is one hour from set creation, never extended by retries.
+Final publication requires the manifest and every listed page (`staging_incomplete` otherwise), validates
+every fold, all sizes and R0–R5 before effects, and rejects unused evidence. The transaction persists nodes,
+revocations, the transition and checkpoint, then advances H together. Refusals record no restore IDs.
+**Failure budget (review 3, amended N5).** A refused final publication is charged only after the request passed
+W(g) authentication and the holder-generation check: a 401 or a 409 `fenced` (stale holder) is never charged.
+The `Orch-Holder` generation is required (a missing one is 400 `malformed`, uncharged). Each holder generation
+may spend at most 16 refusals per rolling hour, so a compromised former holder cannot use up its successor's
+slice; across generations the workspace is capped at 48 refusals per rolling hour (review F1). Takeovers are not
+rate limited, because P3-D10 lets a WSK holder (and an honest host restarting after a crash) always take over; the
+workspace ceiling is what bounds a WSK holder that takes over from itself repeatedly. Accepted cost: a WSK holder
+that takes over three or more times an hour can keep the 48 refusals full, and then valid publications are also
+429 until the window frees. This adds no power, since a WSK holder can already deny service by fighting over
+the lease (P3-D10); the remedy for a hostile WSK holder is rotating the WSK. Order: size cap and parse, then
+an exact retry of an accepted publication returns its stored result (also with the budget spent), then the budget
+check (429 `quota_exceeded`, not charged), then signature and fold work. `ignored` lower-n publications are not
+charged; they cost one signature check and one canonicalisation of at most 2 MiB.
+
+**Publication cost (P3-D33).** Fold work is bounded too: a charged refusal also records the heads it folded,
+and the budget check above also answers 429 `quota_exceeded` (not charged) once the workspace's refusals of
+the rolling hour have folded about 1.81 million heads (twice the heads of a full 64 MiB staging set). A refusal
+before the staged set is folded (for example `restore_source_mismatch`, `checkpoint_time`,
+`staging_incomplete`) folds nothing. Work already done for the same request counts in the check too. Every refusal records the fold work done for it, also the uncharged
+ones (`fenced` after a takeover, 429, 503). No new refusal code; the staged set is kept on a refusal. A relay verifies
+a publication outside its global write transaction and may store the verified nodes of a publication it then
+refuses (for example after a takeover between verification and commit); such nodes are immutable, referenced
+by nothing and invisible to every route, and count toward the workspace's storage. The answer is always the
+check order above evaluated at commit time: a takeover, a changed H, staging set, WSK, owner policy or
+revocation between verification and commit is answered as if the request had arrived after it. Concurrent
+final publications to one workspace are processed one at a time. When state keeps changing between
+verification and commit, the relay may answer 503 `overloaded` with `Retry-After` (never charged); the host
+retries the same request unchanged. (This answer needs a race between verification and commit, so it is
+pinned by relay tests, not by an HTTP fixture, and is not listed in the route table above.)
+
+**Storage caps (P3-D34).** All are 429 `quota_exceeded` with `Retry-After`, checked after authorization (401,
+403 `not_eligible` and 409 `fenced` come first), never charged to the failure budget, and deployment-configurable
+(defaults in parentheses). Staging: the live staged bytes of all workspaces of the workspace's owner person
+(512 MiB), checked after the per-workspace 64 MiB quota and before the 503 deployment ceiling. A final
+publication: the workspace's stored log nodes, including nodes stored for publications that were then refused,
+plus the new nodes this publication adds (4,000,000), judged at commit; a publication that adds no new node is
+never refused by it, and the fold work of a refused one counts toward the refused-heads budget above. A workspace
+restore: the distinct `(device_id, person_id)` revocation pairs of devices without association that the relay's
+§19.5 table does not hold yet (each would add a global row), counted per owner person over all its accepted
+restores (50,000); carrying a pair the relay already holds is never counted or refused. A first card: the
+workspaces the owner account already owns (32, or the account's operator override of 1 to 10,000, P3-D36, set
+by an audited operator command and never over HTTP; workspaces are never deleted). Receipts of accepted publications
+are kept for the newest 256 per workspace (an older exact retry is judged as a new request: `ignored` or a
+refusal, never a different acceptance), and an expired endpoint answers 410 `checkpoint_gone` for the newest 4,096
+expired per workspace, 404 `not_found` beyond. The node quota shares the code with the transient refused-heads
+budget, so a host cannot tell them apart from one answer: it retries after `Retry-After` with backoff (cheap for
+the relay: once the budget is spent the answer comes before any fold) and surfaces a `quota_exceeded` that
+persists past an hour to the owner (a workspace at its node quota migrates to a new one). The permanent caps
+(nodes, workspaces, evidence) answer `Retry-After: 1` like the transient ones; each retry over the node quota
+costs the relay a full verification until the refused-heads budget is spent. The last nodes of the node quota are a
+reserve (5 % of it, 200,000 by default; P3-D36) that only a workspace or ticket restore signed under the owner
+policy may use: any other publication is refused once the stored plus new nodes would exceed the quota minus the
+reserve, so a WSK holder that fills the workspace cannot prevent the owner's restore (a restore adds its line plus
+the heads of its staged set the relay does not hold yet: 1 node for a roll-back to a stored prefix). These answers
+need relay state far beyond any vector, so they are pinned by relay tests, not HTTP fixtures.
+
+**Maximum publication size (P3-D37).** A deployment bounds the staged bytes of one set (its manifest plus its
+pages, the bytes the staging caps count) by its maximum publication size (`ORCH_RELAY_MAX_PUBLICATION_BYTES`,
+default 16 MiB = 16,777,216 bytes, at most the 64 MiB workspace quota; a smaller deployment may set less, e.g.
+4 MiB). It is a permanent refusal for that set, `too_large`, never 429 and without `Retry-After`, checked after
+authorization (401, 403, 409 `fenced` first) and the staging conflict checks, and before the byte quotas (429,
+503). For a new set the per-workspace live-set limit (429, 2 sets) is checked first, so a workspace that already
+holds 2 live sets gets a temporary 429 for an oversized third set, and 413 only once a slot frees (at most 1 h):
+a page PUT is refused 413 when the set's staged bytes plus the page would exceed it; a manifest PUT is
+refused 413, before any page is uploaded, when the set's staged bytes plus the manifest plus 74 bytes per head of
+every listed page not staged yet would exceed it (a lower bound: a page of n heads is at least 74 n bytes); the
+final publication is refused 400 `too_large` (this route's `too_large` status) when its staged set exceeds it,
+after `staging_incomplete` and before any fold, charged to the failure budget with no fold work. A refusal writes
+nothing; the set keeps its earlier pages until it expires. Restores use the same maximum. A host does not retry
+such a set: it splits ordinary growth into several checkpoints (intermediate `n`, each set within the maximum);
+a restore cannot be split, so a restore whose abandoned suffix, retained branch and other logs' growth exceed the
+maximum cannot be published (about 226,000 heads at the default; before P3-D37 the same limit was the 64 MiB
+quota, ~906,000 heads), and the owner migrates to a new workspace. The relay does not advertise its maximum yet.
+These answers depend on deployment configuration and are pinned by relay tests, not HTTP fixtures or vectors (no
+vector stages more than 16 MiB).
+
+**Restore rules (P3-D13/D23/D24/D25).** `restore` is `{line, cert, authz: {delegation}, log}`.
+`line` is the full F1 event object, with its payload fields at the top level, not an interim nested payload.
+`log` is `workspace` or the restored ticket's ULID; it is required (review 3), and the relay verifies the signatures
+in that one context only, never by trying T's entries.
+
+- **R0 (P3-D13):** exact F1 restore fields, person actor, `v=2`, `hash_v=1`, `sig`, `auth`, `roster_v`,
+  `host_sig`; `ws_seq` exactly when `log` is a ticket. `auth` is one of `passphrase`, `secure-enclave`,
+  `secure-enclave-unlocked`, `webauthn`, `tpm`, `windows-hello` and, since H12d (P3-D38), `convenience` (F1 §11.4
+  with the H5c amendment); any other value is refused, never mapped to a known one (`AUTH_KINDS`; this is what
+  `relay-info` level 1 states, §19.1). Strict JSON, schema and line-size checks precede effects.
+  The bundle's delegation MUST have the card's delegation content (`o` equal) and verify under the owner PK (card
+  binding; orch-core #377: an owner re-signing the same content is the same delegation).
+- **R1 (P3-D24):** verify both host and person signatures using F1's `{workspace_id, log}` context.
+  Verify the card's PK-signed delegation and PK-certified device; actor person/device IDs must match,
+  scope levels include operate and no `drop:` scope. Certificate validity is checked at `line.at` and,
+  by the relay only, at its present clock; the signer's `(device_id, person_id)` pair is unrevoked by every
+  revocation the relay holds (orch-core #397: another person's revocation of the device id is another pair and never
+  refuses), its device id is not listed in this payload (self-revocation, any person), and it is currently in the
+  relay member list with operate. Missing authorization evidence is refused.
+- **R2 (P3-D13):** person-signed `source` equals `{n: H.o.n, hash: h_checkpoint(H)}`;
+  outer source_hash must agree. Null is allowed only when no H exists. A withheld old restore or the
+  losing member of two concurrent restores against one source needs a newly signed source.
+- **R3 (P3-D13/D19):** `line.seq = from_seq+1`, `line.prev = head`, `from_seq >= 1`.
+  Prove that the retained endpoint actually ends in the owner-signed head. Below C's seq, the staged
+  abandoned suffix must fold from acc_from to C, with exact count; a retained page starts at a stored
+  node on C's branch. At/above C's seq, prove the forward path. Zero-length proofs compare the endpoint
+  head and acc directly. T's restored entry is exactly `{from_seq+1, head(line), fold(acc_from, head(line))}`.
+  Other logs extend C with exact appended evidence; no log disappears; T.n>C.n; ticket ws_seq does not
+  exceed T's workspace height. Signed abandoned must cover C when C is above from_seq; an equal-height
+  conflicting abandoned head is refused.
+- **R3a (P3-D25):** `C.o.at <= line.at <= T.o.at`, `T.o.at >= H.o.at`, and
+  `T.o.at <= relay clock + 300 s`. The two constraints on T itself apply to every publication, restores included,
+  with 409 `checkpoint_time`, at the relay and on the device alike (inclusive at +300 s). A `line.at` outside
+  `[C.o.at, T.o.at]` is 409 `restore_invalid`. There is no separate ceiling on `line.at`: past the ceiling it is
+  either `checkpoint_time` (T is too) or `restore_invalid` (`line.at > T.o.at`) (review F7).
+  The host clamps checkpoint at to max(clock, previous at), and restore at to max(clock, source at,
+  last merged-order at). `at` is a host-chosen position, not a person-signed timestamp. Rewriting it
+  within the anchored window remains possible and is explicitly tested.
+- **R4 (P3-D13, F1 B1):** workspace restores carry all effective host-held revocations; ticket restores
+  carry `[]`. Validate every `{revocation, device_cert, pk_pub}` first; the certificate's `person_id` must equal
+  `H(h_person_id || suite || pk_pub)`. **Evidence identity (review N1/F3, per pair since orch-core #397, as F1
+  `model/workspace.restore`):** only an *association* binds a carried entry's person and key: the relay's global
+  device registry (§19.1/§6.2, written by `PUT /v2/devices/{device}` or account creation under the person's account key, live
+  at check time, so a member added later is bound) or a restore signer it verified under the owner PK; the person's
+  key is the directory account key. Evidence for an associated device MUST carry that person and key, otherwise
+  `restore_invalid`. Held revocations bind nothing: neither this workspace's chain pairs nor the global §19.5 set (a
+  tombstone is evidence, not an association), so another person's entry for a tombstoned or unknown device id is a
+  new pair, and two persons' entries for one unassociated device in one restore are two pairs, both accepted.
+  Restore evidence never registers its device and never creates an account (no first-come association); it is
+  retained per pair: globally through §19.5 intake (upgrade only, never deleted, §6.2 "no un-revoke") and as this
+  workspace's chain pair. A new registration of a device id with a chain-learned revocation of any person, or of a
+  revoked pair, is 403 `revoked`; out-of-band evidence of another person alone never refuses it, and the device-auth
+  cutoff is per registry pair (§19.5 P3-D30; the reference model's `register_device`, routes `device_put` and
+  `account`). Recommendation for G1
+  (not changed here): `PUT /v2/devices/{device}` is self-authenticating under the account PK only, with no proof of
+  possession of `dk_sig`; requiring one for new registrations would narrow pre-registration of not-yet-registered
+  (v1) device ids. Entries are sorted and unique by `(device_id, person_id)`. For each held chain pair of an
+  ever-device,
+  require the same or stronger reason: compromised > lost = retired. Missing/weaker coverage returns
+  `restore_missing_revocation` with sorted `devices`; the carried entry must be of the **same pair** (another person's
+  entry never stands in for it). **Held** here means chain-learned for this workspace (F1 §5.10, orch-core #387): the
+  revocations the relay accepted in this workspace's own restores (the reference's per-workspace `revocations`). A
+  revocation the relay holds only out of band for this workspace (§19.5 intake, another workspace's restore) refuses
+  its pair as a signer (R1) but is never demanded here; F1 calls its absence
+  `revocation.unpublished`, a non-blocking signal (G4 production: transport detail 6 (c) below). Byte identity with
+  the earliest chain evidence is an F1 host rule, not a relay rule. Preserve strongest reasons; grow ever_devices
+  atomically.
+- **R5 (P3-D13):** applied restore IDs are single-use. Exact publication retries return the stored
+  prior result. Rejected IDs are not consumed. A source-bound transition pins both C and T permanently.
+
+Refusal codes are 409 for every evidence failure on both routes, `restore_not_owner` included (genesis and
+checkpoint alike, review 8); 401 is reserved for the outer object's `bad_signature`, 400 for shape and size.
+
+A bootstrap null-source restore still runs R0/R1/R4/R5 and proves its exact target from acc_0, including
+its restored entry; there is no source comparison or abandoned proof against C. `line.at <= T.o.at` and
+the future ceiling remain. Initialized receivers never apply null-source transitions.
+
+**The P3 owner-device policy (P3-D23/D24).** This is deliberately narrower than full F1 replay:
+a removed device or demoted delegation owner can pass checkpoint-only verification while still holding
+a PK-certified, unrevoked operate device. Full hosts replay owner role, membership, device introduction/
+removal and scopes at from_seq. The relay's current-list check catches honest-host mistakes; WSK signs
+those lists, so they are not authorization evidence in bundles. No host mandate may sign these restores.
+P8's owner-signed roster is required to close this stated gap. Historical devices check certificate expiry
+against line.at, not today's clock, plus source/target anchors and in-bundle revocations. A later local
+lost/retired revocation does not invalidate history; a later compromised revocation raises an alarm without
+changing validity. Durable local revocations and tombstones still prevent resurrection (P3-D24/D25).
+**"Later" is the receiver's own order, never `line.at` (review 1):** a revocation counts as later only when the
+receiver first learns it after it has judged the transition, from a higher-n bundle in the same walk or after its
+commit. Any revocation of the signer it already holds when it judges the transition, from before the sync or from
+a lower-n bundle in this walk, refuses that transition (`chain_diverged`), whatever the reason and whatever
+`revoked_ms` says. This matches F1's receiver (`judge_offer` refuses a known-revoked signer).
+
+**Revocations at receivers: chain-learned and out of band, per pair (F1 §5.10 at 8a07c5ab, orch-core #397; review
+N4).** F1 defines what the relay first did as a local refinement, and F1 wins; `ref/checkpoints.py` follows it. Every
+revocation a device holds is keyed by its `(device_id, person_id)` pair (state key `"<device>:<person>"`), in two
+collections per workspace:
+
+- *Chain-learned* (`revocations`): a revocation whose occurrence the device authenticated against this workspace's
+  accepted history. A checkpoint-only device never sees `device.revoked` event bodies, so its only chain occurrences
+  are entries of restores it accepted. Each entry keeps the signed evidence (`revocation`, `device_cert`, `pk_pub`)
+  and its **provenance**: the accepted target checkpoint (`n` and `h_checkpoint`), the log, the restore's event id,
+  its seq (`from_seq + 1`), its event head and the accumulator node after it (the walk verified T's tail proof from
+  `acc_from` through that head, so the occurrence can be re-proved against T with a proof read from that node). A
+  checkpoint height alone is never provenance. Chain-learned provenance is **monotonic and sticky** per pair: a
+  later restore that abandons the suffix holding the carrying restore, an earlier branch, recovery and failed walks
+  never remove it, an equal-strength later occurrence keeps the first one, only a stronger reason replaces it, and
+  out-of-band evidence never replaces or demotes it.
+- *Out of band* (`local`): every other verified revocation the device holds (the §19.5 feed, the owner directly,
+  another workspace, a walk that failed), whether or not this workspace knows the device. **Verified** means
+  protocol §6.2 `verify_revocation` under the person key of the person the revocation names, against a device
+  certificate of that same person (`device_learn` checks it; the caller is never trusted). Every verified revocation
+  is retained under its pair whatever the workspace associations say: out-of-band evidence never creates or replaces
+  an association, there is no first-verified-evidence-wins rule (F1 row 151 is rewritten by row 152) and no
+  `contested` store. Evidence first learned out of band is promoted when an accepted restore later carries it; a
+  stronger out-of-band reason of a chain pair is tracked beside it.
+- *Associations* (`devices`, F1 `known_devices`): the pairing member list and the applied restore signers. Restore
+  evidence never adds one: a tombstone is evidence, not an association.
+- *Bounds (F1 §5.10 runtime requirements).* `local` is capped per person (64 entries, members included; the pinned
+  card owner is exempt so a genuine owner revocation is never dropped), per device id (8) and in total (4096).
+  Membership (the persons of the device's associations and the card owner) is read at eviction time. A new
+  non-member entry never evicts anything: it is dropped when a cap is full, so arrival order and re-delivery push
+  nothing out. A member's entry evicts the oldest non-member entry in scope (never a chain-learned pair's) and is
+  kept over the cap when there is none (it is bounded per person). A dropped entry never refuses a walk. A walk
+  harvests bundle entries only from lines within `LINE_CAP` and at most 4096 per walk, both counted before any
+  signature check; the judge also checks the line cap before any signature, T's included.
+
+**Signer refusal (C3)** uses both collections by pair: a held revocation refuses a restore signer only when it names
+the signer's device **and person** (the restore certificate's person, the delegation owner), for every reason and
+whatever the associations say; another person's "revocation" of the signer's device id never does, because any
+person can certify another person's device key. The separate rule refusing a bundle whose carried list contains its
+signer's device id (any person) stays. **Evidence identity** of carried entries uses the associations only: a
+carried entry for an associated device must be of that person and stored key; held revocations, chain-learned or out
+of band, bind nothing, so another person's pair carried beside a chain-learned pair is accepted (vector
+`walk_other_person_pair_beside_a_chain_pair_like_relay`). **Completeness** (a workspace restore carries every
+chain-learned pair, same person key where stored, at the same or stronger reason) uses chain-learned pairs only;
+another person's entry never satisfies it. An otherwise accepted workspace restore that does not carry a local pair
+under the same key at its strength is accepted with **`revocation.unpublished`**: judge outputs `unpublished_pairs`
+(sorted `("d_…", "p_…")`), `unpublished` (their `d_` hints) and `unpublished_evidence` (per pair, the strongest held
+entry, the first on a tie). Not reported (still retained and enforced): the accepted signer's device and a device
+whose association names another person. A ticket restore carries `[]` and gives no signal; the signal never
+overrides a refusal. Reporting is not eligibility: the walk keeps a reported pair in `forward` when this workspace
+associates its device with the same person (the runtime forwards the evidence with its certificate and person key to
+the host and retries), in `pending` when the device has no association (unknown, or known only through tombstones:
+kept locally, never forwarded, which would disclose the person's other devices to this host), and forwards it never
+when the association names another person. An acknowledgement is not publication: a pair leaves `forward`/`pending`
+only when an accepted restore carries it at the local strength, which makes it chain-learned. The host side
+(validate, retain, append `device.revoked` only where F1 §5.3 permits, no re-append of duplicate or weaker evidence,
+caps, pair matching) is the host's (P3 bridge), not the relay's.
+The row-151 denial of service and its fail-open variant are closed: a stranger's first-delivered evidence for a
+device binds nothing, so the owner's genuine revocation is retained beside it, refuses the stolen device's restore
+(vector `walk_poisoned_local_still_refuses_its_signer`) and is carried by honest restores.
+**Failed walks (F1 rows 149/150).** A walk commits nothing unless it verifies completely; then it replaces the device
+state in one atomic step: H (the walk position), the applied ids and their signers (the judgments), chain evidence
+with provenance, local evidence, `forward`/`pending` and alarms, so a restart can neither reorder knowledge nor drop a
+completeness obligation. A refused walk keeps H, applied ids, signers and chain provenance as they were, but every
+revocation it verified (each bundle's entries, checked independently as the bundle is reached, admitted in walk
+order under the caps) stays as local evidence, and
+the refusal returns the updated `device`. A C3 alarm concerns a committed transition: whenever compromised evidence
+for the signer (device and person) of an already committed restore is learned, from any walk, committed or not, or
+out of band, the alarm is raised and persisted; alarms about transitions of a walk that never committed are dropped.
+Retrying such a walk can turn a would-be alarm into a refusal (the kept evidence is now held when the transition is
+judged). A local `compromised` revocation of a committed signer alarms when it is learned, independent of any sync
+(review F6).
+**Withholding limit (accepted, F1 §5.10).** A relay can suppress event bodies while supplying the heads that
+checkpoint and rollback proofs need; proofs establish ancestry, not disclosure. A revocation becomes chain-learned
+only when the device verifies its occurrence in accepted history, so this policy preserves the revocations the device
+established there, not every revocation committed by an accepted checkpoint whose bodies it never inspected
+(checkpoint.json `hash_only_withheld_revocation_*`). Option (a) also gives up option (b)'s stronger carriage: an
+accepted workspace restore need not carry the device's out-of-band revocations.
+Consequences, stated in full: a device that learned an *unrelated* device's revocation out of band is not stranded
+behind an older genuine workspace restore that could not list it. A device that learned the *signer's* revocation
+(same device and person) out of band, any reason, while behind an older genuine restore by that signer stays refused
+at that restore until the owner re-pairs it from a fresh baseline; this is accepted, because refusing is the only rule
+a WSK holder holding a revoked device's key cannot exploit. A `compromised` revocation of an accepted restore's signer
+that F1 reports as learned later (`Verdict.alarms`) is the alarm the walk raises, for this walk and later ones.
+**Remaining relay-side differences from F1 (none changes a verdict on a shared case):** (1) the reference walk is
+all-or-nothing over E, so a bundle accepted inside a walk that later fails contributes no chain evidence (F1 lets a
+receiver persist each accepted bundle; both are atomic, the relay's is coarser). (2) The relay server reports
+`revocation.unpublished` in its publication result as the `unpublished` / `unpublished_refs` fields (transport detail
+8), as hints; the reference relay model reports them too and serves the P3-D31 view (vector group `unpublished`). (3) The device runtime's caps count local
+entries only (chain-learned pairs are separate and never evicted). F1 C3 is kept as is: every held revocation of
+the signer pair refuses, whatever its reason; refusing only on `compromised` was rejected. (The former differences
+on legacy bare-id alarms, the first-come binding and `contested` are gone: F1 now resolves a legacy signer to the
+pinned card owner first, then `known_devices`, and has no binding store.)
+
+**Reads, retention and pairing (P3-D13/D19/D20).** A GET returns an immutable endpoint E. Page transitions
+with `after_n=k&to=E`, ordered by target_n, exclusively after k and no later than E.n; k does not need to
+name a retained checkpoint. Every bundle includes restore_id, log, source_hash, target_hash, target_n,
+line, cert and authz. Fetch checkpoint objects by hash and proofs against those same hashes. Superseded
+checkpoints live 24 hours from supersession; transition-referenced checkpoints live permanently.
+An expired E returns 410 `checkpoint_gone` on every endpoint-bound read; unknown hashes return 404.
+Keep the receiver's H unchanged until the entire walk is verified. Restart with a new E after 410;
+missing evidence means incomplete sync, never permission to re-pair or discard rollback protection.
+
+**Device synchronisation (normative, review 2).** A checkpoint-only receiver (orch-mobile) holds `H` (its verified
+baseline or last commit, or none), its applied restore IDs, its durable revocations and the pairing-pinned owner PK,
+WSK and genesis. It MUST run this walk; `ref/checkpoints.py` `sync_walk`/`judge_offer` is the reference, and the
+`walk_*` vectors include states a malicious relay would serve. Every step is a refusal on failure, and a refusal
+leaves H, the applied ids, the signers and the chain-learned revocations exactly as they were; it keeps only the
+revocations the walk verified, as local evidence, and the alarms they cause (failed walks, above).
+
+1. `GET checkpoint` (or `?hash=E` to resume, which MUST return exactly E) gives E. Fetch every checkpoint by hash
+   and verify that its `h_checkpoint` equals the requested hash and its WSK signature; the judge then checks the
+   §5.10 shape, its workspace, its genesis (else `genesis_mismatch`) and the clock ceiling: an `o.at` more than
+   300 s past the device clock is 409 `checkpoint_time` (F1 `checkpoint.future`). `work = H`.
+2. Page `GET transitions?after_n=H.n&to=E`. A page with a non-null `next` MUST be nonempty and `next` MUST be
+   strictly greater than the previous cursor and at most `E.n`; otherwise `sync_incomplete`.
+3. For each bundle B, in order:
+   - If `B.source_hash` is non-null and differs from `h_checkpoint(work)`: fetch C by hash; C MUST have
+     `n > work.n` (else `chain_diverged`), and `work → C` MUST be an exact extension proved by accumulators for every
+     log of C (step 5). Then `work = C`.
+   - Fetch T by `B.target_hash`; `T.o.n` MUST equal `B.target_n`.
+   - Judge B before fetching its proofs: R0 shape, the person and host signatures in `B.log`'s context, the
+     delegation content equal to the pinned card's (`o`), the certificate and delegation under the pinned owner PK
+     (actor = delegation owner = certificate person and device, operate, no `drop:` scope, valid at `line.at`), the
+     signed `source` MUST equal `{n: work.o.n, hash: h_checkpoint(work)}` (the R2 equivalent; a null `source`
+     only when the device has no `work`, so an initialized device refuses every null-source bundle),
+     `line.id` not already applied, `work.o.at <= line.at <= T.o.at`, a ticket `ws_seq` at most T's workspace
+     height, the signer not revoked inside B, and the revocation rules above (every revocation the device holds,
+     chain-learned or local, including those learned from earlier bundles of this walk, refuses its signer when it
+     names the signer's device and person; carried evidence for any device the device knows, active or revoked,
+     MUST come from its known person and key; a workspace restore MUST list every chain-learned revocation at the
+     same or stronger reason). Before judging B, the device verifies each of B's revocation entries on its own; a
+     verified one stays local evidence even if B or the walk fails.
+   - Then prove R3 from GET proof pages bound to C and T: from_seq below C's height takes the retained prefix
+     from T's branch (from `acc_0`) and the abandoned suffix from `acc_from` to C (exactly `C.seq − from_seq`
+     heads, folding to C's acc, `abandoned` covering C); otherwise the forward heads from C's entry. The restored
+     entry of T MUST be reached from `{from_seq, head, acc_from}` by a consistent proof (else `sync_incomplete`)
+     whose first head is `event_head(line)`; a consistent proof whose first head is another event means T is
+     signed over another head and is `chain_diverged` (orch-core #377; `sync_incomplete` is only for missing
+     or malformed proofs).
+     Every other log of T MUST extend work exactly. A workspace log with from_seq 1 starts at the pinned genesis.
+   - Record `line.id` and its signer (device and person), add B's revocations as chain-learned with B's
+     provenance (strongest reason wins, an equal one keeps its first occurrence), note B's `unpublished` ids,
+     `work = T`.
+4. Finally judge E against work: equal n requires the identical object; a lower n is `ignored` only if no
+   transition was walked and no entry of E is higher or conflicting (a lagging relay: keep H, never downgrade);
+   a higher n MUST have `o.at >= work.o.at`, keep every log, and extend work exactly.
+5. Proof pages are paged with `next` and MUST NOT return more heads than the signed heights allow (`to` height
+   minus `from` height), nor more heads per walk than the device's own ceiling (the reference uses 2^22), since
+   WSK-signed heights alone bound nothing; an empty page with a non-null `next`, a fold that misses the signed acc,
+   a signed entry whose head or seq disagrees with its proof, or a 404 is `sync_incomplete`. A device without H
+   requires full proofs from `acc_0`, with the workspace log's first head equal to the pinned genesis.
+6. Commit atomically: `H = E` (or unchanged on `ignored`), the applied IDs with each transition's signer device and
+   person, the chain-learned revocations with provenance, and `forward`/`pending` (the previous ones plus this walk's
+   `unpublished`, minus what is now chain-learned at the local strength; split by whether this workspace knows the
+   device). Whenever the device holds a `compromised` revocation (chain or local) of the device and person that
+   signed any applied transition, in this walk or an earlier one, it raises an alarm and history stays valid; the
+   alarm does not depend on how the history was split into walks (review N3). On 410 `checkpoint_gone` keep H and
+   restart with a new E (a refusal like any other: verified evidence stays local).
+
+The authenticated pairing `approved` answer carries the host's exact `{n, hash}` baseline, or null only
+when none exists. POST baselines pins it for seven days (16 per workspace); retries do not extend expiry.
+DELETE releases it early, idempotently: W(g) releases any pin, an initialized D(m) member only the pin whose
+`offer_id` it names (any other member request is a no-op). The principal's role is always explicit; the
+reference refuses a delete that names none (fail closed). A device must fetch and verify
+that baseline before initialization; it never downgrades it and relay emptiness cannot override a non-null
+baseline. After 24 hours without retrieval it asks the host for a current reference under the same rule.
+
+**Host publication (P3-D21).** Under the append lock, persist the exact C/T, full signed restore,
+certificate, delegation and durable branch proofs in the outbox alongside the append. After releasing the
+lock, publish in order with backoff; delete only after 200. The restore follows its named source and later
+checkpoints wait behind it. Decision/person-event admission tombstones survive restores. No network call
+holds the store lock. The owner's client independently compares the proposed source with the relay;
+flushing the outbox is not a prerequisite to signing.
+
+**Transport details requiring design sign-off (G0b, P3-D13/D19/D20).** The source design leaves the following
+encodings unspecified. The reference and fixtures use explicit candidate conventions; these are not F1
+rules and must be confirmed before G4 ships:
+
+1. Page digest: `sha256:` + SHA-256 of `cj(page without digest)`, without a new domain label.
+2. Null path source: literal `null`. The final restore names its `log` explicitly (amended in G0b after the
+   security review: searching T's entries cost one 512 KiB canonicalisation and P-256 verify per ticket).
+3. `transitions_head` is the greatest target_n at/below the requested checkpoint, or zero. Transition
+   next is the last target_n (returned to after_n); proof next is the folded acc (returned to from),
+   retaining the same to hash. This is the stated exception to §19.6's opaque `next`.
+4. Baseline identity is hash, matching DELETE's path. The design does not define multiple offers pinning
+   the same hash; this reference returns the existing pin without extending it.
+5. The design's §6.2 example uses `after=<held hash>`; §3.4/§6.4 and this contract use `after_n`.
+   F1 permits heads after the restore in T; P3 R3 intentionally requires T's entry to end at the restore.
+   P3 requires full first-publication proof for durable nodes, whereas F1 judge_offer accepts a verified
+   initial checkpoint without ancestry. These are relay restrictions, not changes to F1's event shape.
+6. **G4 preconditions (review 4 and 7), not G0b contract changes.** (a) `GET proof` walks `prev_acc` from E back to
+   `from` on every page, O(history) per page and O(N²/limit) per full sync; G4 MUST index nodes per branch (for
+   example skip pointers or a memoised ordered acc list per `(E, log)`) so a page costs O(limit), or charge walk
+   steps to the §19.6 budgets and state the bound. The reference device walk also reads a restored log from
+   `acc_0` to find `acc_from`. (b) The HTTP fixtures do not yet pin cross-workspace isolation: G4 MUST add a second
+   workspace's token and fixtures for B's sessions on A's routes (403 `not_eligible`), A's checkpoint, proof,
+   staging and baseline hashes requested under B (404, or a no-op for DELETE), and bind the transitions 404,
+   baseline 404/410, staging 429 and checkpoint `too_large`/`wrong_suite` refusals to vector steps.
+   (c) **Revocations at the relay server (F1 §5.10, orch-core #387).** Completeness (R4) MUST use the revocations
+   the relay accepted in this workspace's own restores (chain-learned for the workspace, with their restore id and
+   target checkpoint as provenance, never removed), not the global §19.5 revocation table; a global (out-of-band)
+   revocation of an ever-device that a restore omits or carries weaker is accepted and reported as
+   `revocation.unpublished`, while R1 keeps refusing a signer pair revoked in any revocation the relay holds. **In G4**
+   the production relay emits `unpublished` and `unpublished_refs` in the accepted result (transport detail 8) as
+   hints, and serves the authoritative P3-D31 view; both are pinned by the shared vector group `unpublished`, which
+   the reference relay model (`ref/checkpoints.py`) and production replay.
+   **Status (G4):** (a) `log_nodes` stores a deterministic skip pointer per node (the ancestor at
+   `skip_height(seq)`, as Bitcoin's block index), so a page finds its endpoint node and checks that `from` is
+   on E's branch in O(log N) and then reads `limit` nodes: O(limit + log N) per page and O(N) for a full walk
+   from `acc_0`, measured on a 20,000-node history (`tests/test_checkpoints.py`). (b) Route fixtures carry
+   `cross_workspace_*_b_on_a` and `workspace_b_names_a_*` cases (tokens `FAKE-workspace-b`, `FAKE-device-b`)
+   bound to the `checkpoints_g4` vector group, which also binds the listed refusals. The global ceiling (beyond (a) to (c)) is
+   enforced (default 4 GiB, `ORCH_RELAY_GLOBAL_STAGE_BYTES`), after the per-workspace 429.
+7. **Production notes (G4).** A transport refusal of `PUT checkpoint` (body over the cap, unknown query
+   parameter, wrong content type) is charged like any other refusal once the request passes W(g) and the
+   holder check, as in the reference; an unauthenticated or fenced one is never charged. Retention is evaluated
+   at read time, so reads take no lock and never write; expired rows are purged by writes and a periodic sweep.
+   Parsing and the checks that need no database state run after authorization and before the directory lock;
+   their refusals are raised in the transaction at the position above, so codes and charging are unchanged.
+   Failure rows stop at the budget.
+8. **Workspace revocations and `unpublished` (G4 round 2; per pair since the orch-core #397 re-pin, F1 row
+   152).** R4 completeness uses only revocations learned through this
+   workspace's own accepted restores: the relay keeps them in `checkpoint_revocations`, one row per verified
+   `(device_id, person_id)` pair at its strongest reason with the carried evidence and the carrying restore and
+   target, written in the restore's transaction and never deleted. Each pair of a device in this workspace's
+   ever-devices or in the restore needs a carried entry of the **same pair** at the same or a stronger reason;
+   another person's entry never satisfies it. A restore's `revocations` are unique and sorted per
+   `(device_id, person_id)`. Only associations bind carried evidence (R4): the device registry, excluding rows of
+   evidence-only persons (P3-D29 rows written by restore evidence before migration 0010); never this workspace's
+   chain pairs and never the global table, so another person's pair is accepted beside a chain pair and two persons'
+   pairs for one unregistered device in one restore are both accepted (the round-2 "one person per unknown device"
+   rule is reverted). **Decided (orch-52 ruling 1, P3-D30):** §19.1 registry entries created through `PUT /v2/devices/{device}` or
+   account creation with a verified certificate count as workspace associations (provenance `registry`); restores
+   create none (they no longer register anything). The global
+   `revocations` table is keyed by `(device_id, person_id)` (migration 0010, rows and feed cursors kept), so a
+   first-come row never drops another person's genuine revocation. A revocation the relay holds globally (the §19.5
+   feed, another workspace's restore) never causes `restore_missing_revocation`: when an accepted workspace restore
+   omits it or carries it weaker under the same pair, and the pair is one the P3-D31 view serves (a G2 ever-device:
+   a current or former list member, under its registry person), the result carries
+   `unpublished: ["d_<device>", ...]` and `unpublished_refs: [{device_id, person_id, reason, cursor, digest}]`
+   (the §19.5 revocation cursor and the record's digest). **P3-D31 (U10):** the refs are exactly the view's items
+   after the restore, minus the signer's device, so every ref is retrievable from `GET .../unpublished` in the next
+   snapshot unless upgraded (new cursor and digest) or retired; they are **hints**, the route is authoritative, and a
+   host acts on the route, never on a ref. A device without registry association is no longer reported (the former
+   `holder is None` branch: F1 keeps such evidence pending). `checkpoint_unpublished` is no longer written (kept,
+   not dropped; the view replaces it); an exact retry still returns the stored result, refs included. Both
+   fields are additive and absent when empty; ticket restores report none. A stronger global revocation of a pair
+   already in the workspace chain, carried only at the chain strength, is reported too. Only the devices this
+   workspace knows are looked up (never the relay-wide table). `unpublished_refs` are relay claims, not
+   self-authenticating: a correct host fetches the record (§19.5) and verifies it under the named person's key with
+   a matching device certificate before acting. A ref goes stale when the revocation is later upgraded, because its
+   cursor and digest change. The retrieval route is P3-D31 (§19.5): `GET /v2/workspaces/{ws}/unpublished`, with
+   `POST .../unpublished/ack` and `notices.unpublished`. `GET /v2/devices/{device}/revocation` lists every pair of a device, labelled, but
+   serves no evidence (P3-D30).
+   Not reported (still retained and enforced): the signer's device (equivalent here, because a signer is a
+   registered member), a pair whose device is registered to another person or to no one, and devices this workspace knows only
+   through restore evidence (tombstones: `checkpoint_ever_devices` alone), which count as unknown for forwarding.
+   The signer refusal (R1) uses every revocation the relay holds of the signer's **pair**. The device-auth cutoff
+   (sessions, login, member certificates, stored certificates) is per pair too, under the registry person, and a
+   new registration is refused on any chain-learned revocation of the id (§19.5 P3-D30; index
+   `checkpoint_revocations(device_id, person_id)`, migration 0011). `GET /v2/devices/{device}/revocation` lists
+   every pair in pages, the registered person's first.
+   **P3-D29 (narrowed by #397):** restore evidence no longer creates an account, an evidence-only person or a device
+   row; only its revocation is retained (global pair and chain pair). An evidence-only person's device rows created
+   before migration 0010 were never associations; migration 0012 deletes them, and redeeming an invite deletes any
+   left (P3-D30 round 2), because they would otherwise become associations contradicting another workspace's chain
+   pair. The account row and every revocation stay, and redeeming still turns the account row into the account. Pre-0010 device rows written by evidence for persons that already had an account cannot be told apart
+   from registrations and keep binding (a dev-relay-only residue).
+
+
+### 19.9 Drop (P3-D39; P4 basics, D43)
+
+**Planned routes.** §19.9 and §19.10 are designed ahead of their PRs (P3 design §14.9). Their routes are
+written as a method followed by a separate path span until the PR that implements each one adds its HTTP
+fixtures and spells it as one span (`tests/test_http_fixtures.py` requires a fixture for every such route; D39a1
+adds an explicit list of planned routes to that test, so a forgotten re-spelling fails).
+
+Design: P3 design §14.2 (revision 2, after the Opus and phone reviews). Workspace spaces only
+(`space_kind: "workspace"`); `personal` and `shared` are 400 `malformed` until P6. Member ↔ own workspace only:
+every `wxk` target and every workspace id in `recipients` is `space_id` (cross-workspace addressing is P6). A
+`drop:` scoped device (§6.4) gets 403 `not_eligible` on every route until P6. The lease (§10.6) has no route in
+P4 (404). These routes replace the unprefixed §10.5/§10.6 spellings.
+
+**Upload frame.** The `PUT` body is binary (`application/octet-stream`):
+
+```
+body = "ODU2" || u32be(head_len) || head || blob        u32be: 4 bytes, unsigned, big-endian
+head = cj({"descriptor": <signed drop_object, §10.4>, "wraps": [<wrap record, §10.3>, ...]})
+```
+
+`head_len` is at most 512 KiB (413 `too_large`); `head` is strict JSON with exactly these two fields;
+`cj(descriptor)` is at most 96 KiB and its decoded `meta` at most 64 KiB + 16 bytes (400 `malformed`); `blob` is
+exactly the descriptor's `content_len` bytes (the ORD2 ciphertext, §10.2, whose 40-byte header must name this
+descriptor's suite, `object_id` and `version`; `content_len` counts ciphertext bytes) and ends the body. The
+request MUST carry `Content-Length` = `8 + head_len + content_len` (no chunked body; 400 `malformed`). The relay
+checks everything up to the quota reservation before it reads any blob byte, and may answer while the client is
+still sending; a client may close once it has the answer. For answers given after an upload slot is held, the
+relay shuts down its write side and drains the declared remainder (at most 5 s idle and 30 s in all, in a
+separate drain pool; the upload slot is freed at the answer) before closing, so the answer is not lost to a
+reset; refusals before a slot (transport, session, principal, fence, buckets, slots) close at once. Before
+resending a stored frame after a lost answer, a client reads back the version's descriptor: 200 with its own
+descriptor means stored; 200 with another means the version was taken (`version_conflict` handling); 404 means
+the slot is empty; 410 means use a new object id; 403 means stop. Resends are bounded (backoff and an attempt
+cap).
+
+**Absent objects.** An object that does not exist has `current = 0`: version 1 is written with `If-Match: 0`,
+`parent: 0` and `parent_hash: null` (this is §10.4/§10.6 read together, not a change). `If-Match` is the §10.6
+decimal; the quoted form `"N"` of the same decimal is also accepted; anything else (lists, `*`, `W/`) is 428.
+Success answers carry `ETag: "<version>"`. Reads answer in this order: object absent → 404; object not visible
+to the caller → 403 for every version and state, tombstones included; expired, retired or tombstoned → 410;
+version absent → 404.
+
+| Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
+|---|---|---|---|---|---|
+| PUT `/v2/drop/{o}/versions` | D(m) with `operate` in `space_id`, author = the device; or W(g) of `space_id` (fenced), author = the workspace | `If-Match: N`; frame → 201 `{version}`, `ETag` | an expired or tombstoned object → 410 first; then an exact retry (stored version with the same descriptor `cj(o)`) → 200 `{version}` before the CAS and without reading the blob; blob ≤ `ORCH_RELAY_DROP_MAX_BLOB_BYTES` (default 26 MiB); whole body ≤ 8 + 512 KiB + that, declared and streamed; file `expires_ms` in `(now, now + 7 d + 300 s]`; document `expires_ms` null; `inbox` only for a `file`; ≤ 1 024 wraps, each ≤ 512 B; device wraps with `key_version` 0; an `inbox` object carries one `wxk` wrap to the space and optionally the author's own `device` wrap, never `wk`; ≤ 1 024 versions per document, ≤ 256 documents per workspace (64 per device); ≤ 1 000 new objects per workspace per day (250 per device); quotas below; the W fence is checked before any slot or bucket; upload slots: 2 per device, 3 per person, 4 per workspace, 16 relay-wide; minimum average rate 64 KiB/s after the head (a 26 MiB body may take about 7 minutes), 30 s idle, 10 minutes at most; upload buckets | 400 `malformed` (frame, `Content-Length`, field set, caps, space kind, expiry above the window, a document expiry, an `inbox` document, a `file` above version 1, a foreign `wxk` or `recipients` id, a `wk` wrap on an `inbox` object, short or long blob, a non-ORD2 header, `content_hash` mismatch, wrap shape, `sk` wraps); 401 `bad_signature`; 403 `not_eligible` (author ≠ session, no write scope, `drop:` device, an object of another space, a claimed object, a `device` wrap to a non-member); 409 `version_conflict` (`current`), `stale_epoch` (`epoch`: a `wk` wrap not at the current list epoch), `bad_wxk_version` (refresh the card, rewrap the same `DEK`), `rotation_required` (only if adopted: an open `rotation_due`; body `{error, epoch}`), `fenced` (a stale host); 410 `expired` (a tombstoned id, or `expires_ms` ≤ now); 413 `too_large`; 428 `precondition_required`; 429 `quota_exceeded`, `rate_limited`; 503 `overloaded` | §10.4, §10.6 |
+| POST `/v2/drop/list` | D(m) with `look` in `workspace_id`, or W of `workspace_id` | `{workspace_id, direction, after?, limit?}` → `{objects: [{n, descriptor, wraps, claimed_by}], next}` | `direction` `received` (author ≠ caller) or `sending`; one entry per visible object at its newest version and its change position `n` (raised by every version, wrap change, claim and retire of the object); unclaimed `inbox` objects are listed for member devices; expired or retired objects leave without an entry; `claimed_by` in every entry; ascending `n`, `after` exclusive, `next` the last `n` or null when done; limit ≤ 64 (default 64) and the page stops before 2 MiB (at least one entry); ≤ 2 such reads per device, 4 per person, 8 relay-wide, each held until the body is sent; request JSON cap 16 KiB | 400; 403 `not_eligible`; 429; 503 | §10 |
+| GET `/v2/drop/{o}/descriptors?after=&limit=` | as list, the object visible | → `{descriptors: [signed drop_object], next}` ascending by version | limit ≤ 256 (default 256) and the page stops before 1 MiB (at least one entry); counted with the list reads | 400; 403; 404; 410 `expired`; 429; 503 | §10.6 |
+| GET `/v2/drop/{o}/versions/{v}/descriptor` | as list | → `{descriptor}`, `ETag: "<v>"` | | 403; 404 (absent object or version); 410 | §10.4 |
+| GET `/v2/drop/{o}/versions/{v}/wraps` | as list | → `{wraps, claimed_by}` | only the caller's usable wraps: a W session its workspace's `wk` and `wxk` wraps, a device its workspace's `wk` wraps and its own `device` wraps (never `wxk`); `claimed_by` null when unclaimed | 403; 404; 410 | §10.3 |
+| GET `/v2/drop/{o}/versions/{v}/blob` | as list, and an `inbox` object claimed | → the ORD2 bytes, `Content-Length: content_len`, `ETag: "<v>"`, `Cache-Control: no-store` | streamed; no `Range`; download slots: 4 per device, 8 per person, 32 relay-wide; the same minimum rate, idle and duration limits as uploads; download buckets by MiB | 403 `not_eligible` (an unclaimed inbox); 404; 410 `expired` (expired object or a pruned superseded blob); 429; 503 | §10.2 |
+| PUT `/v2/drop/{o}/versions/{v}/wraps` | W(g), the version addressed to the workspace (its space; claimed by it if `inbox`) | `{wraps: [wrap]}` (exactly one) → `{}` | the host's `drop_rewrap` (§7.5): `target_kind` `wk`, `target_id` the workspace, `key_version` its current epoch; the same record → 200 no-op; JSON cap 16 KiB | 400 `malformed`; 403 `not_eligible` (an unclaimed inbox, not addressed); 409 `stale_epoch`, `wrap_conflict` (other bytes for the same target and key version; the body carries the stored `wrap` and the version's `dek_commit`), `fenced`; 410 | §10.3, §7.5 |
+| POST `/v2/drop/{o}/claim` | W(g) of the object's workspace | §10.5 `{o, sig}` → `{claimed_by}` | §10.5 unchanged, one transaction; the object must be an unexpired `inbox` `file`; JSON cap 16 KiB | §10.5 codes; 403 `not_eligible` (not inbox, another workspace); 409 `already_claimed` (`claimed_by`), `fenced`; 410 | §10.5 |
+| POST `/v2/drop/{o}/retire` | W(g) of the space | `{}` → `{}` | fence checked first; tombstones a `document` at once (every read 410; blobs, wraps and head bytes freed by the sweeper); a retired object → 200 again while its tombstone lives; JSON cap 16 KiB | 403 `not_eligible` (a `file`, another space); 404; 409 `fenced` | §10.6 |
+
+**Reads.** A W session sees the objects of its workspace. A device sees an object when it is a current member
+with `look` of the object's workspace and `recipients` does not exclude it; unclaimed `inbox` objects are
+listed and their descriptors readable (no wrap a device can open exists before the claim), only their blob waits
+for the claim (403). An expired or
+retired object answers 410 `expired` for 30 days (its tombstone; a `PUT` of the id too), then 404. Superseded
+document blobs are kept while among the newest 8 versions or younger than 30 days; a pruned blob is 410, its
+descriptor stays.
+
+**Wraps on `PUT`.** `wk`: `target_id` = `space_id`, `key_version` = the current list epoch (409 `stale_epoch`
+with `epoch` otherwise; the hint rules of P3-D8 apply; the client rewraps the same `DEK` under the new epoch and
+resends the same blob and descriptor); a device author MUST include one on a non-inbox object; an `inbox` object
+MUST NOT carry one (the host adds it at the claim, §7.5). `wxk`: `target_id` = `space_id`,
+`key_version` = its current `wxk_version` (409 `bad_wxk_version`). `device`: a current member of the space's
+workspace or the author, `key_version` 0 (403 `not_eligible`). `sk`: 400 `malformed`. Unique
+`(target_kind, target_id, key_version)`, `object_id` and `version` of this descriptor, §5.3 framing.
+
+**Quotas (P3-D39, 429 `quota_exceeded` unless noted).** Blob bytes: per workspace 512 MiB and 4 096 live
+versions (blob stored); per owner account 1 GiB; per device per workspace 256 MiB; relay-wide
+`ORCH_RELAY_DROP_GLOBAL_BYTES` (default 4 GiB) as 503 `overloaded`. Head bytes (descriptors and every stored
+wrap): per workspace 32 MiB; relay-wide `ORCH_RELAY_DROP_GLOBAL_HEAD_BYTES` (default 512 MiB) as 503. Pruning
+releases blob bytes; tombstoning releases all. A document's 1 025th version and a workspace's 257th live
+document are 429 until the host retires one. Every Drop 429 and 503 carries `Retry-After` (integer seconds,
+≥ 1): for `rate_limited`, slots and `overloaded` the time until a token or slot frees (at most 600 s, the expiry
+sweep, for a global ceiling), all transient; a stored-bytes `quota_exceeded` carries `Retry-After: 600` but is
+not transient, and its body names the cap: `quota` is one of `drop_ws`, `drop_head_ws`, `drop_account`,
+`drop_versions`, `drop_documents`, `drop_device`, `drop_device_head`, `drop_device_versions`,
+`drop_device_documents`, `drop_doc_versions` (a slot cap's 429 says `slot` and is transient). Per-device shares
+of the workspace counters: 256 MiB blob bytes, 8 MiB head bytes, 1 024 live versions, 64 documents. Buckets (one
+token per started MiB): upload per device 64 / 32 per min, per workspace 256 / 128 per min; download per device
+256 / 256 per min, per person twice that (`ORCH_RELAY_THROTTLE_DROP_UP`, `ORCH_RELAY_THROTTLE_DROP_DOWN`).
+
+**Deployment.** A proxy in front of the relay must allow request bodies up to the whole-body maximum on the
+upload path only (slightly above the relay's maximum, so the relay answers its own 413), with timeouts above the
+10-minute transfer limit (P3 design §14.8: the dev deploy's 8,000,000
+byte Caddy cap needs this exception before Drop ships).
+
+**Host notice.** The host poll's `notices` gains `drop`: the newest change position of the workspace (0 if
+none). Like every notice it readies a poll once per change (§19.6). Because `notices` is an exact key set, hosts
+must accept `drop` **before** a relay emits it (rollout order). *Pending orch-52 (P3 design §14.9 Q-H1).*
+
+### 19.10 Push registration and sending (P3-D40)
+
+Design: P3 design §14.3 and §14.7. A relay without push configured answers 404 `not_found` on all three routes.
+
+| Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
+|---|---|---|---|---|---|
+| POST `/v2/push/register` | D(m) of `workspace_id` | `{workspace_id, registration_id, env, topic, token}` → `{registration_id, registered: true}` | `registration_id` 16 random bytes (hex), the device's (bound to it); `env` `sandbox` or `production` and configured on the relay; `topic` = the relay's configured topic (`io.severin.orch`); `token` b64u of 32..100 bytes; one registration per (device, workspace, env, topic): a new id retires the old; the same id and body → 200 (refreshes; free); the token moves from the person's other devices; ≤ 30 state changes per device per hour, ≤ 128 registrations per device; JSON cap 16 KiB | 400 `malformed`; 403 `not_eligible` (also a `drop:` device), `revoked`; 409 `registration_conflict` (the same id with another body, or another device's id); 429 | §9 |
+| POST `/v2/push/unregister` | D (membership not required) | `{workspace_id, registration_id}` (an id or `null` for all of the device's in that workspace) → `{registration_id, registered: false}` | idempotent, also for an absent id; JSON cap 16 KiB | 400; 403 `not_for_this_device` (another device's id), `revoked` | §9 |
+| POST `/v2/workspaces/{ws}/push` | W(g), fenced (`Orch-Holder`; missing or stale → 409 `fenced`, checked before any budget, dedup or queue effect) | `{targets, outer, priority, ttl_s}` → `{accepted}` | `targets`: 1..1 024 sorted unique device ids; non-members (and devices with a revoked or expired certificate) are skipped, not refused; `accepted` counts the accepted targets, not registrations; `outer`: §9's object, exact field set, `v` 2, `ws` = the path, `|cj(outer)| ≤ 3 072`; `priority` `high` or `normal`; `ttl_s` 0..86 400; an outer already sent to a device in the last 24 h is not sent to it again (in memory); budgets per (workspace, device) 20 / 2 per min, per device 60 / 6 per min (over budget: skipped), per workspace 120 / 20 per min (429); budgets ignore `priority`; queue all-or-nothing, 1 024 per workspace, 2 048 per account; JSON cap 64 KiB | 400 `malformed`; 409 `stale_epoch` (`epoch`: `outer.epoch` is not the current list epoch), `fenced`; 429 `rate_limited`; 503 `overloaded` (retryable after `Retry-After`) | §9 |
+
+**APNs request** (normative for the relay; the phone's NSE depends on the body). For each registration of each
+accepted target: HTTP/2 `POST /3/device/<hex token>` to `api.push.apple.com` (`production`) or
+`api.sandbox.push.apple.com` (`sandbox`), headers `authorization: bearer <ES256 JWT {kid}/{iss, iat}>` signed by
+the key the relay maps to that environment (one key may serve both), `apns-topic`, `apns-push-type: alert`,
+`apns-priority: 10` (`high`) or `5` (`normal`), `apns-expiration: 0` (`ttl_s` 0) or `now_s + ttl_s`, and no
+`apns-collapse-id`. Body, exactly:
+
+```
+{"aps":{"alert":{"title":"orch","body":"New activity in orch"},"mutable-content":1},"o":<cj(outer) as a JSON string>}
+```
+
+At most 3 175 bytes for a 3 072-byte outer (APNs allows 4 096). The relay sends no `badge`, `sound`,
+`thread-id` or `category`, and never anything derived from content: the alert is constant English text (P4),
+the same the NSE shows when it drops a payload. Delivery is best effort: no receipt, no durable queue. APNs
+`410 Unregistered`, `400 BadDeviceToken` and `400 DeviceTokenNotForTopic` delete the registration.
+
+**Lifecycle.** A registration is deleted on unregister, on the device's revocation, on its removal from the
+workspace's list (in the publication transaction), on the APNs answers above, when its certificate expires, and
+after 60 days without a refresh. Tokens are stored sealed under an instance secret; the APNs key and that secret
+are never stored in the database (P3 design §14.7).

@@ -1,0 +1,288 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "POST",
+    "path": "/v2/workspaces/{ws}/host/hold",
+    "role": "host",
+    "auth": "W"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/hold",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "gen": null,
+          "take_over": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "gen": 1,
+          "lease_s": 40,
+          "cursor": 0
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "host_hold: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/hold",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "gen": null,
+          "take_over": false
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "host_hold: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/hold",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "gen": null,
+          "take_over": false
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by host_hold."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/hold",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "gen": null,
+          "take_over": false
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_fenced",
+      "given": {
+        "scenario": "fenced",
+        "now_ms": 1790000000000,
+        "condition": "host_hold: Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/hold",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "gen": 0,
+          "take_over": false
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "fenced"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_holder_conflict",
+      "given": {
+        "scenario": "holder_conflict",
+        "now_ms": 1790000000000,
+        "condition": "host_hold: An unexpired holder exists and gen is null with take_over false."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/hold",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "gen": null,
+          "take_over": false
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "holder_conflict"
+        }
+      }
+    },
+    {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "host_hold: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/hold",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 16385,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
+      "name": "renew",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/hold",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "gen": 1,
+          "take_over": false
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "gen": 1,
+          "lease_s": 40,
+          "cursor": 0
+        }
+      }
+    },
+    {
+      "name": "explicit_takeover",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/workspaces/705d40abbb8c1c90354a1acaa94c935c/host/hold",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "gen": null,
+          "take_over": true
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "gen": 2,
+          "lease_s": 40,
+          "cursor": 1
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,718 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "POST",
+    "path": "/v2/persons/{person}/cert-requests",
+    "role": "host",
+    "auth": "W(g)"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_hash": "KMPfKGmqmnZdjDcE4WmogkomtBsqXHCgib78OJHP3CI",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoeO9JeMZVqb9WQjKziM1zlhtEu--BC3t40ep08L2n51PhPQqUowhQGTrOXY_g71odX100nXRRnzQkZkPgMhUJhVY6BUsuwpnLgUHefDzxOYBRzRChyb0RqrNpDjmt7qjqp088KJVbNY5mpmxgi-bZugz8pPpLCLK726mczllKVBx5GpPlrqT-MvL86CHKEXK3rLq-7NdP2lPW7oy_QNqJEDrWbIcP0EeeuiHPgOUxkIJKrLTWteQuMgjy6poG-OXukKn0df5giO8iL8XfNgP0YA9qdsdSBLJQZfmUVkc7or9XMlbrb_OzVye4hbcpukNbMP8i3lFfewd0g59hNruARb5Kqo_yY72obO650oTl8c8G_a4o0KhhTPI2_Dx5n3KjdmqzvGfZLyJv1NDQ_EfAfIvrkxTLfTGkVl307C83gu363v2xi_dw3m-BhKLIKhWHlnnvlSrGJ26h9sTiTIHhDsVGX5I5l7_53TkAeUZAb4L-CV93w_orDDZAH-bp0Rr3u-H_BqFbVU1XsieBQ5MrdmYnWmrxqQ1OXB9r3X7sO2-ZstMNoimrAa2avIW1lpILQ"
+            },
+            "sig": "LThzgKvn2LuYVgYPa16Pz-DhSr-FnCFsKv68YUuJqnmciH42VmSGfALKkxcFUWaRtXdOsUXp3asvBxkZVidZJA"
+          }
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request_id": "1995f17e92ddbfe28475cc5ad02be4c9"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_hash": "KMPfKGmqmnZdjDcE4WmogkomtBsqXHCgib78OJHP3CI",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoeO9JeMZVqb9WQjKziM1zlhtEu--BC3t40ep08L2n51PhPQqUowhQGTrOXY_g71odX100nXRRnzQkZkPgMhUJhVY6BUsuwpnLgUHefDzxOYBRzRChyb0RqrNpDjmt7qjqp088KJVbNY5mpmxgi-bZugz8pPpLCLK726mczllKVBx5GpPlrqT-MvL86CHKEXK3rLq-7NdP2lPW7oy_QNqJEDrWbIcP0EeeuiHPgOUxkIJKrLTWteQuMgjy6poG-OXukKn0df5giO8iL8XfNgP0YA9qdsdSBLJQZfmUVkc7or9XMlbrb_OzVye4hbcpukNbMP8i3lFfewd0g59hNruARb5Kqo_yY72obO650oTl8c8G_a4o0KhhTPI2_Dx5n3KjdmqzvGfZLyJv1NDQ_EfAfIvrkxTLfTGkVl307C83gu363v2xi_dw3m-BhKLIKhWHlnnvlSrGJ26h9sTiTIHhDsVGX5I5l7_53TkAeUZAb4L-CV93w_orDDZAH-bp0Rr3u-H_BqFbVU1XsieBQ5MrdmYnWmrxqQ1OXB9r3X7sO2-ZstMNoimrAa2avIW1lpILQ"
+            },
+            "sig": "LThzgKvn2LuYVgYPa16Pz-DhSr-FnCFsKv68YUuJqnmciH42VmSGfALKkxcFUWaRtXdOsUXp3asvBxkZVidZJA"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_wrong_suite",
+      "given": {
+        "scenario": "wrong_suite",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Instance configured for suite 2 receives the supplied suite-1 object/header; suite gate precedes context checks."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 1,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "c0ba4c0e49f25a37022cc22323a15986",
+              "primary_device_id": "4693874c0d984a3cdec3bc508f56757f",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "ed2a9b65180497dd0022753339a5a378",
+              "dk_hash": "xP8bN70vg077QdxTKO4gLIR-McNAcIdmnjeuGqaLpec",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "I1WqQn6_K03pAFzdjsbHC5G1Bl0IiktxDtQ2ceVWlEtetTEGnoP57ZOxotWejsr_AzYoGYWBGocxgkp5fV9uc2_XDNpne0yld6b6WFRgVnStN0016RQYMFkdXJfmwMd7JeUILQ657BJLuWJtQZnnLnpzhmqJAsSYVjMdVpPXXck0gwM4hMWgM4u_b8pBaByl6W9rlOQiIf8OKWG7vOsmX84MGynlPg8e5oHZus10i9jY_QwcagaspNZ94hRs4DMsPq8FNuy0jabxiAL9uyqPNaWwVg51vgUR9khLZzQHbBPqN1VvRYfO1exutUu5QUpx3t1GIcaBw6sapzhmIsJfmK_hRcvcmUQhJq1KuBrAqSYcQLmwHjkSY4MoaucQk0ijrskSoAuYdu9z38AXtAb6IU0S3zv2sGxuvTqIwlBfeOU3Dxqa6I5D5gLyc-ae3u63ICnAtVEKiP228s-9gvaXSL--uAgUqeAQ559mB_o43Yg4aUu083Kp9xs4bQ"
+            },
+            "sig": "4ZEKV1vZv_CNn-gV7pQ32QWSrlBCW2YdWi25AiBXMl9tmOcquQfk7XJoooIgWmdQ_je7JLHgfpfCBr5xsVOEAA"
+          }
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "wrong_suite"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_bad_signature",
+      "given": {
+        "scenario": "bad_signature",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Trusted directory verification key differs from the artifact's signing key; artifact remains valid under its fixture key."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_hash": "KMPfKGmqmnZdjDcE4WmogkomtBsqXHCgib78OJHP3CI",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoeO9JeMZVqb9WQjKziM1zlhtEu--BC3t40ep08L2n51PhPQqUowhQGTrOXY_g71odX100nXRRnzQkZkPgMhUJhVY6BUsuwpnLgUHefDzxOYBRzRChyb0RqrNpDjmt7qjqp088KJVbNY5mpmxgi-bZugz8pPpLCLK726mczllKVBx5GpPlrqT-MvL86CHKEXK3rLq-7NdP2lPW7oy_QNqJEDrWbIcP0EeeuiHPgOUxkIJKrLTWteQuMgjy6poG-OXukKn0df5giO8iL8XfNgP0YA9qdsdSBLJQZfmUVkc7or9XMlbrb_OzVye4hbcpukNbMP8i3lFfewd0g59hNruARb5Kqo_yY72obO650oTl8c8G_a4o0KhhTPI2_Dx5n3KjdmqzvGfZLyJv1NDQ_EfAfIvrkxTLfTGkVl307C83gu363v2xi_dw3m-BhKLIKhWHlnnvlSrGJ26h9sTiTIHhDsVGX5I5l7_53TkAeUZAb4L-CV93w_orDDZAH-bp0Rr3u-H_BqFbVU1XsieBQ5MrdmYnWmrxqQ1OXB9r3X7sO2-ZstMNoimrAa2avIW1lpILQ"
+            },
+            "sig": "LThzgKvn2LuYVgYPa16Pz-DhSr-FnCFsKv68YUuJqnmciH42VmSGfALKkxcFUWaRtXdOsUXp3asvBxkZVidZJA"
+          }
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "bad_signature"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_hash": "KMPfKGmqmnZdjDcE4WmogkomtBsqXHCgib78OJHP3CI",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoeO9JeMZVqb9WQjKziM1zlhtEu--BC3t40ep08L2n51PhPQqUowhQGTrOXY_g71odX100nXRRnzQkZkPgMhUJhVY6BUsuwpnLgUHefDzxOYBRzRChyb0RqrNpDjmt7qjqp088KJVbNY5mpmxgi-bZugz8pPpLCLK726mczllKVBx5GpPlrqT-MvL86CHKEXK3rLq-7NdP2lPW7oy_QNqJEDrWbIcP0EeeuiHPgOUxkIJKrLTWteQuMgjy6poG-OXukKn0df5giO8iL8XfNgP0YA9qdsdSBLJQZfmUVkc7or9XMlbrb_OzVye4hbcpukNbMP8i3lFfewd0g59hNruARb5Kqo_yY72obO650oTl8c8G_a4o0KhhTPI2_Dx5n3KjdmqzvGfZLyJv1NDQ_EfAfIvrkxTLfTGkVl307C83gu363v2xi_dw3m-BhKLIKhWHlnnvlSrGJ26h9sTiTIHhDsVGX5I5l7_53TkAeUZAb4L-CV93w_orDDZAH-bp0Rr3u-H_BqFbVU1XsieBQ5MrdmYnWmrxqQ1OXB9r3X7sO2-ZstMNoimrAa2avIW1lpILQ"
+            },
+            "sig": "LThzgKvn2LuYVgYPa16Pz-DhSr-FnCFsKv68YUuJqnmciH42VmSGfALKkxcFUWaRtXdOsUXp3asvBxkZVidZJA"
+          }
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by cert_requests_post."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_hash": "KMPfKGmqmnZdjDcE4WmogkomtBsqXHCgib78OJHP3CI",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoeO9JeMZVqb9WQjKziM1zlhtEu--BC3t40ep08L2n51PhPQqUowhQGTrOXY_g71odX100nXRRnzQkZkPgMhUJhVY6BUsuwpnLgUHefDzxOYBRzRChyb0RqrNpDjmt7qjqp088KJVbNY5mpmxgi-bZugz8pPpLCLK726mczllKVBx5GpPlrqT-MvL86CHKEXK3rLq-7NdP2lPW7oy_QNqJEDrWbIcP0EeeuiHPgOUxkIJKrLTWteQuMgjy6poG-OXukKn0df5giO8iL8XfNgP0YA9qdsdSBLJQZfmUVkc7or9XMlbrb_OzVye4hbcpukNbMP8i3lFfewd0g59hNruARb5Kqo_yY72obO650oTl8c8G_a4o0KhhTPI2_Dx5n3KjdmqzvGfZLyJv1NDQ_EfAfIvrkxTLfTGkVl307C83gu363v2xi_dw3m-BhKLIKhWHlnnvlSrGJ26h9sTiTIHhDsVGX5I5l7_53TkAeUZAb4L-CV93w_orDDZAH-bp0Rr3u-H_BqFbVU1XsieBQ5MrdmYnWmrxqQ1OXB9r3X7sO2-ZstMNoimrAa2avIW1lpILQ"
+            },
+            "sig": "LThzgKvn2LuYVgYPa16Pz-DhSr-FnCFsKv68YUuJqnmciH42VmSGfALKkxcFUWaRtXdOsUXp3asvBxkZVidZJA"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_for_this_device",
+      "given": {
+        "scenario": "not_for_this_device",
+        "now_ms": 1790000000000,
+        "condition": "Target device/request binding required by cert_requests_post fails."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_hash": "KMPfKGmqmnZdjDcE4WmogkomtBsqXHCgib78OJHP3CI",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoeO9JeMZVqb9WQjKziM1zlhtEu--BC3t40ep08L2n51PhPQqUowhQGTrOXY_g71odX100nXRRnzQkZkPgMhUJhVY6BUsuwpnLgUHefDzxOYBRzRChyb0RqrNpDjmt7qjqp088KJVbNY5mpmxgi-bZugz8pPpLCLK726mczllKVBx5GpPlrqT-MvL86CHKEXK3rLq-7NdP2lPW7oy_QNqJEDrWbIcP0EeeuiHPgOUxkIJKrLTWteQuMgjy6poG-OXukKn0df5giO8iL8XfNgP0YA9qdsdSBLJQZfmUVkc7or9XMlbrb_OzVye4hbcpukNbMP8i3lFfewd0g59hNruARb5Kqo_yY72obO650oTl8c8G_a4o0KhhTPI2_Dx5n3KjdmqzvGfZLyJv1NDQ_EfAfIvrkxTLfTGkVl307C83gu363v2xi_dw3m-BhKLIKhWHlnnvlSrGJ26h9sTiTIHhDsVGX5I5l7_53TkAeUZAb4L-CV93w_orDDZAH-bp0Rr3u-H_BqFbVU1XsieBQ5MrdmYnWmrxqQ1OXB9r3X7sO2-ZstMNoimrAa2avIW1lpILQ"
+            },
+            "sig": "LThzgKvn2LuYVgYPa16Pz-DhSr-FnCFsKv68YUuJqnmciH42VmSGfALKkxcFUWaRtXdOsUXp3asvBxkZVidZJA"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_for_this_device"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_other_person",
+      "given": {
+        "scenario": "other_person",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: No account for the signed person, or certificate/request person is neither owner nor authorized person."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_hash": "KMPfKGmqmnZdjDcE4WmogkomtBsqXHCgib78OJHP3CI",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoeO9JeMZVqb9WQjKziM1zlhtEu--BC3t40ep08L2n51PhPQqUowhQGTrOXY_g71odX100nXRRnzQkZkPgMhUJhVY6BUsuwpnLgUHefDzxOYBRzRChyb0RqrNpDjmt7qjqp088KJVbNY5mpmxgi-bZugz8pPpLCLK726mczllKVBx5GpPlrqT-MvL86CHKEXK3rLq-7NdP2lPW7oy_QNqJEDrWbIcP0EeeuiHPgOUxkIJKrLTWteQuMgjy6poG-OXukKn0df5giO8iL8XfNgP0YA9qdsdSBLJQZfmUVkc7or9XMlbrb_OzVye4hbcpukNbMP8i3lFfewd0g59hNruARb5Kqo_yY72obO650oTl8c8G_a4o0KhhTPI2_Dx5n3KjdmqzvGfZLyJv1NDQ_EfAfIvrkxTLfTGkVl307C83gu363v2xi_dw3m-BhKLIKhWHlnnvlSrGJ26h9sTiTIHhDsVGX5I5l7_53TkAeUZAb4L-CV93w_orDDZAH-bp0Rr3u-H_BqFbVU1XsieBQ5MrdmYnWmrxqQ1OXB9r3X7sO2-ZstMNoimrAa2avIW1lpILQ"
+            },
+            "sig": "LThzgKvn2LuYVgYPa16Pz-DhSr-FnCFsKv68YUuJqnmciH42VmSGfALKkxcFUWaRtXdOsUXp3asvBxkZVidZJA"
+          }
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "other_person"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_fenced",
+      "given": {
+        "scenario": "fenced",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Current holder generation is 1; header generation 0 has no write authority (hold uses stale gen)."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "0",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_hash": "KMPfKGmqmnZdjDcE4WmogkomtBsqXHCgib78OJHP3CI",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoeO9JeMZVqb9WQjKziM1zlhtEu--BC3t40ep08L2n51PhPQqUowhQGTrOXY_g71odX100nXRRnzQkZkPgMhUJhVY6BUsuwpnLgUHefDzxOYBRzRChyb0RqrNpDjmt7qjqp088KJVbNY5mpmxgi-bZugz8pPpLCLK726mczllKVBx5GpPlrqT-MvL86CHKEXK3rLq-7NdP2lPW7oy_QNqJEDrWbIcP0EeeuiHPgOUxkIJKrLTWteQuMgjy6poG-OXukKn0df5giO8iL8XfNgP0YA9qdsdSBLJQZfmUVkc7or9XMlbrb_OzVye4hbcpukNbMP8i3lFfewd0g59hNruARb5Kqo_yY72obO650oTl8c8G_a4o0KhhTPI2_Dx5n3KjdmqzvGfZLyJv1NDQ_EfAfIvrkxTLfTGkVl307C83gu363v2xi_dw3m-BhKLIKhWHlnnvlSrGJ26h9sTiTIHhDsVGX5I5l7_53TkAeUZAb4L-CV93w_orDDZAH-bp0Rr3u-H_BqFbVU1XsieBQ5MrdmYnWmrxqQ1OXB9r3X7sO2-ZstMNoimrAa2avIW1lpILQ"
+            },
+            "sig": "LThzgKvn2LuYVgYPa16Pz-DhSr-FnCFsKv68YUuJqnmciH42VmSGfALKkxcFUWaRtXdOsUXp3asvBxkZVidZJA"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "fenced"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_other_workspace",
+      "given": {
+        "scenario": "other_workspace",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Authenticated/route workspace differs from the signed object's workspace."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_hash": "KMPfKGmqmnZdjDcE4WmogkomtBsqXHCgib78OJHP3CI",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoeO9JeMZVqb9WQjKziM1zlhtEu--BC3t40ep08L2n51PhPQqUowhQGTrOXY_g71odX100nXRRnzQkZkPgMhUJhVY6BUsuwpnLgUHefDzxOYBRzRChyb0RqrNpDjmt7qjqp088KJVbNY5mpmxgi-bZugz8pPpLCLK726mczllKVBx5GpPlrqT-MvL86CHKEXK3rLq-7NdP2lPW7oy_QNqJEDrWbIcP0EeeuiHPgOUxkIJKrLTWteQuMgjy6poG-OXukKn0df5giO8iL8XfNgP0YA9qdsdSBLJQZfmUVkc7or9XMlbrb_OzVye4hbcpukNbMP8i3lFfewd0g59hNruARb5Kqo_yY72obO650oTl8c8G_a4o0KhhTPI2_Dx5n3KjdmqzvGfZLyJv1NDQ_EfAfIvrkxTLfTGkVl307C83gu363v2xi_dw3m-BhKLIKhWHlnnvlSrGJ26h9sTiTIHhDsVGX5I5l7_53TkAeUZAb4L-CV93w_orDDZAH-bp0Rr3u-H_BqFbVU1XsieBQ5MrdmYnWmrxqQ1OXB9r3X7sO2-ZstMNoimrAa2avIW1lpILQ"
+            },
+            "sig": "LThzgKvn2LuYVgYPa16Pz-DhSr-FnCFsKv68YUuJqnmciH42VmSGfALKkxcFUWaRtXdOsUXp3asvBxkZVidZJA"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "other_workspace"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_replayed",
+      "given": {
+        "scenario": "replayed",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Request id is bound to other bytes, challenge replacement was attempted, or request was rejected."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_hash": "KMPfKGmqmnZdjDcE4WmogkomtBsqXHCgib78OJHP3CI",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoeO9JeMZVqb9WQjKziM1zlhtEu--BC3t40ep08L2n51PhPQqUowhQGTrOXY_g71odX100nXRRnzQkZkPgMhUJhVY6BUsuwpnLgUHefDzxOYBRzRChyb0RqrNpDjmt7qjqp088KJVbNY5mpmxgi-bZugz8pPpLCLK726mczllKVBx5GpPlrqT-MvL86CHKEXK3rLq-7NdP2lPW7oy_QNqJEDrWbIcP0EeeuiHPgOUxkIJKrLTWteQuMgjy6poG-OXukKn0df5giO8iL8XfNgP0YA9qdsdSBLJQZfmUVkc7or9XMlbrb_OzVye4hbcpukNbMP8i3lFfewd0g59hNruARb5Kqo_yY72obO650oTl8c8G_a4o0KhhTPI2_Dx5n3KjdmqzvGfZLyJv1NDQ_EfAfIvrkxTLfTGkVl307C83gu363v2xi_dw3m-BhKLIKhWHlnnvlSrGJ26h9sTiTIHhDsVGX5I5l7_53TkAeUZAb4L-CV93w_orDDZAH-bp0Rr3u-H_BqFbVU1XsieBQ5MrdmYnWmrxqQ1OXB9r3X7sO2-ZstMNoimrAa2avIW1lpILQ"
+            },
+            "sig": "LThzgKvn2LuYVgYPa16Pz-DhSr-FnCFsKv68YUuJqnmciH42VmSGfALKkxcFUWaRtXdOsUXp3asvBxkZVidZJA"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "replayed"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_request_open",
+      "given": {
+        "scenario": "request_open",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Another unexpired open or challenged certificate request exists for the workspace."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_hash": "KMPfKGmqmnZdjDcE4WmogkomtBsqXHCgib78OJHP3CI",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoeO9JeMZVqb9WQjKziM1zlhtEu--BC3t40ep08L2n51PhPQqUowhQGTrOXY_g71odX100nXRRnzQkZkPgMhUJhVY6BUsuwpnLgUHefDzxOYBRzRChyb0RqrNpDjmt7qjqp088KJVbNY5mpmxgi-bZugz8pPpLCLK726mczllKVBx5GpPlrqT-MvL86CHKEXK3rLq-7NdP2lPW7oy_QNqJEDrWbIcP0EeeuiHPgOUxkIJKrLTWteQuMgjy6poG-OXukKn0df5giO8iL8XfNgP0YA9qdsdSBLJQZfmUVkc7or9XMlbrb_OzVye4hbcpukNbMP8i3lFfewd0g59hNruARb5Kqo_yY72obO650oTl8c8G_a4o0KhhTPI2_Dx5n3KjdmqzvGfZLyJv1NDQ_EfAfIvrkxTLfTGkVl307C83gu363v2xi_dw3m-BhKLIKhWHlnnvlSrGJ26h9sTiTIHhDsVGX5I5l7_53TkAeUZAb4L-CV93w_orDDZAH-bp0Rr3u-H_BqFbVU1XsieBQ5MrdmYnWmrxqQ1OXB9r3X7sO2-ZstMNoimrAa2avIW1lpILQ"
+            },
+            "sig": "LThzgKvn2LuYVgYPa16Pz-DhSr-FnCFsKv68YUuJqnmciH42VmSGfALKkxcFUWaRtXdOsUXp3asvBxkZVidZJA"
+          }
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "request_open"
+        }
+      }
+    },
+    {
+      "name": "refusal_410_expired",
+      "given": {
+        "scenario": "expired",
+        "now_ms": 1790000000000,
+        "condition": "The certificate request for cert_requests_post has expired."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_hash": "KMPfKGmqmnZdjDcE4WmogkomtBsqXHCgib78OJHP3CI",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoeO9JeMZVqb9WQjKziM1zlhtEu--BC3t40ep08L2n51PhPQqUowhQGTrOXY_g71odX100nXRRnzQkZkPgMhUJhVY6BUsuwpnLgUHefDzxOYBRzRChyb0RqrNpDjmt7qjqp088KJVbNY5mpmxgi-bZugz8pPpLCLK726mczllKVBx5GpPlrqT-MvL86CHKEXK3rLq-7NdP2lPW7oy_QNqJEDrWbIcP0EeeuiHPgOUxkIJKrLTWteQuMgjy6poG-OXukKn0df5giO8iL8XfNgP0YA9qdsdSBLJQZfmUVkc7or9XMlbrb_OzVye4hbcpukNbMP8i3lFfewd0g59hNruARb5Kqo_yY72obO650oTl8c8G_a4o0KhhTPI2_Dx5n3KjdmqzvGfZLyJv1NDQ_EfAfIvrkxTLfTGkVl307C83gu363v2xi_dw3m-BhKLIKhWHlnnvlSrGJ26h9sTiTIHhDsVGX5I5l7_53TkAeUZAb4L-CV93w_orDDZAH-bp0Rr3u-H_BqFbVU1XsieBQ5MrdmYnWmrxqQ1OXB9r3X7sO2-ZstMNoimrAa2avIW1lpILQ"
+            },
+            "sig": "LThzgKvn2LuYVgYPa16Pz-DhSr-FnCFsKv68YUuJqnmciH42VmSGfALKkxcFUWaRtXdOsUXp3asvBxkZVidZJA"
+          }
+        }
+      },
+      "response": {
+        "status": 410,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 65537,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_quota_exceeded",
+      "given": {
+        "scenario": "quota_exceeded",
+        "now_ms": 1790000000000,
+        "condition": "cert_requests_post: Applicable device/workspace storage, concurrent poll, chunk or open-request cap is full."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/persons/5c0574d08d9b869beaa7b630cc83893d/cert-requests",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-workspace",
+          "Orch-Holder": "1",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "request": {
+            "o": {
+              "v": 2,
+              "suite": 2,
+              "kind": "cert_request",
+              "request_id": "1995f17e92ddbfe28475cc5ad02be4c9",
+              "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+              "person_id": "5c0574d08d9b869beaa7b630cc83893d",
+              "primary_device_id": "6a29d184e6be89bf89cb4864ecd6a507",
+              "offer_id": "a078a2b2aaadd8b9936f0260104de707",
+              "attempt": "b9d179923176ba29616b3a03e527091b",
+              "device_id": "4177b27d8e4ac182e8d388b247d2b136",
+              "dk_hash": "KMPfKGmqmnZdjDcE4WmogkomtBsqXHCgib78OJHP3CI",
+              "created_ms": 1790000000000,
+              "expires_ms": 1790000600000,
+              "sealed": "BDtGuR89HV3u3HW24xj5IdgOmrThLjs7Hj_bWo7HNJIBVYz0x6Vd2HOUWqNowmGMEzEwbMji9EFo6vW5eTFecFjYIoeO9JeMZVqb9WQjKziM1zlhtEu--BC3t40ep08L2n51PhPQqUowhQGTrOXY_g71odX100nXRRnzQkZkPgMhUJhVY6BUsuwpnLgUHefDzxOYBRzRChyb0RqrNpDjmt7qjqp088KJVbNY5mpmxgi-bZugz8pPpLCLK726mczllKVBx5GpPlrqT-MvL86CHKEXK3rLq-7NdP2lPW7oy_QNqJEDrWbIcP0EeeuiHPgOUxkIJKrLTWteQuMgjy6poG-OXukKn0df5giO8iL8XfNgP0YA9qdsdSBLJQZfmUVkc7or9XMlbrb_OzVye4hbcpukNbMP8i3lFfewd0g59hNruARb5Kqo_yY72obO650oTl8c8G_a4o0KhhTPI2_Dx5n3KjdmqzvGfZLyJv1NDQ_EfAfIvrkxTLfTGkVl307C83gu363v2xi_dw3m-BhKLIKhWHlnnvlSrGJ26h9sTiTIHhDsVGX5I5l7_53TkAeUZAb4L-CV93w_orDDZAH-bp0Rr3u-H_BqFbVU1XsieBQ5MrdmYnWmrxqQ1OXB9r3X7sO2-ZstMNoimrAa2avIW1lpILQ"
+            },
+            "sig": "LThzgKvn2LuYVgYPa16Pz-DhSr-FnCFsKv68YUuJqnmciH42VmSGfALKkxcFUWaRtXdOsUXp3asvBxkZVidZJA"
+          }
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "quota_exceeded"
+        }
+      }
+    }
+  ]
+}
