@@ -2380,7 +2380,7 @@ questions of §14.9 are **open**.
 | # | Date | Change | Agreed by |
 |---|---|---|---|
 | A1 | 15 Oct 2026 | The host retire covers **files** as well as documents (a file's bytes, wraps and usage released in the retire transaction); list entries carry `object_id`, `version` and a `state` (`live`, `pruned`, `expired`, `retired`); expired and retired objects stay listed as tombstones for the 30-day window, and every state change raises the change position. With orch-52's changes: (0) the holder generation and lease are re-checked inside the mutation transaction of every fenced Drop write and at the push queue admission, with a takeover-versus-retire race test; (1) retire requires `{expect_version, expect_head}`, checked atomically (409 `version_conflict`, object untouched; the same retry against the tombstone 200); (2) entries carry `tombstone_until_ms`, a gap longer than the 30-day retention forces a full reconciliation, every state change raises the host `drop` notice, an expiry reaches incremental lists after the sweep (~10 minutes); (3) a retire is never replayed after the window, a 404 then proves nothing and the host reconciles; (4) visibility: the 403/404 existence oracle stated precisely, restricted tickets are the host's job (device wraps and device-only `recipients`, filtered host listings), R-D10. Opus delta of this amendment (PASS WITH REQUIRED CHANGES, retire races sound): R1 the `PUT` answers 403 to a device outside a device-only audience before any 410, exact retry or CAS; R2 an explicit `drop_objects.audience` (`space`, `inbox`, `devices`), audience rows never pruned by membership changes, `recipients: []` 400; R3 a 60 s minimum file lifetime, audience rows deleted at expiry and kept (workspace-charged) only on retired tombstones, charge scopes stated, Q-H6 corrected; lows L1–L7 (push re-check off the event loop, 404 inside the retire transaction, canonical `expect_head`, `state` in the 409 body, a 29-day retry and reconciliation margin, the estimate restated, the 403 rationale); Opus delta 2: the list row's relist bound, the expired device-only file's 410-then-403 after the sweep (author included) with fixtures, a host MUST for re-added devices, the retire charge kept on the workspace with a host bound, the request `now` for the 60 s floor, the on-time-sweep assumption (P3-D39 items 1, 3, 4, 5, 6, 7, 8, 9; P3-D40 item 4; §14.4; §14.5; §14.6; §14.9; proto §19.9) | orch-fa (dashboard): host-mediated retire is enough, and the list state is exactly what the dashboard needs; orch-d6 rulings (no device delete in P4, host-mediated only); orch-52 15 Oct 2026: agreed with changes 0-4 (host-only retire for files, fenced by `Orch-Holder`, bounded idempotency in the tombstone window); to be checked by orch-f1 (phone list parser) |
-| A2 | 15 Oct 2026 (revision 2 the same day) | (1) **Decide-class uploads**: a device `PUT` is authorized by `operate`, **or** by `decide` for exactly one shape: a new `file` (version 1, `If-Match: 0`) with `recipients: "inbox"` and the usual inbox wraps; decided on the current member list and re-checked in the commit; a separate decide-class budget (50 creations and 64 MiB per device and workspace per UTC day, JUDGEMENT CALL) on top of the per-device shares; 403 `not_eligible` for any other shape from a decide-only device, at the existing scope step (no new oracle); the host-side claim rule (a person's own uploads claimed without a gesture, someone else's only after a terminal hand-off). (2) **W-session list walks**: `direction: "all"` (W sessions only; a device asking for it 403 `not_eligible`); a relay-wide `generation` in every list page (regenerated when the Drop dataset is restored or replaced) with 409 `generation_changed` for a stale one; a bounded high-watermark `until` returned by a walk's first page and passed by its following pages, which are cut at it. **Revision 2** (Opus delta PASS WITH REQUIRED CHANGES, R1–R4, L1–L5; orch-f1's check; orch-52's Q-H9): the budget charged at admission (refunded only before the first blob byte; failed streams charged their received bytes and a creation) with a conditional update, one decide-class upload slot per device, the real ingress bound (the upload bucket, R-D12) instead of the wrong "1.9 GiB a day", the UTC day of the request's `now`, the commit-time authority winning, the 429's `Retry-After` to 00:00 UTC as a MUST; the threat model corrected (a stolen phone's uploads are its owner's own and released by the gestureless claim; Q-H9's current-member-device condition, "Shared from your phone" list, R-D13); **unclaimed inbox objects visible only to the W session and their author device** (orch-f1 (d)1, confirmed; reverses A1's rule that members list them); the `generation` detected structurally (no `drop_generation` in backup copies, a high-water file outside the database checked before the start-up sweep, held in memory; R-D11 narrowed); client guidance and rollout. The rest of A1 is unchanged (P3-D39 items 1, 3, 4, 6, 7, 8, 13, 14; §14.4; §14.5; §14.6; §14.9 Q-H8, Q-H9, Q-F5, Q-F11; proto §19.9) | orch-52 (host) 15 Oct 2026, including Q-H9; orch-f1 confirmed the inbox visibility change (d)1 and supplied (c)/(d); to be checked by orch-fa (dashboard: `all`, `generation`, `until`, "Shared from your phone"); Opus delta of revision 2 pending |
+| A2 | 15 Oct 2026 (revisions 2 and 3 the same day) | (1) **Decide-class uploads**: a device `PUT` is authorized by `operate`, **or** by `decide` for exactly one shape: a new `file` (version 1, `If-Match: 0`) with `recipients: "inbox"` and the usual inbox wraps; decided on the current member list and re-checked in the commit; a separate decide-class budget (50 creations and 64 MiB per device and workspace per UTC day, JUDGEMENT CALL) on top of the per-device shares; 403 `not_eligible` for any other shape from a decide-only device, at the existing scope step (no new oracle); the host-side claim rule (a person's own uploads claimed without a gesture, someone else's only after a terminal hand-off). (2) **W-session list walks**: `direction: "all"` (W sessions only; a device asking for it 403 `not_eligible`); a relay-wide `generation` in every list page (regenerated when the Drop dataset is restored or replaced) with 409 `generation_changed` for a stale one; a bounded high-watermark `until` returned by a walk's first page and passed by its following pages, which are cut at it. **Revision 2** (Opus delta PASS WITH REQUIRED CHANGES, R1–R4, L1–L5; orch-f1's check; orch-52's Q-H9): the budget charged at admission (refunded only before the first blob byte; failed streams charged their received bytes and a creation) with a conditional update, one decide-class upload slot per device, the real ingress bound (the upload bucket, R-D12) instead of the wrong "1.9 GiB a day", the UTC day of the request's `now`, the commit-time authority winning, the 429's `Retry-After` to 00:00 UTC as a MUST; the threat model corrected (a stolen phone's uploads are its owner's own and released by the gestureless claim; Q-H9's current-member-device condition, "Shared from your phone" list, R-D13); **unclaimed inbox objects visible only to the W session and their author device** (orch-f1 (d)1, confirmed; reverses A1's rule that members list them); the `generation` detected structurally (no `drop_generation` in backup copies, a high-water file outside the database checked before the start-up sweep, held in memory; R-D11 narrowed); client guidance and rollout. **Revision 3** (Opus delta 2, PASS WITH REQUIRED CHANGES: RA–RC, L-1 to L-7; orch-52 and orch-fa): the high-water file moved to a state directory outside the data directory (dev-deploy-plan step B, §6.2 and the reset tool move the whole data directory; D40c replaces them), written at most every 60 s with the committed counter, R-D11 restated; the budget charged by an upsert with a best-effort give-back on the error path; steps 2, 6, 9 and 11 aligned; `claimed_ms` and `expires_ms` in list entries (JUDGEMENT CALL) and "Shared from your phone" a host-side record until `claimed_ms + 7 d`; multi-person release, the revocation timing, the per-workspace scaling of the stored bound and the phone's disconnect backoff stated; estimate +0.5 (D39a2) and +0.5 (D40c). The rest of A1 is unchanged (P3-D39 items 1, 3, 4, 6, 7, 8, 13, 14; §14.4; §14.5; §14.6; §14.9 Q-H8, Q-H9, Q-F5, Q-F11; proto §19.9) | orch-52 (host) 15 Oct 2026, including Q-H9; orch-f1 confirmed the inbox visibility change (d)1 and supplied (c)/(d); to be checked by orch-fa (dashboard: `all`, `generation`, `until`, "Shared from your phone"); Opus delta of revision 2 pending |
 
 Owner decisions (via orch-d6, 14 and 15 Oct): the end-to-end target includes **both** Drop and push; this design
 goes ahead of R3; the relay uses the owner's existing APNs key (Key ID `TD27F9Z9V7`, created by the owner on 8 Oct,
@@ -2512,7 +2512,8 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
       `8 + 512 KiB + max_blob` → 413 `too_large`, before anything else (P3-D17 "caps apply to streamed bytes as
       well as declared Content-Length");
    2. session (401), principal (403 `not_eligible` for a `drop:` device or a non-member; a device needs
-      `operate` or, since amendment A2, `decide` in at least one workspace before it gets a slot, item 13), for a W session the
+      `operate` or, since amendment A2, `decide` in at least one workspace before it gets a slot, and a device
+      with `operate` in no workspace gets **one** upload slot, item 13), for a W session the
       fence at admission (`Orch-Holder` current and the lease unexpired, else 409 `fenced`, P3-D10; Opus N4;
       re-checked in step 11), buckets (P3-D35
       read class, then the upload bucket), then an upload slot (item 8: 429 `quota_exceeded` per device, person or
@@ -2534,9 +2535,9 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
       decide-only device with any other shape gets this same answer at this same step);
    6. the object's state: an object id that exists in another space is 403 `not_eligible` (never its `current`);
       for a device session, an object whose stored audience excludes the device (`audience = 'devices'` and no
-      `drop_audience` row for it, §14.5; live or tombstoned), and since amendment A2 an unclaimed `inbox`
-      object of another author, is 403 `not_eligible` as well (amendment A1, Opus delta R1), so a member outside a restricted audience learns no state, version, kind or claim through a
-      `PUT` either; then an expired or tombstoned object (item 5) is 410 `expired`. Both precede the exact retry
+      `drop_audience` row for it, §14.5; live or tombstoned) is 403 `not_eligible` as well (amendment A1, Opus
+      delta R1), and so is another author's unclaimed `inbox` object (amendment A2), so a member outside a
+      restricted audience or an inbox's author learns no state, version, kind or claim through a `PUT` either; then an expired or tombstoned object (item 5) is 410 `expired`. Both precede the exact retry
       (Opus L1) and the CAS, so a retry never answers 200 for an object that is gone and the 410, the
       `version_conflict` `current`, the file-above-version-1 400 and the claimed 403 reach only callers that
       may see the object. The newest version's device author is in its audience (item 4) until the expiry
@@ -2553,8 +2554,9 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
       now + 60 s` (item 5's floor; 400 `malformed`; `now` here is the request's `now`, below); a claimed object
       takes no new version (403 `not_eligible`; M7). Otherwise 409 `version_conflict` with `current`;
    9. the wraps (item 4) → 400 `malformed`, 409 `stale_epoch` (`epoch`), 409 `bad_wxk_version` or (pending owner
-      question 6) 409 `rotation_required`; then, for an upload authorized by `decide` alone, the reservation
-      of the decide-class budget (item 13, amendment A2) → 429 `rate_limited`; then the quota reservation of
+      question 6) 409 `rotation_required`; then, for an upload authorized by `decide` alone, the **charge** of
+      the decide-class budget (an upsert, kept unless the request is refused before its first blob byte; item
+      13, amendment A2) → 429 `rate_limited`; then the quota reservation of
       the blob bytes and the head bytes (item 8) → 429 `quota_exceeded` or 503 `overloaded`;
    10. the blob: streamed to `drop/tmp/<random>` (mode 0600), at most `content_len` bytes; its first 40 bytes
        must be an ORD2 header with this descriptor's suite, `object_id` and `version`, and `content_len` must be
@@ -2566,7 +2568,8 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
        live `holders` row first (409 `fenced`, item 1; a takeover during the transfer), then re-run 5's
        eligibility (for a device: its live `members` row, so a `decide` or `operate` removed during the
        transfer is 403 here with nothing stored; amendment A2), 6, 8 and 9 on live state (a concurrent writer gets 409 `version_conflict`), insert the rows (§14.5), charge the usage
-       (and the decide-class budget, item 13),
+       (the decide-class budget was charged at step 9; the commit charges it only when the device held
+       `operate` at admission and is decide-only now, item 13),
        commit; 201 `{version}` with `ETag: "<version>"`. A failure before the commit unlinks the file; a crash
        leaves an orphan file that the start-up sweep deletes (a row never points to a missing file because the
        file lands first). The reservation is released in `finally`, also on `ClientDisconnect` and cancellation.
@@ -2784,8 +2787,8 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
 
 7. **List, change positions and page bounds.** `POST /v2/drop/list` with `{workspace_id, direction, after?,
    limit?, generation?, until?}` (D(m) with `look` in `workspace_id`, or W of `workspace_id`) → `{objects: [{n, object_id, version,
-   state, tombstone_until_ms, descriptor, wraps, claimed_by}], next, generation, until}` (`generation` and
-   `until`: amendment A2, item 14). `direction` is `received` (author ≠ caller) or `sending`
+   state, tombstone_until_ms, descriptor, wraps, claimed_by, claimed_ms, expires_ms}], next, generation, until}` (`generation`, `until`,
+   `claimed_ms` and `expires_ms`: amendment A2, items 14 and below). `direction` is `received` (author ≠ caller) or `sending`
    (author = caller), judged by the newest version's author, or, for a W session only, `all` (item 14). Each visible
    object appears once, with its newest version, at its **change position** `n`: a relay-wide counter assigned by
    every version commit, wrap change, claim and **state change** of the object (the §19.5 cursor pattern), so a
@@ -2856,10 +2859,23 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
    ```json
    {"n": 4182, "object_id": "9f2c…", "version": 3, "state": "live", "tombstone_until_ms": null,
     "descriptor": {"o": {"kind": "drop_object", "object_id": "9f2c…", "version": 3, "…": "…"}, "sig": "…"},
-    "wraps": [{"target_kind": "wk", "target_id": "5a1e…", "key_version": 7, "…": "…"}], "claimed_by": null}
+    "wraps": [{"target_kind": "wk", "target_id": "5a1e…", "key_version": 7, "…": "…"}], "claimed_by": null,
+    "claimed_ms": null, "expires_ms": null}
    {"n": 4190, "object_id": "c07d…", "version": 1, "state": "retired", "tombstone_until_ms": 1763208000000,
-    "descriptor": null, "wraps": [], "claimed_by": "5a1e…"}
+    "descriptor": null, "wraps": [], "claimed_by": "5a1e…", "claimed_ms": 1760600000000,
+    "expires_ms": 1761200000000}
    ```
+
+   **`claimed_ms` and `expires_ms` (amendment A2 revision 3; orch-52 and orch-fa, 15 Oct 2026; JUDGEMENT
+   CALL).** Every entry also carries `claimed_ms`: the relay's clock at the claim's commit, set once with
+   `claimed_by` and never changed (a trigger refuses any update of a non-null value, §14.5), null while
+   unclaimed and for every non-inbox object; and `expires_ms`: the object's `drop_objects.expires_ms` (the
+   head descriptor's, null for a document), given on tombstones too, where the descriptor is null. Both stay
+   in the entry until the tombstone's row is deleted (`tombstone_until_ms`). Why: the host's "Shared from your
+   phone" record (item 13, Q-H9) and its restore or takeover reconciliation can then take the claim time and
+   the file's end from the relay, the source of truth, instead of its own clock; the alternative (the host
+   alone records them) loses them with the host's state. Cost: one integer column and two entry fields;
+   `claimed_ms` tells a device that sees the entry no more than the claim's `n` already does.
 
    The relay-wide counter tells a host roughly how much Drop activity
    other tenants have (Opus L7): accepted (R-D8). The host learns of new objects through a new host-poll notice
@@ -3051,17 +3067,31 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
       as to any device.
       - *Charged at admission, refunded almost never.* In step 9 (after the wraps and any `rotation_required`
         check, before the quota reservation) the relay **charges** 1 creation and the declared `content_len`
-        in one short write transaction on the persisted `drop_decide_budget` row with a conditional update
-        (`... SET creations = creations + 1, bytes = bytes + :len WHERE creations + 1 <= 50 AND bytes + :len <=
-        67108864`; no row changed → 429). Two concurrent `PUT`s therefore cannot both take the last creation or
+        in one short write transaction on the persisted `drop_decide_budget` row, as an **upsert**, so the
+        first upload of a UTC day (no row yet) is charged like any other (Opus delta 2, RB):
+
+        ```sql
+        INSERT INTO drop_decide_budget (workspace_id, device_id, day, creations, bytes)
+        VALUES (:ws, :device, :day, 1, :len)
+        ON CONFLICT (workspace_id, device_id, day) DO UPDATE
+          SET creations = creations + 1, bytes = bytes + excluded.bytes
+          WHERE creations + 1 <= 50 AND bytes + excluded.bytes <= 67108864;
+        ```
+
+        `:len` ≤ 67,108,864 always (a blob is at most 26 MiB), so the insert branch never exceeds the cap.
+        The upsert is refused when `changes()` is 0 after it (the conflict branch's `WHERE` failed) → 429. Under
+        the directory's single writer, two concurrent `PUT`s therefore cannot both take the last creation or
         the last bytes, and a crash or restart never refills the budget. The charge is **refunded only** when
         the request is refused before the relay reads its first blob byte (the quota reservation's 429 or 503
         right after the charge) and, trivially, never arises for an exact retry (step 7 answers before any
         charge). Every other outcome keeps the charge: a commit keeps all of it; a stream that fails after
         its first blob byte (a disconnect, an idle or rate breach, a short, long or non-ORD2 body, a wrong
         `content_hash`, a 403 at the commit, a relay error such as 503) is charged 1 creation and the bytes
-        actually received (the difference to `content_len` is given back in the same small transaction that
-        records the failure). JUDGEMENT CALL: no refund for relay-side failures either, so no client-chosen
+        actually received. The give-back of the unreceived bytes (`content_len` − received, and for a refusal
+        before the first blob byte the whole charge) is a **separate small write transaction on the error
+        path** (`finally`, shielded from cancellation), best effort: if it is lost (a crash, an
+        `OperationalError`, the process killed), the full `content_len` stays charged, so a skipped give-back
+        over-charges and never under-charges. JUDGEMENT CALL: no refund for relay-side failures either, so no client-chosen
         failure can pass as one; a phone loses at most one upload's budget per relay fault.
       - *The day.* `day = floor(now_ms / 86,400,000)` of the request's `now`, read once at its start (A1's
         `now`, item 5). The charge, the shortfall give-back and the refund all go to that day's row, also when
@@ -3080,7 +3110,10 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
         `now` to the next 00:00 UTC by the relay's clock, at least 1 and at most 86,400; the phone derives
         "tomorrow" from it, not from its own clock, and sends no decide-class `PUT` before then. It is a step-9
         answer after an upload slot is held, so it takes the early-answer path of item 2 (the bounded drain;
-        the connection may close; the phone treats a disconnect as an unknown outcome and reads back).
+        the connection may close; the phone treats a disconnect as an unknown outcome and reads back). A read-back
+        404 followed by a resend that again ends in a closed connection costs bucket tokens and a drain each
+        time, so the phone backs off exponentially after two consecutive disconnects on a decide-class upload
+        and stops at its attempt cap (item 2; Opus delta 2, L-6).
       - *Arithmetic, and what the budget bounds (Opus delta R1: the revision-1 "~1.9 GiB a day of ingress" was
         wrong).* The budget bounds the bytes the relay **reads into a blob file, hashes and stores** for a
         decide-only device, failed streams included: at most 64 MiB a day per (device, workspace). 64 MiB is
@@ -3089,9 +3122,12 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
         so at most 7 × 64 MiB = 448 MiB, which the 256 MiB device blob share already caps, at most 350 live
         inbox files (7 × 50) and about 1 850 tombstones (~185 KB of uncharged rows). Head bytes: realistic inbox
         heads are 1–3 KB; the worst case (a 96 KiB descriptor and two 512 B wraps) is ~97 KiB × 50 ≈ 4.7 MiB a
-        day, within the 8 MiB device head share. Relay-wide, ~10 invited accounts with ~3 phones each store and
-        hash at most 30 × 64 MiB ≈ 1.9 GiB a day of decide-class blobs (the revision-1 number, which is a
-        stored-bytes bound, not an ingress bound). **Network ingress** is bounded by the buckets and slots,
+        day, within the 8 MiB device head share. The budget is per (device, workspace), so a phone that is a
+        decide-only member of W workspaces can store and hash W × 64 MiB a day; relay-wide the bound is 64 MiB
+        × the number of (decide-only device, workspace) memberships, a day (Opus delta 2, L-4). With ~10
+        invited accounts and ~3 phones each in one workspace, that is 30 × 64 MiB ≈ 1.9 GiB a day of
+        decide-class blobs (the revision-1 number, a stored-bytes bound, not an ingress bound); every phone in
+        two workspaces doubles it. The global ceilings (4 GiB blobs) still cap what is stored at once. **Network ingress** is bounded by the buckets and slots,
         not by the budget: every request takes upload-bucket tokens for its declared body at admission (32
         MiB/min per device, 128 MiB/min per workspace), and a refused request's drain reads at most its
         declared remainder within 30 s from the drain pool (2 per device, 32 relay-wide). A stolen phone that
@@ -3125,12 +3161,20 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
       time, with `decide` present and not revoked, re-checked under the host's store lock in the same step as
       the claim, and (2) the claim is for that person's own device-authored upload. Releasing **someone
       else's** upload, or an upload whose author device has since been revoked or removed, needs a terminal
-      hand-off (a phone asking for it gets the host answer `drop.handoff_required`, orch-52 §11A.16). Every
-      gestureless own-claim appears for 7 days in a "Shared from your phone" list on the dashboard and in
-      `orch status` (item, device, time), and retiring one's own upload stays a single unsigned action, so a
-      stolen phone's upload is visible and removable at once. No activity window: a stolen unlocked phone
-      can already answer questions with `decide`, so this upload risk is comparable, and bounded by the
-      budget.
+      hand-off (a phone asking for it gets the host answer `drop.handoff_required`, orch-52 §11A.16). In a
+      workspace with several people this means any member's own phone upload is released without a gesture to
+      every member, the host's owner included (Opus delta 2, L-1). **"Shared from your phone" is host-side**
+      (orch-52, cc orch-fa, decided 15 Oct): at each gestureless claim the host persists its own record (item,
+      author device, `claimed_ms`) and shows it on the dashboard and in `orch status` until `shared_until_ms =
+      claimed_ms + 7 d`, independent of the file: once the file is gone (its `expires_ms` passed, or retired)
+      the record stays with the state `expired` or `retired` and the retire action is hidden. Who sees that
+      list is the host's matter; relay-side, the only fact is that before the claim the object is visible
+      to the W session and its author device only, so the person's other devices do not see it (visibility is
+      per author **device**, item 6). The relay promises nothing beyond its list: an entry carries `claimed_by`,
+      `claimed_ms` and `expires_ms` (item 7) until its tombstone is deleted (30 days after it began), and after
+      that the host's own record is the only source. Retiring one's own upload stays a single unsigned action.
+      No activity window: a stolen unlocked phone can already answer questions with `decide`, so this upload
+      risk is comparable, and bounded by the budget.
     - **Pinned by** (D39a2): a decide-only device's new inbox file 201 with one `wxk` and its own `device` wrap;
       403 `not_eligible` at step 5 for a decide-only device's `document`, `space` list, device-only list, file
       at version 2, `If-Match: 1`, with nothing charged; the same answer for those shapes on an id of another
@@ -3140,7 +3184,9 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
       `rotation_required` for a `wk`-less inbox upload, `bad_wxk_version` for an old `wxk`; `decide` removed
       during the transfer: 403 at the commit, no row, the file unlinked, 1 creation and the received bytes
       charged; a disconnect after half the blob: 1 creation and the received bytes charged, the rest given
-      back; a refusal at the quota reservation right after the charge: refunded; the 51st creation and a
+      back; the give-back lost (the process killed on the error path): the full `content_len` stays charged; a
+      refusal at the quota reservation right after the charge: refunded; the first upload of a UTC day (no
+      row yet) charged by the upsert's insert branch, and a refused upsert detected by `changes() = 0`; the 51st creation and a
       `content_len` over the remaining bytes 429 `rate_limited` with the `quota` field and `Retry-After` the
       seconds to 00:00 UTC (≥ 1, ≤ 86,400; at 23:59:59.500 UTC it is 1); two concurrent `PUT`s for the last
       creation (one admitted, one 429); an upload admitted at 23:59 UTC and committed after midnight charged to
@@ -3167,20 +3213,34 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
       deleted while the relay runs takes effect only at the next start, and no page is ever served without
       one. It changes **only** when the Drop dataset is restored or replaced, detected structurally rather than
       by an operator step (Opus delta R4; the "fix a security class structurally" rule):
-      1. **Backups never carry it.** The database backup procedure deletes the `drop_generation` row **in the
-         backup copy** at backup time (after `sqlite3 .backup`, before the copy is stored), so every restore
-         of a backup starts without the row, whether or not the restore follows a runbook.
-      2. **A high-water mark outside the database.** The relay keeps `<data>/drop-hwm.json`, next to the
-         database file and excluded from backups and from the reset runbook's moves: `{"generation": <hex>,
-         "n": <drop_counter.n>}`, written by a temporary file, `fsync`, `rename` and a directory `fsync` at
-         every start (after the check) and after every periodic sweep (≤ 10 minutes) and at a clean shutdown.
+      1. **A high-water mark outside the data directory (the primary mechanism; Opus delta 2, RA).** Today's
+         procedures move or copy the **whole** data directory: dev-deploy-plan step B backs up by `mv
+         /srv/orch-relay/data /var/backups/...` (and creates an empty one), its §6.2 rollback restores by `cp -a`
+         of that directory, and the reset tool moves it too. A file inside it would be rolled back with the
+         database, so the high-water file lives in a **sibling state directory that no backup, restore,
+         rollback or reset touches**: `ORCH_RELAY_STATE` (required when `ORCH_RELAY_DROP=1`; the relay refuses
+         to start Drop if it resolves to a path inside `ORCH_RELAY_DATA`), deployed as
+         `/srv/orch-relay/state/` and `/srv/orch-relay-int/state/` (owner the service user, mode 0700, created
+         by `provision.sh`, as the existing `/srv/orch-relay/apns/` sibling; the parents are `root:<svc>
+         0750`, so the service cannot create it itself; D40c). The file `drop-hwm.json` holds
+         `{"generation": <hex>, "n": <committed drop_counter.n>}`, read from the database (never an in-memory
+         next position, so a crash cannot leave a value that was never committed; Opus delta 2, L-5) and
+         written by a temporary file, `fsync`, `rename` and a directory `fsync`: at every start (after the
+         check), **at most every 60 s while the counter changes**, and at a clean shutdown.
+      2. **Backups never carry the row (defence in depth).** A backup made by `sqlite3 .backup` has the
+         `drop_generation` row deleted **in the backup copy** before it is stored, so a restore of such a copy
+         starts without the row even onto a fresh host whose state directory is empty. D40c replaces
+         dev-deploy-plan step B's `mv` and §6.2's `cp -a` of the whole data directory with this (and keeps the
+         state directory out of every move), with a test that restores a step-B backup and a §6.2 rollback and
+         gets 409 on a stale `generation`.
       3. **The start check**, before the start-up sweep (whose pruning of missing blob files assigns new `n`
          and could otherwise carry the counter past a client's stored position before the first request): the
          relay regenerates the row (a fresh random id, in the same transaction as the check) when the row is
          missing, when the high-water file is missing or unreadable, when its `generation` differs from the
-         row's, or when its `n` is above `drop_counter.n` (the counter went back: a restore). JUDGEMENT CALL: a
-         missing high-water file regenerates too (one extra full relist for each host at D39a2's first start
-         or after a lost data directory, never a missed change).
+         row's, or when its `n` is above `drop_counter.n` (the counter went back: a restore, a rollback or a
+         reset to an empty database, whichever procedure did it). JUDGEMENT CALL: a missing high-water file
+         regenerates too (one extra full relist for each host at D39a2's first start, on a new host or after a
+         lost state directory, never a missed change).
       A plain restart or deploy keeps it. Regenerating at every start was rejected: every deploy would force
       every host into a full relist. A request's `generation`, when present, that differs from the relay's
       answers **409 `generation_changed`** (`{"error": "generation_changed"}`); the client then relists from
@@ -3200,7 +3260,8 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
       `after` or `until` **above the relay's current counter** cannot happen within one generation, so it
       answers 409 `generation_changed` as well, whether or not `generation` was sent (JUDGEMENT CALL, the
       P3-D31 `cursor_ahead` pattern): a second line of defence behind the start check above, for a restore
-      it could not see (a whole-disk snapshot that rolled the high-water file back with the database), as
+      it could not see (a whole-disk snapshot that rolled the state directory back with the database, or
+      changes in the last ≤ 60 s before an unclean stop that a rollback then removed), as
       long as the client lists before the counter passes its stored position. `next` is the last entry's `n`, or null when no visible entry with `n` in (that `n`, `until`]
       remains; null ends the walk. After a complete walk the client stores **`(generation, until)`**, not the
       last entry's `n`, and its next walk starts with `after = until`. `until` reveals no more than an entry's
@@ -3262,7 +3323,10 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
       `{"error": "generation_changed"}`, and it relists from the start.
     - **Pinned by** (D39a2): `generation` in every page for both session kinds; stable across a restart,
       regenerated at start when the meta row is missing, when `drop-hwm.json` is missing or names another
-      `generation`, and when its `n` is above the counter; the check before the start-up sweep (a backup
+      `generation`, and when its `n` is above the counter; dev-deploy-plan step B (a moved data directory and an
+      empty new one) and a §6.2 `cp -a` rollback each regenerating (the state directory untouched); the
+      high-water `n` written within 60 s of a commit and at shutdown, always a committed value; Drop refused at
+      start with `ORCH_RELAY_STATE` unset or inside `ORCH_RELAY_DATA`; the check before the start-up sweep (a backup
       restored without `data/drop/` whose pruning renumbers past the host's stored position still answers
       the host's next list 409); a backup copy without the `drop_generation` row (D40c's backup test); a row
       deleted while running changes nothing until the next start; 409
@@ -3512,10 +3576,14 @@ gestureless claim requires the inbox object's verified author device to be a **c
 person the claim is for** (decide present, not revoked) at claim time, re-checked under the host's store lock
 in the same step as the claim, and the claim to be for that person's own device-authored upload; releasing
 another person's upload, or one whose author device has since been revoked or removed, needs a terminal
-hand-off. Every gestureless own-claim is listed for 7 days under "Shared from your phone" on the dashboard and
-in `orch status` (item, device, time), and retiring one's own upload is a single unsigned action. So
-**revoking the phone before the claim blocks the release**, and anything released before is visible and
-removable at once (what members already downloaded stays read, spec §6.4). No activity window is added: a
+hand-off. In a workspace with several people, any member's own phone upload is thus released to every member
+without a gesture (Opus delta 2, L-1). The host records every gestureless own-claim (item, device,
+`claimed_ms`) and shows it under "Shared from your phone" on the dashboard and in `orch status` until
+`claimed_ms + 7 d`, also after the file is gone (host-side, Q-H9), and retiring one's own upload is a single
+unsigned action. **Revoking the phone before the claim blocks the release**, but the host claims within its
+poll or notice latency, so in practice the block helps only for uploads the host has not yet processed (for
+example while the host was offline; Opus delta 2, L-2); anything released before is visible and removable at
+once (what members already downloaded stays read, spec §6.4). No activity window is added: a
 stolen unlocked phone can already answer questions with `decide`, so the upload risk is comparable to what
 `decide` already allows, bounded by the budget (residual R-D13).
 
@@ -3525,7 +3593,8 @@ position, which every entry's `n` already shows (R-D8). `generation` is unauthen
 could keep it across a restore and serve positions that go back, or change it to force full relists
 (availability only, bounded by item 7's pages); it can already withhold changes (above), so this adds nothing
 to that model, and clients let it reset only their list walk (P3-D39 item 14). An honest relay detects a
-restore structurally (the backup copy carries no `generation`; the high-water file outside the database),
+restore structurally (a high-water file in a state directory outside the data directory; backup copies carry
+no `generation`),
 before its start-up pruning can move the counter past a client's position (R-D11).
 
 **Revoked or removed device.** Its registrations and device wraps are deleted in the revocation or publication
@@ -3588,13 +3657,17 @@ unauthenticated floods.
   `PUT`, P3-D39 step 6), and a member inside a restricted document's
   audience can widen the next version's audience (files avoid it). Accepted for P4; a relay-side ticket
   audience would need the relay to learn ticket ids, which spec §4 avoids.
-- R-D11. The `generation` is regenerated at start when the database came from a backup (the backup copy has
-  no row), when the high-water file outside the database is missing, names another `generation` or holds a
-  higher `n`, all checked before the start-up sweep (P3-D39 item 14; Opus delta R4). What remains: a
-  whole-disk snapshot restore rolls the database, the high-water file and `data/drop/` back together, so the
-  `generation` stays; no mass pruning then renumbers objects, and a client whose stored position is above
-  the counter gets 409 `generation_changed` on its next list (the host's notice rule makes it list at once),
-  unless the counter passes that position first; a full relist (at most 29 days apart, item 7) repairs it.
+- R-D11. The `generation` is regenerated at start whenever the database's counter is below the high-water `n`
+  kept in a state directory outside the data directory, or the file is missing or names another
+  `generation`, or the row is missing (backup copies drop it), all checked before the start-up sweep (P3-D39
+  item 14; Opus delta R4, delta 2 RA). That covers dev-deploy-plan step B, its §6.2 rollback and the reset
+  tool, which move or copy the whole data directory, and any restore of a backup copy. What remains: (a) a
+  whole-disk snapshot restore that rolls the state directory back with the database; (b) changes committed
+  in the last ≤ 60 s before an unclean stop (not yet in the high-water file) that a rollback then removes.
+  In both, a client whose stored position is above the counter gets 409 `generation_changed` on its next list
+  (the host's notice rule makes it list at once) unless the start-up pruning or new writes carry the counter
+  past that position first; then the changes in between are missed until its next full relist (at most 29
+  days apart, item 7). Until D40c ships (state directory, backup step), Drop stays off (§14.9 deploy gate).
 - R-D12. Network ingress of a decide-only device is bounded by the upload bucket (32 MiB/min ≈ 45 GiB a day),
   not by the decide-class budget, which bounds only the bytes read into blob files (P3-D39 item 13). Drained
   bytes are discarded without hashing or storing. Accepted as an availability residual until the device is
@@ -3602,7 +3675,8 @@ unauthenticated floods.
 - R-D13. A stolen **unlocked** phone can push content within the decide-class budget until it is revoked;
   the host claims it without a gesture (it is its owner's own upload), which makes it readable to every
   member; each such claim is visible ("Shared from your phone", `orch status`) and removable at once, and a
-  revocation before the claim blocks it (orch-52 Q-H9).
+  revocation before the claim blocks it, which in practice helps only for uploads the host has not yet
+  processed, since the host claims within its poll latency (orch-52 Q-H9).
 
 ### 14.5 Migration plan (0017, 0018, D39a2's)
 
@@ -3742,11 +3816,25 @@ CREATE TABLE drop_decide_budget (
 The caps (50, 64 MiB) live in the code's conditional update, not in CHECKs, so they can be configured. The
 list `generation` (P3-D39 item 14) needs no schema: it is the row `meta(key = 'drop_generation', value = 32
 lower-case hex)` in 0001's `meta` table, written by the start check (before the start-up sweep) when it is
-missing or when the high-water file shows a restore, and read once into memory. Outside the database:
-`<data>/drop-hwm.json` (`{generation, n}`, mode 0600, written atomically with `fsync` at start, after each
-periodic sweep and at shutdown), excluded from backups and from the reset runbook's moves. The backup
-procedure (D40c) deletes the `drop_generation` row in the **backup copy** at backup time, so no backup carries
-it; its test restores a backup and checks that the first start answers a stale `generation` with 409. The
+missing or when the high-water file shows a restore, and read once into memory. Outside the data directory:
+`$ORCH_RELAY_STATE/drop-hwm.json` (`{generation, n}` with the committed counter, mode 0600, written atomically
+with `fsync` at start, at most every 60 s while the counter changes and at shutdown), in
+`/srv/orch-relay/state/` and `/srv/orch-relay-int/state/` (created by `provision.sh`, untouched by every
+backup, restore, rollback and reset). The backup procedure (D40c, replacing dev-deploy-plan step B's `mv` and
+§6.2's `cp -a` of the whole data directory) deletes the `drop_generation` row in the **backup copy**, so no
+backup carries it; its test restores a backup and a rollback and checks that the first start answers a stale
+`generation` with 409. The claim time (P3-D39 item 7, amendment A2 revision 3):
+
+```sql
+ALTER TABLE drop_objects ADD COLUMN claimed_ms INTEGER;  -- set with claimed_by at the claim; NULL until then
+CREATE TRIGGER drop_objects_claimed_ms_immutable
+BEFORE UPDATE OF claimed_ms ON drop_objects
+WHEN OLD.claimed_ms IS NOT NULL AND NEW.claimed_ms IS NOT OLD.claimed_ms
+BEGIN SELECT RAISE(ABORT, 'claimed_ms is immutable'); END;
+```
+
+D39b's claim transaction sets `claimed_ms` with `claimed_by` (relay clock, the transaction's `now`); if D39b
+lands before D39a2, D39b carries this column and trigger in its own migration and D39a2's omits them. The
 migration itself inserts nothing, so a database restored by any route regenerates the same way.
 `drop_counter` (0017) is unchanged and remains the source of `n` and `until`.
 
@@ -3790,7 +3878,9 @@ id, and a tombstoned id resent as an exact retry; 410 an expired `expires_ms`; 4
 author's unclaimed inbox id, 429 `rate_limited` with `quota` `drop_decide_creations` and `drop_decide_bytes` and
 `Retry-After` the seconds to 00:00 UTC, 429 `slot` for a second concurrent decide-class upload), with the frame given as hex; `drop_list.json` (positions, `direction`, wrap
 filtering for a device and a W session, an unclaimed inbox listed for its author device and absent from another member device's `received` until the claim (amendment A2), `claimed_by` in every entry,
-`next` and null at the end, ascending `n`, the byte cut, no `wxk` wrap returned to a device; amendment A2:
+`next` and null at the end, ascending `n`, the byte cut, no `wxk` wrap returned to a device; amendment A2
+revision 3: `claimed_ms` (null, then set) and `expires_ms` (a file's, null for a document, kept on a
+tombstone) in every entry; amendment A2:
 `generation` and `until` in every page, a two-page `all` walk of a W session ending at `until`, 409
 `generation_changed` for a stale `generation` and for `after` above the counter, 400 for `until` without
 `generation`, 403 `not_eligible` for a device asking for `all` with a body otherwise valid (no `after`, so the
@@ -3801,7 +3891,8 @@ missing `generation` cannot answer 400 first; Opus delta L5); amendment A1:
 `drop_descriptors.json` (the byte-cut page); `drop_descriptor_get.json` (with `ETag`; 404
 for an absent version, 403 for a foreign object in any state, 410 before a version's 404; an expired device-only
 file read by its audience device 410 before the sweep and 403 after it, by the W session 410 after it); `drop_wraps_get.json`; `drop_blob_get.json` (headers, 403 unclaimed inbox for its author, 403 for another member device, 410 pruned);
-`drop_wraps_put.json`; `drop_claim.json` (won, idempotent, lost with `claimed_by`, not inbox);
+`drop_wraps_put.json`; `drop_claim.json` (won, idempotent, lost with `claimed_by`, not inbox; the following list entry's `claimed_ms`
+unchanged by the idempotent retry, amendment A2);
 `drop_retire.json` (200 `{state: "retired"}` for a document and for a file with a matching `expect_version`
 and `expect_head`, idempotent 200 for a retired and for an expired object with the stored state, 409
 `version_conflict` with `current` and `state` for a stale version and for a stale head (object untouched), 400
@@ -3932,22 +4023,22 @@ merged before its review and green CI). Efforts are implementer days (re-estimat
 | PR | Content | Effort | Depends |
 |---|---|---|---|
 | D39a1 | Drop write and read, storage: migration 0017, the dedicated async endpoint and file limiter, the frame parser and streamed upload (temp file, hash, `fsync`, unique rename outside the lock), the check order with the fence, exact retry, CAS, wrap, inbox-wrap and recipients checks, the bounded early-answer drain and its pool, list with positions, spliced pages and byte cuts, read slots held until sent, the host `drop` notice, descriptor, descriptor-page and blob GET (streamed), read concurrency bound, slots and minimum rates, the start-up sweep, the real-socket and Caddy early-answer tests; the explicit `PLANNED` route list in `tests/test_http_fixtures.py` (Opus L13), emptied as routes land; **amendment A1:** the list entry shape with `object_id`, `version` and `state` from the start (`live`, `pruned` from the start-up sweep with its new `n`, `expired` computed at read time, tombstone entries with `descriptor` null, `tombstone_until_ms`), the `tombstone_kind`, `head_author_id`, `head_hash` and `audience` columns and the `drop_audience` table in 0017; orch-52 change 0: the fence re-checked inside the `PUT` commit and its takeover-during-transfer test; Opus delta R1–R3: the `PUT` step 6 audience 403, non-empty `recipients`, the 60 s file floor, audience rows charged to the author's head share | 4.5–5 + 0.75 review | this design |
-| D39a2 | Drop limits and lifecycle: blob and head quotas with per-device shares, document count, reservations, buckets, the expiry, tombstone, pruning and device-wrap sweepers (batched by deleted rows; the expiry sweep assigns the new `n`), retire for documents **and files** (amendment A1: a file's version, wraps and usage released in the retire transaction, the unlink after commit, `{state}` answers, idempotency against expiry), the `retired` list state; orch-52 changes 0–3: the retire's in-transaction fence and `expect_version`/`expect_head` precondition (409 `version_conflict`), the bounded idempotent retry, the takeover-versus-retire race tests and the `drop.relay_retire` vectors, `tombstone_ms = expires_ms` on expiry, the notice tests per state change, audience rows deleted at an expiry and kept (moved to the workspace charge) on a retire; the `rotation_required` refusal if the owner adopts it, the peak-RSS bench (uploads plus descriptor pages); **amendment A2:** decide-class uploads (the widened step-2 admission, the step-5 shape check, the commit re-check, the decide-class budget with its table and day sweep; +0.5), and the W-session list walks (`direction: "all"`, the `generation` meta row and start-up insertion, `until`, 409 `generation_changed` including `after` above the counter; +0.5), their fixtures and the `drop.relay_put` and `drop.relay_list_walk` vectors; A2 revision 2: the budget charged at admission with its conditional update and failed-stream charges, the decide-class slot, the inbox visibility filter on lists, reads and `PUT` step 6, the `generation` start check with `drop-hwm.json` (+0.5) | 4.75–5.25 + 1 | D39a1 |
+| D39a2 | Drop limits and lifecycle: blob and head quotas with per-device shares, document count, reservations, buckets, the expiry, tombstone, pruning and device-wrap sweepers (batched by deleted rows; the expiry sweep assigns the new `n`), retire for documents **and files** (amendment A1: a file's version, wraps and usage released in the retire transaction, the unlink after commit, `{state}` answers, idempotency against expiry), the `retired` list state; orch-52 changes 0–3: the retire's in-transaction fence and `expect_version`/`expect_head` precondition (409 `version_conflict`), the bounded idempotent retry, the takeover-versus-retire race tests and the `drop.relay_retire` vectors, `tombstone_ms = expires_ms` on expiry, the notice tests per state change, audience rows deleted at an expiry and kept (moved to the workspace charge) on a retire; the `rotation_required` refusal if the owner adopts it, the peak-RSS bench (uploads plus descriptor pages); **amendment A2:** decide-class uploads (the widened step-2 admission, the step-5 shape check, the commit re-check, the decide-class budget with its table and day sweep; +0.5), and the W-session list walks (`direction: "all"`, the `generation` meta row and start-up insertion, `until`, 409 `generation_changed` including `after` above the counter; +0.5), their fixtures and the `drop.relay_put` and `drop.relay_list_walk` vectors; A2 revision 2: the budget charged at admission with its conditional update and failed-stream charges, the decide-class slot, the inbox visibility filter on lists, reads and `PUT` step 6, the `generation` start check with `drop-hwm.json` (+0.5); A2 revision 3: the budget upsert and the error-path give-back, `ORCH_RELAY_STATE` and the 60 s high-water writer, `claimed_ms` and `expires_ms` in list entries, and +0.25 for the tight revision-2 estimate (Opus delta 2, L-7) (+0.5) | 5.25–5.75 + 1 | D39a1 |
 | D39b | Claims and host re-wraps: `POST claim` (§10.5 transaction), `PUT .../wraps` (`wrap_conflict`), the round trip with `test_round_trip_drop_claim` | 2 + 0.5 | D39a1 |
 | D40a | Push register and unregister: migration 0018, token sealing with the token secret, device-bound ids, same-person move, pruning on revocation and removal, the stale sweep, the disabled-push 404, the partial-configuration refusal | 1.5 + 0.5 | this design |
 | D40b | The host send route and APNs delivery: checks, budgets, the dedup LRU, the in-memory queue and its per-account cap, the HTTP/2 client (a new runtime dependency: `httpx[http2]`, pinned), ES256 JWT cached per key, the per-environment key mapping, the answer table with the 403 backoff, credential loading, the fake APNs transport, log hygiene tests, the end-to-end test | 3.5–4 + 1 | D40a |
-| D40c | Operations (infra session, outside this repo's code): the Caddy body-size exception and timeouts for the Drop upload path (§14.8; deployed before D39 ships), the push configuration on the public unit only (the existing key file, optionally `LoadCredentialEncrypted`), the separate-users credential check, `provision.sh` without VAPID and its 0640 comment, the runbook for key placement and rotation and for `data/drop/` in backups and resets, dev-deploy-plan R8 and P5 | ~1 | D40b (the Caddy part before any D39 deploy) |
+| D40c | Operations (infra session, outside this repo's code): the Caddy body-size exception and timeouts for the Drop upload path (§14.8; deployed before D39 ships), the push configuration on the public unit only (the existing key file, optionally `LoadCredentialEncrypted`), the separate-users credential check, `provision.sh` without VAPID and its 0640 comment, the runbook for key placement and rotation and for `data/drop/` in backups and resets, dev-deploy-plan R8 and P5; amendment A2: the state directories `/srv/orch-relay{,-int}/state/` in `provision.sh` and `ORCH_RELAY_STATE` in the units, dev-deploy-plan step B's `mv` and §6.2's `cp -a` of the whole data directory replaced by `sqlite3 .backup` with the `drop_generation` row deleted in the copy (the state directory never moved), with a restore and rollback test | ~1.5 | D40b (the Caddy part before any D39 deploy) |
 
 **Deploy gate (Opus review of PR #72, F1).** D39a1 ships its routes behind `ORCH_RELAY_DROP=1`, default off (every Drop route answers 404 as absent): without D39a2's quotas, reservations, upload bucket, expiry sweep and retire, any `operate` member could fill the database and the disk. Migration 0017 and the start-up sweep run either way. D39a2 removes the requirement or keeps the switch as a kill-switch; no relay serves Drop before D39a2 lands. The same review added to D39a1: a total deadline for the frame and head (30 s) and for the whole transfer (10 minutes, from the upload slot), account (`person`) slot caps for W sessions, the descriptor-page cut chosen from `descriptor_len` before any descriptor is read, a start-up sweep that never loads descriptors, 503 `overloaded` on a disk error, a non-member device refused before any slot, and a drained 413 for an oversized head.
 
 **D39a2 notes from the Opus delta review of PR #72 (round 3).** Fixed in D39a1: a cancelled or unknown commit outcome keeps the landed blob (the start-up sweep deletes a file no `stored` row names; N1); a SQLite `OperationalError` at the commit answers 503 `overloaded` with `Retry-After` (N2); `members(device_id)` is indexed in 0017 (N4); `descriptor_len` is CHECKed against the descriptor in 0017. For D39a2 to settle: (N3) an EIO on the directory `fsync` after the rename answers 503 but leaves the renamed blob (up to 26 MiB) until the next start-up sweep: D39a2's periodic sweep (or an unlink in that path) removes it; (N5) a host session's slots count against its account owner, so the owner's own devices share the person caps (3 uploads, 4 reads, 8 downloads) with all of that account's hosts: D39a2 decides whether hosts get a separate account key with its own caps; (nits) `ORCH_RELAY_DROP_NOTICE` works while `ORCH_RELAY_DROP` is off (it then reports objects only a past enabled run stored; D39a2 may tie it to the Drop switch); an error while closing the temporary file turns a 400 into a 503.
 
-The **smallest end-to-end slice** is D39a1 + D39a2 + D40a + D40b + D40c (**~18.5–20 days** with reviews,
+The **smallest end-to-end slice** is D39a1 + D39a2 + D40a + D40b + D40c (**~19.5–21 days** with reviews,
 the table's sum; ~11 in revision 1, ~14–15 in revision 2, ~15.5–17 in revision 3, ~16.75–18.25 after amendment
 A1; amendment A1 with orch-52's changes 0–4 and the Opus delta's R1–R3 is already in the D39a1 and D39a2 rows,
-not added again; amendment A2 adds 1.5 implementer days and 0.25 review day to D39a2 (revision 2's 0.5 included); D39b's and
-D40b's in-transaction fence re-checks fit their existing estimates). D40c also carries A2's backup step
-(the `drop_generation` row deleted in the backup copy, `drop-hwm.json` excluded) and its restore test within its ~1 day:
+not added again; amendment A2 adds 2 implementer days and 0.25 review day to D39a2 (revisions 2 and 3
+included) and 0.5 day to D40c (the state directories and the backup and rollback procedure); D39b's and
+D40b's in-transaction fence re-checks and D39b's `claimed_ms` fit their existing estimates):
 a Python harness with a device (suite 2, the ref client) uploading a file to its workspace, the host stub
 seeing the `drop` notice, listing and downloading it, uploading a reply, and sending `drop.new` through the fake
 APNs transport, whose captured body the ref NSE logic (`push` vectors' receiver) opens and verifies. D39b
@@ -4028,16 +4119,24 @@ unless the owner decides otherwise):**
   page, relists in full on 409 `generation_changed`, confirms a full walk's absences with the follow-up walk
   from `until` and takes no irreversible action on absence alone, and lists at once when its `drop` notice
   falls below its stored position (P3-D39 item 14). *Agreed.*
-- **Q-H9 (amendment A2 revision 2, after the Opus delta R2; orch-52, 15 Oct 2026: agreed host-side rule).**
+- **Q-H9 (amendment A2 revisions 2 and 3, after the Opus delta R2 and delta 2; orch-52, 15 Oct 2026: agreed
+  host-side rule; the window decided by orch-52, cc orch-fa).**
   The host claims an inbox object **without a gesture** only when (1) its verified author device is a
   **current member device of the person the claim is for** (`decide` present, not revoked) at claim time,
   re-checked under the host store lock in the same step as the claim, and (2) the claim is for that person's
   own device-authored upload; "the person the claim is for" is the person on whose behalf the host releases
   the object to the workspace (the relay's claimer is the workspace, P3-D39 item 9). Every other release
   (another person's upload, or one whose author device has since been revoked or removed) needs a terminal
-  hand-off (`drop.handoff_required` to a phone that asks). Every gestureless own-claim appears for 7 days in a
-  "Shared from your phone" list on the dashboard and in `orch status` (item, device, time), and retiring one's
-  own upload stays a single unsigned action. No activity window. Residual R-D13: a stolen unlocked phone can
+  hand-off (`drop.handoff_required` to a phone that asks). In a workspace with several people, any member's
+  own phone upload is so released to every member. **"Shared from your phone" is host-side:** at each
+  gestureless claim the host persists its own record (item, author device, `claimed_ms`) and shows it on the
+  dashboard and in `orch status` until `shared_until_ms = claimed_ms + 7 d`, independent of the file; once the
+  file is gone (`expires_ms` passed, or retired) the record stays with the state `expired` or `retired` and
+  the retire action is hidden. The relay promises nothing about listing the entry after its tombstone is
+  deleted: its list entries carry `claimed_by`, `claimed_ms` and `expires_ms` (P3-D39 item 7) until then, and
+  after that the host's own record is the only source. Retiring one's own upload stays a single unsigned
+  action. No activity window. A revocation before the claim blocks it, which helps in practice only for
+  uploads the host has not yet processed. Residual R-D13: a stolen unlocked phone can
   push content within the budget until revoked; the host claims it without a gesture; it is visible and
   removable at once. *Agreed (host-side; the relay enforces nothing here).*
 
@@ -4105,7 +4204,9 @@ existing both-gateway key (orch-d6 correction, 15 Oct).
   directions completed under one `generation`, `generation` an unauthenticated hint, no automatic resend of
   confirmed uploads after a restore), sends `generation` on every list with `after`, and sends the new
   request fields only to a relay running D39a2 (D39a1 refuses them); `direction: "all"` is 403 for a device.
-  (3) **Confirmed by orch-f1, 15 Oct:** a device's lists no longer show another author's unclaimed inbox
+  The phone backs off exponentially after two consecutive closed connections on a decide-class upload and
+  stops at its attempt cap (each resend costs bucket tokens and a drain). Every list entry also carries
+  `claimed_ms` and `expires_ms` (revision 3; may be ignored). (3) **Confirmed by orch-f1, 15 Oct:** a device's lists no longer show another author's unclaimed inbox
   object (it is 403 by id); the phone's own unclaimed uploads stay in its `sending`, and claimed objects are
   visible as before; the phone's claim flow does not list others' unclaimed items (P3-D39 items 6 and 13).
 
