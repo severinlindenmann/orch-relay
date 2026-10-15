@@ -438,28 +438,91 @@ def test_the_revocation_helper_is_pair_scoped(client):
         assert revoked(con, LAPTOP) and not revoked(con, DEVICE)
 
 
-def test_no_relay_code_reads_revocations_by_device_id_without_the_registered_person():
-    """Structural (R1): every SELECT on `revocations` in the relay either joins `devices` on the
-    person or compares `person_id`; Drop code goes through directory.revoked_sql only."""
+PAIR_SCOPED = {
+    # every statement of the relay that names the `revocations` table, exactly (never by file).
+    "bridge.py": [
+        "SELECT coalesce(max(r.cursor),0) FROM revocations r JOIN ever_devices e ON e.device_id=r.device_id JOIN devices d ON d.device_id=r.device_id AND d.person_id=r.person_id WHERE e.workspace_id=? AND NOT EXISTS (SELECT 1 FROM evidence_persons x WHERE x.person_id=d.person_id)"
+    ],
+    "checkpoints.py": ["SELECT 1 FROM revocations WHERE device_id=? AND person_id=?"],
+    "directory.py": [
+        "EXISTS (SELECT 1 FROM revocations rv JOIN devices dv ON dv.device_id=rv.device_id AND dv.person_id=rv.person_id WHERE rv.device_id={})",
+        "EXISTS (SELECT 1 FROM revocations rv JOIN devices dv ON dv.device_id=rv.device_id AND dv.person_id=rv.person_id WHERE rv.device_id=",
+        "INSERT INTO revocations VALUES (?,?,?,?,?,?) ON CONFLICT(device_id,person_id) DO UPDATE SET record=excluded.record, reason=excluded.reason, received_ms=excluded.received_ms, cursor=excluded.cursor",
+        "SELECT 1 FROM revocations WHERE device_id=? AND person_id=?",
+        "SELECT * FROM revocations WHERE device_id=? AND person_id=?",
+        "SELECT * FROM (SELECT r.person_id, r.reason, r.record, r.cursor, CASE WHEN d.device_id IS NOT NULL THEN 0 WHEN EXISTS (SELECT 1 FROM checkpoint_revocations c WHERE c.device_id=r.device_id AND c.person_id=r.person_id) THEN 1 ELSE 2 END rank FROM revocations r LEFT JOIN devices d ON d.device_id=r.device_id AND d.person_id=r.person_id AND NOT EXISTS (SELECT 1 FROM evidence_persons e WHERE e.person_id=d.person_id) WHERE r.device_id=?) WHERE (rank, cursor) > (?, ?) ORDER BY rank, cursor LIMIT ?",
+        "SELECT cursor,record FROM revocations r WHERE person_id=? AND cursor>? AND (? IS NULL OR EXISTS (SELECT 1 FROM ever_devices e WHERE e.workspace_id=? AND e.device_id=r.device_id)) ORDER BY cursor LIMIT ?",
+        "SELECT COALESCE(MAX(cursor),0)+1 FROM revocations",
+    ],
+    "unpublished.py": [
+        "FROM ever_devices e CROSS JOIN devices d CROSS JOIN revocations r JOIN accounts a ON a.person_id = d.person_id LEFT JOIN checkpoint_revocations c ON c.workspace_id = e.workspace_id AND c.device_id = r.device_id AND c.person_id = r.person_id WHERE e.workspace_id = ? AND d.device_id = e.device_id AND r.device_id = d.device_id AND r.person_id = d.person_id AND NOT EXISTS (SELECT 1 FROM evidence_persons x WHERE x.person_id = d.person_id) AND (c.reason IS NULL OR (r.reason = 'compromised' AND c.reason <> 'compromised'))",
+        "SELECT coalesce(max(cursor), 0) FROM revocations",
+    ],
+}
+
+
+def fold_sql(n):
+    """A string expression folded across implicit and `+` concatenation and f-strings."""
+    import ast
+
+    if isinstance(n, ast.Constant) and isinstance(n.value, str):
+        return n.value
+    if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Add):
+        a, b = fold_sql(n.left), fold_sql(n.right)
+        return None if a is None or b is None else a + b
+    if isinstance(n, ast.JoinedStr):
+        return "".join(v.value if isinstance(v, ast.Constant) else "{}" for v in n.values)
+    return None
+
+
+def names_revocations(text):
+    import re
+
+    return bool(
+        text
+        and re.search(r"\b(SELECT|INSERT|UPDATE|DELETE|FROM|JOIN)\b", text)
+        and re.search(r"(?<![A-Za-z_])revocations\b", text)
+    )
+
+
+def sql_literals_naming_revocations(root=None):
+    import ast
     import re
     from pathlib import Path
 
-    root = Path(life_module().__file__).parent
-    for path in sorted(root.glob("*.py")):
-        text = path.read_text()
-        for m in re.finditer(r"FROM revocations\b[^;\"]*", text):
-            chunk = text[m.start() : m.start() + 400]
-            ok = (
-                "device_id=" not in chunk.split("\n")[0]
-                or "person_id" in chunk
-                or "JOIN devices" in chunk
-            )
-            allowed = path.name in (
-                "bridge.py",
-            )  # notice cursor over ever_devices, no access decision
-            assert ok or allowed, (path.name, chunk[:120])
-    for name in ("drop.py", "drop_life.py", "drop_quota.py"):
-        assert "FROM revocations" not in (root / name).read_text(), name
+    found = {}
+    for path in sorted(Path(root or L.__file__).parent.glob("*.py")):
+        for n in ast.walk(ast.parse(path.read_text())):
+            if isinstance(n, (ast.BinOp, ast.Constant, ast.JoinedStr)):
+                text = fold_sql(n)
+                if names_revocations(text):
+                    found.setdefault(path.name, set()).add(re.sub(r"\s+", " ", text).strip())
+    return found
+
+
+def test_every_sql_statement_naming_revocations_is_an_exact_allowlisted_pair_scoped_one():
+    """Structural (R1): the allowlist is exact statements, never files. A new read of `revocations`
+    (plain, split over literals, a JOIN) fails here until a reviewer allows its exact text."""
+    found = sql_literals_naming_revocations()
+    assert {k: sorted(v) for k, v in found.items()} == {
+        k: sorted(v) for k, v in PAIR_SCOPED.items()
+    }
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        'q = "SELECT 1 FROM revocations WHERE device_id=?"',
+        'q = "SELECT 1 " "FROM " "revocations WHERE device_id=?"',
+        'q = "SELECT 1 FROM a JOIN " + "revocations r ON 1"',
+        'q = f"SELECT 1 FROM {t} JOIN revocations r ON 1"',
+    ],
+)
+def test_the_guard_sees_plain_split_joined_and_fstring_reads(tmp_path, src):
+    """The scanner itself, on a scratch directory: a new unjoined read of any shape is found."""
+    (tmp_path / "x.py").write_text(src + "\n")
+    found = sql_literals_naming_revocations(tmp_path / "x.py")
+    assert list(found) == ["x.py"]
 
 
 def life_module():
@@ -618,7 +681,24 @@ def test_n3_an_eio_on_the_directory_fsync_unlinks_the_landed_blob(client, monkey
     assert list(client.app.state.drop.tmp.iterdir()) == []
 
 
-def test_the_maintenance_loop_survives_any_exception_and_logs_it(client, monkeypatch, caplog):
+def run_loop(client, run, until, period=0.01, steps=300):
+    life(client).run = run
+    life(client).period = period
+
+    async def probe():
+        task = asyncio.create_task(life(client).maintenance())
+        for _ in range(steps):
+            await asyncio.sleep(0.01)
+            if until():
+                break
+        alive = not task.done()
+        task.cancel()
+        return alive
+
+    return asyncio.run(probe())
+
+
+def test_the_maintenance_loop_survives_any_exception_logs_once_and_resets(client, caplog):
     calls = []
 
     def boom():
@@ -627,23 +707,95 @@ def test_the_maintenance_loop_survives_any_exception_and_logs_it(client, monkeyp
             raise ValueError("a bug in a phase")
         return set()
 
-    monkeypatch.setattr(life(client), "run", boom)
+    with caplog.at_level(logging.ERROR):
+        assert run_loop(client, boom, lambda: len(calls) >= 4) is True
+    assert len(calls) >= 4
+    assert life(client).failures == 0 and life(client).failures_total == 2  # reset by a success
+    assert caplog.text.count("drop sweep cycle failed") == 1  # rate-limited: the first at once
+    assert life(client).last_logged is None
+
+
+def test_failure_logging_repeats_after_the_interval(client, caplog, monkeypatch):
+    monkeypatch.setattr(L, "LOG_EVERY", 0.0)
+    calls = []
+
+    def boom():
+        calls.append(1)
+        raise ValueError("persistent")
+
+    with caplog.at_level(logging.ERROR):
+        run_loop(client, boom, lambda: len(calls) >= 3)
+    assert caplog.text.count("drop sweep cycle failed") >= 3
+
+
+def test_a_persistent_failure_is_logged_once_per_interval_not_per_cycle(client, caplog):
+    calls = []
+
+    def boom():
+        calls.append(1)
+        raise ValueError("persistent")
+
+    with caplog.at_level(logging.ERROR):
+        run_loop(client, boom, lambda: len(calls) >= 5)
+    assert len(calls) >= 5 and caplog.text.count("drop sweep cycle failed") == 1
+
+
+def test_the_loop_sleeps_after_a_failure_no_hot_spin(client):
+    calls = []
+
+    def boom():
+        calls.append(1)
+        raise ValueError("persistent")
+
+    run_loop(client, boom, lambda: False, period=0.2, steps=50)  # about half a second
+    assert 1 <= len(calls) <= 5
+
+
+def test_cancellation_and_interrupts_pass_through_the_loop(client):
+    def interrupt():
+        raise KeyboardInterrupt
+
+    life(client).run = interrupt
     life(client).period = 0.01
 
     async def probe():
         task = asyncio.create_task(life(client).maintenance())
-        for _ in range(300):
-            await asyncio.sleep(0.01)
-            if len(calls) >= 4:
-                break
-        alive = not task.done()
-        task.cancel()
-        return alive
+        await asyncio.wait_for(task, 5)
 
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(probe())
+
+    async def cancelled():
+        task = asyncio.create_task(life(client).maintenance())
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    life(client).run = lambda: set()
+    asyncio.run(cancelled())
+
+
+def test_one_object_raising_a_non_sqlite_error_does_not_stop_the_healthy_ones(client, caplog):
+    a, _w, ab = upload("a", expires=NOW + 3600_000)
+    assert put(client, a, ab).status_code == 201
+    b_, _w, bb = upload("b", expires=NOW + 7200_000, author=LAPTOP)
+    assert put(client, b_, bb, author=LAPTOP).status_code == 201
+    at(client, NOW + 8000_000)
+    real = life(client).tombstone
+
+    def flaky(con, obj, kind, now, *rest):
+        if obj["object_id"] == a["o"]["object_id"]:
+            raise ValueError("a bug on one object")
+        return real(con, obj, kind, now, *rest)
+
+    life(client).tombstone = flaky
     with caplog.at_level(logging.ERROR):
-        assert asyncio.run(probe()) is True
-    assert len(calls) >= 4 and life(client).failures == 2
-    assert caplog.text.count("drop sweep failed") == 2
+        life(client).run()
+    rows_ = objects(client)
+    assert rows_[a["o"]["object_id"]]["tombstone_kind"] is None
+    assert rows_[b_["o"]["object_id"]]["tombstone_kind"] == "expired"
+    assert "drop sweep failed, skipped" in caplog.text
 
 
 @pytest.mark.parametrize("phase", ["expiry", "documents", "pruning"])

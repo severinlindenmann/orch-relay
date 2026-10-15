@@ -30,7 +30,7 @@ idempotent answer for a tombstone, else the tombstone with a new `n`.
 
 import asyncio
 import logging
-import sqlite3
+import time
 from contextlib import suppress
 from pathlib import Path
 
@@ -48,6 +48,7 @@ BATCH = 4096  # deleted rows per write transaction, cascaded rows included (item
 KEEP_VERSIONS = 8  # newest document versions that always keep their blob (item 5)
 PRUNE_AGE = 30 * DAY_MS
 SWEEP_PERIOD = 600  # seconds (item 5: a sweeper deletes within 10 minutes)
+LOG_EVERY = 300.0  # seconds between logged sweep-cycle failures (the first is logged at once)
 KEEP_DAYS = 1  # day rows older than the previous UTC day are deleted
 
 
@@ -89,7 +90,9 @@ class Life:
         self.d, self.bridge = drop.d, drop.bridge
         self.period = SWEEP_PERIOD
         self.cycles = 0
-        self.failures = 0
+        self.failures = 0  # consecutive failed cycles; reset by a successful one
+        self.failures_total = 0
+        self.last_logged = None
 
     @property
     def on(self):
@@ -214,7 +217,7 @@ class Life:
         con.execute("SAVEPOINT sweep")
         try:
             result = fn()
-        except sqlite3.Error:
+        except Exception:  # any failure of one object: isolate it, never block the batch (R3)
             log.exception("drop sweep failed, skipped: %s", key)
             con.execute("ROLLBACK TO sweep")
             con.execute("RELEASE sweep")
@@ -411,10 +414,19 @@ class Life:
                 changed = await run_in_threadpool(self.run)
                 if changed and self.d.changed:
                     self.d.changed(*[("ws", ws) for ws in sorted(changed)])
-            except Exception:  # any failure: log it, the next cycle retries (R3)
+            except Exception:  # any failure: log it (rate-limited), the next cycle retries (R3)
                 self.failures += 1
-                if self.failures <= 3 or self.failures % 60 == 0:  # rate-limited, one line each
-                    log.exception("drop sweep failed (%d so far)", self.failures)
+                self.failures_total += 1
+                now = time.monotonic()
+                if self.last_logged is None or now - self.last_logged >= LOG_EVERY:
+                    log.exception(
+                        "drop sweep cycle failed (%d in a row, %d in all)",
+                        self.failures,
+                        self.failures_total,
+                    )
+                    self.last_logged = now
+            else:
+                self.failures, self.last_logged = 0, None
             await asyncio.sleep(self.period)
 
     # --- retire ----------------------------------------------------------------------------------
