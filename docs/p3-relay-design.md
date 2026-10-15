@@ -2363,7 +2363,7 @@ No new decisions.
 | P3-D36 | Pre-public limits: staging weighted by body size (one token per started 64 KiB, burst 28,801, refill 600/min); a node-quota reserve (5 %, 200,000 nodes) only owner-signed restores may use; an audited per-account override of the workspaces cap (migration 0016, `orch-relay account-cap`, no HTTP route) (checklist items 3, 4, 8) | §10, proto §19.4, §19.8 |
 | P3-D37 | A hard maximum publication size (`ORCH_RELAY_MAX_PUBLICATION_BYTES`, default 16 MiB, 1..64 MiB): `too_large` at the staging manifest (implied size, before any page) and pages (413, running total) and at the final publication before any fold (400, phase A and C); restores alike; the publication heads cap defaults to the heads it implies (checklist item 1) | §10, proto §19.6, §19.8 |
 | P3-D38 | H12d relay scope: `GET /v2/relay-info` (`reader` a code constant, 1; `max_publication_bytes`; unauthenticated, per-address throttled, `no-store`, an honest-operator statement), `AUTH_KINDS` += `convenience` (deploy before any convenience restore), the `reader_decl`/pair meta v2/`rd` vectors and protocol text | §10, proto §8.3, §8.6, §19.1, §19.4, §19.8 |
-| P3-D39 | Drop at the relay (P4 basics, D39a1/D39a2/D39b): `/v2` routes; one streamed `ODU2` upload frame (head ≤ 512 KiB, exact `Content-Length`) checked before any blob byte is read, early answers drained; descriptor ≤ 96 KiB, `meta` ≤ 64 KiB + 16; tombstone check, then exact retry, before the CAS; `wk` wraps at the current epoch (409 `stale_epoch`; rewrap the same `DEK`); `wxk` and `recipients` within the own workspace (cross-workspace is P6); per-caller wrap filtering; unclaimed inbox files listed, blob after the claim; list by change position and a host `drop` notice; byte-cut pages and bounded read slots; 26 MiB blobs; blob and head quotas per device, workspace, account and global with reservations; slot caps per device, person and workspace with minimum rates; 7-day files, documents without expiry and a host retire, 30-day tombstones, pruned old document blobs, batched sweeps; claims and host re-wraps (`wrap_conflict`); the Caddy body-cap exception before deploy; migration 0017 | §14.2, proto §19.9 |
+| P3-D39 | Drop at the relay (P4 basics, D39a1/D39a2/D39b): `/v2` routes; one streamed `ODU2` upload frame (head ≤ 512 KiB, exact `Content-Length`) checked before any blob byte is read, early answers drained; descriptor ≤ 96 KiB, `meta` ≤ 64 KiB + 16; tombstone check, then exact retry, before the CAS; `wk` wraps at the current epoch (409 `stale_epoch`; rewrap the same `DEK`); `wxk` and `recipients` within the own workspace (cross-workspace is P6); per-caller wrap filtering; unclaimed inbox files listed, blob after the claim; list by change position and a host `drop` notice; byte-cut pages and bounded read slots; 26 MiB blobs; blob and head quotas per device, workspace, account and global with reservations; slot caps per device, person and workspace with minimum rates; 7-day files, documents without expiry and a host retire of files and documents (amendment A1: an `expect_version`/`expect_head` precondition, the fence re-checked inside the transaction, idempotent only within the tombstone window), 30-day tombstones listed with a `state` (`live`, `pruned`, `expired`, `retired`; every state change raises `n` and the host notice) and a `tombstone_until_ms`, a full reconciliation after a gap beyond the retention, pruned old document blobs, batched sweeps; claims and host re-wraps (`wrap_conflict`); the Caddy body-cap exception before deploy; migration 0017 | §14.2, proto §19.9 |
 | P3-D40 | Push at the relay: per-(device, workspace, env, topic) APNs registrations with sealed tokens; same-person token move; host send route W(g) with targets, current-epoch outer, priority and TTL; generic `aps` text plus `o`, no collapse id or badge; in-memory best-effort queue, dedup LRU, budgets per device and workspace; APNs answer handling (410 deletes, 403 backoff); a per-environment key mapping (today the owner's one both-gateway key `TD27F9Z9V7`) and the token secret as files of the public instance's user (optionally `LoadCredentialEncrypted`), never in the database, logs or git; 404 when disabled; migration 0018 | §14.3, §14.7, proto §19.10 |
 
 ## 14. Drop and push, designed ahead of R3 (P3-D39, P3-D40)
@@ -2374,6 +2374,13 @@ orch-f1's phone-side review (R1–R6), orch-52's host-side review (relay-side it
 the existing APNs key. Revision 3 (15 Oct) folds in the Opus delta review of revision 2 (PASS WITH REQUIRED
 CHANGES: N1–N5, L-a to L-j) and orch-f1's check (S1–S3); the finding ids are cited where each lands. A Codex challenge is pending; the owner
 questions of §14.9 are **open**.
+
+**Amendment record** (changes after the merged design, before D39a1's code):
+
+| # | Date | Change | Agreed by |
+|---|---|---|---|
+| A1 | 15 Oct 2026 | The host retire covers **files** as well as documents (a file's bytes, wraps and usage released in the retire transaction); list entries carry `object_id`, `version` and a `state` (`live`, `pruned`, `expired`, `retired`); expired and retired objects stay listed as tombstones for the 30-day window, and every state change raises the change position. With orch-52's changes: (0) the holder generation and lease are re-checked inside the mutation transaction of every fenced Drop write and at the push queue admission, with a takeover-versus-retire race test; (1) retire requires `{expect_version, expect_head}`, checked atomically (409 `version_conflict`, object untouched; the same retry against the tombstone 200); (2) entries carry `tombstone_until_ms`, a gap longer than the 30-day retention forces a full reconciliation, every state change raises the host `drop` notice, an expiry reaches incremental lists after the sweep (~10 minutes); (3) a retire is never replayed after the window, a 404 then proves nothing and the host reconciles; (4) visibility: the 403/404 existence oracle stated precisely, restricted tickets are the host's job (device wraps and device-only `recipients`, filtered host listings), R-D10. Opus delta of this amendment (PASS WITH REQUIRED CHANGES, retire races sound): R1 the `PUT` answers 403 to a device outside a device-only audience before any 410, exact retry or CAS; R2 an explicit `drop_objects.audience` (`space`, `inbox`, `devices`), audience rows never pruned by membership changes, `recipients: []` 400; R3 a 60 s minimum file lifetime, audience rows deleted at expiry and kept (workspace-charged) only on retired tombstones, charge scopes stated, Q-H6 corrected; lows L1–L7 (push re-check off the event loop, 404 inside the retire transaction, canonical `expect_head`, `state` in the 409 body, a 29-day retry and reconciliation margin, the estimate restated, the 403 rationale); Opus delta 2: the list row's relist bound, the expired device-only file's 410-then-403 after the sweep (author included) with fixtures, a host MUST for re-added devices, the retire charge kept on the workspace with a host bound, the request `now` for the 60 s floor, the on-time-sweep assumption (P3-D39 items 1, 3, 4, 5, 6, 7, 8, 9; P3-D40 item 4; §14.4; §14.5; §14.6; §14.9; proto §19.9) | orch-fa (dashboard): host-mediated retire is enough, and the list state is exactly what the dashboard needs; orch-d6 rulings (no device delete in P4, host-mediated only); orch-52 15 Oct 2026: agreed with changes 0-4 (host-only retire for files, fenced by `Orch-Holder`, bounded idempotency in the tombstone window); to be checked by orch-f1 (phone list parser) |
+
 Owner decisions (via orch-d6, 14 and 15 Oct): the end-to-end target includes **both** Drop and push; this design
 goes ahead of R3; the relay uses the owner's existing APNs key (Key ID `TD27F9Z9V7`, created by the owner on 8 Oct,
 already on the VPS; orch-d6 correction, 15 Oct) as a VPS secret that is never printed, logged or committed. Any
@@ -2401,7 +2408,8 @@ members read them. Every `wxk` wrap and every workspace id in `recipients` names
 inbox and rewrap paths already use them (D39b); in P4 an `inbox` object is a `file` claimed by its own workspace
 (M7). Out: cross-workspace addressing (ws→ws mailboxes and foreign inbox claims, P6 #20), personal and shared
 spaces (no `SK` grants exist), `drop:` scoped agents (P6, D15), the advisory lease (`POST /drop/{id}/lease`),
-public and upload links, recall, byte ranges. The only delete is the host's document retire (item 5).
+public and upload links, recall, byte ranges. The only delete is the host's retire of a file or a document
+(item 5, amendment A1); a device has no delete route in P4 and asks its host instead.
 
 **Push, P4 (spec §6.3, D47, D48).** Per-(device, workspace) APNs registrations; a host-originated send route; the
 relay's fan-out to registered tokens through APNs with the `.p8` auth key; token lifecycle. Delivery is best
@@ -2424,10 +2432,20 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
    | `GET /v2/drop/{o}/versions/{v}/blob` | as list | the ORD2 ciphertext, streamed |
    | `PUT /v2/drop/{o}/versions/{v}/wraps` | W(g) | the host's `drop_rewrap` wrap under its current `WK_e` (D39b) |
    | `POST /v2/drop/{o}/claim` | W(g) | §10.5 claim-once, unchanged (D39b) |
-   | `POST /v2/drop/{o}/retire` | W(g) of the space | tombstone a `document` at once, releasing its bytes (item 5, Opus M5; D39a2) |
+   | `POST /v2/drop/{o}/retire` | W(g) of the space | tombstone a `file` or a `document` at once if its head is still the expected one, releasing its bytes (item 5, Opus M5, amendment A1; D39a2) |
 
-   The host's writes are fenced (`Orch-Holder`) like every other W write (P3-D10). Drop routes refuse `drop:`
-   scoped devices with 403 `not_eligible` until P6.
+   The host's writes are fenced (`Orch-Holder`) like every other W write (P3-D10). **The fence holds inside the
+   mutation, not only at admission (amendment A1, orch-52 change 0).** Every fenced Drop write (`PUT` versions,
+   `PUT .../wraps`, claim, retire) checks the fence twice: at admission, before any slot, bucket or body read
+   (so a stale host spends nothing), and again **inside the write transaction that mutates**, against the live
+   `holders` row (`gen` equal to `Orch-Holder` and `lease_until_ms` > the transaction's `now`), before any row
+   changes; a failure there is 409 `fenced` with nothing changed (an upload's temp or renamed file is unlinked as
+   for any failure before the commit). `host/hold` writes the `holders` row in its own write transaction under
+   the same directory lock, so a takeover and a fenced Drop write are serialized: either the write commits under
+   the old generation before the takeover, or it sees the new generation and changes nothing. A long upload
+   (up to 10 minutes) whose lease lapsed or was taken over during the blob transfer therefore fails at the
+   commit, not silently. The push send route applies the same rule to its queue admission (§14.3 item 4).
+   Drop routes refuse `drop:` scoped devices with 403 `not_eligible` until P6.
 
 2. **One streamed upload body, not JSON with a base64 blob (JUDGEMENT CALL; changes the phone's packaging).**
    The FakeRelay's `PUT` takes `{"descriptor", "wraps", "blob": b64u}` up to 36 MiB of JSON. Parsing that holds the
@@ -2493,7 +2511,8 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
       `8 + 512 KiB + max_blob` → 413 `too_large`, before anything else (P3-D17 "caps apply to streamed bytes as
       well as declared Content-Length");
    2. session (401), principal (403 `not_eligible` for a `drop:` device or a non-member), for a W session the
-      fence (`Orch-Holder` current and the lease unexpired, else 409 `fenced`, P3-D10; Opus N4), buckets (P3-D35
+      fence at admission (`Orch-Holder` current and the lease unexpired, else 409 `fenced`, P3-D10; Opus N4;
+      re-checked in step 11), buckets (P3-D35
       read class, then the upload bucket), then an upload slot (item 8: 429 `quota_exceeded` per device, person or
       workspace; 503 `overloaded` relay-wide);
    3. `If-Match` (428 `precondition_required`, §10.6);
@@ -2501,22 +2520,33 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
    5. the descriptor → 400 `malformed` unless: the §10.4 field set and suite; `cj(descriptor)` ≤ 96 KiB and the
       decoded `meta` ≤ 64 KiB + 16 bytes (the phone's `Drop.maxMetaBytes`; Opus H1); `object_id` equals the path;
       `space_kind` is `workspace`; `object_kind`; `recipients` is `"inbox"` (only with `object_kind: "file"`, M7)
-      or a sorted unique list of at most 1 024 ids, each either `space_id` or a current member device of it (M1);
-      the expiry rules of item 5; and `Content-Length = 8 + head_len + content_len` (M3). An `expires_ms` at or
+      or a sorted unique list of 1 to 1 024 ids, each either `space_id` or a current member device of it (M1;
+      an empty list `[]` is 400, amendment A1: it would be an audience nobody but the W session can see, which
+      no client needs); the expiry rules of item 5; and `Content-Length = 8 + head_len + content_len` (M3). An `expires_ms` at or
       before `now` is 410 `expired` (a resent body that has expired; orch-f1 R4). The author: `author_kind`/
       `author_id` must be the session's principal (a device session writes `author_kind: "device"` with its own
       id, a W session `"workspace"` with its own id) → 403 `not_eligible`; the signature under the registry
       `dk_sig_pub` or the card's `wsk_pub` → 401 `bad_signature`; the space: the principal may write to
       `space_id` (a current member with `operate`, or that workspace's W(g)) → 403 `not_eligible`;
    6. the object's state: an object id that exists in another space is 403 `not_eligible` (never its `current`);
-      an expired or tombstoned object (item 5) is 410 `expired`. This precedes the exact retry (Opus L1), so a
-      retry never answers 200 for an object that is gone;
+      for a device session, an object whose stored audience excludes the device (`audience = 'devices'` and no
+      `drop_audience` row for it, §14.5; live or tombstoned) is 403 `not_eligible` as well (amendment A1, Opus
+      delta R1), so a member outside a restricted audience learns no state, version, kind or claim through a
+      `PUT` either; then an expired or tombstoned object (item 5) is 410 `expired`. Both precede the exact retry
+      (Opus L1) and the CAS, so a retry never answers 200 for an object that is gone and the 410, the
+      `version_conflict` `current`, the file-above-version-1 400 and the claimed 403 reach only callers that
+      may see the object. The newest version's device author is in its audience (item 4) until the expiry
+      sweep deletes the audience rows of an expired device-only file (item 5), so a lost 201 is recoverable by
+      its author while the file lives; after that sweep every device, the author included, gets 403 on reads
+      and `PUT` (no new oracle: the id was already known to exist), and only the W session still sees the
+      tombstone;
    7. an **exact retry**: if version `version` is stored and its descriptor's `cj(o)` equals this one's, answer
       200 `{version}` at once (no blob read, no CAS; the stored wraps stay). This precedes the CAS, as for
       membership (P3-D7 "Retries"), so a lost 201 never turns into a 409 for the phone to reconcile;
    8. the CAS of §10.6 against a read snapshot: `If-Match == current`, `parent == current`,
       `version == current + 1`, `parent_hash` = the hash of the current head, and for `current > 0` the same
-      `object_kind`, `space_id` and `space_kind` as the head; a `file` takes only version 1; a claimed object
+      `object_kind`, `space_id` and `space_kind` as the head; a `file` takes only version 1, with `expires_ms ≥
+      now + 60 s` (item 5's floor; 400 `malformed`; `now` here is the request's `now`, below); a claimed object
       takes no new version (403 `not_eligible`; M7). Otherwise 409 `version_conflict` with `current`;
    9. the wraps (item 4) → 400 `malformed`, 409 `stale_epoch` (`epoch`), 409 `bad_wxk_version` or (pending owner
       question 6) 409 `rotation_required`; then the quota reservation of the blob bytes and the head bytes
@@ -2527,8 +2557,9 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
        400 `malformed`, `H(blob) ≠ content_hash` is 400 `malformed`; the file is `fsync`ed and renamed to a
        unique final path `drop/blobs/<o>/<v>.<rand>` (recorded in the row) and the directory `fsync`ed, all
        **before** the directory lock (Opus L8: no `fsync` under the global write lock);
-   11. the commit, under the directory lock in one write transaction: re-run 5's eligibility, 6, 8 and 9 on live
-       state (a concurrent writer gets 409 `version_conflict`), insert the rows (§14.5), charge the usage,
+   11. the commit, under the directory lock in one write transaction: for a W session re-check the fence on the
+       live `holders` row first (409 `fenced`, item 1; a takeover during the transfer), then re-run 5's
+       eligibility, 6, 8 and 9 on live state (a concurrent writer gets 409 `version_conflict`), insert the rows (§14.5), charge the usage,
        commit; 201 `{version}` with `ETag: "<version>"`. A failure before the commit unlinks the file; a crash
        leaves an orphan file that the start-up sweep deletes (a row never points to a missing file because the
        file lands first). The reservation is released in `finally`, also on `ClientDisconnect` and cancellation.
@@ -2569,34 +2600,131 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
    item readable to the members, as intended in P4. P8 note: a device author of restricted content needs the
    same `wk`-free rule.
 
-   **Restricted content (orch-52 Q-H4).** The relay cannot tell what an object is about and enforces nothing
-   about restricted tickets beyond membership. The host MUST address an object about a restricted ticket with
-   `device` wraps only (no `wk` wrap, which every member device can open) and `recipients` = the devices that may
-   see it; the W-author rule above allows exactly that.
+   **Restricted content (orch-52 Q-H4; amendment A1, orch-52 change 4).** Relay membership and `recipients` are
+   not ticket authorization. The relay does not know tickets or their visibility; what it enforces is only
+   membership (`look`/`operate`) and the newest version's `recipients`: a device-only list hides the object,
+   its tombstone and its list entry from every other member device (403 on reads and on a `PUT`, step 6; no
+   list entry). That device-only list **is** the restricted audience. The relay stores it explicitly (Opus delta
+   R2): `drop_objects.audience` is `'space'` (`recipients` contains `space_id`), `'inbox'` or `'devices'` (a
+   device-only list), and visibility is keyed on that column, never on whether `drop_audience` rows exist. For
+   `'devices'` the rows are the listed devices plus the newest version's device author (so an author never
+   locks itself out). The rows change only when a new version's commit replaces them, and are deleted with the
+   object row or at an expiry tombstoning (item 5); **membership removal and revocation never delete or prune
+   them**. A removed or revoked device that is still listed sees nothing, because the membership check comes
+   first; if a removed device is added back to the workspace, it sees the object again, as the host chose it.
+   No other relay mechanism is added. Everything else is the host's job (a host MUST, now, before P8):
+   - an object about a restricted ticket is addressed with `device` wraps only, for exactly the devices allowed
+     to see the ticket (no `wk` wrap, which every member device can open; no `inbox`, whose claim adds a `wk`
+     wrap), and `recipients` = those devices; the W-author rule above allows exactly that;
+   - the host decides which wraps and recipients exist and re-checks visibility on every later version, re-wrap
+     and claim it writes; when the allowed audience shrinks it writes no new wrap for the removed devices (wraps
+     already fetched cannot be recalled, as for removals);
+   - a host that adds a device id back to the workspace MUST NOT assume that device is blind to restricted
+     objects it was listed for before: audience rows survive membership changes (by design, item 4), so the
+     re-added device can again list and read their descriptors and metadata; it holds no wrap the host did not
+     write for it, so it cannot open content it lost access to, and the host re-wraps nothing for it unless
+     the ticket allows (Opus delta 2, L-a);
+   - the host filters what it passes on by ticket visibility: a W session's list returns every object of the
+     workspace in every state, so any listing, object id or tombstone the host relays to devices (bridge
+     answers, the dashboard) is filtered by the ticket's audience, and a restricted object's id is never put
+     into content that a wider audience reads.
+   What the relay cannot do: stop a member device inside a restricted audience from writing a next document
+   version with a wider `recipients` and a `wk` wrap (documents are collaborative; readers apply the author
+   rule, and orch-52 restricts its host to `file` objects, so restricted content should be files); and hide an
+   object's existence from a member that knows its id (the 403/404 existence oracle of item 6). Both stay
+   residuals (R-D10).
 
-   `recipients` is `"inbox"` or a sorted unique list of at most 1 024 ids (§10.4), each `space_id` or a current
+   `recipients` is `"inbox"` or a sorted unique list of 1 to 1 024 ids (§10.4), each `space_id` or a current
    member device of it (step 5). Every object is therefore visible only within its own workspace (in P4 a claim
    is by that same workspace), so no per-object access table is needed (§14.5).
 
 5. **Expiry, retention and the document lifecycle (JUDGEMENT CALL on the numbers; Opus M5, owner question 3).**
    A `file` MUST carry `expires_ms` with `now < expires_ms ≤ now + 7 d + 300 s` (`ORCH_RELAY_DROP_MAX_TTL_MS`,
    default 604,800,000; the FakeRelay's rule, plus 300 s for clock skew, orch-f1 R4); `expires_ms ≤ now` is 410
-   `expired` (a resent body that has expired), above the window 400 `malformed`. A `document` version MUST carry
+   `expired` (a resent body that has expired), above the window 400 `malformed`. **Minimum lifetime (amendment
+   A1, Opus delta R3):** a new file with `expires_ms < now + 60 s` is 400 `malformed`, `now` being the request's
+   clock reading taken once at its start and reused when the commit re-runs step 8, so a slow upload that met
+   the floor at admission is not refused for it at the commit (the commit's `expires_ms ≤ now` check, 410,
+   uses the transaction's own `now`; Opus delta 2, L-c), so no member can churn
+   files that expire at once. The floor is checked with the CAS (step 8), after the exact retry, so a retry of
+   a stored file close to its expiry still answers 200. A `document` version MUST carry
    `expires_ms: null` in P4 (400 otherwise): with a settable expiry any `operate` member could write a version
-   expiring in 1 ms and let the sweeper destroy the whole history. When `now ≥ expires_ms` a file is invisible at
-   once (reads 410 `expired`), a sweeper deletes its blob and wraps within 10 minutes and releases the usage, and
+   expiring in 1 ms and let the sweeper destroy the whole history. When `now ≥ expires_ms` a file is unreadable at
+   once (reads 410 `expired`; a list shows it as `expired`, item 7), a sweeper deletes its blob and wraps within
+   10 minutes, releases the usage, sets `tombstone_kind = 'expired'` and `tombstone_ms = expires_ms` (not the
+   sweep time, so the listed `tombstone_until_ms` of item 7 is the same before and after the sweep), deletes its
+   `drop_audience` rows (a device-only expired tombstone stays `audience = 'devices'` with no rows, so it is
+   then visible to the W session only; its audience devices hold `expires_ms` and drop the file at that time;
+   Opus delta R3) and assigns
+   it a new change position, and
    a **tombstone** (the `drop_objects` row with `tombstone_ms`) is kept 30 days, so a reused id is 410 rather
    than a fresh version 1 that a reader holding the old head would read as a rollback. Superseded document
    versions keep their descriptors (readers check the chain from version 1) but their **blobs** are pruned when
    they are neither among the newest 8 versions nor younger than 30 days; pruning releases the blob bytes (the
    head bytes stay charged), and a pruned blob reads 410 `expired`. A document has at most 1 024 versions (the
    phone's chain cap); the 1 025th is 429 `quota_exceeded`.
-   **Retire** (`POST /v2/drop/{o}/retire`, W(g) of the space, fenced, body `{}`): the host tombstones a document
-   at once (reads 410; the sweeper frees its blobs, wraps and head bytes; the id stays 410 for 30 days). This is
-   the only way out of the per-document and per-workspace document caps, so no workspace can reach a permanent
-   429: the host retires a full or abandoned document after copying what it keeps into a new object. A `file`
-   is 403 `not_eligible` (it expires on its own); a retired object answers 200 again while its tombstone lives
-   (idempotent). Members cannot retire (a removed device's history stays until the host acts).
+   **Retire** (`POST /v2/drop/{o}/retire`, W(g) of the object's space, fenced like every W write, body
+   `{"expect_version": <int ≥ 1>, "expect_head": "<b64u>"}` → `{"state": "retired" | "expired"}`): the host
+   tombstones a `file` or a `document` at once, **if its head is still the one the host decided about**
+   (orch-52 change 1). `expect_version` is the newest version the host saw and `expect_head` that version's
+   head hash, `H("orch/v2/drop-parent|" || cj(o))` (the value the next version's `parent_hash` would carry,
+   stored as `parent_hash_next` and copied to `drop_objects.head_hash`, §14.5). Both fields are **required**
+   for files and documents (every P4 object); a body without them, or with any other field, is 400
+   `malformed`. Encodings (Opus delta L3): `expect_version` is a JSON integer ≥ 1 (not a boolean, float or
+   string); `expect_head` is canonical unpadded b64u (§1) of exactly 32 bytes, i.e. 43 characters that decode
+   to 32 bytes and re-encode to the same text, else 400; the relay compares the decoded bytes with the stored
+   hash. Check order: the W session, its fence at admission (409 `fenced`) and buckets; the body (400);
+   object absent → 404; another space → 403 `not_eligible`; then, **in one write transaction**:
+   1. the fence again on the live `holders` row (409 `fenced`, nothing changed; item 1, orch-52 change 0), so
+      a retire admitted just before a takeover cannot commit after it; then the object row again: a row the
+      tombstone sweep deleted after the pre-check is 404 (Opus delta L2);
+   2. the precondition against the live row: if `current ≠ expect_version` or `head_hash ≠ expect_head`, 409
+      `version_conflict` with `{"current": <current>, "state": <the entry state>}` and the object untouched
+      (a member's version committed after the host's decision is never taken along by the retire);
+   3. if the object is already a tombstone (retired, or a file at or past `expires_ms`, swept or not) and the
+      precondition matched: 200 with its stored state, nothing changed and no new `n` (the bounded idempotent
+      retry, below);
+   4. otherwise the relay sets `tombstone_ms = now` and `tombstone_kind = 'retired'` and assigns a new change
+      position `n` (item 7). A device-only object keeps its `drop_audience` rows on the retired tombstone (its
+      audience still sees the `retired` entry); they move from the author device's head share to the
+      workspace's head bytes only, until the row is deleted (§14.5). Only the host creates retired tombstones.
+   Every read is then 410 `expired` and the list shows the object with `state: "retired"` until its tombstone
+   ends (30 days, then 404 and no entry; a `PUT` of the id is 410 meanwhile, as for an expired file).
+   JUDGEMENT CALL (`expect_version` and `expect_head` both): a file always has version 1, so a version alone
+   protects nothing for files and cannot tell an id reused after the tombstone window; the head hash binds the
+   exact version the host decided about, and the version keeps the 409 readable (`current`, the existing
+   `version_conflict` code and body of the `PUT`, not a new code). The alternatives (an `If-Match` header as on
+   the `PUT`, or the version only) were rejected for those reasons.
+   - A **document** keeps the batched release: the sweeper frees its blobs, wraps and head bytes (item 12; up to
+     1 024 versions cannot be deleted under one write lock). Its document count drops at once.
+   - A **file** (amendment A1) has one version and at most 1 024 wraps, within item 12's per-transaction row
+     bound, so the retire transaction itself deletes its version and wraps and releases its blob bytes, head
+     bytes and live-version count from every usage scope (workspace, account, the author's device share); the
+     blob file is unlinked after the commit (a crash in between leaves an orphan that the start-up sweep deletes,
+     §14.5). A claimed or unclaimed `inbox` file, and a file a member device authored, are retired the same way.
+   - **Idempotent, bounded by the tombstone window:** a retry with the same `expect_version` and `expect_head`
+     against the tombstone answers 200 with its stored state and changes nothing (no new `n`); a file whose
+     `expires_ms` has passed is already `expired` (200 `{"state": "expired"}`, the sweeper frees it as
+     before), so expiry and retire never race into two tombstones. The tombstone keeps `current` and
+     `head_hash`, so the precondition is checked the same way on it.
+   - **Never replay a retire after the window (orch-52 change 3).** The idempotency lasts only while the
+     tombstone lives (until its `tombstone_until_ms`, item 7). After that the row is gone and the id may be
+     reused as a fresh version 1 (R-D5), so a 404 proves nothing (neither that the retire happened nor that the
+     object expired), and a match of the reused id is unlikely only because of `expect_head`. Host contract: a
+     retire whose answer was lost is retried only within **29 days** of the earlier of its first attempt and,
+     for a file, its `expires_ms` (a retire that committed did so after the first attempt, and an expiry
+     tombstone starts at `expires_ms`, so either tombstone outlives the bound; the day of margin covers the
+     host's clock against the relay's; a tombstone the host has listed gives the exact end,
+     `tombstone_until_ms`); after that the host
+     **does not replay it** but reconciles: it relists the workspace in full and decides again from what is
+     there (a live object with another head is a new object; absence means gone).
+   This is the only way out of the per-document and per-workspace document caps, so no workspace can reach a
+   permanent 429: the host retires a full or abandoned document after copying what it keeps into a new object.
+   It also frees a file's quota before its 7 days end (Q-H6). **Only the host deletes:** devices have no retire
+   or delete route in P4, not even for their own uploads; a member that wants an item gone asks its host (a
+   host op over the bridge, orch-52), which decides and retires (orch-d6 ruling, amendment A1). A removed
+   device's uploads stay until the host acts or they expire. The tombstone window (30 days) and the sweeps are
+   unchanged.
 
 6. **Reads.** A W session reads the objects of its workspace (the space, or the claimer, §10.5). A device
    session reads an object when it is a current member with `look` of the object's workspace and `recipients`
@@ -2606,15 +2734,30 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
    403 `not_eligible` until the object is claimed. JUDGEMENT CALL (Opus N2 asks for it to be explicit): before
    the claim the other members learn the item's routing metadata (author device id, `created_ms`,
    `expires_ms`, `content_len`, its existence) but hold no wrap they can open; the alternative (only the author
-   sees it before the claim) breaks R1's flow. **Answer order (orch-f1 R5, Opus L-b)**, so a foreign probe learns
-   nothing beyond existence:
+   sees it before the claim) breaks R1's flow. **Answer order (orch-f1 R5, Opus L-b)**, so a caller that may not
+   see an object learns its existence and nothing more (not its workspace, kind, version, state or recipients):
    1. object absent → 404;
    2. object not visible to the caller (another workspace, or `recipients` excluding the device) → 403 for every
       version and state, tombstones included;
    3. expired, retired or tombstoned → 410;
    4. version absent → 404 (the phone's pre-`PUT` read-back treats it as "slot empty").
-   The remaining 403/404 existence oracle across workspaces (and `PUT` step 6) is accepted: object ids are
-   128-bit random. `GET .../blob` streams the file with `Content-Length: content_len`,
+   **This is an existence oracle, not "no leak" (amendment A1, orch-52 change 4).** Any authenticated caller
+   that knows or guesses an object id tells 403 (the id exists, live or as a tombstone, and is hidden from it)
+   from 404 (no such id, or its tombstone has ended), and the `PUT` answers the same way: step 6 gives 403 for
+   another space's id and, for a device, for an object whose audience excludes it, before any 410, exact
+   retry, CAS or claim answer (Opus delta R1). That holds **across workspaces** and **within one**: a member
+   device outside a device-only `recipients` list (a restricted audience, item 4) that learns a restricted
+   object's id gets 403, not 404, on every read and `PUT`, so it learns that something it may not see exists,
+   and later that it is gone (403 turns into 404 when the tombstone ends). That is all it learns: no list entry,
+   descriptor, wrap or blob, and no state, version, kind or claim status (the reads stop at step 2 of the order
+   above, the `PUT` at step 6). Accepted (R-D10): ids are 128-bit random, so guessing is infeasible and the
+   oracle answers only for ids a caller already learned elsewhere; the host keeps restricted ids out of content
+   a wider audience reads (item 4). JUDGEMENT CALL, 403 rather than 404 for "not visible" (Opus delta L7): a
+   404 would close the oracle within a workspace only if every route lied the same way, but the `PUT` cannot:
+   it must refuse a write to an existing id it hides (a 404 there would invite a version 1 under that id, which
+   the CAS then refuses with its own answer), and 403 on reads alone next to a 403 on `PUT` would just move the
+   oracle. One rule across workspaces and within one (403 = exists and hidden) is simpler to test and to reason
+   about; it also keeps the phone's pre-`PUT` read-back meaning of 404 ("slot empty", orch-f1 R5). `GET .../blob` streams the file with `Content-Length: content_len`,
    `Content-Type: application/octet-stream`, `ETag: "<v>"`, `Cache-Control: no-store`, in 64 KiB reads, never
    buffered; no `Range` in P4. `GET .../wraps` and the list return only the wraps the caller can use: a **W
    session** gets the `wk` and `wxk` wraps of its workspace; a **device** gets the `wk` wraps of its workspace and
@@ -2623,14 +2766,82 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
    others' device wraps). `claimed_by` is present in every list entry and wraps answer (null when unclaimed).
 
 7. **List, change positions and page bounds.** `POST /v2/drop/list` with `{workspace_id, direction, after?,
-   limit?}` (D(m) with `look` in `workspace_id`, or W of `workspace_id`) → `{objects: [{n, descriptor, wraps,
-   claimed_by}], next}`. `direction` is `received` (author ≠ caller) or `sending` (author = caller). Each visible
+   limit?}` (D(m) with `look` in `workspace_id`, or W of `workspace_id`) → `{objects: [{n, object_id, version,
+   state, tombstone_until_ms, descriptor, wraps, claimed_by}], next}`. `direction` is `received` (author ≠ caller) or `sending`
+   (author = caller), judged by the newest version's author. Each visible
    object appears once, with its newest version, at its **change position** `n`: a relay-wide counter assigned by
-   every version commit, wrap change and claim of the object (the §19.5 cursor pattern), so a client that keeps
-   `after` sees only what changed. Pages ascend by `n`; `next` is the last entry's `n`, or null when there is
-   nothing more (orch-f1 S2). An expired or retired object leaves the list **without** an entry, so an `after`
-   list never shows it; a client that caches the list relists from the start now and then, or learns 410 on a
-   read. The relay-wide counter tells a host roughly how much Drop activity
+   every version commit, wrap change, claim and **state change** of the object (the §19.5 cursor pattern), so a
+   client that keeps `after` sees only what changed. Pages ascend by `n`; `next` is the last entry's `n`, or null
+   when there is nothing more (orch-f1 S2).
+
+   **Entry state (amendment A1).** `state` is one of:
+
+   | `state` | Meaning | `descriptor` | `wraps` | Raises `n` |
+   |---|---|---|---|---|
+   | `live` | the entry's version and its blob are readable | the newest version's | the caller's usable wraps | (by the version, wrap or claim) |
+   | `pruned` | the object is live but the entry's version has no blob (a pruned blob, descriptor kept; reads of that blob are 410) | kept | `[]` (pruning deletes the version's wraps, item 10) | yes, when the listed version is pruned |
+   | `expired` | a file at or past `expires_ms`: a tombstone | `null` | `[]` | yes, by the expiry sweep (≤ 10 minutes after `expires_ms`) |
+   | `retired` | retired by the host (item 5): a tombstone | `null` | `[]` | yes, in the retire transaction |
+
+   A superseded document version whose blob is pruned is never the listed version (the newest 8 always keep
+   their blobs), so in P4 `pruned` appears on an entry only after a database restore without its blob files
+   (item 12, the start-up sweep), which assigns the new `n`; superseded pruning shows only as 410 on that
+   version's blob and in the descriptor chain, and raises no `n`. `object_id` and `version` are given in every
+   entry because a tombstone has no descriptor (the relay keeps only the `drop_objects` row, §14.5). An
+   `expired` entry may appear before the sweep has run (the state is computed against `now` at read time), but
+   only a list that happens to reach the object's old position sees it; a client therefore also treats a file
+   as expired at its descriptor's `expires_ms` on its own (Opus delta L5); the sweep's `n`, **up to about 10
+   minutes after `expires_ms`**, is what makes it reach every incremental list that may see the tombstone and
+   the host notice (a device-only file's audience devices lose its entry at the sweep instead, item 5), so an
+   incremental client learns of an expiry up to ~10 minutes late (a read is 410 at once).
+
+   **Tombstone end and full reconciliation (orch-52 change 2).** Every entry carries `tombstone_until_ms`: null
+   on `live` and `pruned` entries, and on a tombstone the end of its retention, `tombstone_ms + 30 d` (for
+   `expired`, `expires_ms + 30 d` both before and after the sweep, item 5). A tombstone is listed until then;
+   its row is then deleted, which raises no `n` (there is no entry left to carry it), so a client drops a
+   tombstone it holds at `tombstone_until_ms` on its own, and a full relist simply omits it. Consequently a
+   client **MUST do a full reconciliation** (list from the start, `after` omitted, and replace its whole set
+   for the workspace: anything it holds that the full list lacks is gone) when the gap since its last complete
+   incremental list is longer than the retention less the sweep period (30 days minus 10 minutes; 29 days is
+   recommended, for clock margin; measured by the client from that list's start; the bound assumes the expiry
+   sweep runs on time, every 10 minutes, so clients use 29 days, which also covers a late sweep of up to a
+   day; Opus delta 2, L-d),
+   because a state change in the gap may have been followed by the end of its tombstone, which no `after`
+   list shows. A host also reconciles in full after a state restore, at takeover and before deciding about a
+   retire it did not complete (item 5).
+
+   **Every state change reaches the host notice.** `retired` (the retire transaction), `expired` (the expiry
+   sweep) and `pruned` (the start-up sweep) each assign a new `n`, so each raises the workspace's newest change
+   position and thus the host's `drop` notice (§14.9 Q-H1), like a version, wrap or claim. The end of a
+   tombstone does not: the notice is the newest `n` among the workspace's remaining rows, so when the newest-`n` row is a
+   tombstone that ends, the notice value can drop; a host treats only a value above its stored position as
+   news and never moves its position back.
+
+   **Who sees which entry.** Unchanged from item 6, and the same for tombstones: a **W session** sees every object
+   of its workspace in every state. A **device** sees an entry when it is a current member with `look` and the
+   object's audience includes it (`audience` `'space'` or `'inbox'`, or `'devices'` with a `drop_audience` row for
+   it); a device excluded from a device-only list sees no entry for it in any state, tombstones included (the
+   read answer order's 403). Exception (Opus delta R3): an expired device-only tombstone has no audience rows
+   after the sweep, so only the W session lists it; a retired one keeps them. Unclaimed `inbox` files are listed
+   for member devices, and so are their tombstones.
+
+   **Why incremental lists see state changes (JUDGEMENT CALL).** The alternative was to state that `after` lists
+   never see a retire or an expiry and that clients relist in full. The existing design already raises `n` on a
+   retire (§19.9's route table, the `n` column of §14.5, the "positions moving on ... a retire" test), and the
+   host learns of changes only through the `drop` notice and `after` lists, so a state change that raised no `n`
+   would be invisible to the host and the dashboard until a full relist. Raising `n` keeps one rule (every change
+   moves the object to the end) and costs one counter update per sweep batch row. orch-f1's phone relists in full
+   and is unaffected; the dashboard and the host can list incrementally. Example entries (values shortened):
+
+   ```json
+   {"n": 4182, "object_id": "9f2c…", "version": 3, "state": "live", "tombstone_until_ms": null,
+    "descriptor": {"o": {"kind": "drop_object", "object_id": "9f2c…", "version": 3, "…": "…"}, "sig": "…"},
+    "wraps": [{"target_kind": "wk", "target_id": "5a1e…", "key_version": 7, "…": "…"}], "claimed_by": null}
+   {"n": 4190, "object_id": "c07d…", "version": 1, "state": "retired", "tombstone_until_ms": 1763208000000,
+    "descriptor": null, "wraps": [], "claimed_by": "5a1e…"}
+   ```
+
+   The relay-wide counter tells a host roughly how much Drop activity
    other tenants have (Opus L7): accepted (R-D8). The host learns of new objects through a new host-poll notice
    `drop` (the newest change position of the workspace; §14.9 Q-H1), then lists `after` its stored position.
    `GET /v2/drop/{o}/descriptors?after=&limit=` pages the chain (`limit` ≤ 256, default 256): the phone's
@@ -2659,6 +2870,17 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
      wraps, charged to the workspace: per workspace 32 MiB, global `ORCH_RELAY_DROP_GLOBAL_HEAD_BYTES` 512 MiB
      public, 128 MiB internal. Heads live in SQLite, so this cap is what bounds the database, its WAL and
      `VACUUM` space; blobs live in files. Per workspace at most 256 documents that are not tombstoned.
+     **Audience rows (amendment A1, Opus delta R3)** are head bytes at 65 B each: while the object is live they
+     count against the workspace, the author device's head share and the global head ceiling, like its
+     descriptor; an expiry deletes them (item 5); a retire moves them off the author's share, so a retired
+     device-only tombstone holds at most M × 65 B (M the listed devices, ≤ the workspace's member devices) of
+     workspace and global head bytes until its row is deleted 30 days later. Only the host creates retired
+     tombstones, so no member can pin head bytes that way; the host's own retires of restricted objects cost
+     it up to M × 65 B each for 30 days (≈ 1.3 KB at M = 20), which it cannot free early. JUDGEMENT CALL (Opus
+     delta 2, L-b): the charge stays on the workspace (as above) rather than moving back to the author's share,
+     because only the host's decision creates it, so a host rule bounds it with no new relay counter: the host
+     SHOULD let a member's restricted file expire rather than retire it in bulk, and keeps its retired
+     restricted tombstones' rows within 1 MiB of the workspace head bytes (about 800 retires at M = 20).
    - **Per-member shares (Opus N5).** Every workspace-wide counter also has a per-(device, workspace) share, so
      one `operate` member cannot lock the workspace's Drop: blob bytes 256 MiB, head bytes 8 MiB, live versions
      1 024, documents 64, version-1 creations 250 per day. The workspace totals stay. The 1 024-version cap of a
@@ -2671,7 +2893,8 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
      also carries `Retry-After: 600` (the sweep period) for uniformity, but is **not** transient: its body names
      the cap, `{"error": "quota_exceeded", "quota": "drop_ws" | "drop_head_ws" | "drop_account" |
      "drop_versions" | "drop_documents" | "drop_device" | "drop_device_head" | "drop_device_versions" |
-     "drop_device_documents" | "drop_doc_versions"}`, and it stays until expiry, pruning or a retire frees
+     "drop_device_documents" | "drop_doc_versions"}`, and it stays until expiry, pruning, a retire or (for
+     head bytes held by a retired device-only tombstone's audience rows) the end of that tombstone frees
      usage (Q-H6). A slot cap's 429 carries `"quota": "slot"` and is transient. Usage is reserved in memory at
      step 9 and charged in the commit, so concurrent uploads cannot overshoot; a crash drops reservations and the
      temp files with them.
@@ -2683,7 +2906,8 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
      holds at most 3 of 16 upload slots.
    - **Disk.** Drop's worst case is the blob ceilings (public 4 GiB + internal 1 GiB = 5.37 GB), the head
      ceilings in SQLite counted twice for WAL and `VACUUM` with ~1.3× page and index overhead (≈ 1.75 GB),
-     in-flight temp files (16 × 27.8 MB per instance, both instances ≈ 0.89 GB) and tombstones (≤ ~100 B each):
+     in-flight temp files (16 × 27.8 MB per instance, both instances ≈ 0.89 GB) and tombstones (≤ ~100 B each,
+     uncharged, plus a retired device-only tombstone's charged audience rows, within the head ceilings):
      ≈ 8 GB (Opus delta: 7.5–7.9 GB). With the dev-deploy-plan §4.3 checkpoint bound of ~15 GB and ~35 GB free,
      the worst case leaves ~12 GB free; the plan's "≥ 20 GB free" soak criterion is about real usage and
      still holds for the invited users (files live ≤ 7 days). A larger ceiling needs the disk recomputed (§10
@@ -2704,11 +2928,14 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (�
      taken before the read for `content_len`, per device burst 256 and 256/min, per person twice that
      (`ORCH_RELAY_THROTTLE_DROP_DOWN`). Metadata routes take one read-class token as today.
    - **Rate of new objects:** at most 1 000 version-1 creations per workspace per day and 250 per device in it
-     (429 `rate_limited`), which bounds tombstones to ~30 000 per workspace (~3 MB).
+     (429 `rate_limited`), which bounds tombstones to ~30 000 per workspace (~3 MB of uncharged rows; the
+     60-second minimum file lifetime of item 5 stops instant-expiry churn, and expired tombstones keep no
+     audience rows).
 
 9. **Claims and host re-wraps (D39b).** `POST /v2/drop/{o}/claim` is §10.5 verbatim (one transaction, the
    five-step order, idempotent, `claimed_by` to the loser), with relay details: the W session's fence and
-   authorization are checked before anything else (Opus N4); the object must be an `inbox`
+   authorization are checked before anything else (Opus N4) and the fence again inside the claim's and the
+   re-wrap's write transaction (item 1); the object must be an `inbox`
    `file` and unexpired (403 `not_eligible` otherwise, as the FakeRelay does); in P4 the claimer is the object's
    own workspace (M1); the claim's change position is new, so lists show it; a claimed object takes no new
    version (M7). `PUT /v2/drop/{o}/versions/{v}/wraps` with `{wraps: [wrap]}` (exactly one record) stores the
@@ -2764,7 +2991,35 @@ refused; two concurrent writers of version N+1 (one 201, one 409, one blob file 
 mid-blob (no row, the temp file swept, the reservation released); a crash after the rename (orphan swept at
 start-up, no row without its file); quota reservation under concurrency; slot caps per device, person and
 workspace and the minimum rate on both directions; the `stale_epoch` wrap after a rotation and the same-`DEK`
-rewrap retry; expiry, tombstone and pruned-blob reads (410); retire; byte-cut pages; wrap filtering per caller;
+rewrap retry; expiry, tombstone and pruned-blob reads (410); retire of a document and of a file (amendment
+A1: a file's usage rows, version count and per-device share back to their earlier values in the retire
+transaction, its blob file unlinked after the commit, a crash between commit and unlink swept at start-up, a
+member-authored file and a claimed and an unclaimed inbox file retired by the host, every read 410 at once, a
+`PUT` of the id 410, idempotent 200 with the stored state for a retired and for an expired object, no new `n` on
+the repeat, 403 for another space, 409 `fenced` before anything else, no device route; orch-52 changes 0, 1
+and 3: 400 without `expect_version` or `expect_head`, 409 `version_conflict` with `current` and nothing
+changed when a member's version 2 of a document committed after the host read version 1 and when the head
+hash differs at the same version, the same retry against the tombstone 200, a retry with another head against
+the tombstone 409, a reused id after the tombstone window 409 for the old head); the **takeover-versus-retire
+race** (a retire admitted under generation `g`, a `host/hold` takeover committed before its write transaction:
+409 `fenced`, the object live and its `n` unchanged; the reverse order: the retire commits and the new holder
+sees the tombstone), and the same race for a host `PUT` (a takeover during the blob transfer: 409 `fenced` at
+the commit, no row, the file unlinked), a claim, a re-wrap and a push send (nothing queued); list `state` per
+entry (`live`, `pruned` after a restore without blob files, `expired` before and after the sweep, `retired`) with
+`descriptor` null and `wraps` empty on tombstones, `tombstone_until_ms` null on live entries and `tombstone_ms
++ 30 d` on tombstones (`expires_ms + 30 d` for an expiry, unchanged by the sweep), `n` and the host `drop`
+notice raised by the retire, the expiry sweep and the start-up pruning so an `after` list sees each, a
+tombstone hidden from a device outside a device-only audience (403 on its reads, 404 once the tombstone ends),
+a tombstone gone from the list after 30 days without a new `n`; Opus delta R1–R3 and lows: a `PUT` by a member
+device outside a device-only audience 403 for a live, an expired and a retired object and for a matching exact
+retry, before any 410, `version_conflict` or file-version 400, while the author device (always in the audience)
+gets its exact-retry 200; `audience` `'devices'` with every listed device removed or revoked still hidden from
+the other members (rows untouched by removal and revocation); `recipients: []` 400; a new file expiring in under
+60 s 400 and an exact retry 59 s before expiry 200; an expired device-only tombstone without audience rows after
+the sweep (listed to the W session only), a retired one keeping them, the head-byte charges per scope (author
+share while live, workspace only after a retire, released at the row's deletion); a retire whose row the
+tombstone sweep deletes between pre-check and transaction 404; `expect_head` padded, 31 or 33 bytes and
+non-canonical 400, `expect_version` `true` or `1.0` 400; byte-cut pages; wrap filtering per caller;
 an unclaimed inbox listed with its descriptor but a 403 blob; 404 (not 403) for an absent version; list
 positions moving on a new version, a wrap, a claim and a retire; revocation pruning device wraps; batched sweeps
 and a failing row skipped; a restore without `data/drop/`; early answers with an unread body over a real socket
@@ -2802,7 +3057,13 @@ and through Caddy (item 2); peak RSS of 16 concurrent 26 MiB uploads plus 8 conc
 4. **The host's send route** (`POST /v2/workspaces/{ws}/push`, W(g), **fenced** like every W write: a missing or
    stale `Orch-Holder` or an expired lease is 409 `fenced`, P3-D10, and nothing is queued; orch-52 nit 7). Auth
    and the fence are checked **before** any bucket, dedup-LRU or queue effect, so a stale holder cannot spend the
-   live holder's budget or poison the LRU (Opus N4); retire, re-wrap and claim follow the same rule:
+   live holder's budget or poison the LRU (Opus N4); retire, re-wrap and claim follow the same rule. The fence
+   is checked **again at the effect** (amendment A1, orch-52 change 0): just before the all-or-nothing queue
+   admission the route re-reads the live `holders` row under the directory lock that `host/hold` takes (a read,
+   no write transaction; the queue is in memory). That lock is a `threading.RLock` the sweeps hold for whole
+   batches, so the re-check and the enqueue run in the worker threadpool, never on the event loop (Opus delta
+   L1), so a takeover between admission and enqueue queues nothing
+   and answers 409 `fenced`, as the fenced Drop writes do inside their transactions (P3-D39 item 1):
    `{targets: [device_id], outer: {v, ws, epoch, c}, priority: "high" | "normal", ttl_s}` → `{accepted}`.
    - `outer` is §9's outer object, sealed under `K_push(e)` with the `WSK` signature inside; the relay checks only
      its exact field set, `v = 2`, `ws` = the path, `c` canonical b64u, `|cj(outer)| ≤ 3,072` (else 400
@@ -2906,17 +3167,31 @@ knows from its own tables.
 
 **Hostile host (a `WSK` holder).** It can notify its own members within the budgets, with any label it signs
 (it is the workspace authority), upload within its account's quota, claim its own workspace's inbox objects,
-re-wrap objects of its own space, and retire its documents. It cannot target a non-member, learn a device's
+re-wrap objects of its own space, and retire any file or document in its own space, including a member's
+upload before the others have read it (amendment A1; it is the workspace authority, R-D9). It cannot target a non-member, learn a device's
 token or whether it registered, read or address another workspace's objects (P4 has no cross-workspace
 addressing), or exceed its account's stored bytes (1 GiB) or its per-device notification budget.
 
+**Stale host process (after a takeover; amendment A1, orch-52 changes 0 and 1).** An old host process that
+still holds a generation's session cannot write once a takeover has committed: the fence is re-checked inside
+every fenced Drop write transaction and at the push queue admission (P3-D39 item 1), so a retire, `PUT`,
+claim, re-wrap or push admitted before the takeover and reaching its effect after it is 409 `fenced` with
+nothing changed. A retire also cannot take along a version committed after the host's decision (the
+`expect_version`/`expect_head` precondition, item 5), and after the tombstone window a lost retire is not
+replayed but reconciled (item 5).
+
 **Hostile member device (or a stolen unlocked phone, D49).** With `operate` it can upload within its 256 MiB share
 and the workspace caps, and write the next version of a document of its workspace (the model: documents are
-collaborative; readers apply the author rule). It cannot destroy a document's history (documents carry no
-expiry in P4 and only the host retires), address other workspaces (M1), hold more than 3 upload slots for its
+collaborative; readers apply the author rule). It cannot delete anything: P4 has no device delete or retire
+route, not even for its own uploads (deletes are host-mediated: the device asks its host, which decides;
+amendment A1), so it cannot destroy a document's history or another member's file (documents carry no expiry in
+P4 and only the host retires), address other workspaces (M1), hold more than 3 upload slots for its
 person, or force a large read (descriptors ≤ 96 KiB, byte-cut pages, bounded read slots; Opus H1). It cannot
 send pushes, read other workspaces' objects, see other members' device wraps (filtered), or register a token for
-a workspace it is not a member of. It can register a
+a workspace it is not a member of. Outside a restricted (device-only) audience it gets no entry, descriptor,
+wrap or blob, but if it knows an object's id it learns that the object exists and, later, that it is gone (the
+403/404 existence oracle, P3-D39 item 6, R-D10); inside such an audience it can write a document's next
+version with a wider audience (item 4; restricted content should be files). It can register a
 victim's token if it learns it (it cannot from the relay); the victim then receives generic text for this
 device's workspaces, bounded by P3-D40 item 7's budgets.
 
@@ -2952,7 +3227,7 @@ unauthenticated floods.
   (the numbers against ~10 invited accounts are owner question 4).
 - R-D4. The relay learns recipients, sizes and claim outcomes, as spec §4 accepts.
 - R-D5. Old document blobs are pruned (item 5): a reader that never downloaded version 3 cannot get it later;
-  the chain stays verifiable. A host retire removes a document for everyone. After its 30-day tombstone an id
+  the chain stays verifiable. A host retire removes a file or a document for everyone. After its 30-day tombstone an id
   can be reused as version 1, for files and retired documents alike; a reader that persisted its highest version
   sees that as a rollback error (Opus L-i).
 - R-D6. §9 has no padding, so the push ciphertext's length reveals the label's length to the byte, and often the
@@ -2966,6 +3241,20 @@ unauthenticated floods.
   `rotation_required` refusal (owner question 6).
 - R-D8. The relay-wide change position `n` tells a host roughly how much Drop activity other tenants have
   (Opus L7). Accepted for P4; per-workspace positions would remove it.
+- R-D9. The host can retire any object of its workspace, so a member's upload can vanish before other members
+  read it, and a member cannot remove its own upload without the host (amendment A1). Accepted: the host is the
+  workspace authority, and a hostile host could already withhold its `wk` wrap or never claim an inbox item.
+  A tombstone tells the devices that saw the object whether it expired or was retired.
+- R-D10. Relay membership and `recipients` are not ticket authorization (amendment A1, orch-52 change 4). The
+  relay does not know which ticket an object belongs to or who may see it; it enforces membership and the
+  newest version's device-only `recipients` list, which the host chooses (P3-D39 item 4). Restricted tickets
+  therefore rest on the host: `device` wraps and `recipients` only for the allowed devices, no `wk` wrap, and
+  its own listings and bridge answers filtered by ticket visibility. Residual at the relay: the 403/404
+  existence oracle (P3-D39 item 6: a member outside the audience that knows an id learns that the object
+  exists and when it is gone, never its content, metadata, state, version, kind or claim, on reads or on a
+  `PUT`, P3-D39 step 6), and a member inside a restricted document's
+  audience can widen the next version's audience (files avoid it). Accepted for P4; a relay-side ticket
+  audience would need the relay to learn ticket ids, which spec §4 avoids.
 
 ### 14.5 Migration plan (0017, 0018)
 
@@ -2984,9 +3273,27 @@ CREATE TABLE drop_objects (
     inbox INTEGER NOT NULL CHECK (inbox IN (0, 1)),
     claimed_by TEXT,                        -- §10.5; NULL until claimed
     expires_ms INTEGER,                     -- the head's; NULL for a document without expiry
-    tombstone_ms INTEGER,                   -- set when expired or retired; row deleted 30 d later
-    n INTEGER NOT NULL,                     -- latest change position (version, wrap, claim, retire)
-    created_ms INTEGER NOT NULL
+    tombstone_ms INTEGER,                   -- set when retired (now) or expired (= expires_ms); row deleted 30 d later
+    tombstone_kind TEXT CHECK (tombstone_kind IN ('expired', 'retired')),  -- the list state (A1)
+    head_author_id TEXT NOT NULL,           -- the newest version's author: `direction` without a descriptor (A1)
+    head_hash TEXT NOT NULL,                -- the newest version's parent_hash_next: retire's expect_head, kept on the tombstone (A1)
+    audience TEXT NOT NULL CHECK (audience IN ('space', 'inbox', 'devices')),  -- the newest version's recipients kind (A1, R2)
+    n INTEGER NOT NULL,                     -- latest change position (version, wrap, claim, state change)
+    created_ms INTEGER NOT NULL,
+    CHECK ((tombstone_ms IS NULL) = (tombstone_kind IS NULL))
+);
+-- The device-only `recipients` list of the newest version (audience = 'devices'), one row per listed
+-- device plus the newest version's device author (A1): the list, read and PUT step 6 filters use it
+-- without parsing descriptors. Visibility is keyed on drop_objects.audience, never on whether rows
+-- exist: 'devices' with no row for a device hides the object from it. Rows exist only for 'devices';
+-- a new version's commit replaces them; membership removal and revocation never touch them; an expiry
+-- tombstoning deletes them; a retired tombstone keeps them until the object row is deleted. Charged as
+-- head bytes at 65 B each (P3-D39 item 8: workspace, global and, while live, the author device's share);
+-- at most the workspace's member devices per object. The relay knows nothing of tickets.
+CREATE TABLE drop_audience (
+    object_id TEXT NOT NULL REFERENCES drop_objects(object_id) ON DELETE CASCADE,
+    device_id TEXT NOT NULL,
+    PRIMARY KEY (object_id, device_id)
 );
 -- The list scan: in P4 an object is visible only within its own workspace (P3-D39 item 4),
 -- so no per-object access table is needed (Opus M1).
@@ -3049,15 +3356,19 @@ WHEN EXISTS (SELECT 1 FROM drop_versions WHERE object_id = NEW.object_id AND ver
 BEGIN SELECT RAISE(ABORT, 'drop_versions is immutable'); END;
 ```
 
-Deletion happens only in the sweeps, in batches of at most 256 rows per transaction (P3-D39 item 12): at
-tombstoning (expiry or retire) the sweeper deletes the object's versions and wraps and releases all its bytes,
-keeping only the `drop_objects` row, which it deletes 30 days later; blob pruning sets `blob` → `'pruned'` and
+Deletion happens in the sweeps, in batches bounded as P3-D39 item 12 says, and in a file's retire transaction
+(one version and at most 1 024 wraps, within that bound; amendment A1): at tombstoning (expiry or retire) the
+object's versions and wraps are deleted and their bytes released, keeping only the `drop_objects` row (with
+`tombstone_kind`, `audience`, `current` and `head_hash`, uncharged; on a retired device-only tombstone also its
+`drop_audience` rows, charged to the workspace; an expiry deletes them), which the sweeper deletes 30 days later,
+releasing the audience rows' head bytes; every tombstoning assigns a new `n`; blob pruning sets `blob` → `'pruned'` and
 `blob_path` → NULL (the only columns that may change). `wrap_conflict` and the claim's "delete every other wrap"
 are ordinary deletes on `drop_wraps`. Files live in `<data>/drop/blobs/<o>/<v>.<rand>` and `<data>/drop/tmp/`,
 directories 0700, files 0600, on the database's filesystem so `rename` is atomic; files are unlinked after the
 batch commits. The start-up sweep (before serving) deletes `tmp/*`, blob files without a `stored` row, and marks
-a `stored` row whose file is missing as `pruned` with an error log, releasing its blob bytes (this also makes a
-database restored without `data/drop/` consistent).
+a `stored` row whose file is missing as `pruned` with an error log, releasing its blob bytes and, when that row
+is the object's newest version, assigning the object a new `n` (its list `state` becomes `pruned`); this also
+makes a database restored without `data/drop/` consistent.
 
 **0018_push.sql** (D40a):
 
@@ -3088,16 +3399,26 @@ HTTP fixtures (`tests/http_fixtures/`, MANIFEST revision bumped, one file per ro
 `drop_put.json` (201; 200 exact retry; 428 missing and malformed `If-Match`; 409 `version_conflict` with
 `current`; 409 `stale_epoch`; 409 `bad_wxk_version`; 409 `fenced` for a stale host; 400 a `wk` wrap on an
 inbox object; 429 for each per-device share (`quota` names it); 403 `not_eligible` for a `drop:` device, for another
-space and for a claimed object; 401 `bad_signature`; 400 bad frame, missing `Content-Length`, a `Content-Length`
+space, for a claimed object and (amendment A1, Opus delta R1) for a member device outside a device-only audience,
+live and tombstoned; 400 for `recipients: []` and for a new file expiring in under 60 s; an expired device-only
+file's `PUT` by its author 410 before the sweep and 403 after it; 401 `bad_signature`; 400 bad frame, missing `Content-Length`, a `Content-Length`
 that does not match the frame, short blob, wrong hash, a non-ORD2 blob header, a descriptor or `meta` over its
 cap, a foreign `wxk` target or `recipients` id, a document with an expiry, an `inbox` document; 410 tombstoned
 id, and a tombstoned id resent as an exact retry; 410 an expired `expires_ms`; 413 head and declared length; 429
 `quota_exceeded`; 503 `overloaded`), with the frame given as hex; `drop_list.json` (positions, `direction`, wrap
 filtering for a device and a W session, an unclaimed inbox listed for a device, `claimed_by` in every entry,
-`next` and null at the end, ascending `n`, the byte cut, no `wxk` wrap returned to a device); `drop_descriptors.json` (the byte-cut page); `drop_descriptor_get.json` (with `ETag`; 404
-for an absent version, 403 for a foreign object in any state, 410 before a version's 404); `drop_wraps_get.json`; `drop_blob_get.json` (headers, 403 unclaimed inbox, 410 pruned);
+`next` and null at the end, ascending `n`, the byte cut, no `wxk` wrap returned to a device; amendment A1:
+`object_id`, `version` and `state` in every entry, a `pruned` entry, an `expired` and a `retired` tombstone with
+`descriptor` null and `wraps` empty, `tombstone_until_ms` null on live entries and set on tombstones, an
+`after` list that sees a retire, a device outside a device-only audience without the tombstone);
+`drop_descriptors.json` (the byte-cut page); `drop_descriptor_get.json` (with `ETag`; 404
+for an absent version, 403 for a foreign object in any state, 410 before a version's 404; an expired device-only
+file read by its audience device 410 before the sweep and 403 after it, by the W session 410 after it); `drop_wraps_get.json`; `drop_blob_get.json` (headers, 403 unclaimed inbox, 410 pruned);
 `drop_wraps_put.json`; `drop_claim.json` (won, idempotent, lost with `claimed_by`, not inbox);
-`drop_retire.json` (200, idempotent, 403 for a file); `host_poll.json` (the `drop` notice);
+`drop_retire.json` (200 `{state: "retired"}` for a document and for a file with a matching `expect_version`
+and `expect_head`, idempotent 200 for a retired and for an expired object with the stored state, 409
+`version_conflict` with `current` and `state` for a stale version and for a stale head (object untouched), 400
+`malformed` without the precondition and for a non-canonical `expect_head`, 403 `not_eligible` for another space, 404, 409 `fenced`); `host_poll.json` (the `drop` notice);
 `push_register.json` (200, idempotent refresh, 409 `registration_conflict` for another body and for another
 device's id, 400 env/topic/token and an unconfigured env, 403 `not_eligible` and a `drop:` device, 404 when
 disabled); `push_unregister.json`; `push_send.json` (200 `accepted`, skipped non-member, 409 `stale_epoch`, 400
@@ -3112,7 +3433,12 @@ Vectors (`tests/vectors_v2.json`, relay-owned sections): `drop.upload_frame` (en
 a head at the cap, a blob one byte short and long); `drop.relay_put` (a chain of PUT steps against one state:
 create with `If-Match: 0`, the next version, a stale writer, a fork attempt with another `parent_hash`, a
 file's version 2, an exact retry after the head moved, a `wk` wrap at an old epoch and the same-`DEK` rewrap
-that follows, "tombstoned then retry", "inbox document refused"); `push.apns_envelope` (outer → APNs body bytes,
+that follows, "tombstoned then retry", "inbox document refused", and amendment A1's "retired file then
+retry" and "retired file then version 1 under the same id", both 410); `drop.relay_retire` (amendment A1,
+orch-52 changes 0, 1 and 3: steps against one state: a retire with the matching head, its retry (200, no new
+`n`), a retire after a member's newer version (409 `version_conflict`, untouched), a retire whose generation
+was taken over between admission and commit (409 `fenced`, untouched), and a retire of a reused id with the
+old head after the window (409)); `push.apns_envelope` (outer → APNs body bytes,
 the 3,072-byte edge giving 3,175 bytes). The existing `drop` and `push` sections (descriptors, claims, chains,
 NSE cases) are unchanged and are what the phone and host already run.
 
@@ -3192,7 +3518,7 @@ here); the owner checks the portal before planning a new key. Creating a key is 
 
 Cross-workspace Drop addressing (ws→ws mailboxes, foreign `wxk` and inbox claims, P6 #20); personal and shared
 spaces and `SK` grants; `drop:` scoped agents; leases; public and upload links; recall (beyond the host's
-document retire); byte ranges and resumable uploads; cross-relay addressing; a durable push outbox and delivery
+retire of files and documents); a device delete or self-retire route; byte ranges and resumable uploads; cross-relay addressing; a durable push outbox and delivery
 receipts; multiple instances sharing APNs connections; an HSM or KMS for the APNs key; hot key reload;
 per-account Drop quota overrides (as P3-D36's workspaces override); malware or content scanning (impossible on
 ciphertext); abuse reporting and takedown; metrics and alerting on APNs failures; localized generic push text
@@ -3215,15 +3541,17 @@ merged before its review and green CI). Efforts are implementer days (re-estimat
 
 | PR | Content | Effort | Depends |
 |---|---|---|---|
-| D39a1 | Drop write and read, storage: migration 0017, the dedicated async endpoint and file limiter, the frame parser and streamed upload (temp file, hash, `fsync`, unique rename outside the lock), the check order with the fence, exact retry, CAS, wrap, inbox-wrap and recipients checks, the bounded early-answer drain and its pool, list with positions, spliced pages and byte cuts, read slots held until sent, the host `drop` notice, descriptor, descriptor-page and blob GET (streamed), read concurrency bound, slots and minimum rates, the start-up sweep, the real-socket and Caddy early-answer tests; the explicit `PLANNED` route list in `tests/test_http_fixtures.py` (Opus L13), emptied as routes land | 4–4.5 + 0.75 review | this design |
-| D39a2 | Drop limits and lifecycle: blob and head quotas with per-device shares, document count, reservations, buckets, the expiry, tombstone, pruning and device-wrap sweepers (batched by deleted rows), retire, the `rotation_required` refusal if the owner adopts it, the peak-RSS bench (uploads plus descriptor pages) | 2.75–3.25 + 0.75 | D39a1 |
+| D39a1 | Drop write and read, storage: migration 0017, the dedicated async endpoint and file limiter, the frame parser and streamed upload (temp file, hash, `fsync`, unique rename outside the lock), the check order with the fence, exact retry, CAS, wrap, inbox-wrap and recipients checks, the bounded early-answer drain and its pool, list with positions, spliced pages and byte cuts, read slots held until sent, the host `drop` notice, descriptor, descriptor-page and blob GET (streamed), read concurrency bound, slots and minimum rates, the start-up sweep, the real-socket and Caddy early-answer tests; the explicit `PLANNED` route list in `tests/test_http_fixtures.py` (Opus L13), emptied as routes land; **amendment A1:** the list entry shape with `object_id`, `version` and `state` from the start (`live`, `pruned` from the start-up sweep with its new `n`, `expired` computed at read time, tombstone entries with `descriptor` null, `tombstone_until_ms`), the `tombstone_kind`, `head_author_id`, `head_hash` and `audience` columns and the `drop_audience` table in 0017; orch-52 change 0: the fence re-checked inside the `PUT` commit and its takeover-during-transfer test; Opus delta R1–R3: the `PUT` step 6 audience 403, non-empty `recipients`, the 60 s file floor, audience rows charged to the author's head share | 4.5–5 + 0.75 review | this design |
+| D39a2 | Drop limits and lifecycle: blob and head quotas with per-device shares, document count, reservations, buckets, the expiry, tombstone, pruning and device-wrap sweepers (batched by deleted rows; the expiry sweep assigns the new `n`), retire for documents **and files** (amendment A1: a file's version, wraps and usage released in the retire transaction, the unlink after commit, `{state}` answers, idempotency against expiry), the `retired` list state; orch-52 changes 0–3: the retire's in-transaction fence and `expect_version`/`expect_head` precondition (409 `version_conflict`), the bounded idempotent retry, the takeover-versus-retire race tests and the `drop.relay_retire` vectors, `tombstone_ms = expires_ms` on expiry, the notice tests per state change, audience rows deleted at an expiry and kept (moved to the workspace charge) on a retire; the `rotation_required` refusal if the owner adopts it, the peak-RSS bench (uploads plus descriptor pages) | 3.25–3.75 + 0.75 | D39a1 |
 | D39b | Claims and host re-wraps: `POST claim` (§10.5 transaction), `PUT .../wraps` (`wrap_conflict`), the round trip with `test_round_trip_drop_claim` | 2 + 0.5 | D39a1 |
 | D40a | Push register and unregister: migration 0018, token sealing with the token secret, device-bound ids, same-person move, pruning on revocation and removal, the stale sweep, the disabled-push 404, the partial-configuration refusal | 1.5 + 0.5 | this design |
 | D40b | The host send route and APNs delivery: checks, budgets, the dedup LRU, the in-memory queue and its per-account cap, the HTTP/2 client (a new runtime dependency: `httpx[http2]`, pinned), ES256 JWT cached per key, the per-environment key mapping, the answer table with the 403 backoff, credential loading, the fake APNs transport, log hygiene tests, the end-to-end test | 3.5–4 + 1 | D40a |
 | D40c | Operations (infra session, outside this repo's code): the Caddy body-size exception and timeouts for the Drop upload path (§14.8; deployed before D39 ships), the push configuration on the public unit only (the existing key file, optionally `LoadCredentialEncrypted`), the separate-users credential check, `provision.sh` without VAPID and its 0640 comment, the runbook for key placement and rotation and for `data/drop/` in backups and resets, dev-deploy-plan R8 and P5 | ~1 | D40b (the Caddy part before any D39 deploy) |
 
-The **smallest end-to-end slice** is D39a1 + D39a2 + D40a + D40b + D40c (**~15.5–17 days** with reviews; ~11 in
-revision 1, ~14–15 in revision 2; the Opus delta's sum of the table plus ~0.5 day for its required changes):
+The **smallest end-to-end slice** is D39a1 + D39a2 + D40a + D40b + D40c (**~16.75–18.25 days** with reviews,
+the table's sum; ~11 in revision 1, ~14–15 in revision 2, ~15.5–17 in revision 3; amendment A1 with orch-52's
+changes 0–4 and the Opus delta's R1–R3 is already in the D39a1 and D39a2 rows, not added again; D39b's and
+D40b's in-transaction fence re-checks fit their existing estimates):
 a Python harness with a device (suite 2, the ref client) uploading a file to its workspace, the host stub
 seeing the `drop` notice, listing and downloading it, uploading a reply, and sending `drop.new` through the fake
 APNs transport, whose captured body the ref NSE logic (`push` vectors' receiver) opens and verifies. D39b
@@ -3273,7 +3601,10 @@ unless the owner decides otherwise):**
   `K_push` holder it reaches, and addresses Drop objects about them with `device` wraps only (P3-D39 item 4).
   The relay cannot tell and enforces nothing here. *Recommend* making this a host MUST now, before P8. orch-52
   agrees and adds the seal gate (seal a `wk` wrap or a push only at the committed epoch with the rotation gate
-  down) and label padding (R-D6).
+  down) and label padding (R-D6). Amendment A1 (orch-52 change 4) makes the split explicit: the relay enforces
+  membership and the device-only `recipients` list only, keeps the documented 403/404 existence oracle, and
+  the host also filters its own listings and bridge answers by ticket visibility (P3-D39 items 4 and 6,
+  R-D10).
 - **Q-H5.** Host Drop writes: a `PUT` with `author_kind: "workspace"`, W(g)-fenced like every write; a
   `drop_rewrap` persists its wrap before the `PUT .../wraps` (409 `wrap_conflict` otherwise); documents are
   retired, never expired. *Recommend yes.* orch-52 agrees and persists the whole `ODU2` frame before the first
@@ -3281,9 +3612,19 @@ unless the owner decides otherwise):**
   body (P3-D39 item 9). The relay lets a W author write document versions; orch-52 restricts its host to
   `file` objects until a merge rule exists.
 - **Q-H6.** Handling 429 `quota_exceeded` on Drop (per device, workspace, account): permanent until expiry,
-  pruning or a retire; the host shows it, never retries unchanged in a loop (as the P3-D34 permanent quotas).
+  pruning or a retire (head bytes held by a retired device-only tombstone's audience rows only when that
+  tombstone ends, 30 days after the retire; P3-D39 item 8); the host shows it, never retries unchanged in a loop (as the P3-D34 permanent quotas).
   The body's `quota` field names the cap (P3-D39 item 8). 503 `overloaded`, 429 `rate_limited` and a slot
   429 are retryable after `Retry-After`, never permanent.
+- **Q-H7 (amendment A1; orch-52, 15 Oct 2026: agreed with changes 0-4).** Host-only retire of files and
+  documents, fenced by `Orch-Holder` (re-checked inside the relay's write transaction, P3-D39 item 1). The host
+  sends `{expect_version, expect_head}` of the head it decided about and treats 409 `version_conflict` as "look
+  again" (the object is untouched); it retries a retire with a lost answer only within **29 days** of the
+  earlier of its first attempt and, for a file, its `expires_ms` (a day of margin for the host's clock against
+  the relay's `tombstone_ms`; Opus delta L5), and otherwise reconciles by a full relist, never replaying it (a
+  404 after the window proves nothing); it reconciles in full after a listing gap longer than 29 days, a state
+  restore or a takeover; it counts a `drop` notice as news only above its stored position (P3-D39 items 5 and
+  7). *Agreed.*
 
 orch-52's review (15 Oct, SOUND WITH CHANGES) also lists host-side work recorded in orch-core, not here: R6's
 typed `BridgeKeys` methods (`seal_push`, `wrap_dek_wk`, `open_wrap_wk`), the H13a push planner and outbox, the
@@ -3326,6 +3667,14 @@ existing both-gateway key (orch-d6 correction, 15 Oct).
 - **Q-F9.** Pruned old document versions answer 410 `expired` on the blob, tombstoned or retired ids 410 on
   every read, and 410 on a `PUT` means "use a new object id": the phone treats 410 as final, never as a fork.
   *Agreed.*
+- **Q-F10 (amendment A1, to be checked by orch-f1).** List entries gain `object_id`, `version` and `state`
+  (`live`, `pruned`, `expired`, `retired`); tombstones (`expired`, `retired`) stay listed for 30 days with
+  `descriptor: null` and `wraps: []`, so the parser must accept a null descriptor and key entries by
+  `object_id`. The phone relists in full, so it needs no `after` handling; it shows a retired item as removed by
+  the host. A file's retire is host-mediated: the phone has no delete route and asks its host (orch-52's host
+  op). After orch-52's changes every entry also carries `tombstone_until_ms` (null unless a tombstone), which
+  the parser accepts and may ignore; a client that does list incrementally reconciles in full after a gap
+  longer than 29 days (P3-D39 item 7).
 
 **FakeRelay versus the protocol (conflicts and proposals):**
 
@@ -3337,6 +3686,7 @@ existing both-gateway key (orch-d6 correction, 15 Oct).
 | `wk` wraps at any epoch | `wk` at the current epoch, else 409 `stale_epoch`; rewrap the same `DEK` | adopt (closes the race for removals) |
 | `wxk` to any workspace | `wxk` and `recipients` within the object's own workspace (P4) | adopt (owner question 1) |
 | documents may expire | documents carry no expiry; the host retires | adopt (owner question 3) |
+| no retire; list entries have no state, gone objects vanish | the host retires files and documents (with an `expect_version`/`expect_head` precondition); entries carry `object_id`, `version`, `state`, `tombstone_until_ms`, tombstones listed 30 days | adopt (amendment A1, Q-F10, Q-H7) |
 | all wraps returned on list and wraps GET | the caller's usable wraps only | adopt (Q-F5) |
 | no pagination on list | `after`/`next` by change position, byte-cut pages | adopt |
 | host rewrap in process, silent replace | `PUT .../wraps`, `wrap_conflict` on other bytes | adopt |
