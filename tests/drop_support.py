@@ -353,7 +353,9 @@ def production_conditions(client, relay, ident):
         if "usage" in relay:
             scope, field = relay["usage"]["scope"], relay["usage"]["field"]
             owner = con.execute("SELECT owner_person_id FROM workspaces").fetchone()[0]
-            key = {"device": f"{WS}:{ident}", "workspace": WS, "account": owner, "global": ""}[scope]
+            key = {"device": f"{WS}:{ident}", "workspace": WS, "account": owner, "global": ""}[
+                scope
+            ]
             cap = {
                 ("device", "blob"): q.dev_blob,
                 ("workspace", "blob"): q.ws_blob,
