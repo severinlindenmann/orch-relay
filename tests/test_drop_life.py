@@ -397,6 +397,7 @@ def registered_person(client, device):
 
 
 def revoke_pair(client, device, person):
+    cursor = 1000 + max([r["cursor"] for r in rows(path_of(client), "revocations")] + [0])
     sql(
         client,
         "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
@@ -405,7 +406,7 @@ def revoke_pair(client, device, person):
         b"{}",
         "lost",
         NOW,
-        99,
+        cursor,
     )
 
 
