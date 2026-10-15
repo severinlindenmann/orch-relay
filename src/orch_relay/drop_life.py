@@ -38,6 +38,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import proto as P
 from .bridge import refuse
+from .directory import revoked_sql
 from .drop_quota import AUDIENCE_ROW, DAY_MS, day_of
 
 log = logging.getLogger(__name__)
@@ -88,6 +89,7 @@ class Life:
         self.d, self.bridge = drop.d, drop.bridge
         self.period = SWEEP_PERIOD
         self.cycles = 0
+        self.failures = 0
 
     @property
     def on(self):
@@ -335,8 +337,9 @@ class Life:
             "FROM drop_wraps w JOIN drop_objects o ON o.object_id=w.object_id "
             "JOIN drop_versions v ON v.object_id=w.object_id AND v.version=w.version "
             "WHERE w.target_kind='device' AND (NOT EXISTS (SELECT 1 FROM members m WHERE "
-            "m.workspace_id=o.workspace_id AND m.device_id=w.target_id) OR EXISTS "
-            "(SELECT 1 FROM revocations r WHERE r.device_id=w.target_id)) LIMIT ?",
+            "m.workspace_id=o.workspace_id AND m.device_id=w.target_id) OR "
+            + revoked_sql("w.target_id")
+            + ") LIMIT ?",
             (BATCH + len(skip),),
         ).fetchall()
         done = 0
@@ -408,8 +411,10 @@ class Life:
                 changed = await run_in_threadpool(self.run)
                 if changed and self.d.changed:
                     self.d.changed(*[("ws", ws) for ws in sorted(changed)])
-            except sqlite3.Error:  # busy past the timeout: the next cycle retries
-                log.warning("drop sweep failed", exc_info=True)
+            except Exception:  # any failure: log it, the next cycle retries (R3)
+                self.failures += 1
+                if self.failures <= 3 or self.failures % 60 == 0:  # rate-limited, one line each
+                    log.exception("drop sweep failed (%d so far)", self.failures)
             await asyncio.sleep(self.period)
 
     # --- retire ----------------------------------------------------------------------------------

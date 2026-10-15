@@ -109,6 +109,7 @@ JSON_CAPS = {r[0]: (2097152 if r[0] == "membership" else 65536 if r[0] in
              {"bridge_device_post", "bridge_host_post", "pair_device_post", "pair_host_post"} | DH.NAMES}
 JSON_CAPS.update(CP.CAPS)
 JSON_CAPS["drop_list"] = DH.CAPS["drop_list"]
+JSON_CAPS["drop_retire"] = DH.CAPS["drop_retire"]
 BODY_CAPS = {**JSON_CAPS, "bridge_device_post": 1048576, "bridge_host_post": 262144,
              "pair_device_post": 65536, "pair_host_post": 65536, "drop_put": DH.CAPS["drop_put"]}
 

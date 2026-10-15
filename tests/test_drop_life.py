@@ -389,20 +389,95 @@ def test_a_removed_members_device_wraps_are_deleted_and_its_head_bytes_released(
     assert s["o"]["object_id"] in objects(client)
 
 
-def test_a_revoked_members_device_wraps_are_deleted_too(client):
-    device_only(client)
+def registered_person(client, device):
+    with closing(db.connect(path_of(client))) as con:
+        return con.execute("SELECT person_id FROM devices WHERE device_id=?", (device,)).fetchone()[
+            0
+        ]
+
+
+def revoke_pair(client, device, person):
     sql(
         client,
         "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
-        LAPTOP,
-        "p",
+        device,
+        person,
         b"{}",
         "lost",
         NOW,
         99,
     )
+
+
+def test_a_revoked_members_device_wraps_are_deleted_too(client):
+    device_only(client)
+    revoke_pair(client, LAPTOP, registered_person(client, LAPTOP))  # the registered person's pair
     life(client).run()
     assert device_wraps(client) == [DEVICE]
+
+
+def test_a_strangers_self_certified_pair_never_costs_a_device_its_wraps(client):
+    """R1 (cross-tenant, P3-D30): a pair under another person is no revocation of this device."""
+    device_only(client)
+    revoke_pair(client, LAPTOP, "e" * 32)
+    life(client).run()
+    assert device_wraps(client) == sorted([LAPTOP, DEVICE])
+
+
+def test_the_revocation_helper_is_pair_scoped(client):
+    from orch_relay.directory import device_revoked_for_registered_person as revoked
+
+    with closing(db.connect(path_of(client))) as con:
+        assert not revoked(con, LAPTOP)
+    revoke_pair(client, LAPTOP, "e" * 32)
+    with closing(db.connect(path_of(client))) as con:
+        assert not revoked(con, LAPTOP)
+    revoke_pair(client, LAPTOP, registered_person(client, LAPTOP))
+    with closing(db.connect(path_of(client))) as con:
+        assert revoked(con, LAPTOP) and not revoked(con, DEVICE)
+
+
+def test_no_relay_code_reads_revocations_by_device_id_without_the_registered_person():
+    """Structural (R1): every SELECT on `revocations` in the relay either joins `devices` on the
+    person or compares `person_id`; Drop code goes through directory.revoked_sql only."""
+    import re
+    from pathlib import Path
+
+    root = Path(life_module().__file__).parent
+    for path in sorted(root.glob("*.py")):
+        text = path.read_text()
+        for m in re.finditer(r"FROM revocations\b[^;\"]*", text):
+            chunk = text[m.start() : m.start() + 400]
+            ok = (
+                "device_id=" not in chunk.split("\n")[0]
+                or "person_id" in chunk
+                or "JOIN devices" in chunk
+            )
+            allowed = path.name in (
+                "bridge.py",
+            )  # notice cursor over ever_devices, no access decision
+            assert ok or allowed, (path.name, chunk[:120])
+    for name in ("drop.py", "drop_life.py", "drop_quota.py"):
+        assert "FROM revocations" not in (root / name).read_text(), name
+
+
+def life_module():
+    return L
+
+
+def test_a_device_removed_from_one_workspace_keeps_its_wraps_in_another(client):
+    device_only(client)
+    with closing(db.connect(path_of(client))) as con:
+        scopes = con.execute("SELECT scopes FROM members WHERE device_id=?", (LAPTOP,)).fetchone()[
+            0
+        ]
+        person = con.execute(
+            "SELECT person_id FROM members WHERE device_id=?", (LAPTOP,)
+        ).fetchone()[0]
+    sql(client, "DELETE FROM members WHERE device_id=?", LAPTOP)
+    sql(client, "INSERT INTO members VALUES (?,?,?,?)", WS_B, LAPTOP, person, scopes)
+    life(client).run()
+    assert device_wraps(client) == [DEVICE]  # removed from WS: gone, despite membership of WS_B
 
 
 def test_a_current_members_device_wraps_stay(client):
@@ -540,6 +615,66 @@ def test_n3_an_eio_on_the_directory_fsync_unlinks_the_landed_blob(client, monkey
     assert r.status_code == 503 and r.headers["retry-after"] == "60"
     assert blob_files(client) == [] and rows(path_of(client), "drop_objects") == []
     assert list(client.app.state.drop.tmp.iterdir()) == []
+
+
+def test_the_maintenance_loop_survives_any_exception_and_logs_it(client, monkeypatch, caplog):
+    calls = []
+
+    def boom():
+        calls.append(1)
+        if len(calls) < 3:
+            raise ValueError("a bug in a phase")
+        return set()
+
+    monkeypatch.setattr(life(client), "run", boom)
+    life(client).period = 0.01
+
+    async def probe():
+        task = asyncio.create_task(life(client).maintenance())
+        for _ in range(300):
+            await asyncio.sleep(0.01)
+            if len(calls) >= 4:
+                break
+        alive = not task.done()
+        task.cancel()
+        return alive
+
+    with caplog.at_level(logging.ERROR):
+        assert asyncio.run(probe()) is True
+    assert len(calls) >= 4 and life(client).failures == 2
+    assert caplog.text.count("drop sweep failed") == 2
+
+
+@pytest.mark.parametrize("phase", ["expiry", "documents", "pruning"])
+def test_every_sweep_unlinks_its_blobs_only_after_the_commit(client, monkeypatch, phase):
+    if phase == "expiry":
+        s, _w, b = upload("a", expires=NOW + 3600_000)
+        assert put(client, s, b).status_code == 201
+        at(client, s["o"]["expires_ms"])
+        committed = "SELECT count(*) FROM drop_objects WHERE tombstone_kind='expired'"
+    elif phase == "documents":
+        chain = doc_chain(client, "d", 2)
+        assert retire(client, chain[1]).status_code == 200
+        committed = "SELECT count(*) FROM drop_versions"  # 0 once released
+    else:
+        doc_chain(client, "d", 9)
+        at(client, NOW + 30 * DAY)
+        committed = "SELECT count(*) FROM drop_versions WHERE blob='pruned'"
+    seen = []
+    real_path = L.Path
+
+    class Spy:
+        def __init__(self, path):
+            self.path = real_path(path)
+
+        def unlink(self):
+            with closing(db.connect(path_of(client))) as con:
+                seen.append(con.execute(committed).fetchone()[0])
+            self.path.unlink()
+
+    monkeypatch.setattr(L, "Path", Spy)
+    life(client).run()
+    assert seen and all(v == (0 if phase == "documents" else 1) for v in seen), seen
 
 
 # --- retire ----------------------------------------------------------------------------------------
@@ -755,6 +890,16 @@ def test_retire_403_for_another_workspaces_object_not_404(client):
     r = retire_request(client, object_id("f"), 1, P.b64u(b"x" * 32))
     assert (r.status_code, r.json()) == (403, {"error": "not_eligible"})
     assert retire_request(client, object_id("nobody"), 1, P.b64u(b"x" * 32)).status_code == 404
+
+
+def test_retire_a_foreign_id_whose_tombstone_ended_is_404_not_403(client):
+    o = object_id("old")
+    apply_op(
+        client.app.state.directory, {"op": "foreign_object", "object_id": o, "workspace_id": WS_B}
+    )
+    sql(client, "UPDATE drop_objects SET tombstone_ms=?, tombstone_kind='retired'", NOW - 31 * DAY)
+    r = retire_request(client, o, 1, P.b64u(b"x" * 32))
+    assert (r.status_code, r.json()) == (404, {"error": "not_found"})
 
 
 def test_retire_refuses_a_stale_host_at_admission_and_changes_nothing(client):

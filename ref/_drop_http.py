@@ -32,7 +32,7 @@ ROUTES = [
 ]
 NAMES = {r[0] for r in ROUTES}
 PUT_CAP = 8 + M.MAX_HEAD + M.MAX_BLOB  # the whole-body maximum (413 for a declared length above it)
-CAPS = {"drop_put": PUT_CAP, "drop_list": 16384}
+CAPS = {"drop_put": PUT_CAP, "drop_list": 16384, "drop_retire": 16384}
 CONDITIONS = {
     "precondition_required": "If-Match is absent or not a decimal without leading zeros (or its quoted form).",
     "version_conflict": "The object's current version differs from If-Match, parent or version, or parent_hash "
@@ -360,6 +360,11 @@ def build(v):
             ("expect_head_padded", {"expect_version": 1, "expect_head": good_head + "="}),
             ("expect_head_31_bytes", {"expect_version": 1, "expect_head": R.b64u(b"\x01" * 31)})):
         cs.append(case("malformed_" + label, retire_req(rf, body=body), prior=[up_rf]))
+    big = retire_req(rf)
+    big.pop("json")
+    big["body_recipe"] = {"prefix_b64u": "", "byte": 32, "count": CAPS["drop_retire"] + 1, "suffix_b64u": ""}
+    cs.append(case("refusal_413_too_large", big, prior=[up_rf], response={"status": 413, "json": {"error": "too_large"}},
+                   condition="The body is one byte above the 16 KiB JSON cap: refused before parsing."))
     out["drop_retire"] = cs
 
     # --- reads --------------------------------------------------------------------------------------------

@@ -261,7 +261,8 @@ def test_http_fixture(path):
             assert code in allowed[response["status"]], (response["status"], code)
             assert set(response["json"]) == (
                 {"error", "epoch"}
-                if code in ("stale_epoch", "rotation_required")
+                if code == "stale_epoch"
+                or (code == "rotation_required" and path.stem == "drop_put")
                 else {"error", "devices"}
                 if code == "restore_missing_revocation"
                 else {"error", "current", "state"}
