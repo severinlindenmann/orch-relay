@@ -3745,6 +3745,23 @@ request does not), a W session's at admission. The daily version-1 creation coun
 only with `ORCH_RELAY_DROP=1`. D39a2's `n`-assigning sweepers run only when `ORCH_RELAY_DROP=1` (the state-check gate
 arrives with the list walks).
 
+**D39a2 part 2 decisions (implementation, 16 Oct 2026; `drop_life.py`).** One sweep cycle every 600 s, only with
+`ORCH_RELAY_DROP=1` (with Drop off no sweeper task exists, `Life.run` returns at once and the start-up sweep stops
+after cleaning `tmp/`, so nothing assigns a position; PR 4 puts the state-check gate in front of the same entry
+points). Phases, each in transactions of at most 4 096 deleted rows (versions, cascaded wraps, audience rows; one
+object always completes): expiry (`expires_ms <= now`: `expired` tombstone with `tombstone_ms = expires_ms`, a
+file's version, wraps and usage released, audience rows deleted, new `n`), release of a retired document's versions,
+end of tombstones (`tombstone_ms + 30 d <= now` and no version left; no `n`; a retired device-only tombstone's
+audience rows give back their workspace and global head bytes), document blob pruning (version `<= current - 8`
+and `received_ms + 30 d <= now`; no `n`), `device` wraps of devices that are no longer members of the object's
+workspace or have a revocation (head bytes released from the workspace, global and the version author's share),
+and the two daily tables (rows older than the previous UTC day: the previous day stays for a slow upload that
+began before midnight). A failing object is rolled back to its savepoint, logged and skipped for the cycle. Retire
+is as the amendment A1 text above; the retire of a document counts it out at once (the creator's document share
+too) and leaves its versions to the sweeper. `rotation_required` is adopted: a `wk` wrap is refused with 409 and the
+current epoch while any `rotation_due` row of the workspace exists (after `stale_epoch`, in the commit again); an
+exact retry (step 7) and `wk`-less uploads are unaffected. N3: an error after the blob's rename removes the blob.
+
 ### 14.5 Migration plan (0017, 0018, D39a2's)
 
 Conventions as before: numbered `.sql` files run by `db.migrate`, integer ms of the relay clock, ids as lower-case
