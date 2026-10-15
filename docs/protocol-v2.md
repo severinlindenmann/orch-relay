@@ -225,7 +225,10 @@ Labels (device names, pairing labels) and WebAuthn `shown` text are cleaned as b
 - do not normalise;
 - truncate to **80 code points**.
 
-The receiving host cleans. A displaying device does not clean again. Vector:
+The receiving host cleans for display. A host that records the label in signed logs may additionally normalise its
+own copy (NFC); signatures over the device's original label are always verified over the original bytes, before any
+cleaning or normalisation. "Do not normalise" above is about the cleaning step itself. A displaying device does not
+clean again. Vector:
 `pair_with_a_label_full_of_controls`.
 
 ## 3. Domain separation
@@ -717,6 +720,9 @@ member's grant). So a host that regenerated a key at the held epoch and re-seale
 `p3.resealed_same_epoch_wk_commit_changed_before_grant_conflict`,
 `p3.resealed_same_list_seq_stale_list_before_grant_conflict`).
 
+A list after the first may have no members: checks 8 and 9 then have nothing to check, and check 7 still requires a
+higher epoch when any previous member is missing.
+
 **What the relay cannot check (G2b).** Grants are sealed, so the relay cannot compare a grant's `WK` with
 `wk_commit`. Its part is the field's presence and shape, the epoch ranges, and same-epoch consistency (7b).
 Devices check every grant they use against the list's `wk_commit` (§7.3 D3, D4).
@@ -1020,7 +1026,9 @@ Vectors: `bridge.seal`, `hkdf` (`k_bridge_epoch_1`, `k_bridge_epoch_2`, `k_pair`
      step 5, before the code is shown and before the primary is asked (orch-v2-host §9.4); it is never a bridge
      refusal. A pairing whose declaration fails that gate, or whose level is below what the workspace requires,
      is refused with the short `rejected` form (no reason on the wire; the host screen explains, orch-v2-host
-     §9.15 Q4). The host keeps the declaration verbatim.
+     §9.15 Q4). The host keeps the declaration verbatim. The relay reference checks form and
+     signature only: a host refuses a `created_ms` more than 300 s ahead of its clock as `time` at admission
+     (orch-v2-host §0.8.6 9.3), so the vector `created_ms_2_53_minus_1_accepted` is accepted on form alone.
    - **Compatibility.** An old host refuses a meta v2 as `malformed` (an unknown key): that fails closed. A new
      host accepts a meta without `reader_decl` (level 0). A phone sends `reader_decl` only to a host that
      understands it; R6's first release ships both (orch-v2-host §9.11, Q7), so no negotiation is defined.
@@ -1090,6 +1098,9 @@ Vectors: `bridge.seal`, `hkdf` (`k_bridge_epoch_1`, `k_bridge_epoch_2`, `k_pair`
    2. uploads a WK grant for the current epoch;
    3. publishes the new member list;
    4. completes native pairing; no platform passkey registration (D45/D46, P3 design §7).
+
+   Items 2 and 3 are one relay call: the relay takes the grants inside the member-list publication body (§7.2
+   P3-D7), not as separate uploads. Only the certificate (item 1) goes to the directory on its own.
 
 The device polls with `{"op":"pair_status"}` (epoch 0, signed with its new key, read-only). Answers are
 exactly one of:
@@ -1267,7 +1278,8 @@ host must not be able to get one for a key of its choosing. The flow is:
    - The primary signs a certificate (§6.1) **for exactly the two keys of its own stored challenge**, once
      per request (`already_signed` afterwards), and uploads it to the directory. It signs only while the
      challenge is unexpired (`expired`) and not rejected (`rejected`).
-   - A human who rejects on the primary closes the request; nothing is ever signed for it.
+   - A human who rejects on the primary closes the request, whether it is open or challenged; nothing is ever
+     signed for it.
    - The host polls the directory for the certificate, then continues with §8.3 step 6.
 
 **UI rules for the two codes (R8).** The phone shows two codes in turn. To keep them apart:
@@ -1340,6 +1352,9 @@ Scopes are sealed: the host checks them. Terminal records remain until `expires_
     to open it with.
   - (G2b) A **burned** epoch's key (§7.2 H4) counts as held. A phone pinned to a burned epoch by a withholding
     relay gets the host-signed `stale_epoch` sealed under that key, and nothing else is ever sealed under it.
+    This holds for a burned epoch **above** the committed one too, despite "a higher epoch is dropped": the request
+    gets only a signed `stale_epoch` under the burned key, naming the pending epoch, or `EHW + 1` if none is
+    pending. The burned key is held for that refusal only, never to seal data (orch-v2-host §11A.15.2, C5).
 - **The device** answers `stale_epoch` by fetching its grant and sending the request again as a new
   request (new rid, new seq). The refused seq is consumed (vector
   `stale_epoch_consumes_its_seq_then_a_new_request_runs`).
@@ -1372,7 +1387,7 @@ verified.**
    - **a suite ≠ the deployment's**;
    - another workspace;
    - a mailbox id ≠ rid.
-2. **Key.** **Epoch > current: drop. Epoch 0: the offer named by `stream`, otherwise drop. Otherwise
+2. **Key.** **Epoch > current and not a burned epoch (§8.5): drop. Epoch 0: the offer named by `stream`, otherwise drop. Otherwise
    `WK_epoch`, otherwise drop.**
 3. **Tag.** Drop on failure. **At epoch 0, go to §8.3.**
 4. **Device.** Each of these is a refusal within the host-wide budget (10 per minute), and is dropped
