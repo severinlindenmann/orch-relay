@@ -19,6 +19,33 @@ V = CORPUS["2"]
 S = R.SUITES[2]
 
 
+# P3-D39/D40 (Opus L13): routes designed ahead of their PRs, spelled as a method followed by a separate
+# path span until their PR lands fixtures and re-spells them as one span. Emptied as routes land.
+PLANNED = {
+    ("PUT", "/v2/drop/{o}/versions/{v}/wraps"),  # D39b
+    ("POST", "/v2/drop/{o}/claim"),  # D39b
+    ("POST", "/v2/drop/{o}/retire"),  # D39a2
+    ("POST", "/v2/push/register"),  # D40a
+    ("POST", "/v2/push/unregister"),  # D40a
+    ("POST", "/v2/workspaces/{ws}/push"),  # D40b
+}
+# Refusals a route's row names that its own PR does not produce yet (with the PR that adds them).
+DEFERRED = {("PUT", "/v2/drop/{o}/versions"): {"rotation_required"}}  # D39a2, owner question 6
+# Backticked names in the registry and refusal cells that are answer fields, not error codes.
+FIELDS = {"epoch", "current", "state", "claimed_by", "devices", "server_ms", "quota"}
+
+
+def test_planned_routes_are_spelled_apart_and_have_no_fixtures():
+    table = DOC.split("## 19. Relay HTTP API", 1)[1]
+    planned = set(re.findall(r"^\| (GET|POST|PUT|DELETE) `(/v2/[^`?\[]+)", table, re.MULTILINE))
+    assert planned == PLANNED
+    actual = {
+        (f["route"]["method"], f["route"]["path"])
+        for f in (json.loads(p.read_text()) for p in FILES)
+    }
+    assert not planned & actual
+
+
 def test_all_contract_routes_have_fixtures():
     table = DOC.split("## 19. Relay HTTP API", 1)[1]
     routes = set(re.findall(r"`(GET|POST|PUT|DELETE) (/v2/[^`?\[]+)", table))
@@ -52,9 +79,21 @@ def test_explicit_route_refusals_are_covered():
         ]
         # Escaped pipes occur in the hold request shape, so isolate the refusal cell from the right.
         cell = line.rsplit("|", 3)[1]
-        explicit = set(re.findall(r"`([a-z_]+)`", cell)) - {"epoch"}
-        actual = {c["response"]["json"].get("error") for f in matching for c in f["cases"]}
+        explicit = set(re.findall(r"`([a-z_]+)`", cell)) - FIELDS
+        if match.group(2).startswith("/v2/drop/") or match.group(2) == "/v2/drop/list":
+            # Drop rows also name fields and kinds (`wxk`, `recipients`): only registered codes.
+            explicit &= REGISTERED
+        explicit -= DEFERRED.get(match.groups(), set())
+        actual = {c["response"].get("json", {}).get("error") for f in matching for c in f["cases"]}
         assert explicit <= actual, (match.groups(), explicit - actual)
+
+
+REGISTERED = set(
+    re.findall(
+        r"`([a-z_]+)`",
+        DOC.split("**Relay and orch-publish HTTP**", 1)[1].split("**Primary device", 1)[0],
+    )
+)
 
 
 def signed_objects(value):
@@ -127,6 +166,13 @@ def check_signatures(
             owner = "phone"
         elif o["kind"] == "ws_delegation":
             owner = "person_alice"
+        elif o["kind"] == "drop_object":  # P3-D39: signed by its author
+            authors = {
+                corpus["ids"]["device_phone"]: "phone",
+                corpus["ids"]["device_laptop"]: "laptop",
+                corpus["ids"]["device_primary"]: "primary",
+            }
+            owner = authors.get(o["author_id"], "wsk_a")
         else:
             owner = "wsk_a"
         assert (
@@ -171,7 +217,7 @@ def test_http_fixture(path):
     actual = {
         (c["response"]["status"], c["response"]["json"]["error"])
         for c in f["cases"]
-        if "error" in c["response"]["json"]
+        if "error" in c["response"].get("json", {})
     }
     assert actual == set(refusals(row))
     registry = DOC.split("**Relay and orch-publish HTTP**", 1)[1].split("**Primary device", 1)[0]
@@ -190,7 +236,7 @@ def test_http_fixture(path):
                 else "sha256:[0-9a-f]{64}"
                 if m[0] in {"{hash}", "{target_hash}"}
                 else "[0-9]+"
-                if m[0] == "{i}"
+                if m[0] in {"{i}", "{v}"}
                 else "[0-9a-f]{32}"
             ),
             f["route"]["path"],
@@ -201,6 +247,13 @@ def test_http_fixture(path):
         if request["method"] == "GET":
             assert "json" not in request and "body_b64u" not in request
         assert all(isinstance(v, str) for v in request["query"].values())
+        if "body_hex" in response:  # P3-D39: a blob answer
+            assert response["status"] == 200 and path.stem == "drop_blob_get"
+            assert response["headers"]["Content-Type"] == "application/octet-stream"
+            assert response["headers"]["Content-Length"] == str(
+                len(bytes.fromhex(response["body_hex"]))
+            )
+            continue
         assert response["headers"]["Content-Type"] == "application/json"
         if response["status"] >= 400:
             code = response["json"]["error"]
@@ -210,6 +263,10 @@ def test_http_fixture(path):
                 if code == "stale_epoch"
                 else {"error", "devices"}
                 if code == "restore_missing_revocation"
+                else {"error", "current"}
+                if code == "version_conflict"
+                else {"error", "quota"}
+                if code == "quota_exceeded" and "quota" in response["json"]
                 else {"error"}
             )
         if response["status"] in (429, 503):
@@ -228,7 +285,7 @@ def test_http_fixture(path):
         )
         check_signatures(response)
         list(envelopes(c))
-        if "body_recipe" in request:
+        if "body_recipe" in request and c["name"].startswith("refusal_"):
             recipe = request["body_recipe"]
             raw = (
                 R.unb64u(recipe["prefix_b64u"])
@@ -262,7 +319,7 @@ def test_http_fixture(path):
 def test_fixture_success_shapes():
     for f in build().values():
         for c in f["cases"]:
-            if c["response"]["status"] >= 400:
+            if c["response"]["status"] >= 400 or "json" not in c["response"]:
                 continue
             body = c["response"]["json"]
             if "chunks" in body:
@@ -285,7 +342,7 @@ def test_fixture_success_shapes():
                     "cert_requests",
                     "rotation_due",
                     "unpublished",
-                }
+                } | ({"drop"} if c["name"] == "drop_notice" else set())
                 for item in body["items"]:
                     assert set(item) == {"n", "route", "device", "rid", "offer", "envelope"}
                     h = check_envelope(item["envelope"])
@@ -310,7 +367,10 @@ def test_json_caps_match_route_tables_and_success_bodies_fit():
         assert BODY_CAPS[name] == cap
         assert len(R.cj(success["request"]["json"])) <= cap
         oversized = next(
-            c for c in fixture["cases"] if c["response"]["json"].get("error") == "too_large"
+            c
+            for c in fixture["cases"]
+            if c["response"]["json"].get("error") == "too_large"
+            and c["name"].startswith("refusal_")
         )
         assert oversized["response"]["status"] == (400 if name == "checkpoint_put" else 413)
         assert oversized["request"]["body_recipe"]["count"] == cap + 1

@@ -476,6 +476,14 @@ def apply(state, op):
         for w in state["workspaces"].values():
             w["epoch"] = op["epoch"]
         return
+    if kind == "foreign_object":  # an object of another workspace (no member of it here)
+        state["counter"] += 1
+        state["objects"][op["object_id"]] = {
+            "workspace_id": op["workspace_id"], "object_kind": "file", "current": 1, "inbox": False,
+            "claimed_by": None, "expires_ms": state["now_ms"] + DAY, "tombstone_ms": None,
+            "tombstone_kind": None, "head_author_id": op["workspace_id"], "head_hash": "x" * 43,
+            "audience": "space", "audience_devices": [], "n": state["counter"], "created_ms": state["now_ms"]}
+        return
     obj = state["objects"][op["object_id"]]
     state["counter"] += 1
     obj["n"] = state["counter"]

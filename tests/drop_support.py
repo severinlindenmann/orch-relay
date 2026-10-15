@@ -215,6 +215,21 @@ def apply_op(d, op):
         o_id = op["object_id"]
         con.execute("UPDATE drop_counter SET n=n+1")
         n = con.execute("SELECT n FROM drop_counter").fetchone()[0]
+        if kind == "foreign_object":
+            con.execute(
+                "INSERT INTO drop_objects VALUES (?,?,?,'file',1,0,NULL,?,NULL,NULL,?,?,'space',?,?)",
+                (
+                    o_id,
+                    op["workspace_id"],
+                    PERSON,
+                    d.clock() + DAY,
+                    op["workspace_id"],
+                    "x" * 43,
+                    n,
+                    d.clock(),
+                ),
+            )
+            return
         con.execute("UPDATE drop_objects SET n=? WHERE object_id=?", (n, o_id))
         if kind in ("retire", "expire_sweep"):
             if kind == "retire":
@@ -273,3 +288,52 @@ def send_step(client, step):
     if "content_length" in step:
         h["Content-Length"] = str(step["content_length"])
     return client.put(f"/v2/drop/{step['object_id']}/versions", content=body, headers=h)
+
+
+def send_request(client, request):
+    kwargs = {"headers": request["headers"], "params": request["query"]}
+    if "body_hex" in request:
+        kwargs["content"] = bytes.fromhex(request["body_hex"])
+    if "json" in request:
+        kwargs["content"] = P.cj(request["json"])
+    return client.request(request["method"], request["path"], **kwargs)
+
+
+def prepare_fixture(client, case):
+    """A Drop HTTP fixture's preconditions (tests/http_fixtures/README.md): the seeded workspace,
+    `given.prior` requests, `given.ops` and `given.relay` conditions."""
+    d, drop = client.app.state.directory, client.app.state.drop
+    setup(d)
+    given = case["given"]
+    for prior in given.get("prior", []):
+        r = send_request(client, prior)
+        assert r.status_code in (200, 201), (prior["path"], r.text)
+    for op in given.get("ops", []):
+        apply_op(d, op)
+    relay = given.get("relay", {})
+    token = case["request"]["headers"].get("Authorization", "")[7:]
+    ident = next((k for k, t in TOKENS.items() if t == token), None)
+    with closing(db.connect(d.path)) as con, con:
+        if relay.get("device") == "drop_scoped":
+            con.execute(
+                "UPDATE devices SET scopes_max=? WHERE device_id=?", (P.cj([f"drop:{WS}"]), ident)
+            )
+        elif relay.get("device") == "cert_expired":
+            con.execute("UPDATE devices SET expires_ms=? WHERE device_id=?", (d.clock(), ident))
+        elif relay.get("device") == "revoked":
+            con.execute(
+                "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
+                (ident, PERSON, P.cj(V["revocations"][0]["signed"]), "lost", d.clock(), 1),
+            )
+    for kind, slots in (
+        ("upload_slots", drop.uploads),
+        ("read_slots", drop.reads),
+        ("download_slots", drop.downloads),
+    ):
+        if relay.get(kind) == "device":
+            slots.used[("device", ident)] = slots.caps["device"]
+        elif relay.get(kind) == "relay":
+            slots.count = slots.total
+    if relay.get("bucket") == "empty":
+        d.throttles = {**d.throttles, "session": (1, 1)}
+        d.buckets.take(("session", ("device", ident)), 1, 1, d.clock())
