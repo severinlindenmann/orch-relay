@@ -802,3 +802,17 @@ def test_host_drop_notice_behind_its_switch(client):
     assert put(client, s2, b2).status_code == 201
     notices = client.get(f"/v2/workspaces/{WS}/host/poll", params=q, headers=h).json()["notices"]
     assert notices["drop"] == 2
+
+
+def test_relay_never_stores_name_mime_or_plaintext(client):
+    """§14.2 item 11: only ciphertext reaches the database and the blob files."""
+    secret = b"PLAINTEXT-MARKER-orch-drop-7f3a" * 8
+    signed, _, body = upload("secret", content=secret)
+    assert put(client, signed, body).status_code == 201
+    data = path_of(client).read_bytes()
+    for wal in path_of(client).parent.glob("*.sqlite3-wal"):
+        data += wal.read_bytes()
+    for blob in files(client)[0]:
+        data += blob.read_bytes()
+    for needle in (b"PLAINTEXT-MARKER", b"f.txt", b"text/plain"):
+        assert needle not in data
