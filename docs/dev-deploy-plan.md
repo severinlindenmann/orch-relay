@@ -229,7 +229,8 @@ PR #27 changes both units, plus a new unit, the nft table and the Caddyfile:
   (table `inet orch_limits`).
 - The Caddyfile gains `request_body { max_size 8MB }` on `relay.` and `relay-internal.` (8,000,000 bytes).
   **Drop (P3-D39) needs an exception before it ships:** a matcher for `PUT /v2/drop/*/versions` with
-  `max_size` 27,787,272 bytes and read/idle timeouts above 10 minutes, the 8 MB cap everywhere else (P3 design
+  `max_size` 27,852,808 bytes (the relay's 27,787,272-byte maximum plus 64 KiB, so the relay answers its own
+  413) and read/idle timeouts above 10 minutes, the 8 MB cap everywhere else (P3 design
   §14.8; D40c). Without it every upload above 8,000,000 bytes gets Caddy's 413.
 
 Points to know before running `provision.sh` for these changes:
