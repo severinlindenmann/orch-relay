@@ -334,6 +334,42 @@ def prepare_fixture(client, case):
             slots.used[("device", ident)] = slots.caps["device"]
         elif relay.get(kind) == "relay":
             slots.count = slots.total
+    if "usage" in relay or "creations" in relay or relay.get("bucket") == "drop_up_empty":
+        production_conditions(client, relay, ident)
     if relay.get("bucket") == "empty":
         d.throttles = {**d.throttles, "session": (1, 1)}
         d.buckets.take(("session", ("device", ident)), 1, 1, d.clock())
+
+
+def production_conditions(client, relay, ident):
+    """D39a2 relay conditions: a usage scope at its cap, a full daily creation counter, an empty
+    upload bucket (the fixture README names them)."""
+    d, drop = client.app.state.directory, client.app.state.drop
+    q = drop.quotas
+    if relay.get("bucket") == "drop_up_empty":
+        d.throttles = {**d.throttles, "drop-up": (1, 1)}
+        d.buckets.take(("drop-up", ident), 1, 1, d.clock())
+    with closing(db.connect(d.path)) as con, con:
+        if "usage" in relay:
+            scope, field = relay["usage"]["scope"], relay["usage"]["field"]
+            owner = con.execute("SELECT owner_person_id FROM workspaces").fetchone()[0]
+            key = {"device": f"{WS}:{ident}", "workspace": WS, "account": owner, "global": ""}[scope]
+            cap = {
+                ("device", "blob"): q.dev_blob,
+                ("workspace", "blob"): q.ws_blob,
+                ("workspace", "head"): q.ws_head,
+                ("account", "blob"): q.account_blob,
+                ("global", "blob"): q.global_blob,
+            }[(scope, field)]
+            values = {"blob": 0, "head": 0}
+            values[field] = cap
+            con.execute(
+                "INSERT INTO drop_usage VALUES (?,?,?,?,0,0) ON CONFLICT(scope,id) DO UPDATE SET "
+                "blob_bytes=excluded.blob_bytes, head_bytes=excluded.head_bytes",
+                (scope, key, values["blob"], values["head"]),
+            )
+        if relay.get("creations") == "device_full":
+            con.execute(
+                "INSERT INTO drop_creations VALUES ('device', ?, ?, ?)",
+                (f"{WS}:{ident}", d.clock() // DAY, q.dev_creations),
+            )

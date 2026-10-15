@@ -199,6 +199,32 @@ def build(v):
     cs.append(case("refusal_503_overloaded", ok, relay={"upload_slots": "relay"},
                    condition="All 16 relay-wide upload slots are held.",
                    response={"status": 503, "json": {"error": "overloaded"}}))
+    # D39a2 (P3-D39 item 8): stored-bytes caps (429 `quota_exceeded` naming the cap, Retry-After 600:
+    # not transient), a global ceiling (503, Retry-After 600), the MiB upload bucket and the daily
+    # version-1 creation counters (Retry-After the seconds to 00:00 UTC of the relay's clock).
+    for name, scope, field, quota, cond in (
+            ("device_share", "device", "blob", "drop_device",
+             "The device's blob share in this workspace (256 MiB) is full."),
+            ("workspace_bytes", "workspace", "blob", "drop_ws", "The workspace's 512 MiB of blobs are full."),
+            ("workspace_head_bytes", "workspace", "head", "drop_head_ws",
+             "The workspace's 32 MiB of descriptor and wrap bytes are full."),
+            ("account_bytes", "account", "blob", "drop_account",
+             "The owner account's 1 GiB of blobs is full.")):
+        cs.append(case("refusal_429_quota_exceeded_" + name, ok, relay={"usage": {"scope": scope, "field": field}},
+                       condition=cond + " Not transient: it stays until expiry, pruning or a retire frees usage.",
+                       response={"status": 429, "json": {"error": "quota_exceeded", "quota": quota},
+                                 "retry": "600"}))
+    cs.append(case("refusal_503_overloaded_global_ceiling", ok, relay={"usage": {"scope": "global", "field": "blob"}},
+                   condition="The relay-wide blob ceiling (ORCH_RELAY_DROP_GLOBAL_BYTES) is reached.",
+                   response={"status": 503, "json": {"error": "overloaded"}, "retry": "600"}))
+    cs.append(case("refusal_429_rate_limited_upload_bucket", ok, relay={"bucket": "drop_up_empty"},
+                   condition="The device's upload bucket (one token per started MiB; burst 1, 1 per minute) is empty.",
+                   response={"status": 429, "json": {"error": "rate_limited"}, "retry": "60"}))
+    midnight = max(1, min(86_400, -(-(86_400_000 - NOW % 86_400_000) // 1000)))
+    cs.append(case("refusal_429_rate_limited_creations", ok, relay={"creations": "device_full"},
+                   condition="The device has made its 250 version-1 creations of this UTC day; Retry-After is "
+                             "the seconds to 00:00 UTC.",
+                   response={"status": 429, "json": {"error": "rate_limited"}, "retry": str(midnight)}))
     foreign = b.oid("fx foreign")
     cs.append(case("another_space", put_req(up(foreign)),
                    ops=[{"op": "foreign_object", "object_id": foreign, "workspace_id": b.ws_b}]))

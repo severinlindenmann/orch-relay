@@ -14,8 +14,10 @@ Check order of the `PUT` (§14.2 item 3; each refusal stops, nothing is stored b
  8 CAS - 9 wraps - 10 blob - 11 commit (fence, then 5's eligibility, 6, 7, 8, 9 on live rows).
 
 Lock order: the in-memory slot tables (event loop only), then Directory.lock, then Directory.budget;
-a pooled read connection is never held while taking the lock. Limits, quotas and the lifecycle
-sweepers beyond the start-up sweep are D39a2; claims and host re-wraps are D39b.
+a pooled read connection is never held while taking the lock. Quotas, reservations and the MiB
+buckets are drop_quota.py (D39a2 part 1: reserved at step 9, enforced in the commit); the sweepers
+beyond the start-up sweep, retire, decide-class uploads and list walks are later D39a2 parts; claims
+and host re-wraps are D39b.
 """
 
 import asyncio
