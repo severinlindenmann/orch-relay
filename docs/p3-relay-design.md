@@ -2572,7 +2572,8 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (ย
        `operate` at admission and is decide-only now, item 13),
        commit; 201 `{version}` with `ETag: "<version>"`. A failure before the commit unlinks the file; a crash
        leaves an orphan file that the start-up sweep deletes (a row never points to a missing file because the
-       file lands first). The reservation is released in `finally`, also on `ClientDisconnect` and cancellation.
+       file lands first). The reservation is released when the commit returns (Opus R2: a 201, 200 or refusal
+       frees it at once) and in `finally` on every other exit, also on `ClientDisconnect` and cancellation.
 
    The relay never checks `content_hash` against anything but the bytes it received, never opens metadata, and
    never checks `dek_commit` (it has no `DEK`). Readers do all three (ยง10.4).
@@ -3737,8 +3738,9 @@ positional insert has 15 values for 16 columns) when Drop is on; with Drop off n
 **D39a2 part 1 decisions (owner, via orch-d6, 15 Oct 2026).** When several caps apply at once, the refusal names
 the author's own share first, then the workspace, the account and the global ceiling (503, no `quota` key). Admission
 charges the head bytes gross (the audience rows a new document version releases are not netted off); the commit
-charges them exactly. A device's workspace upload bucket is charged once the head names the workspace (a W session's
-at admission). The daily version-1 creation counters answer 429 `rate_limited` with `quota: "drop_creations"` and
+charges them exactly. A device's workspace upload bucket is charged at step 5, once the device is eligible to write in the
+workspace the head names (Opus R1: every later refusal, an exact retry and a creations 429 spend it; an ineligible
+request does not), a W session's at admission. The daily version-1 creation counters answer 429 `rate_limited` with `quota: "drop_creations"` and
 `Retry-After` to 00:00 UTC; their day rows are swept with the budget's (D39a2 part 2). `ORCH_RELAY_DROP_NOTICE` works
 only with `ORCH_RELAY_DROP=1`. D39a2's `n`-assigning sweepers run only when `ORCH_RELAY_DROP=1` (the state-check gate
 arrives with the list walks).

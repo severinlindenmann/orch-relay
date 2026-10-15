@@ -414,8 +414,8 @@ class Drop:
         fence at admission (409 `fenced`, before any slot or body read), then one read-class token
         (P3-D35; a refusal after authentication is charged too). `upload_cost` (a PUT: tokens for
         its declared body, one per started MiB) then charges the upload bucket of the device, or
-        of the W session's workspace (item 8); a device's workspace bucket is charged once the
-        head names the workspace."""
+        of the W session's workspace (item 8); a device's workspace bucket is charged at step 5, once
+        the device is eligible to write in the workspace the head names (precheck)."""
         d = self.d
         with self.bridge.reading("query") as con:
             con.execute("BEGIN")
@@ -784,7 +784,8 @@ class Drop:
     def reserve(self, plan):
         """Step 9, on the event loop with no await between the check and the take: refuse a
         version that would pass a cap with the in-flight reservations counted, else reserve its
-        bytes, head bytes, version and document until the request ends."""
+        bytes, head bytes, version and document until the commit returns (released then, R2; also
+        released in `finally` on a refusal, a disconnect or a cancellation)."""
         o = plan.o
         check(
             self.quotas,
