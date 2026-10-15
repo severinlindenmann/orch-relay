@@ -28,6 +28,9 @@ def create_app(data_dir: Path | str | None = None, instance: str | None = None) 
             asyncio.create_task(app.state.bridge.maintenance()),
             asyncio.create_task(app.state.checkpoints.maintenance()),
         ]
+        # The Drop sweeps assign change positions: they exist only with ORCH_RELAY_DROP=1.
+        if (sweeper := app.state.drop.life.start()) is not None:
+            tasks.append(sweeper)
         try:
             yield
         finally:

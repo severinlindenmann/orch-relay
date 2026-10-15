@@ -41,6 +41,7 @@ from starlette.routing import Route
 from . import proto as P
 from .bridge import refuse
 from .directory import DAY, Refusal, fail, pair_revoked
+from .drop_life import TOMBSTONE, Life, state_of, tombstone_until
 from .drop_quota import (
     AUDIENCE_ROW,
     Need,
@@ -72,7 +73,6 @@ DEFAULT_MAX_BLOB = 26 * MIB  # ORCH_RELAY_DROP_MAX_BLOB_BYTES, 1..256 MiB
 DEFAULT_MAX_TTL = 604_800_000  # ORCH_RELAY_DROP_MAX_TTL_MS
 SKEW = 300_000
 MIN_FILE_LIFE = 60_000  # amendment A1, Opus delta R3
-TOMBSTONE = 30 * DAY
 LIST_LIMIT, LIST_BYTES, LIST_JSON_CAP = 64, 2 * MIB, 16 * KIB
 PAGE_LIMIT, PAGE_BYTES = 256, 1 * MIB
 IO = 64 * KIB
@@ -198,23 +198,6 @@ def if_match(text):
     return int(text)
 
 
-def tombstone_until(row, now):
-    """The tombstone's end (ms), or None while the object is live (§14.2 item 7)."""
-    if row["tombstone_ms"] is not None:
-        return row["tombstone_ms"] + TOMBSTONE
-    if row["expires_ms"] is not None and row["expires_ms"] <= now:
-        return row["expires_ms"] + TOMBSTONE  # expired, before the sweep (A1)
-    return None
-
-
-def state_of(row, blob, now):
-    if row["tombstone_kind"] is not None:
-        return row["tombstone_kind"]
-    if row["expires_ms"] is not None and row["expires_ms"] <= now:
-        return "expired"
-    return "pruned" if blob == "pruned" else "live"
-
-
 def env_int(env, name, default, low, high):
     raw = env.get(name)
     if raw is None:
@@ -259,7 +242,9 @@ class Drop:
         self.max_body = 8 + MAX_HEAD + self.max_blob
         # Item 8: the caps (drop_quota.py). Parsed only with Drop on: with it off nothing of Drop
         # runs, so a bad ORCH_RELAY_DROP_GLOBAL_* value cannot abort a start (D39a2 review L6).
-        self.quotas = Quotas(env) if enabled(env) else Quotas({})
+        self.on = enabled(env)
+        self.quotas = Quotas(env) if self.on else Quotas({})
+        self.life = Life(self)  # the sweeps and the retire (drop_life.py); idle with Drop off
         self.reserved = Reservations()  # in-flight upload reservations, event loop only
         self.limits = Limits()
         self.files = None  # anyio.CapacityLimiter(FILE_TOKENS), made on the event loop
@@ -300,6 +285,8 @@ class Drop:
         for entry in self.tmp.iterdir():
             with suppress(OSError):
                 entry.unlink()
+        if not self.on:
+            return  # the `n`-assigning part runs only with ORCH_RELAY_DROP=1 (D39a2 part 2)
         with self.d.lock:
             con = self.bridge.connection("write")
             con.execute("BEGIN IMMEDIATE")
@@ -715,6 +702,8 @@ class Drop:
             kind = rec["target_kind"]
             if kind == "wk" and rec["key_version"] != epoch:
                 no("stale_epoch", 409, epoch=epoch)
+            elif kind == "wk" and self.rotation_open(con, ws):
+                no("rotation_required", 409, epoch=epoch)
             elif kind == "wxk" and (card is None or rec["key_version"] != card[0]):
                 no("bad_wxk_version", 409)
             elif kind == "device":
@@ -731,6 +720,15 @@ class Drop:
                     "not_eligible",
                     403,
                 )
+
+    @staticmethod
+    def rotation_open(con, ws):
+        """A revocation's `rotation_due` row is open for the workspace: the epoch is unchanged until
+        the host rotates, so a `wk` wrap would land under the key the revoked device holds (R-D7)."""
+        return (
+            con.execute("SELECT 1 FROM rotation_due WHERE workspace_id=? LIMIT 1", (ws,)).fetchone()
+            is not None
+        )
 
     def precheck(self, session, o_path, expected, raw, content_length, request_now, cost=0):
         """Steps 4 (parse) to 9 on a read snapshot, before any blob byte. Returns ("retry",
@@ -978,12 +976,16 @@ class Drop:
         folder.mkdir(mode=0o700, exist_ok=True)
         rel = f"{o['object_id']}/{o['version']}.{secrets.token_hex(8)}"
         os.rename(tmp, self.blobs / rel)
-        for path in (folder, self.blobs, self.tmp):
-            fd = os.open(path, os.O_RDONLY)
-            try:
-                os.fsync(fd)
-            finally:
-                os.close(fd)
+        try:
+            for path in (folder, self.blobs, self.tmp):
+                fd = os.open(path, os.O_RDONLY)
+                try:
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+        except OSError:
+            self.unlink(self.blobs / rel)  # N3: an EIO after the rename must not leave the blob
+            raise
         return rel
 
     @staticmethod
@@ -1167,6 +1169,20 @@ class Drop:
                 entries.append((row["n"], entry(row, state, wraps, now)))
         return splice_list(entries, len(rows) > limit)
 
+    def retire(self, session, headers, o_id, raw):
+        """POST /v2/drop/{o}/retire (§14.2 item 5, amendment A1): W sessions only (a device
+        asks its host), then the body `{expect_version, expect_head}`, both required, then the
+        write transaction (`Life.retire`)."""
+        need(session["kind"] == "workspace", "not_eligible", 403)
+        try:
+            body = P.parse_json(raw)
+        except ValueError:
+            fail("malformed")
+        need(isinstance(body, dict) and set(body) == {"expect_version", "expect_head"})
+        version = integer(body["expect_version"], 1)
+        head = b64(body["expect_head"], 32)  # canonical unpadded b64u of exactly 32 bytes
+        return self.life.retire(headers, o_id, version, head)
+
     # --- ASGI ------------------------------------------------------------------------------------
 
     async def endpoint(self, scope, receive, send, route):
@@ -1186,22 +1202,29 @@ class Drop:
             try:
                 query = query_map(scope)
                 raw = b""
-                if route == "list":
+                if route in ("list", "retire"):
                     declared = headers.get("content-length")
                     if declared and declared.isdecimal() and int(declared) > LIST_JSON_CAP:
                         no("too_large", 413)
                     raw = await body.read_all(LIST_JSON_CAP)
                     need(not query)
+                    o_id = path_object(scope) if route == "retire" else None
                 else:
                     o_id = path_object(scope)
                     version = path_version(scope) if route != "descriptors" else None
                     need(route == "descriptors" or not query)
-                session = await run_in_threadpool(self.admit, headers)
+                session = await run_in_threadpool(self.admit, headers, route == "retire")
                 extra = []
                 if route in ("list", "descriptors"):
                     slot = self.reads.take(self.slot_keys(session))
                 if route == "list":
                     payload = await run_in_threadpool(self.list_page, session, raw)
+                elif route == "retire":
+                    payload, moved = await run_in_threadpool(
+                        self.retire, session, headers, o_id, raw
+                    )
+                    if moved and self.d.changed:
+                        self.d.changed(("ws", moved))
                 elif route == "descriptors":
                     payload = await run_in_threadpool(self.descriptors_page, session, o_id, query)
                 else:
@@ -1737,6 +1760,7 @@ ROUTES = (
     ("descriptor", "/v2/drop/{o}/versions/{v}/descriptor", "GET"),
     ("wraps", "/v2/drop/{o}/versions/{v}/wraps", "GET"),
     ("blob", "/v2/drop/{o}/versions/{v}/blob", "GET"),
+    ("retire", "/v2/drop/{o}/retire", "POST"),
 )
 
 
