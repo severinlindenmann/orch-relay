@@ -1,0 +1,638 @@
+{
+  "contract": "orch-relay-http-v2",
+  "suite": 2,
+  "route": {
+    "method": "POST",
+    "path": "/v2/push/register",
+    "role": "client",
+    "auth": "D(m)"
+  },
+  "cases": [
+    {
+      "name": "success",
+      "given": {
+        "scenario": "authorized_current_state",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "sandbox",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "registered": true
+        }
+      }
+    },
+    {
+      "name": "refusal_400_cert_expired",
+      "given": {
+        "scenario": "cert_expired",
+        "now_ms": 1790000000000,
+        "condition": "Device certificate used by push_register has expired (400)."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "sandbox",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "cert_expired"
+        }
+      }
+    },
+    {
+      "name": "refusal_400_malformed",
+      "given": {
+        "scenario": "malformed",
+        "now_ms": 1790000000000,
+        "condition": "push_register: Unknown query parameter; strict route parsing refuses before dispatch."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {
+          "unexpected": "1"
+        },
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "sandbox",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "refusal_401_unauthenticated",
+      "given": {
+        "scenario": "unauthenticated",
+        "now_ms": 1790000000000,
+        "condition": "push_register: Authorization header is absent; no valid bearer session."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "sandbox",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 401,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "unauthenticated"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_not_eligible",
+      "given": {
+        "scenario": "not_eligible",
+        "now_ms": 1790000000000,
+        "condition": "Principal lacks the person or workspace authority required by push_register."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "sandbox",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    },
+    {
+      "name": "refusal_403_revoked",
+      "given": {
+        "scenario": "revoked",
+        "now_ms": 1790000000000,
+        "condition": "The device authenticating push_register is revoked."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "sandbox",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "revoked"
+        }
+      }
+    },
+    {
+      "name": "refusal_404_not_found",
+      "given": {
+        "scenario": "not_found",
+        "now_ms": 1790000000000,
+        "condition": "The relay has no complete push configuration: the route answers 404 before authentication."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "sandbox",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 404,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_found"
+        }
+      }
+    },
+    {
+      "name": "refusal_409_registration_conflict",
+      "given": {
+        "scenario": "registration_conflict",
+        "now_ms": 1790000000000,
+        "condition": "push_register: The registration id exists with another body (workspace, env, topic or token), or belongs to another device."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "sandbox",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 409,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "registration_conflict"
+        }
+      }
+    },
+    {
+      "name": "refusal_413_too_large",
+      "given": {
+        "scenario": "too_large",
+        "now_ms": 1790000000000,
+        "condition": "push_register: Whole HTTP body is exactly one byte above this route's published cap; refuse before parsing."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "body_recipe": {
+          "prefix_b64u": "",
+          "byte": 32,
+          "count": 16385,
+          "suffix_b64u": ""
+        }
+      },
+      "response": {
+        "status": 413,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "too_large"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_quota_exceeded",
+      "given": {
+        "scenario": "quota_exceeded",
+        "now_ms": 1790000000000,
+        "condition": "The device already holds 128 registrations (a replacement of an existing tuple would not count)."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "sandbox",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "quota_exceeded"
+        }
+      }
+    },
+    {
+      "name": "refusal_429_rate_limited",
+      "given": {
+        "scenario": "rate_limited",
+        "now_ms": 1790000000000,
+        "condition": "The device made 30 state-changing registrations in the current hour; an exact retry is free and never refused."
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "sandbox",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 429,
+        "headers": {
+          "Content-Type": "application/json",
+          "Retry-After": "20"
+        },
+        "json": {
+          "error": "rate_limited"
+        }
+      }
+    },
+    {
+      "name": "exact_retry_refreshes",
+      "given": {
+        "scenario": "same_id_and_body_already_registered_free_of_rate_windows",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "sandbox",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "registered": true
+        }
+      }
+    },
+    {
+      "name": "new_id_retires_the_old_one",
+      "given": {
+        "scenario": "a_registration_exists_for_this_device_workspace_env_topic",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "0424456dca291eff11fb86b0046eeeb1",
+          "env": "sandbox",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "registration_id": "0424456dca291eff11fb86b0046eeeb1",
+          "registered": true
+        }
+      }
+    },
+    {
+      "name": "token_moves_from_the_persons_other_device",
+      "given": {
+        "scenario": "another_device_of_this_person_holds_the_token",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "sandbox",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "registered": true
+        }
+      }
+    },
+    {
+      "name": "production_env",
+      "given": {
+        "scenario": "relay_has_a_production_key",
+        "now_ms": 1790000000000
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "production",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "registered": true
+        }
+      }
+    },
+    {
+      "name": "env_without_a_key_is_malformed",
+      "given": {
+        "scenario": "env_without_a_key",
+        "relay": {
+          "envs": [
+            "sandbox"
+          ]
+        }
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "production",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "wrong_topic_is_malformed",
+      "given": {
+        "scenario": "wrong_topic"
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "sandbox",
+          "topic": "io.example.other",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "token_of_31_bytes_is_malformed",
+      "given": {
+        "scenario": "short_token"
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "sandbox",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQ"
+        }
+      },
+      "response": {
+        "status": 400,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "malformed"
+        }
+      }
+    },
+    {
+      "name": "drop_scoped_device",
+      "given": {
+        "scenario": "drop_scoped_device"
+      },
+      "request": {
+        "method": "POST",
+        "path": "/v2/push/register",
+        "query": {},
+        "headers": {
+          "Authorization": "Bearer FAKE-device",
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "workspace_id": "705d40abbb8c1c90354a1acaa94c935c",
+          "registration_id": "4eb5c210e1c5a64ac9873a6ed7c6ef35",
+          "env": "sandbox",
+          "topic": "io.severin.orch",
+          "token": "KlBeHDcPAG9AfaBK4oJ51rV-rmMyhMG6yGTt7lUsFQo"
+        }
+      },
+      "response": {
+        "status": 403,
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "json": {
+          "error": "not_eligible"
+        }
+      }
+    }
+  ]
+}

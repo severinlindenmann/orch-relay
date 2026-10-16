@@ -31,6 +31,9 @@ def create_app(data_dir: Path | str | None = None, instance: str | None = None) 
         # The Drop sweeps assign change positions: they exist only with ORCH_RELAY_DROP=1.
         if (sweeper := app.state.drop.life.start()) is not None:
             tasks.append(sweeper)
+        if app.state.push.enabled:  # P3-D40: the stale and expired-certificate sweep
+            tasks.append(asyncio.create_task(app.state.push.maintenance()))
+            tasks.append(asyncio.create_task(app.state.push.sender.run()))  # APNs delivery
         try:
             yield
         finally:
@@ -56,6 +59,9 @@ def create_app(data_dir: Path | str | None = None, instance: str | None = None) 
     from .drop import install as install_drop
 
     install_drop(app)  # P3-D39 (D39a1)
+    from .push import install as install_push
+
+    install_push(app)  # P3-D40 (D40a): raises PushConfigError on a partial configuration
 
     @app.get("/healthz")
     def healthz() -> dict:

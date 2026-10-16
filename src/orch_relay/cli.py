@@ -57,9 +57,14 @@ def main(argv: list[str] | None = None) -> int:
 
     import uvicorn
 
-    uvicorn.run(
-        app_mod.create_app(), host=args.host, port=args.port, workers=1, proxy_headers=False
-    )
+    from .push_config import PushConfigError
+
+    try:
+        app = app_mod.create_app()
+    except PushConfigError as exc:  # P3-D40 item 9: a partial push configuration is loud
+        print(f"orch-relay: refusing to start: {exc}", file=sys.stderr)
+        return 2
+    uvicorn.run(app, host=args.host, port=args.port, workers=1, proxy_headers=False)
     return 0
 
 

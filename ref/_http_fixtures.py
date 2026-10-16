@@ -47,6 +47,16 @@ ROUTES = [
     ("relay_info", "GET", "/v2/relay-info", "client", "none", "429:rate_limited"),
 ]
 
+# P3-D40 (D40a, D40b): push registration and the host's send route (protocol §19.10)
+ROUTES += [
+    ("push_register", "POST", "/v2/push/register", "client", "D(m)",
+     "403:not_eligible,revoked 404:not_found 409:registration_conflict 429:rate_limited,quota_exceeded"),
+    ("push_unregister", "POST", "/v2/push/unregister", "client", "D",
+     "400:cert_expired 403:not_for_this_device,revoked 404:not_found"),
+    ("push_send", "POST", "/v2/workspaces/{ws}/push", "host", "W(g)",
+     "404:not_found 409:stale_epoch 429:rate_limited 503:overloaded"),
+]
+
 ROUTES += CP.ROUTES
 # P3-D39 (D39a1): the Drop write and read routes (ref/_drop_http.py, the model ref/drop_relay.py)
 ROUTES += DH.ROUTES
@@ -99,12 +109,14 @@ CONDITIONS = {
 }
 
 
+CONDITIONS["registration_conflict"] = (
+    "The registration id exists with another body (workspace, env, topic or token), or belongs to another device.")
 CONDITIONS.update(CP.CONDITIONS)
 CONDITIONS.update(DH.CONDITIONS)
 
 # (G0a review 2) Whole JSON body caps, enforced before parsing.
 JSON_CAPS = {r[0]: (2097152 if r[0] == "membership" else 65536 if r[0] in
-             {"accounts", "card_put", "card_keys", "cert_requests_post"} else 16384)
+             {"accounts", "card_put", "card_keys", "cert_requests_post", "push_send"} else 16384)
              for r in ROUTES if r[1] in {"POST", "PUT"} and r[0] not in
              {"bridge_device_post", "bridge_host_post", "pair_device_post", "pair_host_post"} | DH.NAMES}
 JSON_CAPS.update(CP.CAPS)
@@ -158,6 +170,23 @@ def condition_for(name, code):
         return "Held list is (list_seq 1, epoch 2); this list's epoch 1 falls below it. Epochs may skip, never fall."
     if name == "membership" and code == "wk_commit_changed":
         return "Held list (list_seq 1, epoch 1) carries wk_commit A; this list (list_seq 2) keeps epoch 1 with wk_commit B."
+    if name.startswith("push_"):
+        text = {
+            ("push_register", "quota_exceeded"): "The device already holds 128 registrations (a replacement of an existing tuple would not count).",
+            ("push_register", "rate_limited"): "The device made 30 state-changing registrations in the current hour; an exact retry is free and never refused.",
+            ("push_register", "not_eligible"): "A drop: scoped device, or a device that is not a member of workspace_id.",
+            ("push_register", "revoked"): "The authenticated device is revoked.",
+            ("push_unregister", "not_for_this_device"): "registration_id belongs to another device.",
+            ("push_send", "stale_epoch"): "outer.epoch is not the workspace's current list epoch (the answer's epoch is 2).",
+            ("push_send", "rate_limited"): "The workspace made 120 send requests in a burst and 20 per minute since.",
+            ("push_send", "overloaded"): "The in-memory queue cannot take every send of this request (4,096 total, 1,024 per workspace, 2,048 per account); nothing was queued. Retry after Retry-After.",
+            ("push_send", "not_eligible"): "The session is a device, or a W session of another workspace.",
+            ("push_send", "not_found"): "The relay has no complete push configuration: the route answers 404 before authentication.",
+            ("push_register", "not_found"): "The relay has no complete push configuration: the route answers 404 before authentication.",
+            ("push_unregister", "not_found"): "The relay has no complete push configuration: the route answers 404 before authentication.",
+        }.get((name, code))
+        if text:
+            return text
     if code == "retry_exhausted" and name == "bridge_host_post":
         return "This identical chunk's copy has expired and it was already stored again eight times (P3-D27); terminal."
     if code == "rate_limited" and name == "bridge_device_post":
@@ -197,6 +226,7 @@ def build(vectors=None):
             meta = {"state": "pending", "wsk_pub": card["o"]["wsk_pub"], "sas_nonce": R.b64u(R.fake("fixture SAS")), "dk_sig_pub": cert["o"]["dk_sig_pub"], "dk_kx_pub": cert["o"]["dk_kx_pub"]}
         return R.envelope(S, R.k_pair(R.fake("fixture pairing secret"), bytes.fromhex(ws), bytes.fromhex(offer)), key, h, R.frame(meta))
     preq, presp = pair(1), pair(2)
+    push_registration = R.fake("P3 push registration")[:16].hex()
     ck = {"workspace_id": ws, "device_id": device, "card_seq": 1, "sealed": publication["card_key_wraps"]["wraps"][0]["sealed"]}
     shapes = {
         "session_challenge": ({}, {"challenge": objs["login"]["challenge"], "expires_ms": 1790000060000}),
@@ -220,6 +250,10 @@ def build(vectors=None):
         "cert_requests_poll": (None, {"requests": [objs["request"]]}),
         "cert_challenge": ({"challenge": objs["challenge"]}, {}), "cert_rejection": ({"rejection": objs["cert_rejection"]}, {}),
         "cert_request_get": (None, {"state": "challenged", "challenge": objs["challenge"], "cert": None, "rejection": None}),
+        "push_register": ({"workspace_id": ws, "registration_id": push_registration, "env": "sandbox", "topic": "io.severin.orch",
+                           "token": R.b64u(R.fake("P3 push token")[:32])}, {"registration_id": push_registration, "registered": True}),
+        "push_unregister": ({"workspace_id": ws, "registration_id": push_registration}, {"registration_id": push_registration, "registered": False}),
+        "push_send": ({"targets": [device], "outer": json.loads(v["push"]["raw"]), "priority": "high", "ttl_s": 600}, {"accepted": 1}),
         # RELAY_READER_LEVEL 1 and the default ORCH_RELAY_MAX_PUBLICATION_BYTES (16 MiB, P3-D37)
         "relay_info": (None, {"v": 1, "reader": 1, "max_publication_bytes": 16 * 1024 * 1024}),
     }
@@ -428,6 +462,52 @@ def build(vectors=None):
             cases[-1]["given"].update(scenario="drop_notice", relay={"drop_notice": True}, condition=(
                 "The relay runs with ORCH_RELAY_DROP_NOTICE=1; the workspace's newest Drop object is at change "
                 "position 3."))
+        if name == "push_register":
+            body = success["request"]["json"]
+            extra("exact_retry_refreshes", given="same_id_and_body_already_registered_free_of_rate_windows")
+            other_id = R.fake("P3 push registration 2")[:16].hex()
+            extra("new_id_retires_the_old_one", {"json": {**body, "registration_id": other_id}},
+                  {"registration_id": other_id, "registered": True}, given="a_registration_exists_for_this_device_workspace_env_topic")
+            extra("token_moves_from_the_persons_other_device", given="another_device_of_this_person_holds_the_token")
+            extra("production_env", {"json": {**body, "env": "production"}}, given="relay_has_a_production_key")
+            c = copy.deepcopy(success)
+            c.update(name="env_without_a_key_is_malformed", given={"scenario": "env_without_a_key", "relay": {"envs": ["sandbox"]}})
+            c["request"]["json"] = {**body, "env": "production"}
+            c["response"].update(status=400, json={"error": "malformed"})
+            cases.append(c)
+            c = copy.deepcopy(success)
+            c.update(name="wrong_topic_is_malformed", given={"scenario": "wrong_topic"})
+            c["request"]["json"] = {**body, "topic": "io.example.other"}
+            c["response"].update(status=400, json={"error": "malformed"})
+            cases.append(c)
+            c = copy.deepcopy(success)
+            c.update(name="token_of_31_bytes_is_malformed", given={"scenario": "short_token"})
+            c["request"]["json"] = {**body, "token": R.b64u(R.fake("P3 push token")[:31])}
+            c["response"].update(status=400, json={"error": "malformed"})
+            cases.append(c)
+            c = copy.deepcopy(success)
+            c.update(name="drop_scoped_device", given={"scenario": "drop_scoped_device"})
+            c["response"].update(status=403, json={"error": "not_eligible"})
+            cases.append(c)
+        if name == "push_unregister":
+            body = success["request"]["json"]
+            extra("every_registration_of_the_device_in_the_workspace", {"json": {**body, "registration_id": None}},
+                  {"registration_id": None, "registered": False})
+            extra("absent_id_is_idempotent", given="registration_id_not_held")
+            extra("membership_not_required", given="device_was_removed_from_the_workspace_but_is_not_revoked")
+        if name == "push_send":
+            body = success["request"]["json"]
+            extra("non_member_target_is_skipped", {"json": {**body, "targets": [R.fake("P3 push non-member")[:16].hex()]}},
+                  {"accepted": 0}, given="target_is_not_a_member_or_its_certificate_is_revoked_or_expired")
+            extra("exact_retry_sends_nothing_again", given="same_outer_already_sent_to_the_device_within_24_h_accepted_still_counts")
+            extra("over_budget_is_skipped_not_refused", given="device_budget_spent_accepted_still_counts")
+            big = dict(body["outer"], c="A" * 4000)
+            c = copy.deepcopy(success)
+            c.update(name="oversized_outer", given={"scenario": "outer_over_3072_bytes"})
+            c["request"]["json"] = {**body, "outer": big}
+            c["response"].update(status=400, json={"error": "malformed"})
+            cases.append(c)
+            extra("ttl_zero_normal_priority", {"json": {**body, "priority": "normal", "ttl_s": 0}})
         if name == "session_logout":
             extra("expired_token_retry", given="token_expired_or_already_logged_out")
         if name == "relay_info":  # every answer of the route, refusals included, is never cached
