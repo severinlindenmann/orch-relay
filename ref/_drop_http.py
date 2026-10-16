@@ -247,6 +247,54 @@ def build(v):
                              "the seconds to 00:00 UTC.",
                    response={"status": 429, "json": {"error": "rate_limited", "quota": "drop_creations"},
                              "retry": str(midnight)}))
+    # D39a2 part 3 (amendment A2, item 13): decide-class uploads. The phone holds `look` and `decide`
+    # only (the op `scopes`); it may upload exactly one shape, a new inbox file, at the budget of
+    # 50 creations and 64 MiB per device and workspace per UTC day (429 `rate_limited`, `quota`
+    # drop_decide_creations | drop_decide_bytes, Retry-After the seconds to 00:00 UTC).
+    decide = [{"op": "scopes", "device": ph, "scopes": ["look", "decide"]}]
+
+    def dinbox(label, **kw):
+        return up(label, recipients="inbox", wraps=lambda o: [b.wrap(o, "wxk"), b.wrap(o, "device", ph)], **kw)
+
+    dfile = dinbox("fx decide")
+    cs.append(case("decide_only_inbox_file", put_req(dfile), ops=decide,
+                   condition="A phone with look and decide uploads a new inbox file: one wxk and its own device wrap."))
+    cs.append(case("decide_only_inbox_file_without_the_device_wrap",
+                   put_req(up("fx decide plain", recipients="inbox")), ops=decide))
+    cs.append(case("decide_only_exact_retry", put_req(dfile), prior=[put_req(dfile)], ops=decide,
+                   condition="The phone's resend after a lost 201: 200 before the budget, so it spends nothing."))
+    for label, kw, why in (
+            ("document", {"kind": "document"}, "a document"),
+            ("space_recipients", {}, "an object addressed to the space"),
+            ("device_only", {"recipients": [lap]}, "a device-only list")):
+        cs.append(case("refusal_403_decide_only_" + label, put_req(up("fx decide " + label, **kw)), ops=decide,
+                       condition=f"A decide-only device uploads {why}: 403 at the scope step, nothing charged."))
+    cs.append(case("refusal_403_decide_only_second_version",
+                   put_req(dinbox("fx decide", version=2, parent=dfile[0]["o"]), if_match="1"),
+                   prior=[put_req(dfile)], ops=decide,
+                   condition="A decide-only device writes version 2 of its own file: 403, like every other shape."))
+    cs.append(case("refusal_403_decide_only_if_match_1", put_req(dfile, if_match="1"), ops=decide,
+                   condition="If-Match 1 on a new id: the shape needs If-Match 0, so 403 (not a 409)."))
+    cs.append(case("refusal_403_look_only_device", put_req(dfile),
+                   ops=[{"op": "scopes", "device": ph, "scopes": ["look"]}],
+                   condition="A look-only device has no write scope at all."))
+    cs.append(case("decide_only_own_file_again_409", put_req(dinbox("fx decide", content=b"another")),
+                   prior=[put_req(dfile)], ops=decide,
+                   condition="Its own existing file with If-Match 0 and other content: the CAS answers, as for operate."))
+    theirs = up("fx decide theirs", author=lap, recipients="inbox")
+    cs.append(case("refusal_403_decide_only_anothers_unclaimed_inbox",
+                   put_req(dinbox("fx decide theirs")), prior=[put_req(theirs, lap)], ops=decide,
+                   condition="Another author's unclaimed inbox id is hidden: the same 403 (amendment A2)."))
+    cs.append(case("decide_only_a_wk_less_inbox_upload_ignores_an_open_rotation", put_req(dfile),
+                   ops=decide + [{"op": "rotation_due"}, {"op": "epoch", "epoch": 2}]))
+    for label, relay_name, quota in (("creations", "creations_full", "drop_decide_creations"),
+                                     ("bytes", "bytes_full", "drop_decide_bytes")):
+        cs.append(case("refusal_429_rate_limited_decide_" + label, put_req(dfile), ops=decide,
+                       relay={"decide_budget": relay_name},
+                       condition="The phone's decide-class budget of this UTC day is spent (50 creations or 64 MiB); "
+                                 "Retry-After is the seconds to 00:00 UTC.",
+                       response={"status": 429, "json": {"error": "rate_limited", "quota": quota},
+                                 "retry": str(midnight)}))
     foreign = b.oid("fx foreign")
     cs.append(case("another_space", put_req(up(foreign)),
                    ops=[{"op": "foreign_object", "object_id": foreign, "workspace_id": b.ws_b}]))
@@ -378,14 +426,25 @@ def build(v):
     oid = {k: x[0]["o"]["object_id"] for k, x in {"a": a, "b": bl, "c": hb, "d": ib, "e": wide}.items()}
 
     cs = [case("success", list_req(lap), prior=world,
-               condition="The laptop lists what others wrote: positions ascending, its usable wraps, the "
-                         "unclaimed inbox item listed (no wrap a device can open), claimed_by in every entry.")]
+               condition="The laptop lists what others wrote: positions ascending, its usable wraps, claimed_by, "
+                         "claimed_ms and expires_ms in every entry; the phone's unclaimed inbox item is not "
+                         "listed (amendment A2).")]
     cs += generic("drop_list", list_req(lap), prior=world)
     cs.append(case("sending", list_req(ph, direction="sending"), prior=world))
     cs.append(case("device_outside_the_audience", list_req(ph), prior=world,
                    condition="The host's device-only object for the laptop is not listed for the phone."))
     cs.append(case("workspace_session", list_req(ws), prior=world,
-                   condition="A W session sees every object of its workspace with its wk and wxk wraps."))
+                   condition="A W session sees every object of its workspace with its wk and wxk wraps, the "
+                             "unclaimed inbox item included."))
+    cs.append(case("unclaimed_inbox_hidden_from_a_member", list_req(lap), prior=[put_req(ib)],
+                   condition="Only the phone's unclaimed inbox file exists: a member device's list is empty."))
+    cs.append(case("claimed_inbox_listed_with_claimed_ms", list_req(lap), prior=world,
+                   ops=[{"op": "claim", "object_id": oid["d"], "workspace_id": ws}],
+                   condition="After the host's claim the inbox item is every member's, with claimed_by and "
+                             "claimed_ms (the relay's clock at the claim)."))
+    cs.append(case("claimed_inbox_in_an_after_list", list_req(lap, after=5), prior=world,
+                   ops=[{"op": "claim", "object_id": oid["d"], "workspace_id": ws}],
+                   condition="The claim's new n brings the item into an incremental list."))
     cs.append(case("first_page", list_req(lap, limit=1), prior=world))
     cs.append(case("after_the_last_position", list_req(lap, after=5), prior=world))
     cs.append(case("states", list_req(lap), prior=world + [put_req(up("fx exp", expires=NOW + 120_000))],
@@ -472,6 +531,10 @@ def build(v):
                            relay={"download_slots": "relay"}, response={"status": 503, "json": {"error": "overloaded"}}))
         if what == "descriptor":
             cs.append(case("unclaimed_inbox", get_req(oid["d"], what, lap), prior=world))
+        cs.append(case("unclaimed_inbox_author", get_req(oid["d"], what, ph), prior=world,
+                       condition="The author device reads back its own unclaimed upload (the blob waits for "
+                                 "the claim)."))
+        cs.append(case("unclaimed_inbox_workspace", get_req(oid["d"], what, ws), prior=world))
         out[name] = cs
     return out
 

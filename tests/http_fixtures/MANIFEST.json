@@ -1,5 +1,5 @@
 {
-  "aggregate": "112d7ee1b67248cbfc4b0219e5f01b33c8cbf0c7941661ffc262811e6312de6f",
+  "aggregate": "a50d6e75964c7dcd071fcc3a8f70436109efefa6169c72014c5f33af83fb8ec5",
   "files": {
     "README.md": "10349e1f5441acf6242cbda78153b4bc889637ec23e3cc6d82e8ae9cabc4820d",
     "accounts.json": "060776501099476673fa1026afa1256ec7c06f8c922c9b3542ee63ee6058d1c3",
@@ -21,13 +21,13 @@
     "checkpoint_put.json": "c12b4fd42db5be943fb9c6d836df4fe284c37e6f07be64f60fc041b5001ca5e3",
     "device_get.json": "ff37825adf657c46cc4c0b380a86838b16a67875ecabd417901681fc794196a1",
     "device_put.json": "448656fea7366cd8e61fbbaaa2f8e39a28c6b6ba81fe7c53b9b2555916e10187",
-    "drop_blob_get.json": "0c92f286b8173d25f38610e1564c7b21c95d23d43a7f8c461e639593e9f5adcb",
-    "drop_descriptor_get.json": "107cca10813f5ec87cb4c07835b87dc3400fd59de2c2d49bdeaae8e0514f31ca",
+    "drop_blob_get.json": "b4aa1e6e18c83fc699aef32d65d050abb0140b18c2dbdfc493f47f6b113446f2",
+    "drop_descriptor_get.json": "a999dec48df57d4091fe928338ac6371d02a7c0a2b3c3c006bac2bf5f9d7c87d",
     "drop_descriptors.json": "a5cda4bf79748c1551ee11ef16828b2c6493f51fd5a4f2172206fbcdddb3fb20",
-    "drop_list.json": "b0cd7b75686b47ce397b09548fb164e9da42694517021d59088dddac81477ad4",
-    "drop_put.json": "26b2c4c517060807a6e2609b0807abe8befb4c30d782509a0ab60aa2eef51637",
+    "drop_list.json": "b233c682a0243256f72d82071d7b1e098bd60df97540c3ef56ac0df80760db50",
+    "drop_put.json": "3cd019a2827fed1d11a52e63c1993eec2fc93bda7c6726e829c1c9f810818024",
     "drop_retire.json": "6c034bb4a3badf7242d52b02c552ab487538d2d9ce68557d28368050b0f347aa",
-    "drop_wraps_get.json": "e3d5fdb4423fa1ecbf5f03cb210c77d252794f36609a4a9f0f027c9d7ffcfd7c",
+    "drop_wraps_get.json": "c8792ccecd72a1333a760bcd6c7d5ac4e95a2dd57741356226d07137b768c9a3",
     "genesis.json": "f769c7a11e16629f3600ef9592d86c641079988cca304cfa14374c90ccb20277",
     "grants.json": "accfe157b6b57fd72fc1b86697596343d6bdd68f2cf8680f26a64e4ef56e3591",
     "host_hold.json": "3e53d3d685b0beb747890b1ca83d4af506f75cffc787ee8948e56803b5925fc7",
@@ -52,5 +52,5 @@
     "unpublished_ack.json": "b9eb82d048df7dc44c9b351fee3c491701f010ee86d57d40782c5adf8f054fd8",
     "unpublished_get.json": "73ee9247010acb848870bd0e21a476ec36f883ae4c5c6ceacb31cdd6d6245768"
   },
-  "revision": 17
+  "revision": 18
 }

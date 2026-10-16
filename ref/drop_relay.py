@@ -148,11 +148,20 @@ def sees_workspace(state, principal, ws):
 def visible(state, principal, obj):
     if not sees_workspace(state, principal, obj["workspace_id"]):
         return False
-    return (principal["kind"] == "workspace" or obj["audience"] != "devices"
-            or principal["id"] in obj["audience_devices"])
+    if principal["kind"] == "workspace":
+        return True
+    if obj["inbox"] and obj["claimed_by"] is None:  # amendment A2: the W session's and the author's
+        return obj["head_author_id"] == principal["id"]
+    return obj["audience"] != "devices" or principal["id"] in obj["audience_devices"]
 
 
-def eligibility(state, principal, signed, now, signature=True):
+def decide_shape(o, expected):
+    """Item 13 (amendment A2): a new inbox file at version 1, If-Match 0; request-only, no state."""
+    return (o["object_kind"] == "file" and o["recipients"] == "inbox" and o["version"] == 1
+            and o["parent"] == 0 and expected == 0)
+
+
+def eligibility(state, principal, signed, now, expected, signature=True):
     o = signed["o"]
     ws = o["space_id"]
     if o["object_kind"] == "file":
@@ -168,7 +177,8 @@ def eligibility(state, principal, signed, now, signature=True):
             no(401, "bad_signature")
     if kind == "device":
         scopes = member(state, ws, ident)
-        need(scopes is not None and "operate" in scopes, 403, "not_eligible")
+        need(scopes is not None and ("operate" in scopes or ("decide" in scopes and decide_shape(o, expected))),
+             403, "not_eligible")
     else:
         need(ident == ws, 403, "not_eligible")
     if isinstance(o["recipients"], list):
@@ -311,7 +321,7 @@ def _put(state, principal, o_path, body, im, holder, content_length):
     signed, records = shape(head, o_path)
     o = signed["o"]
     need(8 + len(raw) + o["content_len"] == (len(body) if content_length is None else content_length))
-    eligibility(state, principal, signed, now)
+    eligibility(state, principal, signed, now, expected)
     obj = object_state(state, principal, o, now)
     if exact_retry(state, o, obj):
         return {"status": 200, "json": {"version": o["version"]}}
@@ -331,6 +341,7 @@ def _put(state, principal, o_path, body, im, holder, content_length):
     state["objects"][o["object_id"]] = {
         "workspace_id": o["space_id"], "object_kind": o["object_kind"], "current": o["version"],
         "inbox": o["recipients"] == "inbox", "claimed_by": prior["claimed_by"] if prior else None,
+        "claimed_ms": prior.get("claimed_ms") if prior else None,
         "expires_ms": o["expires_ms"], "tombstone_ms": None, "tombstone_kind": None,
         "head_author_id": o["author_id"], "head_hash": parent_hash(o), "audience": audience,
         "audience_devices": devices, "n": state["counter"],
@@ -455,7 +466,8 @@ def list_page(state, principal, body):
                 "tombstone_until_ms": tombstone_until(obj, now),
                 "descriptor": ver["descriptor"] if ver and st in ("live", "pruned") else None,
                 "wraps": usable(state, principal, o_id, obj["current"], ws) if st == "live" else [],
-                "claimed_by": obj["claimed_by"],
+                "claimed_by": obj["claimed_by"], "claimed_ms": obj.get("claimed_ms"),
+                "expires_ms": obj["expires_ms"],
             })
         return {"status": 200, "json": {"objects": entries,
                                         "next": entries[-1]["n"] if more and entries else None}}
@@ -505,8 +517,8 @@ def retire(state, principal, o_id, body, holder=None):
 
 def apply(state, op):
     """A state change a fixture or vector names as a precondition: `retire` (tombstone now, new n),
-    `expire_sweep` (expired tombstone at expires_ms, audience rows deleted, new n), `claim` (claimed_by,
-    new n), `prune` (the listed version's blob gone after a restore, wraps deleted, new n), `clock`."""
+    `expire_sweep` (expired tombstone at expires_ms, audience rows deleted, new n), `claim` (claimed_by, claimed_ms = now,
+    new n), `scopes` (a member's scopes), `prune` (the listed version's blob gone after a restore, wraps deleted, new n), `clock`."""
     kind = op["op"]
     if kind == "clock":
         state["now_ms"] = op["now_ms"]
@@ -514,6 +526,11 @@ def apply(state, op):
     if kind == "rotation_due":  # a revocation left a rotation_due row open (wk wraps are refused)
         for w in state["workspaces"].values():
             w["rotation_due"] = True
+        return
+    if kind == "scopes":  # a member device's scopes change (a phone holds `look` and `decide` only)
+        for w in state["workspaces"].values():
+            if op["device"] in w["members"]:
+                w["members"][op["device"]] = list(op["scopes"])
         return
     if kind == "epoch":  # a membership publication at a new epoch (a removal)
         for w in state["workspaces"].values():
@@ -523,7 +540,7 @@ def apply(state, op):
         state["counter"] += 1
         state["objects"][op["object_id"]] = {
             "workspace_id": op["workspace_id"], "object_kind": "file", "current": 1, "inbox": False,
-            "claimed_by": None, "expires_ms": state["now_ms"] + DAY, "tombstone_ms": None,
+            "claimed_by": None, "claimed_ms": None, "expires_ms": state["now_ms"] + DAY, "tombstone_ms": None,
             "tombstone_kind": None, "head_author_id": op["workspace_id"], "head_hash": "x" * 43,
             "audience": "space", "audience_devices": [], "n": state["counter"], "created_ms": state["now_ms"]}
         return
@@ -540,6 +557,7 @@ def apply(state, op):
             del state["versions"][key]
     elif kind == "claim":
         obj["claimed_by"] = op["workspace_id"]
+        obj["claimed_ms"] = state["now_ms"]
     elif kind == "prune":
         ver = state["versions"][f"{op['object_id']}/{obj['current']}"]
         ver.update(blob="pruned", wraps=[])
