@@ -609,10 +609,9 @@ def test_unclaimed_inbox_is_the_hosts_and_authors_only_until_the_claim(client):
     for what in ("descriptor", "wraps", "blob"):
         r = get(client, o_id, what, LAPTOP)
         assert (r.status_code, r.json()) == (403, hidden)
-    assert (
-        client.get(f"/v2/drop/{o_id}/descriptors", headers=headers(LAPTOP, if_match=None)).json()
-        == hidden
-    )
+    assert client.get(
+        f"/v2/drop/{o_id}/descriptors", headers=headers(LAPTOP, if_match=None)
+    ).json() == hidden
     assert listing(client, LAPTOP).json()["objects"] == []
     assert get(client, o_id, "descriptor").status_code == 200  # the author's read-back
     assert get(client, o_id, "wraps").json()["claimed_by"] is None
