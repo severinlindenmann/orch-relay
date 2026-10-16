@@ -854,3 +854,62 @@ def test_a_download_over_one_mib_costs_two_tokens(client):
         client.get(url, headers=auth).status_code == 200
     )  # 2 of 3 tokens (a 1 MiB + 1 B blob + header)
     assert client.get(url, headers=auth).status_code == 429  # 1 left: a floored cost would pass
+
+
+# --- D39a2 part 1 review follow-ups (L1, L2) -------------------------------------------------------
+
+
+def test_l1_the_start_up_check_boundary_is_the_maximal_body_not_the_blob(client):
+    """Upload buckets must hold the tokens of a maximal body (blob cap + 8 + head cap = 26 MiB +
+    512 KiB + 8 B: 27 started MiB), download buckets those of a maximal blob (26). A burst of 26
+    refuses an upload bucket, 27 starts; a download bucket needs only 26 (kills mutants that
+    compute the upload cost from max_blob or the download cost from max_body)."""
+    drop, d = client.app.state.drop, client.app.state.directory
+    assert drop.max_blob == 26 * 1024 * 1024 and drop.max_body == 8 + 512 * 1024 + drop.max_blob
+    saved = d.throttles
+    try:
+        for name, env in (
+            ("drop-up", "ORCH_RELAY_THROTTLE_DROP_UP"),
+            ("drop-up-workspace", "ORCH_RELAY_THROTTLE_DROP_UP_WORKSPACE"),
+        ):
+            d.throttles = {**saved, name: (26, 26)}
+            with pytest.raises(ValueError, match=env):
+                drop.check_buckets()
+            d.throttles = {**saved, name: (27, 27)}
+            drop.check_buckets()
+        for name, env in (
+            ("drop-down", "ORCH_RELAY_THROTTLE_DROP_DOWN"),
+            ("drop-down-person", "ORCH_RELAY_THROTTLE_DROP_DOWN_PERSON"),
+        ):
+            d.throttles = {**saved, name: (25, 25)}
+            with pytest.raises(ValueError, match=env):
+                drop.check_buckets()
+            d.throttles = {**saved, name: (26, 26)}
+            drop.check_buckets()
+    finally:
+        d.throttles = saved
+
+
+def test_l2_step_6_refusals_spend_the_workspace_bucket(client):
+    """A 403 (outside a device-only audience) and a 410 (a tombstone) are answered at step 6,
+    after step 5 charged the device's workspace bucket: each costs one token, never refunded."""
+    from drop_support import default_wraps
+
+    hidden, _w, hb = upload("hid", author=LAPTOP, recipients=[LAPTOP])
+    assert put(client, hidden, hb, author=LAPTOP).status_code == 201
+    gone, _w, gb = upload("gone")
+    assert put(client, gone, gb).status_code == 201
+    with closing(db.connect(path_of(client))) as con, con:
+        con.execute(
+            "UPDATE drop_objects SET tombstone_ms=?, tombstone_kind='retired' WHERE object_id=?",
+            (NOW, gone["o"]["object_id"]),
+        )
+    exhaust(client, **{"drop-up-workspace": (4, 1)})  # NOW is frozen: no refill
+    client.app.state.directory.buckets.clear()
+    unit = client.app.state.directory.buckets.UNIT
+    assert put(client, gone, gb).status_code == 410
+    assert ws_bucket(client)[0] == 3 * unit
+    mine, data, _dek = descriptor(hidden["o"]["object_id"], author=DEVICE, recipients=[LAPTOP])
+    body = frame(mine, default_wraps(mine["o"]), data)
+    assert put(client, mine, body).status_code == 403
+    assert ws_bucket(client)[0] == 2 * unit

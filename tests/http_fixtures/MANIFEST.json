@@ -1,7 +1,7 @@
 {
-  "aggregate": "630b97d1dda477d32997b0565d25e7ac8d25cce48721efd783a71d5c7fc60659",
+  "aggregate": "112d7ee1b67248cbfc4b0219e5f01b33c8cbf0c7941661ffc262811e6312de6f",
   "files": {
-    "README.md": "459a0579ed6453056d31f89f4bac200eab8c84f2202cb4107e70cf25502202bb",
+    "README.md": "10349e1f5441acf6242cbda78153b4bc889637ec23e3cc6d82e8ae9cabc4820d",
     "accounts.json": "060776501099476673fa1026afa1256ec7c06f8c922c9b3542ee63ee6058d1c3",
     "baseline_delete.json": "d463dc15149dc8ed0669ffc1cad74f53e9d841957f3e91de0bc91b9582f0dd1f",
     "baseline_post.json": "595b7d56c266ca88888c7c2c32cc9444838e9b3879ddc2391f367a8078f8bcec",
@@ -25,7 +25,8 @@
     "drop_descriptor_get.json": "107cca10813f5ec87cb4c07835b87dc3400fd59de2c2d49bdeaae8e0514f31ca",
     "drop_descriptors.json": "a5cda4bf79748c1551ee11ef16828b2c6493f51fd5a4f2172206fbcdddb3fb20",
     "drop_list.json": "b0cd7b75686b47ce397b09548fb164e9da42694517021d59088dddac81477ad4",
-    "drop_put.json": "f336e4dbcfb7872fba1e9c02060716251107a0cee5a380d1a1cabf95e89a0d52",
+    "drop_put.json": "26b2c4c517060807a6e2609b0807abe8befb4c30d782509a0ab60aa2eef51637",
+    "drop_retire.json": "6c034bb4a3badf7242d52b02c552ab487538d2d9ce68557d28368050b0f347aa",
     "drop_wraps_get.json": "e3d5fdb4423fa1ecbf5f03cb210c77d252794f36609a4a9f0f027c9d7ffcfd7c",
     "genesis.json": "f769c7a11e16629f3600ef9592d86c641079988cca304cfa14374c90ccb20277",
     "grants.json": "accfe157b6b57fd72fc1b86697596343d6bdd68f2cf8680f26a64e4ef56e3591",
@@ -51,5 +52,5 @@
     "unpublished_ack.json": "b9eb82d048df7dc44c9b351fee3c491701f010ee86d57d40782c5adf8f054fd8",
     "unpublished_get.json": "73ee9247010acb848870bd0e21a476ec36f883ae4c5c6ceacb31cdd6d6245768"
   },
-  "revision": 15
+  "revision": 17
 }

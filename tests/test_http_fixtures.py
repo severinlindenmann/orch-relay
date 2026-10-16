@@ -24,14 +24,12 @@ S = R.SUITES[2]
 PLANNED = {
     ("PUT", "/v2/drop/{o}/versions/{v}/wraps"),  # D39b
     ("POST", "/v2/drop/{o}/claim"),  # D39b
-    ("POST", "/v2/drop/{o}/retire"),  # D39a2
     ("POST", "/v2/push/register"),  # D40a
     ("POST", "/v2/push/unregister"),  # D40a
     ("POST", "/v2/workspaces/{ws}/push"),  # D40b
 }
 # Refusals a route's row names that its own PR does not produce yet (with the PR that adds them).
 DEFERRED = {
-    ("PUT", "/v2/drop/{o}/versions"): {"rotation_required"},  # D39a2, owner question 6
     ("POST", "/v2/drop/list"): {"generation_changed"},  # D39a2, amendment A2
 }
 # Backticked names in the registry and refusal cells that are answer fields, not error codes.
@@ -264,8 +262,11 @@ def test_http_fixture(path):
             assert set(response["json"]) == (
                 {"error", "epoch"}
                 if code == "stale_epoch"
+                or (code == "rotation_required" and path.stem == "drop_put")
                 else {"error", "devices"}
                 if code == "restore_missing_revocation"
+                else {"error", "current", "state"}
+                if code == "version_conflict" and path.stem == "drop_retire"
                 else {"error", "current"}
                 if code == "version_conflict"
                 else {"error", "quota"}

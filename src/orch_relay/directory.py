@@ -279,6 +279,22 @@ def pair_revoked(con, device_id, person_id):
     )
 
 
+def revoked_sql(column):
+    """SQL for "this device is revoked" by the REGISTERED person's pair (P3-D30; `pair_revoked` in
+    SQL): the one fragment every relay query that lets a revocation remove a device's access must
+    use. A stranger's self-certified pair for the same device id never matches. `column` is the
+    device id expression."""
+    return (
+        "EXISTS (SELECT 1 FROM revocations rv JOIN devices dv ON dv.device_id=rv.device_id "
+        f"AND dv.person_id=rv.person_id WHERE rv.device_id={column})"
+    )
+
+
+def device_revoked_for_registered_person(con, device_id):
+    """Is the device revoked by its registered person's pair (never a stranger's)?"""
+    return con.execute(f"SELECT {revoked_sql('?')}", (device_id,)).fetchone()[0] == 1
+
+
 def chain_revoked(con, device_id):
     """Does any workspace's chain hold a revocation of this device id, whatever the person?
 

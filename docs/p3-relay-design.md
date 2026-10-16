@@ -2572,7 +2572,8 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (ย
        `operate` at admission and is decide-only now, item 13),
        commit; 201 `{version}` with `ETag: "<version>"`. A failure before the commit unlinks the file; a crash
        leaves an orphan file that the start-up sweep deletes (a row never points to a missing file because the
-       file lands first). The reservation is released in `finally`, also on `ClientDisconnect` and cancellation.
+       file lands first). The reservation is released when the commit returns (Opus R2: a 201, 200 or refusal
+       frees it at once) and in `finally` on every other exit, also on `ClientDisconnect` and cancellation.
 
    The relay never checks `content_hash` against anything but the bytes it received, never opens metadata, and
    never checks `dek_commit` (it has no `DEK`). Readers do all three (ยง10.4).
@@ -3737,11 +3738,29 @@ positional insert has 15 values for 16 columns) when Drop is on; with Drop off n
 **D39a2 part 1 decisions (owner, via orch-d6, 15 Oct 2026).** When several caps apply at once, the refusal names
 the author's own share first, then the workspace, the account and the global ceiling (503, no `quota` key). Admission
 charges the head bytes gross (the audience rows a new document version releases are not netted off); the commit
-charges them exactly. A device's workspace upload bucket is charged once the head names the workspace (a W session's
-at admission). The daily version-1 creation counters answer 429 `rate_limited` with `quota: "drop_creations"` and
+charges them exactly. A device's workspace upload bucket is charged at step 5, once the device is eligible to write in the
+workspace the head names (Opus R1: every later refusal, an exact retry and a creations 429 spend it; an ineligible
+request does not), a W session's at admission. The daily version-1 creation counters answer 429 `rate_limited` with `quota: "drop_creations"` and
 `Retry-After` to 00:00 UTC; their day rows are swept with the budget's (D39a2 part 2). `ORCH_RELAY_DROP_NOTICE` works
 only with `ORCH_RELAY_DROP=1`. D39a2's `n`-assigning sweepers run only when `ORCH_RELAY_DROP=1` (the state-check gate
 arrives with the list walks).
+
+**D39a2 part 2 decisions (implementation, 16 Oct 2026; `drop_life.py`).** One sweep cycle every 600 s, only with
+`ORCH_RELAY_DROP=1` (with Drop off no sweeper task exists, `Life.run` returns at once and the start-up sweep stops
+after cleaning `tmp/`, so nothing assigns a position; PR 4 puts the state-check gate in front of the same entry
+points). Phases, each in transactions of at most 4 096 deleted rows (versions, cascaded wraps, audience rows; one
+object always completes): expiry (`expires_ms <= now`: `expired` tombstone with `tombstone_ms = expires_ms`, a
+file's version, wraps and usage released, audience rows deleted, new `n`), release of a retired document's versions,
+end of tombstones (`tombstone_ms + 30 d <= now` and no version left; no `n`; a retired device-only tombstone's
+audience rows give back their workspace and global head bytes), document blob pruning (version `<= current - 8`
+and `received_ms + 30 d <= now`; no `n`), `device` wraps of devices that are no longer members of the object's
+workspace or have a revocation (head bytes released from the workspace, global and the version author's share),
+and the two daily tables (rows older than the previous UTC day: the previous day stays for a slow upload that
+began before midnight). A failing object is rolled back to its savepoint, logged and skipped for the cycle. Retire
+is as the amendment A1 text above; the retire of a document counts it out at once (the creator's document share
+too) and leaves its versions to the sweeper. `rotation_required` is adopted: a `wk` wrap is refused with 409 and the
+current epoch while any `rotation_due` row of the workspace exists (after `stale_epoch`, in the commit again); an
+exact retry (step 7) and `wk`-less uploads are unaffected. N3: an error after the blob's rename removes the blob. A device counts as revoked only by its registered person's pair (`directory.revoked_sql`, P3-D30): a stranger's self-certified pair never removes its wraps (one helper for every access decision, pinned by a structural test). The sweeper loop logs and survives any exception; a cycle in which any object failed counts as failed (one summary line with the first traceback, the first at once, then at most one per 300 s). The structural guard over `revocations` is static: it scans the relay's SQL string literals and migrations against an exact allowlist, and does not see SQL assembled at run time. Notes: each sweep's candidate scan runs inside the global write lock (about 0.35 s for 300 000 device wraps; acceptable at P4 scale, drive it from `drop_wraps_target` if that changes); the sweeps use the wall clock like the reads; a device removed and re-added before the sweep ran gets its old device wraps back, after it they are gone (the host's MUST for re-added devices); the `rotation_required` body carries `epoch` on a Drop `PUT` only (the membership route's has none); PR 4's state check must land before Drop is switched on.
 
 ### 14.5 Migration plan (0017, 0018, D39a2's)
 

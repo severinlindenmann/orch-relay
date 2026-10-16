@@ -15,7 +15,8 @@ from ref._drop_build import NOW, Builder
 
 ROUTES = [
     ("drop_put", "PUT", "/v2/drop/{o}/versions", "client", "D(m)|W(g)",
-     "401:bad_signature 409:version_conflict,stale_epoch,bad_wxk_version 410:expired 428:precondition_required "
+     "401:bad_signature 409:version_conflict,stale_epoch,bad_wxk_version,rotation_required 410:expired "
+     "428:precondition_required "
      "429:quota_exceeded,rate_limited 503:overloaded"),
     ("drop_list", "POST", "/v2/drop/list", "client", "D(m)|W", "429:quota_exceeded,rate_limited 503:overloaded"),
     ("drop_descriptors", "GET", "/v2/drop/{o}/descriptors", "client", "D(m)|W",
@@ -26,10 +27,12 @@ ROUTES = [
      "404:not_found 410:expired 429:rate_limited"),
     ("drop_blob_get", "GET", "/v2/drop/{o}/versions/{v}/blob", "client", "D(m)|W",
      "404:not_found 410:expired 429:quota_exceeded,rate_limited 503:overloaded"),
+    # D39a2 (amendment A1): the host's retire of a file or a document
+    ("drop_retire", "POST", "/v2/drop/{o}/retire", "host", "W(g)", "404:not_found 409:version_conflict"),
 ]
 NAMES = {r[0] for r in ROUTES}
 PUT_CAP = 8 + M.MAX_HEAD + M.MAX_BLOB  # the whole-body maximum (413 for a declared length above it)
-CAPS = {"drop_put": PUT_CAP, "drop_list": 16384}
+CAPS = {"drop_put": PUT_CAP, "drop_list": 16384, "drop_retire": 16384}
 CONDITIONS = {
     "precondition_required": "If-Match is absent or not a decimal without leading zeros (or its quoted form).",
     "version_conflict": "The object's current version differs from If-Match, parent or version, or parent_hash "
@@ -70,6 +73,17 @@ def build(v):
         return {"method": "POST", "path": "/v2/drop/list", "query": {}, "headers": headers(who, json_body=True)
                 if who != ws else {**headers(who, json_body=True)}, "json": body}
 
+    def retire_req(signed_body, who=ws, version=None, head=None, extra=None, body=None, query=None,
+                   o_id=None):
+        signed, _frame = signed_body
+        o = signed["o"]
+        payload = {"expect_version": o["version"] if version is None else version,
+                   "expect_head": M.parent_hash(o) if head is None else head}
+        if body is not None:
+            payload = body
+        return {"method": "POST", "path": f"/v2/drop/{o_id or o['object_id']}/retire", "query": query or {},
+                "headers": headers(who, extra, json_body=True), "json": payload}
+
     def principal_of(request):
         token = request["headers"].get("Authorization", "")[7:]
         who = next(k for k, t in TOKENS.items() if t == token)
@@ -83,6 +97,8 @@ def build(v):
             length = int(request["headers"]["Content-Length"]) if "Content-Length" in request["headers"] else None
             return M.put(state, p, path[3], body.hex(), request["headers"].get("If-Match"),
                          request["headers"].get("Orch-Holder"), length)
+        if len(path) > 4 and path[4] == "retire":
+            return M.retire(state, p, path[3], request["json"], request["headers"].get("Orch-Holder"))
         if path[3] == "list":
             return M.list_page(state, p, request["json"])
         if path[4] == "descriptors":
@@ -183,6 +199,11 @@ def build(v):
     cs.append(case("same_dek_rewrapped_at_the_new_epoch",
                    put_req(up("fx epoch", wraps=lambda o: [b.wrap(o, "wk", key_version=2)])),
                    ops=[{"op": "epoch", "epoch": 2}]))
+    cs.append(case("refusal_409_rotation_required", put_req(up("fx rotation")), ops=[{"op": "rotation_due"}],
+                   condition="A revocation's rotation_due row is open: a wk wrap is refused until the host rotates "
+                             "(owner question 6); 409 with the current epoch."))
+    cs.append(case("rotation_due_does_not_refuse_a_wk_less_inbox_upload",
+                   put_req(up("fx rotation inbox", recipients="inbox")), ops=[{"op": "rotation_due"}]))
     cs.append(case("refusal_409_bad_wxk_version",
                    put_req(up("fx wxk", wraps=lambda o: [b.wrap(o, "wk"), b.wrap(o, "wxk", key_version=2)]))))
     host = up("fx host", author=ws)
@@ -292,6 +313,59 @@ def build(v):
     cs.append(case("refusal_413_too_large", q, response={"status": 413, "json": {"error": "too_large"}},
                    condition="The declared Content-Length is one byte above 8 + 512 KiB + 26 MiB; nothing is read."))
     out["drop_put"] = cs
+
+    # --- retire (D39a2, amendment A1) ------------------------------------------------------------------
+    rf = up("fx retire")
+    up_rf = put_req(rf)
+    rt = retire_req(rf)
+    cs = [case("success", rt, prior=[up_rf],
+               condition="The host retires a file the phone uploaded, naming the version and head it decided about.")]
+    cs.append(case("retire_a_document", retire_req(d1), prior=[put_req(d1)],
+                   condition="A document is tombstoned at once; its versions are released by the batched sweeper."))
+    claimed = up("fx retire claimed", recipients="inbox")
+    cs.append(case("retire_a_claimed_inbox_file", retire_req(claimed), prior=[put_req(claimed)],
+                   ops=[{"op": "claim", "object_id": claimed[0]["o"]["object_id"], "workspace_id": ws}]))
+    cs.append(case("idempotent_retry", rt, prior=[up_rf, rt],
+                   condition="Same expect_version and expect_head against the tombstone: 200 with its state, "
+                             "nothing changed and no new n (only while the tombstone lives)."))
+    cs.append(case("a_file_the_sweep_expired_answers_expired", rt, prior=[up_rf],
+                   ops=[{"op": "expire_sweep", "object_id": rf[0]["o"]["object_id"]}]))
+    cs.append(case("refusal_409_version_conflict", retire_req(rf, version=2), prior=[up_rf],
+                   condition="The host decided about another version than the newest (a member wrote meanwhile)."))
+    cs.append(case("refusal_409_version_conflict_head", retire_req(rf, head=R.b64u(b"\x01" * 32)), prior=[up_rf],
+                   condition="The version matches but the head hash is not the stored head."))
+    cs.append(case("version_conflict_against_the_tombstone", retire_req(rf, version=2), prior=[up_rf, rt],
+                   condition="The precondition is checked against a tombstone too; the body names state retired."))
+    cs.append(case("refusal_404_not_found", retire_req(rf), condition="No such object id."))
+    cs.append(case("refusal_403_not_eligible", retire_req(rf, ph), prior=[up_rf],
+                   condition="Only the host (a W session) retires; a member device, even the uploader, gets 403."))
+    foreign_r = b.oid("fx retire foreign")
+    cs.append(case("another_space", retire_req(rf, o_id=foreign_r), prior=[up_rf],
+                   ops=[{"op": "foreign_object", "object_id": foreign_r, "workspace_id": b.ws_b}],
+                   condition="The id belongs to another workspace: 403, never 404."))
+    cs.append(case("refusal_409_fenced", retire_req(rf, extra={"Orch-Holder": "0"}), prior=[up_rf],
+                   condition="A stale host: holder generation 1 is current, the request names 0."))
+    q = retire_req(rf)
+    q["headers"].pop("Authorization")
+    cs.append(case("refusal_401_unauthenticated", q, prior=[up_rf],
+                   response={"status": 401, "json": {"error": "unauthenticated"}}))
+    cs.append(case("refusal_400_malformed", retire_req(rf, query={"unexpected": "1"}), prior=[up_rf],
+                   response={"status": 400, "json": m}))
+    good_head = M.parent_hash(rf[0]["o"])
+    for label, body in (
+            ("missing_expect_head", {"expect_version": 1}),
+            ("extra_field", {"expect_version": 1, "expect_head": good_head, "force": True}),
+            ("expect_version_zero", {"expect_version": 0, "expect_head": good_head}),
+            ("expect_version_a_string", {"expect_version": "1", "expect_head": good_head}),
+            ("expect_head_padded", {"expect_version": 1, "expect_head": good_head + "="}),
+            ("expect_head_31_bytes", {"expect_version": 1, "expect_head": R.b64u(b"\x01" * 31)})):
+        cs.append(case("malformed_" + label, retire_req(rf, body=body), prior=[up_rf]))
+    big = retire_req(rf)
+    big.pop("json")
+    big["body_recipe"] = {"prefix_b64u": "", "byte": 32, "count": CAPS["drop_retire"] + 1, "suffix_b64u": ""}
+    cs.append(case("refusal_413_too_large", big, prior=[up_rf], response={"status": 413, "json": {"error": "too_large"}},
+                   condition="The body is one byte above the 16 KiB JSON cap: refused before parsing."))
+    out["drop_retire"] = cs
 
     # --- reads --------------------------------------------------------------------------------------------
     a = up("fx a")                                   # phone, to the space

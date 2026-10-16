@@ -248,6 +248,8 @@ def wrap_state(state, o, records, now):
         kind = rec["target_kind"]
         if kind == "wk" and rec["key_version"] != w["epoch"]:
             no(409, "stale_epoch", epoch=w["epoch"])
+        elif kind == "wk" and w.get("rotation_due"):  # an open rotation_due (owner question 6)
+            no(409, "rotation_required", epoch=w["epoch"])
         elif kind == "wxk" and rec["key_version"] != w["wxk_version"]:
             no(409, "bad_wxk_version")
         elif kind == "device":
@@ -461,6 +463,43 @@ def list_page(state, principal, body):
         return refusal.result
 
 
+# --- retire (D39a2, amendment A1) ------------------------------------------------------------------------
+
+
+def retire(state, principal, o_id, body, holder=None):
+    """POST /v2/drop/{o}/retire on `state` (mutated only by the retire itself): W sessions only, the
+    body `{expect_version, expect_head}` (both required), 404 for an absent or ended tombstone, 403 for
+    another space, 409 `version_conflict` (`current`, `state`) against the live row, the bounded
+    idempotent 200 for a tombstone, else a `retired` tombstone with a new `n` (a file's version is
+    released with it, a document's versions go with the sweeper, not modelled)."""
+    try:
+        admit(state, principal, holder, True)
+        need(principal["kind"] == "workspace", 403, "not_eligible")
+        need(isinstance(body, dict) and set(body) == {"expect_version", "expect_head"})
+        version = integer(body["expect_version"], 1)
+        head = b64(body["expect_head"], 32)
+        now = state["now_ms"]
+        obj = state["objects"].get(o_id)
+        until = tombstone_until(obj, now) if obj else None
+        if obj is None or (until is not None and until <= now):
+            no(404, "not_found")
+        need(obj["workspace_id"] == principal["id"], 403, "not_eligible")
+        ver = state["versions"].get(f"{o_id}/{obj['current']}")
+        st = state_of(obj, ver["blob"] if ver else None, now)
+        if obj["current"] != version or R.unb64u(obj["head_hash"], 32) != head:
+            no(409, "version_conflict", current=obj["current"], state=st)
+        if until is not None:
+            return {"status": 200, "json": {"state": st}}
+        state["counter"] += 1
+        obj.update(n=state["counter"], tombstone_ms=now, tombstone_kind="retired")
+        if obj["object_kind"] == "file":
+            for key in [k for k in state["versions"] if k.split("/")[0] == o_id]:
+                del state["versions"][key]
+        return {"status": 200, "json": {"state": "retired"}}
+    except Refusal as refusal:
+        return refusal.result
+
+
 # --- state operations that have no D39a1 route (D39a2 sweeps and retire, D39b claim) ------------------
 
 
@@ -471,6 +510,10 @@ def apply(state, op):
     kind = op["op"]
     if kind == "clock":
         state["now_ms"] = op["now_ms"]
+        return
+    if kind == "rotation_due":  # a revocation left a rotation_due row open (wk wraps are refused)
+        for w in state["workspaces"].values():
+            w["rotation_due"] = True
         return
     if kind == "epoch":  # a membership publication at a new epoch (a removal)
         for w in state["workspaces"].values():

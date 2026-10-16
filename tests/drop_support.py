@@ -212,6 +212,9 @@ def apply_op(d, op):
             seq = con.execute("SELECT coalesce(max(list_seq),0)+1 FROM member_lists").fetchone()[0]
             con.execute("INSERT INTO member_lists VALUES (?,?,?,'{}')", (WS, seq, op["epoch"]))
             return
+        if kind == "rotation_due":  # a revocation's rotation is open: wk wraps are refused
+            con.execute("INSERT INTO rotation_due VALUES (?,?,?,?)", (WS, LAPTOP, 5, 1))
+            return
         o_id = op["object_id"]
         con.execute("UPDATE drop_counter SET n=n+1")
         n = con.execute("SELECT n FROM drop_counter").fetchone()[0]
