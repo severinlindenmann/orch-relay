@@ -8,8 +8,8 @@ from directory_support import DEVICE, NOW, PERSON, WS, V, seed, signed
 from orch_relay import db
 from orch_relay import proto as P
 from orch_relay.directory import token_hash
-from ref.drop_relay import GENERATION
 from ref import orch_protocol_ref as R
+from ref.drop_relay import GENERATION
 
 S = R.SUITES[2]
 LAPTOP = V["ids"]["device_laptop"]

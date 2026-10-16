@@ -715,3 +715,31 @@ def test_a_list_page_never_goes_without_a_generation_even_after_the_row_is_delet
             con.execute("DELETE FROM meta WHERE key='drop_generation'")
         page = list_page(c, DEVICE).json()
         assert re.fullmatch(r"[0-9a-f]{32}", page["generation"])
+
+
+def test_the_write_syncs_the_file_and_then_the_directory(dirs, monkeypatch):
+    data, _state = dirs
+    calls = []
+    real = os.fsync
+
+    def fsync(fd):
+        calls.append(os.fstat(fd).st_mode)
+        return real(fd)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    with start(data):
+        pass
+    import stat
+
+    assert stat.S_ISREG(calls[0]) and stat.S_ISDIR(calls[1])  # the file, then the directory entry
+
+
+def test_drop_off_with_the_state_set_and_an_empty_database_still_runs_check_and_writer(
+    dirs, monkeypatch
+):
+    data, state = dirs
+    monkeypatch.setenv("ORCH_RELAY_DROP", "0")
+    with start(data) as c:
+        st = c.app.state.drop.state
+        assert st.required and st.ok and st.generation == meta(data)
+        assert hwm(state) == {"generation": st.generation, "n": 0}
