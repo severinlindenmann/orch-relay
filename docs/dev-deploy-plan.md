@@ -274,8 +274,9 @@ All of these are read once at start-up. The list is complete for `develop` `601c
 | `ORCH_RELAY_DROP_NOTICE` | `bridge.py` (P3-D39) | `0`: no `notices.drop` | leave unset | Q-H1: only once hosts accept the key |
 | `ORCH_RELAY_DROP_MAX_BLOB_BYTES`, `ORCH_RELAY_DROP_MAX_TTL_MS` | `drop.py` | 26 MiB, 7 d | leave unset | only with `ORCH_RELAY_DROP=1` |
 | `ORCH_RELAY_ADMIN_BUSY_MS` | `cli.py` (P3-D36 `account-cap`) | 5000 | operator shell only | — |
-| `VAPID_SUBJECT`, `VAPID_PRIVATE_KEY_FILE`, `VAPID_PUBLIC_KEY_FILE` | **not read by the relay** | — | leave as `provision.sh` writes them | push is not implemented (TODO(P4) in `provision.sh`) |
-| APNs key (`/srv/orch-relay/apns/`) | **not read by the relay** | — | not needed for this deploy | see R8 |
+| `ORCH_RELAY_APNS_TEAM_ID`, `ORCH_RELAY_APNS_TOPIC`, `ORCH_RELAY_PUSH_TOKEN_KEY_FILE`, `ORCH_RELAY_APNS_SANDBOX_KEY_ID`, `ORCH_RELAY_APNS_SANDBOX_KEY_FILE`, `ORCH_RELAY_APNS_PRODUCTION_KEY_ID`, `ORCH_RELAY_APNS_PRODUCTION_KEY_FILE` | `push_config.py` (P3-D40, D40a/b) | none set: push disabled, the three push routes answer 404 | **public unit only**, once the owner gives the go (R8, "Push runbook"); **the internal unit gets none** | all of the team id, topic, token secret file and at least one environment's key id and file, or none: any partial set makes the relay refuse to start (exit 2). Needs the `httpx[http2]` wheel dependencies in the release venv |
+| `ORCH_RELAY_THROTTLE_PUSH_WS_DEVICE`, `..._PUSH_DEVICE`, `..._PUSH_WS` (`burst/per-minute`) | `push_send.py` | 20/2, 60/6, 120/20 | leave the defaults | only with push configured |
+| `VAPID_SUBJECT`, `VAPID_PRIVATE_KEY_FILE`, `VAPID_PUBLIC_KEY_FILE` | **not read by the relay** | — | leave as `provision.sh` writes them (D40c removes them from `provision.sh`; Web Push is not used) | the relay sends APNs only |
 
 **P4 cap (`ORCH_RELAY_MAX_PUBLICATION_BYTES`, P3-D37).** No staged set can exceed the maximum (`too_large`), so a
 publication's new heads are bounded by `max / 74 B`. Figures from design §10 checklist 1 (measured on macOS, CPython 3.14; **U10 NOT OBTAINABLE read-only (VPS Python is CPython 3.14.4, same minor as the measurement; the benchmark must still be run)** with `tests/bench_publication_lockhold.py`): ~1.3 KB of phase A memory per new node, and a baseline of
@@ -714,8 +715,9 @@ Ordered by impact:
 - **R7. No remote e2e harness and no confirmed real host.** The design §10 scenarios do not exist (§1.4), and
   whether a P3-capable orch-core host is available is unknown (U11). Without a host the phone cannot pair, so the
   deploy alone does not unblock mobile.
-- **R8. APNs and push.** The relay has no push code and no push-registration route (gap 16), so APNs keys on the VPS
-  are **not** needed for this deploy, and push cannot be tested against the real relay in phase 2.
+- **R8. APNs and push.** Push registration and sending exist in the relay since D40a and D40b (before them there was no
+  push code, gap 16); APNs keys on the VPS are needed only once push is switched on (below), and a relay without the
+  push lines serves no push route.
   - HANDOVER and `e2e/CHECKLIST.md` expect the `.p8` in `/srv/orch-relay/apns/` at mode 0600. `provision.sh`
     comments say root-owned with mode 0640 and group `orch-relay`. **Settled by P3 design §14.7 (15 Oct):** the
     owner's key (Key ID `TD27F9Z9V7`, both gateways, per the owner's note) stays at
@@ -723,6 +725,44 @@ Ordered by impact:
     it; the internal instance has push disabled; `systemd-creds` (`LoadCredentialEncrypted=`) is an optional
     deploy-time step. D40c removes the 0640 comment and the `VAPID_*` lines.
   - Push registration and sending are designed in P3 design §14.3 and protocol §19.10 (P3-D40).
+  - **Push runbook (text only; nothing here has been run).** Implemented by D40a and D40b. Push stays off (404) until
+    the public unit has a complete configuration; the owner decides when. As root on the VPS, in this order:
+    1. *Key file.* The owner's APNs key stays at `/srv/orch-relay/apns/AuthKey_TD27F9Z9V7.p8`, owner
+       `orch-relay:orch-relay`, mode 0600, directory 0700. The relay refuses (start-up error `apns key unreadable
+       (<env>)` or "accessible to others") a key file that is group- or world-accessible or owned by another uid than
+       the service user; a file under `$CREDENTIALS_DIRECTORY` (the `systemd-creds` step of P3 design §14.7) is
+       accepted as is. Never print, copy or commit the file.
+    2. *Token secret.* `install -d -m 0700 -o orch-relay -g orch-relay /srv/orch-relay/apns` if absent, then
+       `head -c 32 /dev/urandom > /srv/orch-relay/apns/push-token.key; chown orch-relay:orch-relay
+       /srv/orch-relay/apns/push-token.key; chmod 0600 /srv/orch-relay/apns/push-token.key`. Exactly 32 bytes, made on the
+       VPS, never copied off it, never in a backup of the database, **never rotated in place** (rotating it means
+       deleting every `push_subscriptions` row; apps re-register at their next launch).
+    3. *Environment lines* in `/etc/orch/relay.local.env` (the public unit's file of §4.3; not secret):
+       ```
+       ORCH_RELAY_APNS_TEAM_ID=<the 10-character Apple team id>
+       ORCH_RELAY_APNS_TOPIC=io.severin.orch
+       ORCH_RELAY_PUSH_TOKEN_KEY_FILE=/srv/orch-relay/apns/push-token.key
+       ORCH_RELAY_APNS_SANDBOX_KEY_ID=TD27F9Z9V7
+       ORCH_RELAY_APNS_SANDBOX_KEY_FILE=/srv/orch-relay/apns/AuthKey_TD27F9Z9V7.p8
+       ORCH_RELAY_APNS_PRODUCTION_KEY_ID=TD27F9Z9V7
+       ORCH_RELAY_APNS_PRODUCTION_KEY_FILE=/srv/orch-relay/apns/AuthKey_TD27F9Z9V7.p8
+       ```
+       One key for both gateways today (per the owner's note, not yet verified: the first sandbox send checks the
+       sandbox half, the first TestFlight send the production half). With two keys later, point each environment at
+       its own id and file. An environment is enabled when both its id and file are set; one without a key answers
+       400 `malformed` at registration.
+    4. *The internal unit gets none of these lines.* Its push routes answer 404. Check, without printing:
+       `sudo -u orch-relay-int cat /srv/orch-relay/apns/AuthKey_TD27F9Z9V7.p8 >/dev/null` must fail with "Permission
+       denied" (and the same for `push-token.key`); after the optional `systemd-creds` step check
+       `/run/credentials/orch-relay.service/apns-TD27F9Z9V7` instead.
+    5. *Restart* `orch-relay` only; `GET /healthz` must come back. A partial set refuses to start with
+       `orch-relay: refusing to start: partial push configuration, missing: ...` in the journal and exit status 2.
+    6. *Check:* an unconfigured instance answers `POST /v2/push/register` with `404 {"error":"not_found"}`; the public
+       one answers 401 without a session. Then one sandbox send from the owner's device (the phone registers at
+       launch; the host sends). Logs show registration ids' first 8 digits and APNs reasons, never tokens, payloads,
+       JWTs or key bytes.
+    7. The release needs the new migration `0018_push` (applied at start-up) and the `httpx[http2]` dependency
+       (`h2`, `hpack`, `hyperframe`; hashes in `uv.lock`).
 - **R9. Mobile pins the relay URL.** The vectors and fixtures use `relay_url = https://relay.dev.severin.io`, and the
   phone requires the signed card's `relay_url` to be byte-equal to the reviewed origin. The relay's
   `ORCH_RELAY_ORIGIN` and the host's card must therefore carry exactly that string; a trailing slash breaks it.
