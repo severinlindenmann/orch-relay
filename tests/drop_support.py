@@ -8,6 +8,7 @@ from directory_support import DEVICE, NOW, PERSON, WS, V, seed, signed
 from orch_relay import db
 from orch_relay import proto as P
 from orch_relay.directory import token_hash
+from ref.drop_relay import GENERATION
 from ref import orch_protocol_ref as R
 
 S = R.SUITES[2]
@@ -320,6 +321,7 @@ def prepare_fixture(client, case):
     `given.prior` requests, `given.ops` and `given.relay` conditions."""
     d, drop = client.app.state.directory, client.app.state.drop
     setup(d)
+    drop.state.generation = GENERATION  # the fixtures' relay generation (a real one is random)
     given = case["given"]
     for prior in given.get("prior", []):
         r = send_request(client, prior)
