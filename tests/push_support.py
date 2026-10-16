@@ -158,3 +158,134 @@ def send(
     body = {"targets": targets, "outer": o or outer(), "priority": priority, "ttl_s": ttl_s}
     body.update(over)
     return c.post(f"/v2/workspaces/{ws}/push", json=body, headers=auth(session, holder))
+
+
+class Accepting:
+    """A transport that answers 200 to everything (fixture replays must never reach a network)."""
+
+    async def post(self, env, path, headers, body):
+        return 200, b""
+
+    async def aclose(self):
+        pass
+
+
+def fixture_env(case):
+    """(configured at all, the environments) for a push HTTP fixture case."""
+    given = case["given"]
+    if given.get("scenario") == "not_found":
+        return None
+    return tuple(given.get("relay", {}).get("envs", ("sandbox", "production")))
+
+
+def prepare_fixture(client, name, case):
+    """Explicit database and in-memory preconditions for a push HTTP fixture (tests/http_fixtures)."""
+    d = client.app.state.directory
+    seed_push(d, case["given"].get("now_ms", NOW))
+    d.clock = lambda: case["given"].get("now_ms", NOW)
+    push = client.app.state.push
+    if not push.enabled:
+        return
+    push.apns.transport = Accepting()
+    scenario, label = case["given"].get("scenario", case["name"]), case["name"]
+    request = case["request"]
+    body = request.get("json") or {}
+    ws = body.get("workspace_id", WS)
+    registration = body.get("registration_id") or rid(1)
+
+    def sql(text, *args):
+        with closing(db.connect(d.path)) as con, con:
+            con.execute(text, args)
+
+    def put(n, tok, session, env="sandbox", workspace=ws):
+        r = register(client, tok, n, session=session, env=env, ws=workspace)
+        assert r.status_code == 200, r.text
+
+    if name == "push_send":  # the phone is registered in the sandbox
+        put(1, TOKEN_A, "FAKE-device")
+    if scenario == "cert_expired":
+        sql("UPDATE devices SET expires_ms=?", NOW)
+    elif scenario == "revoked":
+        sql(
+            "INSERT INTO revocations VALUES (?,?,?,?,?,?)",
+            V["ids"]["device_phone"],
+            V["ids"]["person_alice"],
+            b"x",
+            "lost",
+            NOW,
+            1,
+        )
+    elif scenario == "not_eligible" and name == "push_register":
+        sql("DELETE FROM members")
+    elif scenario == "not_eligible" and name == "push_unregister":
+        sql(
+            "UPDATE sessions SET kind='workspace', subject_id=? WHERE token_hash=?",
+            WS,
+            token_hash("FAKE-device"),
+        )
+    elif scenario == "not_eligible" and name == "push_send":
+        sql(
+            "UPDATE sessions SET kind='device', subject_id=? WHERE token_hash=?",
+            V["ids"]["device_phone"],
+            token_hash("FAKE-workspace"),
+        )
+    elif scenario == "drop_scoped_device":
+        sql(
+            "UPDATE sessions SET subject_id=? WHERE token_hash=?",
+            V["ids"]["device_agent"],
+            token_hash("FAKE-device"),
+        )
+    elif scenario == "registration_conflict":
+        put(int(registration, 16), TOKEN_B, "FAKE-device")
+    elif scenario == "rate_limited" and name == "push_register":
+        end = (NOW // 3_600_000 + 1) * 3_600_000
+        d.windows[("push-register", V["ids"]["device_phone"], 3_600_000)] = (end, 30)
+    elif scenario == "rate_limited" and name == "push_send":
+        for _ in range(120):
+            push.outbox.buckets.take(("push-ws", WS), 120, 20, NOW)
+    elif scenario == "quota_exceeded":
+        with closing(db.connect(d.path)) as con, con:
+            for n in range(128):
+                con.execute(
+                    "INSERT INTO push_subscriptions VALUES (?,?,?,?,?,?,?,?,?)",
+                    (
+                        rid(5000 + n),
+                        V["ids"]["device_phone"],
+                        f"{n:032x}",
+                        "sandbox",
+                        TOPIC,
+                        b"x" * 60,
+                        bytes([n]) * 32,
+                        NOW,
+                        NOW,
+                    ),
+                )
+    elif scenario == "overloaded":
+        push.outbox.caps = (0, 0, 0)
+    elif scenario == "not_for_this_device":
+        put(int(registration, 16), TOKEN_B, "FAKE-laptop")
+    elif scenario == "stale_epoch":
+        sql("INSERT INTO member_lists VALUES (?,?,?,?)", WS, 2, 2, b"{}")
+    elif label == "exact_retry_refreshes":
+        put(int(registration, 16), P.unb64u(body["token"]), "FAKE-device")
+    elif label == "new_id_retires_the_old_one":
+        put(77, TOKEN_B, "FAKE-device")
+    elif label == "token_moves_from_the_persons_other_device":
+        put(78, P.unb64u(body["token"]), "FAKE-laptop")
+    elif name == "push_unregister" and label in (
+        "success",
+        "every_registration_of_the_device_in_the_workspace",
+    ):
+        put(int(registration, 16), TOKEN_A, "FAKE-device")
+    elif label == "membership_not_required":
+        put(int(registration, 16), TOKEN_A, "FAKE-device")
+        sql("DELETE FROM members WHERE device_id=?", V["ids"]["device_phone"])
+    elif name == "push_send":
+        if label == "exact_retry_sends_nothing_again":
+            first = client.post(request["path"], json=body, headers=request["headers"])
+            assert first.status_code == 200, first.text
+        elif label == "over_budget_is_skipped_not_refused":
+            for _ in range(20):
+                push.outbox.buckets.take(
+                    ("push-ws-device", WS, V["ids"]["device_phone"]), 20, 2, NOW
+                )

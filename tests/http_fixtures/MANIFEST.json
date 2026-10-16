@@ -1,7 +1,7 @@
 {
-  "aggregate": "b32bc01d60d281cadcc7efa5ef8359849357e1af1be3e55ab295afc23d722400",
+  "aggregate": "82703ffe2ebf80eed5176146b430538303f5bea2f96a6c2dddb87783abcc5b6b",
   "files": {
-    "README.md": "792db0b65903bf559cf0255c9dc09070cd641fb8c2a2db9624527c4ba5101abb",
+    "README.md": "863f2bb0eefbe1e1f02b52f370e68a69a07ae088c4a21aa34577ee6397144a3b",
     "accounts.json": "060776501099476673fa1026afa1256ec7c06f8c922c9b3542ee63ee6058d1c3",
     "baseline_delete.json": "d463dc15149dc8ed0669ffc1cad74f53e9d841957f3e91de0bc91b9582f0dd1f",
     "baseline_post.json": "595b7d56c266ca88888c7c2c32cc9444838e9b3879ddc2391f367a8078f8bcec",
@@ -39,6 +39,9 @@
     "pair_host_post.json": "8b10f584a8b3b5c594fb7753e619745d9e2eb55184b92685b1b094880a189297",
     "pair_poll.json": "e5b146b13447e6ca5b570ed11ed3c53eec11e81d091812c719327ccf8854307e",
     "proof.json": "b6f8cff6ec22c651ee7ba7110c7e94e5d841a42dfdb4255f827808e9b26bf135",
+    "push_register.json": "0fd7dc846f3c10f280842db8ad78cfc130a89cbe24e898abf846e73c94cad28c",
+    "push_send.json": "3fae0953eba4ee58b68faf7801d4678b66bc18078ab58c9610d6424ac6293825",
+    "push_unregister.json": "eb6305262e78f219821b6084cf6f463a2cdf3356d189b72e2944217c4ca11520",
     "relay_info.json": "51177abdcbefc2e1acb1579376f44dd21fe78de09279cdd402eb06ac7f6d0e07",
     "revocation_feed.json": "66fadcc488dd22f0e742e0f815e2e969d169549686594f2bdbdb5c4bb4feb8b2",
     "revocation_get.json": "236b9b42f5d229d4a9c147714e9fba7539b6fa1512e9baec3cff4fcd451af6b9",
@@ -52,5 +55,5 @@
     "unpublished_ack.json": "b9eb82d048df7dc44c9b351fee3c491701f010ee86d57d40782c5adf8f054fd8",
     "unpublished_get.json": "73ee9247010acb848870bd0e21a476ec36f883ae4c5c6ceacb31cdd6d6245768"
   },
-  "revision": 18
+  "revision": 19
 }
