@@ -599,18 +599,34 @@ def test_wraps_filtered_per_caller(client):
     assert get(client, o_id, "wraps").json()["claimed_by"] is None
 
 
-def test_unclaimed_inbox_is_listed_but_its_blob_waits(client):
+def test_unclaimed_inbox_is_the_hosts_and_authors_only_until_the_claim(client):
+    """Amendment A2 (reverses A1): other member devices see nothing of an unclaimed inbox object;
+    its author reads the descriptor and lists it in `sending`, the blob waits for the claim."""
     signed, _, body = upload("inbox", recipients="inbox")
     assert put(client, signed, body).status_code == 201
     o_id = signed["o"]["object_id"]
+    hidden = {"error": "not_eligible"}
+    for what in ("descriptor", "wraps", "blob"):
+        r = get(client, o_id, what, LAPTOP)
+        assert (r.status_code, r.json()) == (403, hidden)
+    assert client.get(
+        f"/v2/drop/{o_id}/descriptors", headers=headers(LAPTOP, if_match=None)
+    ).json() == hidden
+    assert listing(client, LAPTOP).json()["objects"] == []
+    assert get(client, o_id, "descriptor").status_code == 200  # the author's read-back
+    assert get(client, o_id, "wraps").json()["claimed_by"] is None
+    r = get(client, o_id, "blob")  # the author's blob waits for the claim, as everyone's
+    assert (r.status_code, r.json()) == (403, hidden)
+    assert [e["object_id"] for e in listing(client, DEVICE, "sending").json()["objects"]] == [o_id]
+    assert listing(client, DEVICE).json()["objects"] == []
+    assert [e["object_id"] for e in listing(client, WS).json()["objects"]] == [o_id]
+    assert get(client, o_id, "descriptor", WS).status_code == 200
+    sql(client, "UPDATE drop_objects SET claimed_by=?", WS)
+    assert get(client, o_id, "blob", LAPTOP).status_code == 200
     assert get(client, o_id, "descriptor", LAPTOP).status_code == 200
-    assert get(client, o_id, "blob", LAPTOP).json() == {"error": "not_eligible"}
-    assert get(client, o_id, "wraps", LAPTOP).json() == {"claimed_by": None, "wraps": []}
     entries = listing(client, LAPTOP).json()["objects"]
     assert [e["object_id"] for e in entries] == [o_id]
     assert entries[0]["wraps"] == []  # no wxk to a device
-    sql(client, "UPDATE drop_objects SET claimed_by=?", WS)
-    assert get(client, o_id, "blob", LAPTOP).status_code == 200
 
 
 def test_blob_get_streams_with_headers(client):
@@ -666,7 +682,7 @@ def test_list_positions_direction_states_and_cut(client, monkeypatch):
     got = listing(client, DEVICE).json()["objects"]
     assert [e["object_id"] for e in got] == [b["o"]["object_id"]]  # c is hidden from the phone
     lap = listing(client, LAPTOP).json()["objects"]
-    assert [e["n"] for e in lap] == [1, 3, 4]
+    assert [e["n"] for e in lap] == [1, 3]  # d, the phone's unclaimed inbox file, is hidden (A2)
     for e in lap:
         assert set(e) == {
             "n",
@@ -677,16 +693,29 @@ def test_list_positions_direction_states_and_cut(client, monkeypatch):
             "descriptor",
             "wraps",
             "claimed_by",
+            "claimed_ms",
+            "expires_ms",
         }
         assert e["state"] == "live" and e["tombstone_until_ms"] is None and e["claimed_by"] is None
+        assert e["claimed_ms"] is None and e["expires_ms"] == NOW + 7 * DAY
     assert all(w["target_kind"] != "wxk" for e in lap for w in e["wraps"])
     host = listing(client, WS).json()["objects"]
     assert [e["n"] for e in host] == [1, 2, 4]  # W: received = authored by anyone else
-    page = listing(client, LAPTOP, limit=2).json()
-    assert [e["n"] for e in page["objects"]] == [1, 3] and page["next"] == 3
-    page = listing(client, LAPTOP, after=3).json()
-    assert [e["n"] for e in page["objects"]] == [4] and page["next"] is None
-    # a new version moves an object to the end
+    page = listing(client, LAPTOP, limit=1).json()
+    assert [e["n"] for e in page["objects"]] == [1] and page["next"] == 1
+    page = listing(client, LAPTOP, after=1).json()
+    assert [e["n"] for e in page["objects"]] == [3] and page["next"] is None
+    # the host claims d (n 5): it enters the laptop's lists, with `claimed_ms`
+    sql(
+        client,
+        "UPDATE drop_objects SET claimed_by=?, claimed_ms=?, n=5 WHERE object_id=?",
+        WS,
+        NOW,
+        d["o"]["object_id"],
+    )
+    claimed = listing(client, LAPTOP, after=4).json()["objects"][0]
+    assert (claimed["object_id"], claimed["claimed_by"]) == (d["o"]["object_id"], WS)
+    assert (claimed["claimed_ms"], claimed["expires_ms"]) == (NOW, NOW + 7 * DAY)
     # states: retired and expired tombstones, pruned
     sql(
         client,
@@ -703,7 +732,10 @@ def test_list_positions_direction_states_and_cut(client, monkeypatch):
     expired = entries[d["o"]["object_id"]]
     assert (expired["state"], expired["descriptor"]) == ("expired", None)
     assert expired["tombstone_until_ms"] == d["o"]["expires_ms"] + 30 * DAY
-    assert listing(client, LAPTOP, after=4).json()["objects"][0]["n"] == 10  # an after list sees it
+    # tombstones keep claimed_ms and expires_ms (until their row ends)
+    assert (expired["claimed_ms"], expired["expires_ms"]) == (NOW, d["o"]["expires_ms"])
+    assert (retired["claimed_ms"], retired["expires_ms"]) == (None, a["o"]["expires_ms"])
+    assert listing(client, LAPTOP, after=5).json()["objects"][0]["n"] == 10  # an after list sees it
     for bad in ({"limit": 65}, {"limit": 0}, {"after": -1}, {"x": 1}, {"after": True}):
         assert listing(client, LAPTOP, **bad).status_code == 400
     r = client.post(
