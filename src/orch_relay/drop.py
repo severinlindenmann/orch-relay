@@ -16,8 +16,9 @@ Check order of the `PUT` (§14.2 item 3; each refusal stops, nothing is stored b
 Lock order: the in-memory slot tables (event loop only), then Directory.lock, then Directory.budget;
 a pooled read connection is never held while taking the lock. Quotas, reservations and the MiB
 buckets are drop_quota.py (D39a2 part 1: reserved at step 9, enforced in the commit); the sweepers
-beyond the start-up sweep, retire, decide-class uploads and list walks are later D39a2 parts; claims
-and host re-wraps are D39b.
+beyond the start-up sweep and retire are drop_life.py (D39a2 part 2); decide-class uploads (the shape,
+the budget charged at admission, its give-back, the one slot) and the host-and-author-only visibility
+of an unclaimed inbox object are D39a2 part 3; list walks are part 4; claims and host re-wraps are D39b.
 """
 
 import asyncio
