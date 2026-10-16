@@ -23,6 +23,11 @@ from . import proto as P
 
 log = logging.getLogger(__name__)
 
+# httpx logs every request line (the URL carries the device token) at INFO, and httpcore, h2 and hpack log header
+# values (`authorization: bearer <JWT>`) at DEBUG: they stay at WARNING whatever the operator sets on the root logger.
+for _name in ("httpx", "httpcore", "h2", "hpack"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
+
 GATEWAYS = {
     "production": "https://api.push.apple.com",
     "sandbox": "https://api.sandbox.push.apple.com",
@@ -103,6 +108,9 @@ class EnvState:
     paused_until_s: float = 0.0
     backoff_s: float = BACKOFF_MIN_S
     renew_next: bool = False  # the first send after a pause renews the JWT
+    forced_at_s: float | None = (
+        None  # when a 403 last forced a renewal (at most one per BACKOFF_MIN_S)
+    )
 
 
 @dataclass
@@ -177,8 +185,13 @@ class Apns:
             if status == 400 and reason in BAD_TOKEN_REASONS:
                 return Result("bad_token", 400, reason)
             if status == 403:
-                if not renewed:  # renew the JWT once and retry once
+                state = self.states[env]
+                last = state.forced_at_s
+                if not renewed and (last is None or now_s - last >= BACKOFF_MIN_S):
+                    # renew the JWT once and retry once; a 403 storm renews at most once per 20 minutes per
+                    # environment (Apple throttles provider tokens renewed more often)
                     renewed = force = True
+                    state.forced_at_s = now_s
                     continue
                 log.error("apns_auth %s: %s (%s)", tag, reason or status, env)
                 self.pause(env, now_s, "apns_auth")

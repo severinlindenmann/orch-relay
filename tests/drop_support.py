@@ -389,7 +389,13 @@ def production_conditions(client, relay, ident):
             full = relay["decide_budget"] == "creations_full"
             con.execute(
                 "INSERT INTO drop_decide_budget VALUES (?,?,?,?,?)",
-                (WS, ident, d.clock() // DAY, q.decide_creations if full else 0, 0 if full else q.decide_bytes),
+                (
+                    WS,
+                    ident,
+                    d.clock() // DAY,
+                    q.decide_creations if full else 0,
+                    0 if full else q.decide_bytes,
+                ),
             )
         if relay.get("creations") == "device_full":
             con.execute(

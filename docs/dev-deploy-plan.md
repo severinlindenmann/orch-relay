@@ -760,7 +760,10 @@ Ordered by impact:
     6. *Check:* an unconfigured instance answers `POST /v2/push/register` with `404 {"error":"not_found"}`; the public
        one answers 401 without a session. Then one sandbox send from the owner's device (the phone registers at
        launch; the host sends). Logs show registration ids' first 8 digits and APNs reasons, never tokens, payloads,
-       JWTs or key bytes.
+       JWTs or key bytes. This holds because the relay pins the `httpx`, `httpcore`, `h2` and `hpack` loggers to
+       WARNING (`apns.py`): left alone, httpx would write every request line, whose URL carries the device token, at
+       INFO, and httpcore, h2 and hpack would write header values, including `authorization: bearer <JWT>`, at DEBUG.
+       Do not lower those loggers' levels in a logging configuration or on the unit.
     7. The release needs the new migration `0018_push` (applied at start-up) and the `httpx[http2]` dependency
        (`h2`, `hpack`, `hyperframe`; hashes in `uv.lock`).
 - **R9. Mobile pins the relay URL.** The vectors and fixtures use `relay_url = https://relay.dev.severin.io`, and the

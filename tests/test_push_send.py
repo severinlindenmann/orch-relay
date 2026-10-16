@@ -586,6 +586,24 @@ def test_403_renews_once_and_retries_once(c):
     assert not c.push.apns.paused("sandbox", NOW / 1000)
 
 
+def test_403_renews_at_most_once_per_twenty_minutes_per_environment(c):
+    long_sessions(c.d)
+    clock = [NOW]
+    c.d.clock = lambda: clock[0]
+    c.fake.reply((403, {"reason": "ExpiredProviderToken"}))
+    send(c, [PHONE], outer(1))
+    assert wait_for(lambda: c.push.sender.results and c.push.sender.results[-1][1] == "ok")
+    assert len(c.fake.requests) == 2 and c.push.apns.jwt.signed == 2  # renewed once, delivered
+    clock[0] = (
+        NOW + 60_000
+    )  # a minute later: another 403 does not renew again, the environment pauses at once
+    c.fake.reply((403, {"reason": "ExpiredProviderToken"}))
+    send(c, [PHONE], outer(2))
+    assert wait_for(lambda: c.push.apns.paused("sandbox", clock[0] / 1000))
+    assert len(c.fake.requests) == 3 and c.push.apns.jwt.signed == 2
+    assert c.push.apns.states["sandbox"].forced_at_s == NOW / 1000
+
+
 def test_403_twice_pauses_queues_meanwhile_and_recovers(c, caplog):
     caplog.set_level("DEBUG")
     long_sessions(c.d)

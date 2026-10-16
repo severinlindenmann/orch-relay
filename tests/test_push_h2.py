@@ -143,6 +143,28 @@ def test_a_connection_error_is_retried_then_fails(tmp_path):
     assert asyncio.run(run()).kind == "failed"
 
 
+def test_no_library_logs_the_token_or_the_jwt_even_at_debug(tmp_path, server, caplog):
+    caplog.set_level(
+        "DEBUG"
+    )  # the operator may run the root logger at DEBUG: httpx, httpcore, h2 and hpack must stay quiet
+    apns, _, transport = apns_for(tmp_path, server)
+
+    async def run():
+        try:
+            return await apns.deliver(make_send())
+        finally:
+            await transport.aclose()
+
+    assert asyncio.run(run()).kind == "ok"
+    jwt = server.requests[0]["headers"]["authorization"].removeprefix("bearer ")
+    assert caplog.records == [] or all(
+        r.name not in ("httpx", "httpcore", "h2", "hpack") or r.levelno >= 30
+        for r in caplog.records
+    )
+    seen = "\n".join(f"{r.name} {r.getMessage()} {r.__dict__}" for r in caplog.records)
+    assert TOKEN_A.hex() not in seen and jwt not in seen and "bearer" not in seen
+
+
 def test_the_whole_relay_delivers_over_real_http2(tmp_path, monkeypatch, server):
     keys = configure(monkeypatch, tmp_path)
     with TestClient(create_app(tmp_path / "data")) as client:
