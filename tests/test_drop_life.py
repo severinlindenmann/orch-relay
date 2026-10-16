@@ -480,8 +480,8 @@ def names_revocations(text):
 
     return bool(
         text
-        and re.search(r"\b(SELECT|INSERT|UPDATE|DELETE|FROM|JOIN)\b", text)
-        and re.search(r"(?<![A-Za-z_])revocations\b", text)
+        and re.search(r"\b(SELECT|INSERT|UPDATE|DELETE|FROM|JOIN)\b", text, re.IGNORECASE)
+        and re.search(r"(?<![A-Za-z_])revocations\b", text, re.IGNORECASE)
     )
 
 
@@ -500,9 +500,59 @@ def sql_literals_naming_revocations(root=None):
     return found
 
 
+MIGRATION_ALLOWED = {
+    "0002_directory.sql": [
+        "CREATE TABLE revocations ( device_id TEXT PRIMARY KEY REFERENCES devices(device_id), person_id TEXT NOT NULL, record BLOB NOT NULL, reason TEXT NOT NULL, received_ms INTEGER NOT NULL, cursor INTEGER NOT NULL UNIQUE )",
+        "CREATE INDEX revocation_feed ON revocations(person_id, cursor)",
+    ],
+    "0010_revocation_pairs.sql": [
+        "INSERT INTO revocation_pairs SELECT device_id, person_id, record, reason, received_ms, cursor FROM revocations",
+        "DROP TABLE revocations",
+        "ALTER TABLE revocation_pairs RENAME TO revocations",
+        "CREATE INDEX revocation_feed ON revocations(person_id, cursor)",
+    ],
+}
+
+
+def sql_file_statements_naming_revocations(folder):
+    """Every statement (split on `;`, comments removed, so a trigger body is scanned piece by
+    piece) of the .sql files in `folder` that names the table `revocations`, any case."""
+    import re
+    from pathlib import Path
+
+    found = {}
+    for path in sorted(Path(folder).glob("*.sql")):
+        text = re.sub(r"--[^\n]*", "", path.read_text())
+        for statement in text.split(";"):
+            if re.search(r"(?<![A-Za-z_])revocations\b", statement, re.IGNORECASE):
+                found.setdefault(path.name, []).append(re.sub(r"\s+", " ", statement).strip())
+    return found
+
+
+def test_migrations_naming_revocations_are_an_exact_allowlist():
+    """A VIEW or TRIGGER over `revocations` reading it by device id alone would bypass the
+    Python scan: every migration statement naming it must be listed exactly."""
+    from pathlib import Path
+
+    found = sql_file_statements_naming_revocations(Path(L.__file__).parent / "migrations")
+    assert found == MIGRATION_ALLOWED
+
+
+def test_the_sql_file_scanner_sees_views_triggers_and_any_case(tmp_path):
+    (tmp_path / "x.sql").write_text(
+        "CREATE VIEW v AS select device_id from Revocations;\n"
+        "CREATE TRIGGER t AFTER INSERT ON a BEGIN DELETE FROM b WHERE x IN "
+        "(SELECT device_id FROM REVOCATIONS); END;\n-- FROM revocations in a comment\n"
+    )
+    found = sql_file_statements_naming_revocations(tmp_path)
+    assert len(found["x.sql"]) == 2
+
+
 def test_every_sql_statement_naming_revocations_is_an_exact_allowlisted_pair_scoped_one():
     """Structural (R1): the allowlist is exact statements, never files. A new read of `revocations`
-    (plain, split over literals, a JOIN) fails here until a reviewer allows its exact text."""
+    (plain, split over literals, a JOIN, any case) fails here until a reviewer allows its exact text.
+    Static limit, by design: SQL built at run time (`.format`, `%`, a variable table name) is not
+    seen; nothing in the relay builds a statement over this table that way."""
     found = sql_literals_naming_revocations()
     assert {k: sorted(v) for k, v in found.items()} == {
         k: sorted(v) for k, v in PAIR_SCOPED.items()
@@ -516,6 +566,8 @@ def test_every_sql_statement_naming_revocations_is_an_exact_allowlisted_pair_sco
         'q = "SELECT 1 " "FROM " "revocations WHERE device_id=?"',
         'q = "SELECT 1 FROM a JOIN " + "revocations r ON 1"',
         'q = f"SELECT 1 FROM {t} JOIN revocations r ON 1"',
+        'q = "select 1 from revocations where device_id=?"',
+        'q = "SELECT 1 FROM Revocations"',
     ],
 )
 def test_the_guard_sees_plain_split_joined_and_fstring_reads(tmp_path, src):
@@ -828,6 +880,100 @@ def test_every_sweep_unlinks_its_blobs_only_after_the_commit(client, monkeypatch
     monkeypatch.setattr(L, "Path", Spy)
     life(client).run()
     assert seen and all(v == (0 if phase == "documents" else 1) for v in seen), seen
+
+
+def test_a_cycle_where_every_object_fails_counts_as_failed_and_logs_one_summary(client, caplog):
+    for label, who in (("a", DEVICE), ("b", LAPTOP)):
+        s, _w, b = upload(label, expires=NOW + 3600_000, author=who)
+        assert put(client, s, b, author=who).status_code == 201
+    at(client, NOW + 7200_000)
+
+    def broken(*a, **k):
+        raise ValueError("every object fails")
+
+    life(client).tombstone = broken
+    with caplog.at_level(logging.ERROR):
+        life(client).run()
+    assert life(client).failures == 1 and life(client).failures_total == 1
+    assert caplog.text.count("Traceback") == 1  # one traceback per cycle, not per object
+    assert "skipped 2 object(s) this cycle" in caplog.text
+    caplog.clear()
+    with caplog.at_level(logging.ERROR):
+        life(
+            client
+        ).run()  # the same failure next cycle: counted, not logged again within the interval
+    assert life(client).failures == 2 and caplog.text == ""
+
+
+def test_the_loop_does_not_reset_the_counter_after_a_cycle_with_failed_objects(client):
+    s, _w, b = upload("a", expires=NOW + 3600_000)
+    assert put(client, s, b).status_code == 201
+    at(client, NOW + 7200_000)
+
+    def broken(*a, **k):
+        raise ValueError("bad object")
+
+    life(client).tombstone = broken
+    life(client).period = 0.01
+
+    async def probe():
+        task = asyncio.create_task(life(client).maintenance())
+        await asyncio.sleep(0.15)
+        task.cancel()
+
+    asyncio.run(probe())
+    assert life(client).failures >= 3 and life(client).cycle_bad
+
+
+def test_a_failure_after_a_partial_object_release_rolls_the_whole_object_back(client):
+    s, _w, b = upload("a", author=LAPTOP, recipients=[LAPTOP, DEVICE], expires=NOW + 3600_000)
+    assert put(client, s, b, author=LAPTOP).status_code == 201
+    at(client, NOW + 7200_000)
+    before = (
+        usage(path_of(client)),
+        rows(path_of(client), "drop_versions"),
+        rows(path_of(client), "drop_wraps"),
+        rows(path_of(client), "drop_audience"),
+        rows(path_of(client), "drop_objects"),
+        counter(client),
+    )
+    files_before = blob_files(client)
+    real = life(client).audience
+
+    def late(con, obj, kind):
+        real(con, obj, kind)  # the versions, wraps and charges were released before this raises
+        raise ValueError("fails after the release")
+
+    life(client).audience = late
+    life(client).run()
+    after = (
+        usage(path_of(client)),
+        rows(path_of(client), "drop_versions"),
+        rows(path_of(client), "drop_wraps"),
+        rows(path_of(client), "drop_audience"),
+        rows(path_of(client), "drop_objects"),
+        counter(client),
+    )
+    assert after == before and blob_files(client) == files_before
+    life(client).audience = real
+    life(client).run()  # the next cycle completes it, charging nothing twice
+    expect_released(client)
+
+
+def test_a_failing_prune_leaves_the_blob_stored_and_the_rest_of_the_cycle_running(client):
+    doc_chain(client, "d", 10)
+    at(client, NOW + 30 * DAY)
+    before = (usage(path_of(client)), rows(path_of(client), "drop_versions"))
+    files_before = blob_files(client)
+
+    def broken(con, row):
+        raise ValueError("prune fails")
+
+    client.app.state.drop.prune = broken
+    life(client).run()
+    assert (usage(path_of(client)), rows(path_of(client), "drop_versions")) == before
+    assert blob_files(client) == files_before
+    assert life(client).failures == 1 and life(client).cycle_bad
 
 
 # --- retire ----------------------------------------------------------------------------------------

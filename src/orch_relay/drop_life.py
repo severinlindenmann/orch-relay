@@ -31,6 +31,7 @@ idempotent answer for a tombstone, else the tombstone with a new `n`.
 import asyncio
 import logging
 import time
+import traceback
 from contextlib import suppress
 from pathlib import Path
 
@@ -93,6 +94,7 @@ class Life:
         self.failures = 0  # consecutive failed cycles; reset by a successful one
         self.failures_total = 0
         self.last_logged = None
+        self.object_failures, self.first_failure, self.cycle_bad = 0, None, False
 
     @property
     def on(self):
@@ -210,15 +212,17 @@ class Life:
             if not progress and len(skip) == skipped:  # a newly skipped object may unblock more
                 return total, changed
 
-    @staticmethod
-    def guarded(con, skip, key, fn):
-        """Run one object's sweep under a savepoint: a failure rolls it back, is logged and skips
-        the object for the rest of the cycle (item 12)."""
+    def guarded(self, con, skip, key, fn):
+        """Run one object's sweep under a savepoint: a failure rolls it back whole, skips the object
+        for the rest of the cycle and is counted; `run` reports one summary line per cycle with
+        the first traceback (never one traceback per object; item 12, R3)."""
         con.execute("SAVEPOINT sweep")
         try:
             result = fn()
-        except Exception:  # any failure of one object: isolate it, never block the batch (R3)
-            log.exception("drop sweep failed, skipped: %s", key)
+        except Exception:  # noqa: BLE001 any failure of one object: isolate it, never block the batch (R3)
+            self.object_failures += 1
+            if self.first_failure is None:
+                self.first_failure = (key, traceback.format_exc())
             con.execute("ROLLBACK TO sweep")
             con.execute("RELEASE sweep")
             skip.add(key)
@@ -396,11 +400,35 @@ class Life:
         if not self.on:
             return None
         changed = set()
+        self.object_failures, self.first_failure, self.cycle_bad = 0, None, False
         for name in self.PHASES:
             _total, moved = self.drain(getattr(self, name))
             changed |= moved
         self.cycles += 1
+        if self.object_failures:  # a cycle with any failed object is a failed cycle
+            self.cycle_bad = True
+            key, trace = self.first_failure
+            self.failed(
+                f"drop sweep failed, skipped {self.object_failures} object(s) this cycle "
+                f"(first: {key})",
+                trace,
+            )
         return changed
+
+    def failed(self, summary, detail=""):
+        """Count a failed cycle and log it: the first at once, then at most once per LOG_EVERY."""
+        self.failures += 1
+        self.failures_total += 1
+        now = time.monotonic()
+        if self.last_logged is None or now - self.last_logged >= LOG_EVERY:
+            log.error(
+                "%s (%d in a row, %d in all)\n%s",
+                summary,
+                self.failures,
+                self.failures_total,
+                detail,
+            )
+            self.last_logged = now
 
     def start(self):
         """The periodic task (a new asyncio task, on the running loop), or None with Drop off."""
@@ -414,19 +442,11 @@ class Life:
                 changed = await run_in_threadpool(self.run)
                 if changed and self.d.changed:
                     self.d.changed(*[("ws", ws) for ws in sorted(changed)])
-            except Exception:  # any failure: log it (rate-limited), the next cycle retries (R3)
-                self.failures += 1
-                self.failures_total += 1
-                now = time.monotonic()
-                if self.last_logged is None or now - self.last_logged >= LOG_EVERY:
-                    log.exception(
-                        "drop sweep cycle failed (%d in a row, %d in all)",
-                        self.failures,
-                        self.failures_total,
-                    )
-                    self.last_logged = now
+            except Exception:  # noqa: BLE001 any failure: log it (rate-limited), the next cycle retries (R3)
+                self.failed("drop sweep cycle failed", traceback.format_exc())
             else:
-                self.failures, self.last_logged = 0, None
+                if not self.cycle_bad:  # `run` already counted a cycle with failed objects
+                    self.failures, self.last_logged = 0, None
             await asyncio.sleep(self.period)
 
     # --- retire ----------------------------------------------------------------------------------
