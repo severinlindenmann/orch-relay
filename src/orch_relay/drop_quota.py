@@ -51,6 +51,9 @@ class Quotas:
         self.dev_versions, self.dev_documents = 1024, 64
         self.doc_versions = 1024  # one document's chain (the phone's cap); no per-member share
         self.ws_creations, self.dev_creations = 1000, 250  # version-1 creations per UTC day
+        # The decide-class budget (item 13, A2): per (device, workspace) and UTC day, for uploads a
+        # device is authorized for by `decide` alone.
+        self.decide_creations, self.decide_bytes = 50, 64 * MIB
 
     def limits(self, ws, owner, device):
         """The ordered checks for an upload: (usage key, field, cap, name, status). The author's
@@ -231,3 +234,51 @@ def charge_creation(con, quotas, ws, device, day):
 
 def refuse_creations(now_ms):
     refuse("rate_limited", 429, seconds_to_midnight(now_ms), quota="drop_creations")
+
+
+# --- the decide-class budget (item 13, amendment A2) ---------------------------------------------
+
+
+def refuse_decide(name, now_ms):
+    refuse("rate_limited", 429, seconds_to_midnight(now_ms), quota=name)
+
+
+def charge_decide(con, quotas, ws, device, day, length, now_ms):
+    """Charge one creation and `length` bytes to the device's budget row of `day`, by the upsert of
+    item 13: the first upload of a day inserts, later ones update only while both caps hold; a
+    refused upsert (`changes() = 0`) is 429 `rate_limited` with `quota` naming the cap that failed
+    and `Retry-After` the seconds to 00:00 UTC. Runs in a write transaction; the caller rolls back
+    or commits. A request that cannot fit even an empty day (a lowered cap) is refused up front,
+    so the insert branch never exceeds a cap."""
+    if quotas.decide_creations < 1:
+        refuse_decide("drop_decide_creations", now_ms)
+    if length > quotas.decide_bytes:
+        refuse_decide("drop_decide_bytes", now_ms)
+    con.execute(
+        "INSERT INTO drop_decide_budget (workspace_id, device_id, day, creations, bytes) "
+        "VALUES (?,?,?,1,?) ON CONFLICT (workspace_id, device_id, day) DO UPDATE "
+        "SET creations = creations + 1, bytes = bytes + excluded.bytes "
+        "WHERE creations + 1 <= ? AND bytes + excluded.bytes <= ?",
+        (ws, device, day, length, quotas.decide_creations, quotas.decide_bytes),
+    )
+    if con.execute("SELECT changes()").fetchone()[0] == 0:
+        row = con.execute(
+            "SELECT creations FROM drop_decide_budget WHERE workspace_id=? AND device_id=? AND day=?",
+            (ws, device, day),
+        ).fetchone()
+        name = (
+            "drop_decide_creations"
+            if row is None or row[0] + 1 > quotas.decide_creations
+            else "drop_decide_bytes"
+        )
+        refuse_decide(name, now_ms)
+
+
+def give_back_decide(con, ws, device, day, creations, nbytes):
+    """The error path's give-back: `creations` (0 or 1) and `nbytes` off the request's own day row,
+    never below zero. A lost give-back over-charges, it never under-charges."""
+    con.execute(
+        "UPDATE drop_decide_budget SET creations = max(0, creations - ?), "
+        "bytes = max(0, bytes - ?) WHERE workspace_id=? AND device_id=? AND day=?",
+        (creations, nbytes, ws, device, day),
+    )

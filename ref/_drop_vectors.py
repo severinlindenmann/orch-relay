@@ -137,6 +137,21 @@ def add_drop_relay(out):
         return steps
     case("outside_a_device_only_audience_403_before_410", audience)
 
+    def decide(state):
+        """Amendment A2, item 13: a phone holding look and decide may upload one new inbox file; its
+        document, a space-addressed file and a second version are 403 at the scope step."""
+        inbox = b.upload("vector decide", recipients="inbox",
+                         wraps=lambda o: [b.wrap(o, "wxk"), b.wrap(o, "device", ph)])
+        steps = [op(state, op="scopes", device=ph, scopes=["look", "decide"]),
+                 step(state, ph, inbox, "0"),
+                 step(state, ph, b.upload("vector decide doc", kind="document"), "0"),
+                 step(state, ph, b.upload("vector decide space"), "0"),
+                 step(state, ph, inbox, "0"),
+                 step(state, ph, b.upload("vector decide", version=2, parent=inbox[0]["o"],
+                                          recipients="inbox"), "1")]
+        return steps
+    case("decide_only_inbox_file_then_a_decide_only_document", decide)
+
     def host(state):
         f = b.upload("vector host", author=ws)
         return [step(state, ws, f, "0", holder="0"), step(state, ws, f, "0", holder="1")]

@@ -212,6 +212,12 @@ def apply_op(d, op):
             seq = con.execute("SELECT coalesce(max(list_seq),0)+1 FROM member_lists").fetchone()[0]
             con.execute("INSERT INTO member_lists VALUES (?,?,?,'{}')", (WS, seq, op["epoch"]))
             return
+        if kind == "scopes":  # a member device's scopes change (a phone: look and decide)
+            con.execute(
+                "UPDATE members SET scopes=? WHERE device_id=?",
+                (P.cj(op["scopes"]), op["device"]),
+            )
+            return
         if kind == "rotation_due":  # a revocation's rotation is open: wk wraps are refused
             con.execute("INSERT INTO rotation_due VALUES (?,?,?,?)", (WS, LAPTOP, 5, 1))
             return
@@ -251,7 +257,8 @@ def apply_op(d, op):
             con.execute("DELETE FROM drop_versions WHERE object_id=?", (o_id,))
         elif kind == "claim":
             con.execute(
-                "UPDATE drop_objects SET claimed_by=? WHERE object_id=?", (op["workspace_id"], o_id)
+                "UPDATE drop_objects SET claimed_by=?, claimed_ms=? WHERE object_id=?",
+                (op["workspace_id"], d.clock(), o_id),
             )
         elif kind == "prune":
             con.execute(
@@ -337,7 +344,12 @@ def prepare_fixture(client, case):
             slots.used[("device", ident)] = slots.caps["device"]
         elif relay.get(kind) == "relay":
             slots.count = slots.total
-    if "usage" in relay or "creations" in relay or relay.get("bucket") == "drop_up_empty":
+    if (
+        "usage" in relay
+        or "creations" in relay
+        or "decide_budget" in relay
+        or relay.get("bucket") == "drop_up_empty"
+    ):
         production_conditions(client, relay, ident)
     if relay.get("bucket") == "empty":
         d.throttles = {**d.throttles, "session": (1, 1)}
@@ -372,6 +384,12 @@ def production_conditions(client, relay, ident):
                 "INSERT INTO drop_usage VALUES (?,?,?,?,0,0) ON CONFLICT(scope,id) DO UPDATE SET "
                 "blob_bytes=excluded.blob_bytes, head_bytes=excluded.head_bytes",
                 (scope, key, values["blob"], values["head"]),
+            )
+        if relay.get("decide_budget") in ("creations_full", "bytes_full"):
+            full = relay["decide_budget"] == "creations_full"
+            con.execute(
+                "INSERT INTO drop_decide_budget VALUES (?,?,?,?,?)",
+                (WS, ident, d.clock() // DAY, q.decide_creations if full else 0, 0 if full else q.decide_bytes),
             )
         if relay.get("creations") == "device_full":
             con.execute(

@@ -30,7 +30,7 @@ of D39a2, `claim` of D39b, `prune` after a restore, `foreign_object`, `epoch`, `
 in-memory relay conditions (`device`: `drop_scoped`/`cert_expired`/`revoked`; full `upload_slots`,
 `read_slots` or `download_slots` of the `device` or the `relay`; an empty `bucket`: the read-class
 `empty`, or (D39a2) `drop_up_empty`, the device's MiB upload bucket; `usage`: a `{scope, field}` at its cap,
-`creations`: `device_full`, the device's 250 version-1 creations of the UTC day). `drop_retire.json` (D39a2 part 2, the host's retire; the model's `retire` in `ref/drop_relay.py`) names the op `rotation_due` too (an open `rotation_due` row: `drop_put.json` `refusal_409_rotation_required`). Every expected answer is
+`creations`: `device_full`, the device's 250 version-1 creations of the UTC day; `decide_budget`: `creations_full` or `bytes_full`, the phone's decide-class budget of the UTC day spent). D39a2 part 3 adds the op `scopes` (`{device, scopes}`: the phone holds `look` and `decide` only) for the decide-class cases of `drop_put.json`, and the `claim` op now also sets `claimed_ms` to the relay's `now` (`drop_list.json`). `drop_retire.json` (D39a2 part 2, the host's retire; the model's `retire` in `ref/drop_relay.py`) names the op `rotation_due` too (an open `rotation_due` row: `drop_put.json` `refusal_409_rotation_required`). Every expected answer is
 the reference model's (`ref/drop_relay.py`). `host_poll.json` `drop_notice` shows `notices.drop` (only with
 `ORCH_RELAY_DROP_NOTICE=1`, until hosts accept the key).
 

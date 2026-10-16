@@ -16,8 +16,9 @@ Check order of the `PUT` (§14.2 item 3; each refusal stops, nothing is stored b
 Lock order: the in-memory slot tables (event loop only), then Directory.lock, then Directory.budget;
 a pooled read connection is never held while taking the lock. Quotas, reservations and the MiB
 buckets are drop_quota.py (D39a2 part 1: reserved at step 9, enforced in the commit); the sweepers
-beyond the start-up sweep, retire, decide-class uploads and list walks are later D39a2 parts; claims
-and host re-wraps are D39b.
+beyond the start-up sweep and retire are drop_life.py (D39a2 part 2); decide-class uploads (the shape,
+the budget charged at admission, its give-back, the one slot) and the host-and-author-only visibility
+of an unclaimed inbox object are D39a2 part 3; list walks are part 4; claims and host re-wraps are D39b.
 """
 
 import asyncio
@@ -48,9 +49,11 @@ from .drop_quota import (
     Quotas,
     Reservations,
     charge_creation,
+    charge_decide,
     check,
     creations_left,
     day_of,
+    give_back_decide,
     read_usage,
     refuse_creations,
     usage_keys,
@@ -216,6 +219,8 @@ class Plan:
         self.wrap_texts = [P.cj(r).decode() for r in records]
         o = self.o
         self.inbox = o["recipients"] == "inbox"
+        self.decide = False  # authorized by `decide` alone at admission (item 13): budget charged
+        self.charged = None  # (day, bytes) taken at step 9, for the error path's give-back
         if self.inbox:
             self.audience, self.devices = "inbox", []
         elif o["space_id"] in o["recipients"]:
@@ -248,10 +253,11 @@ class Drop:
         self.reserved = Reservations()  # in-flight upload reservations, event loop only
         self.limits = Limits()
         self.files = None  # anyio.CapacityLimiter(FILE_TOKENS), made on the event loop
-        self.uploads = Slots(16, {"device": 2, "person": 3, "workspace": 4})
+        self.uploads = Slots(16, {"device": 2, "person": 3, "workspace": 4, "decide": 1})
         self.downloads = Slots(32, {"device": 4, "person": 8})
         self.reads = Slots(8, {"device": 2, "person": 4})
         self.drains = Slots(32, {"device": 2})
+        self.give_back_logged = -60.0  # monotonic time of the last give-back failure log
         self.hooks = {}  # tests: "head", "before_commit", "drain", "answered"
 
     async def hook(self, name, **info):
@@ -414,12 +420,23 @@ class Drop:
                 if write and session["kind"] == "workspace":
                     d.fence(con, headers, session["subject_id"], now)
                 if write and session["kind"] == "device":
-                    # Review F8 (§14.2 step 2, "a non-member"): a device with `operate` in no
-                    # workspace gets neither an upload slot nor a drain.
-                    scopes = con.execute(
-                        "SELECT scopes FROM members WHERE device_id=?", (session["subject_id"],)
-                    ).fetchall()
-                    need(any("operate" in P.parse_json(r[0]) for r in scopes), "not_eligible", 403)
+                    # Review F8 (§14.2 step 2, "a non-member"), widened by amendment A2: a device
+                    # with neither `operate` nor `decide` in any workspace gets neither an upload
+                    # slot nor a drain. One with `decide` alone everywhere (a phone) gets its one
+                    # decide-class slot (item 13); the exact shape is step 5's.
+                    scopes = [
+                        P.parse_json(r[0])
+                        for r in con.execute(
+                            "SELECT scopes FROM members WHERE device_id=?",
+                            (session["subject_id"],),
+                        ).fetchall()
+                    ]
+                    need(
+                        any("operate" in sc or "decide" in sc for sc in scopes),
+                        "not_eligible",
+                        403,
+                    )
+                    session["decide_slot"] = not any("operate" in sc for sc in scopes)
                 if session["kind"] == "workspace":
                     # Review F3: a host's slots also count against its account (the card owner),
                     # so one account's workspaces cannot take every relay-wide slot.
@@ -500,7 +517,13 @@ class Drop:
         """§14.2 item 6: the caller may see this object (any state)."""
         if not self.sees_workspace(con, session, row["workspace_id"]):
             return False
-        if session["kind"] == "workspace" or row["audience"] != "devices":
+        if session["kind"] == "workspace":
+            return True
+        if row["inbox"] and row["claimed_by"] is None:
+            # Amendment A2 (reverses A1): an unclaimed inbox object is the W session's and its
+            # author device's alone (an inbox object has one version, so the head author is it).
+            return row["head_author_id"] == session["subject_id"]
+        if row["audience"] != "devices":
             return True
         return (
             con.execute(
@@ -597,10 +620,24 @@ class Drop:
                 kinds["wk"] == 1
             )  # the member-writer wrap; a W author may omit it only for devices
 
-    def eligibility(self, con, session, signed, now, signature=True):
+    @staticmethod
+    def decide_shape(o, expected):
+        """Item 13's decide-class shape: a new inbox `file` at version 1 (`If-Match: 0`). It
+        depends on the request alone, never on stored state (no oracle)."""
+        return (
+            o["object_kind"] == "file"
+            and o["recipients"] == "inbox"
+            and o["version"] == 1
+            and o["parent"] == 0
+            and expected == 0
+        )
+
+    def eligibility(self, con, session, signed, now, expected, signature=True):
         """Step 5's database checks: the expiry window (400; its 410 is in step 6), the author is
         the principal (403), the signature (401, only once: keys never change), the write scope
-        (403), and only then the recipients as the space or its current member devices (400).
+        (403: `operate`, or `decide` for the decide-class shape only, item 13), and only then the
+        recipients as the space or its current member devices (400). Returns "decide" when the write
+        is authorized by `decide` alone, else None.
         JUDGEMENT CALL (authorization pass): §14.2 lists the recipients check before the author,
         but run first it would tell a caller without write scope which device ids are members
         of any workspace (400 versus 403); after the scope check it reveals nothing new."""
@@ -626,14 +663,24 @@ class Drop:
                 ).fetchone()
             if pub is None or P.verify_object(signed, P.unb64u(pub[0]), "drop_object") is None:
                 no("bad_signature", 401)
+        decide = None
         if kind == "device":
             scopes = self.member(con, ws, ident)
-            need(scopes is not None and "operate" in scopes, "not_eligible", 403)
+            if scopes is not None and "operate" in scopes:
+                pass
+            else:
+                need(
+                    scopes is not None and "decide" in scopes and self.decide_shape(o, expected),
+                    "not_eligible",
+                    403,
+                )
+                decide = "decide"
         else:
             need(ident == ws, "not_eligible", 403)
         if isinstance(o["recipients"], list):
             for target in o["recipients"]:
                 need(target == ws or self.member(con, ws, target) is not None)
+        return decide
 
     def object_state(self, con, session, o, now):
         """Step 6: another space's id or a device outside a device-only audience is 403 (never
@@ -739,7 +786,7 @@ class Drop:
         plan = Plan(signed, records, len(raw))
         with self.bridge.reading("query") as con:
             con.execute("BEGIN")
-            self.eligibility(con, session, signed, request_now)
+            plan.decide = self.eligibility(con, session, signed, request_now, expected) is not None
             if session["kind"] == "device" and cost:
                 # The device's workspace upload bucket (item 8, R-D12), charged as soon as the
                 # device is eligible to write here (step 5): every later refusal, the exact
@@ -779,6 +826,47 @@ class Drop:
         plan.keys = usage_keys(ws, plan.owner, plan.device)
         plan.usage = read_usage(con, plan.keys)
 
+    def charge_budget(self, plan, request_now):
+        """Step 9, an upload authorized by `decide` alone (item 13): the decide-class budget is
+        charged at admission, by the upsert, in its own short write transaction under the
+        directory's single writer (two concurrent uploads cannot both take the last unit; a crash
+        never refills it). 429 `rate_limited` with `quota` and `Retry-After` to 00:00 UTC."""
+        o = plan.o
+        day = day_of(request_now)
+        with self.d.lock:
+            con = self.bridge.connection("write")
+            con.execute("BEGIN IMMEDIATE")
+            with con:
+                charge_decide(
+                    con,
+                    self.quotas,
+                    o["space_id"],
+                    o["author_id"],
+                    day,
+                    o["content_len"],
+                    request_now,
+                )
+        plan.charged = (day, o["content_len"])
+
+    def give_back(self, plan, creations, nbytes):
+        """The error path's give-back (item 13): its own small write transaction, best effort. A
+        lost one (a database error, a killed process) leaves the full charge: over-charging, never
+        under-charging."""
+        o = plan.o
+        try:
+            with self.d.lock:
+                con = self.bridge.connection("write")
+                con.execute("BEGIN IMMEDIATE")
+                with con:
+                    give_back_decide(
+                        con, o["space_id"], o["author_id"], plan.charged[0], creations, nbytes
+                    )
+        except Exception:  # best effort by design: any failure over-charges, never raises
+            now = time.monotonic()
+            if now - self.give_back_logged >= 60:
+                self.give_back_logged = now
+                log.exception("drop decide budget give-back lost (over-charged)")
+
     def reserve(self, plan):
         """Step 9, on the event loop with no await between the check and the take: refuse a
         version that would pass a cap with the in-flight reservations counted, else reserve its
@@ -797,10 +885,13 @@ class Drop:
         )
         return self.reserved.take(plan.keys, plan.need)
 
-    def enforce(self, con, plan, row, request_now, now):
+    def enforce(self, con, plan, row, request_now, now, decided=False):
         """The commit's authority (item 8): the caps against the live usage rows (no
         reservations: each upload's own commit decides), then, for a new object, the creation
-        counters by upsert. A refusal propagates out of the write transaction (rolled back)."""
+        counters by upsert. `decided`: the commit-time authority is `decide` alone; if the upload was
+        admitted under `operate` (no budget charge at step 9) it is charged here by the same upsert
+        (item 13, R3; refused: 429 with nothing stored). A refusal propagates out of the write
+        transaction (rolled back)."""
         o = plan.o
         ws = o["space_id"]
         usage = read_usage(con, plan.keys)
@@ -818,6 +909,16 @@ class Drop:
             con, self.quotas, ws, plan.device, day_of(request_now)
         ):
             refuse_creations(request_now)
+        if decided and not plan.decide:
+            charge_decide(
+                con,
+                self.quotas,
+                ws,
+                o["author_id"],
+                day_of(request_now),
+                o["content_len"],
+                request_now,
+            )
 
     # --- PUT: step 11 ----------------------------------------------------------------------------
 
@@ -834,13 +935,16 @@ class Drop:
                 session = d.authenticate(con, headers, now)
                 if session["kind"] == "workspace":
                     d.fence(con, headers, session["subject_id"], now)  # orch-52 change 0
-                self.eligibility(con, session, plan.signed, now, signature=False)
+                decided = (
+                    self.eligibility(con, session, plan.signed, now, expected, signature=False)
+                    is not None
+                )
                 row = self.object_state(con, session, o, now)
                 if self.exact_retry(con, o, row):
                     return 200, o["version"], o["space_id"]
                 self.cas(o, row, expected, request_now)
                 self.wrap_state(con, o, plan.records, now)
-                self.enforce(con, plan, row, request_now, now)
+                self.enforce(con, plan, row, request_now, now, decided)
                 self.insert(con, plan, row, blob_path, now)
         return 201, o["version"], o["space_id"]
 
@@ -1154,11 +1258,15 @@ class Drop:
             )
             args = [ws, after, me, now, now, TOMBSTONE, now]
             if session["kind"] == "device":
+                # §14.2 item 6 (amendment A2): the visibility filter, in SQL, before the page limit
+                # (no gaps, no leaks in a page's count): the space's, the claimed inbox's, the
+                # author's own unclaimed inbox, a device-only object's audience.
                 sql += (
-                    " AND (o.audience<>'devices' OR EXISTS (SELECT 1 FROM drop_audience a "
-                    "WHERE a.object_id=o.object_id AND a.device_id=?))"
+                    " AND ((o.audience='space' OR (o.audience='inbox' AND (o.claimed_by IS NOT "
+                    "NULL OR o.head_author_id=?)) OR (o.audience='devices' AND EXISTS (SELECT 1 "
+                    "FROM drop_audience a WHERE a.object_id=o.object_id AND a.device_id=?))))"
                 )
-                args.append(me)
+                args += [me, me]
             rows = con.execute(sql + " ORDER BY o.n LIMIT ?", (*args, limit + 1)).fetchall()
             entries = []
             for row in rows[:limit]:
@@ -1299,6 +1407,7 @@ class Drop:
         headers = header_map(scope)
         body = Body(receive, self.limits)
         slot, tmp, final, device, reservation = None, None, None, None, None
+        plan, refund_all = None, False  # the decide-class charge: given back in `finally`
         mode = "brief"  # steps 1-2: close at once after at most 64 KiB or 1 s
 
         def free():
@@ -1325,7 +1434,10 @@ class Drop:
             cost = max(1, -(-declared // MIB))  # one bucket token per started MiB of body
             session = await run_in_threadpool(self.admit, headers, True, cost)
             device = session["subject_id"]
-            slot = self.uploads.take(self.slot_keys(session, workspace=True))
+            keys = self.slot_keys(session, workspace=True)
+            if session.get("decide_slot"):
+                keys.append(("decide", device))  # a decide-only device: one slot (item 13)
+            slot = self.uploads.take(keys)
             mode = "full"  # from here on early answers drain
             held = time.monotonic()
             body.deadline = held + min(self.limits.head_s, self.limits.max_transfer)
@@ -1359,7 +1471,19 @@ class Drop:
                     no("quota_exceeded", 429, quota="slot")
                 self.uploads.used[key] += 1
                 slot.append(key)
-            reservation = self.reserve(plan)
+            if plan.decide:
+                key = ("decide", device)
+                if key not in slot:  # `operate` elsewhere, decide-only here: still one at a time
+                    if self.uploads.used[key] >= self.uploads.caps["decide"]:
+                        no("quota_exceeded", 429, quota="slot")
+                    self.uploads.used[key] += 1
+                    slot.append(key)
+                await run_in_threadpool(self.charge_budget, plan, request_now)
+            try:
+                reservation = self.reserve(plan)
+            except Refusal:
+                refund_all = plan.charged is not None  # refused before the first blob byte
+                raise
             # 10. the blob, streamed to drop/tmp, landed at a unique final path
             mode = "none"  # a failure while streaming closes; the body was the client's
             tmp, handle = await self.io(self.open_tmp)
@@ -1389,6 +1513,7 @@ class Drop:
             # reservation before the answer is sent (a slow send must not count them twice).
             self.reserved.release(reservation)
             reservation = None
+            refund_all = status == 200 and plan.charged is not None  # an exact retry won the race
             if status != 200 and self.d.changed:
                 self.d.changed(("ws", ws))
             return await self.answer(send, body, status, {"version": version}, etag(version))
@@ -1425,11 +1550,23 @@ class Drop:
         finally:
             if reservation is not None:
                 self.reserved.release(reservation)
-            if tmp is not None:
-                await self.io(self.unlink, tmp)
-            if final is not None:
-                await self.io(self.unlink, self.blobs / final)
-            free()
+            try:
+                if plan is not None and plan.charged is not None:
+                    # Item 13: a commit keeps the charge; a refusal before the first blob byte or an
+                    # exact retry gives it all back; any other end keeps one creation and the bytes
+                    # received and gives back the rest. Shielded: a cancellation never skips it.
+                    kept = min(plan.charged[1], body.blob_in)
+                    back = (1, plan.charged[1]) if refund_all else (0, plan.charged[1] - kept)
+                    if back != (0, 0):
+                        await asyncio.shield(
+                            asyncio.ensure_future(run_in_threadpool(self.give_back, plan, *back))
+                        )
+            finally:
+                if tmp is not None:
+                    await self.io(self.unlink, tmp)
+                if final is not None:
+                    await self.io(self.unlink, self.blobs / final)
+                free()
 
     def settle(self, commit, path):
         """After the commit's thread finished (also when the request was cancelled meanwhile):
@@ -1456,6 +1593,7 @@ class Drop:
         pending = bytearray()
         body.start_rate()
         async for data in body.rest():
+            body.blob_in += len(data)
             if have + len(pending) + len(data) > want:
                 fail("malformed")  # a long body
             if len(header) < ORD2_HEADER:
@@ -1557,6 +1695,7 @@ class Body:
         self.on_answer = None
         self.declared = None
         self.received = 0
+        self.blob_in = 0  # blob bytes read by `Drop.stream` (the decide-class give-back)
         self.start = None
         self.deadline = None  # monotonic: the head or the whole transfer must end by then
 
@@ -1688,8 +1827,12 @@ def entry(row, state, wraps, now):
         (
             b'{"claimed_by":',
             P.cj(row["claimed_by"]),
+            b',"claimed_ms":',
+            P.cj(row["claimed_ms"]),
             b',"descriptor":',
             descriptor,
+            b',"expires_ms":',
+            P.cj(row["expires_ms"]),
             b',"n":',
             str(row["n"]).encode(),
             b',"object_id":',

@@ -3087,8 +3087,9 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (Â
         the directory's single writer, two concurrent `PUT`s therefore cannot both take the last creation or
         the last bytes, and a crash or restart never refills the budget. The charge is **refunded only** when
         the request is refused before the relay reads its first blob byte (the quota reservation's 429 or 503
-        right after the charge) and, trivially, never arises for an exact retry (step 7 answers before any
-        charge). Every other outcome keeps the charge: a commit keeps all of it; a stream that fails after
+        right after the charge) and for the lost commit race (the commit finds the identical version already
+        stored and answers 200, the exact retry of step 7 at the commit: the whole charge is given back; D39a2
+        part 3, review L3), and never arises for an exact retry that step 7 answers before any charge. Every other outcome keeps the charge: a commit keeps all of it; a stream that fails after
         its first blob byte (a disconnect, an idle or rate breach, a short, long or non-ORD2 body, a wrong
         `content_hash`, a 403 at the commit, a relay error such as 503) is charged 1 creation and the bytes
         actually received. The give-back of the unreceived bytes (`content_len` âˆ’ received, and for a refusal
@@ -3761,6 +3762,21 @@ is as the amendment A1 text above; the retire of a document counts it out at onc
 too) and leaves its versions to the sweeper. `rotation_required` is adopted: a `wk` wrap is refused with 409 and the
 current epoch while any `rotation_due` row of the workspace exists (after `stale_epoch`, in the commit again); an
 exact retry (step 7) and `wk`-less uploads are unaffected. N3: an error after the blob's rename removes the blob. A device counts as revoked only by its registered person's pair (`directory.revoked_sql`, P3-D30): a stranger's self-certified pair never removes its wraps (one helper for every access decision, pinned by a structural test). The sweeper loop logs and survives any exception; a cycle in which any object failed counts as failed (one summary line with the first traceback, the first at once, then at most one per 300 s). The structural guard over `revocations` is static: it scans the relay's SQL string literals and migrations against an exact allowlist, and does not see SQL assembled at run time. Notes: each sweep's candidate scan runs inside the global write lock (about 0.35 s for 300 000 device wraps; acceptable at P4 scale, drive it from `drop_wraps_target` if that changes); the sweeps use the wall clock like the reads; a device removed and re-added before the sweep ran gets its old device wraps back, after it they are gone (the host's MUST for re-added devices); the `rotation_required` body carries `epoch` on a Drop `PUT` only (the membership route's has none); PR 4's state check must land before Drop is switched on.
+
+**D39a2 part 3 decisions (implementation, 16 Oct 2026; `drop.py`, `drop_quota.py`).** The decide-class authority is decided in step 5
+from the request alone (`Drop.decide_shape`: `file`, `inbox`, version 1, `If-Match: 0`) and the live `members` row, before any object
+state is read, and again in the commit's transaction (`eligibility` returns the class; the commit-time class wins). Step 2 admits a
+device holding `operate` or `decide` anywhere; one holding `operate` nowhere takes the `("decide", device)` slot key at admission (cap 1),
+one that is decide-only only for this workspace takes it at step 5 (429 `slot`, before the charge and any blob byte). The budget is
+charged in step 9 after the workspace slot and immediately before the reservation, by `charge_budget` (the item 13 upsert in its own
+write transaction under `Directory.lock`; the refused upsert names `drop_decide_creations` or `drop_decide_bytes` by reading the row,
+`Retry-After` from the request's `now`); a lowered cap that a request cannot fit even on an empty day is refused before the insert
+branch. The give-back runs in `finally`, shielded, in its own transaction (`give_back`, errors logged, never raised): a refusal at the
+reservation or an exact retry that won the commit gives back the whole charge; every other end keeps one creation and the blob bytes the
+stream read (`Body.blob_in`) and gives back the unread rest, so a stream that never delivered a byte still costs its creation. A
+commit-time `operate` to `decide` change charges the budget by the same upsert inside the commit (429 `rate_limited` with nothing stored
+and no charge). The visibility rule is one function (`Drop.visible`) for reads and `PUT`, and one SQL clause for the list, applied in the
+`WHERE` before the page `LIMIT`. List entries carry `claimed_ms` and `expires_ms` from `drop_objects`.
 
 ### 14.5 Migration plan (0017, 0018, D39a2's)
 
