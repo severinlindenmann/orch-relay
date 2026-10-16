@@ -810,3 +810,45 @@ def test_the_list_entry_key_order_is_cj(client):
     entry = json.loads(listing(client, WS).content)["objects"][0]
     assert list(entry) == sorted(entry)
     assert {"claimed_ms", "expires_ms"} <= set(entry)
+
+
+def test_l1_the_commit_time_charge_goes_to_the_requests_day(client):
+    """A device that loses `operate` mid-upload is charged at the commit, to the request's day even
+    when the commit clock is past midnight."""
+    scopes(client, DEVICE, FULL)
+    midnight = (NOW // DAY + 1) * DAY
+    start = midnight - 2000
+    revive(client, start)
+
+    def hook(plan):
+        scopes(client, DEVICE, DECIDE)
+        revive(client, midnight + 1000)
+
+    client.app.state.drop.hooks["before_commit"] = hook
+    signed, body = inbox("a", now=start)
+    assert put(client, signed, body).status_code == 201
+    assert budget(path_of(client), day=start // DAY) == (1, signed["o"]["content_len"])
+    assert budget(path_of(client), day=midnight // DAY) is None
+
+
+def test_l2_a_decide_only_version_2_with_if_match_0_is_403_not_400(client):
+    signed, body = inbox("a")
+    assert put(client, signed, body).status_code == 201
+    second, _w, b2 = plain_upload(
+        signed["o"]["object_id"], version=2, parent=signed["o"], recipients="inbox"
+    )
+    r = put(client, second, b2, if_match="0")
+    assert (r.status_code, r.json()) == (403, HIDDEN)
+
+
+def test_l4_any_give_back_failure_is_logged_and_the_slot_is_released(h, monkeypatch, caplog):
+    def boom(*args):
+        raise RuntimeError("not a database error")
+
+    monkeypatch.setattr(DR, "give_back_decide", boom)
+    signed, body = inbox("a", content=b"\1" * 100_000)
+    head = 8 + int.from_bytes(body[4:8], "big")
+    asyncio.run(aput(h, body, signed, chunks=[body[: head + 500]], then="disconnect"))
+    assert budget(h.d.path) == (1, signed["o"]["content_len"])  # over-charged, not raised
+    assert h.drop.uploads.count == 0 and h.drop.uploads.used == {}
+    assert sum("give-back lost" in r.message for r in caplog.records) == 1

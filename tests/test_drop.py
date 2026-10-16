@@ -759,7 +759,7 @@ def test_list_other_workspace_and_non_member(client):
     assert listing(client, LAPTOP).status_code == 403
 
 
-def test_startup_sweep_prunes_missing_and_deletes_orphans(tmp_path):
+def test_startup_sweep_prunes_missing_and_deletes_orphans(tmp_path, monkeypatch):
     with TestClient(create_app(tmp_path)) as c:
         setup(c.app.state.directory)
         s, _, b = upload("a")
@@ -775,6 +775,8 @@ def test_startup_sweep_prunes_missing_and_deletes_orphans(tmp_path):
         path_a = drop.blobs / rows(c.app.state.directory.path, "drop_versions")[0]["blob_path"]
         path_a.unlink()  # a restore without data/drop/ for this one
         before = usage(c.app.state.directory.path)[("workspace", WS)]
+    # the start-up sweeps read the real clock: freeze it at the test's NOW (the files expire 7 days on)
+    monkeypatch.setattr("time.time_ns", lambda: NOW * 1_000_000)
     with TestClient(create_app(tmp_path)) as c:
         c.app.state.directory.clock = lambda: NOW
         drop = c.app.state.drop

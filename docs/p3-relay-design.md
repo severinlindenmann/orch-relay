@@ -3087,8 +3087,9 @@ effort. No Web Push or VAPID: `provision.sh`'s `VAPID_*` remnants are dropped (Â
         the directory's single writer, two concurrent `PUT`s therefore cannot both take the last creation or
         the last bytes, and a crash or restart never refills the budget. The charge is **refunded only** when
         the request is refused before the relay reads its first blob byte (the quota reservation's 429 or 503
-        right after the charge) and, trivially, never arises for an exact retry (step 7 answers before any
-        charge). Every other outcome keeps the charge: a commit keeps all of it; a stream that fails after
+        right after the charge) and for the lost commit race (the commit finds the identical version already
+        stored and answers 200, the exact retry of step 7 at the commit: the whole charge is given back; D39a2
+        part 3, review L3), and never arises for an exact retry that step 7 answers before any charge. Every other outcome keeps the charge: a commit keeps all of it; a stream that fails after
         its first blob byte (a disconnect, an idle or rate breach, a short, long or non-ORD2 body, a wrong
         `content_hash`, a 403 at the commit, a relay error such as 503) is charged 1 creation and the bytes
         actually received. The give-back of the unreceived bytes (`content_len` âˆ’ received, and for a refusal

@@ -220,9 +220,7 @@ class Plan:
         o = self.o
         self.inbox = o["recipients"] == "inbox"
         self.decide = False  # authorized by `decide` alone at admission (item 13): budget charged
-        self.charged = (
-            None  # (day, creations, bytes) taken at step 9, for the error path's give-back
-        )
+        self.charged = None  # (day, bytes) taken at step 9, for the error path's give-back
         if self.inbox:
             self.audience, self.devices = "inbox", []
         elif o["space_id"] in o["recipients"]:
@@ -259,6 +257,7 @@ class Drop:
         self.downloads = Slots(32, {"device": 4, "person": 8})
         self.reads = Slots(8, {"device": 2, "person": 4})
         self.drains = Slots(32, {"device": 2})
+        self.give_back_logged = -60.0  # monotonic time of the last give-back failure log
         self.hooks = {}  # tests: "head", "before_commit", "drain", "answered"
 
     async def hook(self, name, **info):
@@ -862,8 +861,11 @@ class Drop:
                     give_back_decide(
                         con, o["space_id"], o["author_id"], plan.charged[0], creations, nbytes
                     )
-        except (sqlite3.Error, OSError):
-            log.exception("drop decide budget give-back lost (over-charged)")
+        except Exception:  # best effort by design: any failure over-charges, never raises
+            now = time.monotonic()
+            if now - self.give_back_logged >= 60:
+                self.give_back_logged = now
+                log.exception("drop decide budget give-back lost (over-charged)")
 
     def reserve(self, plan):
         """Step 9, on the event loop with no await between the check and the take: refuse a
