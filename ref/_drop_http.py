@@ -18,7 +18,7 @@ ROUTES = [
      "401:bad_signature 409:version_conflict,stale_epoch,bad_wxk_version,rotation_required 410:expired "
      "428:precondition_required "
      "429:quota_exceeded,rate_limited 503:overloaded"),
-    ("drop_list", "POST", "/v2/drop/list", "client", "D(m)|W", "429:quota_exceeded,rate_limited 503:overloaded"),
+    ("drop_list", "POST", "/v2/drop/list", "client", "D(m)|W", "409:generation_changed 429:quota_exceeded,rate_limited 503:overloaded"),
     ("drop_descriptors", "GET", "/v2/drop/{o}/descriptors", "client", "D(m)|W",
      "404:not_found 410:expired 429:quota_exceeded,rate_limited 503:overloaded"),
     ("drop_descriptor_get", "GET", "/v2/drop/{o}/versions/{v}/descriptor", "client", "D(m)|W",
@@ -445,7 +445,52 @@ def build(v):
     cs.append(case("claimed_inbox_in_an_after_list", list_req(lap, after=5), prior=world,
                    ops=[{"op": "claim", "object_id": oid["d"], "workspace_id": ws}],
                    condition="The claim's new n brings the item into an incremental list."))
-    cs.append(case("first_page", list_req(lap, limit=1), prior=world))
+    gen, stale = M.GENERATION, "0" * 32
+    cs.append(case("first_page", list_req(lap, limit=1), prior=world,
+                   condition="Every page echoes the relay's `generation` and `until`, the newest change "
+                             "position when the walk started; `next` is the last entry's n."))
+    cs.append(case("incremental_with_generation", list_req(lap, after=5, generation=gen), prior=world,
+                   condition="An incremental list that sends the stored generation: empty, `until` 5 (A2)."))
+    cs.append(case("all_by_the_workspace_session", list_req(ws, direction="all"), prior=world,
+                   condition="`all` (W sessions only): both authors, every state, the unclaimed inbox item "
+                             "included, `until` = the counter (5)."))
+    cs.append(case("all_walk_first_page", list_req(ws, direction="all", limit=2), prior=world,
+                   condition="A walk's first page: no `until`, no `generation`; `next` 2, `until` 5."))
+    cs.append(case("all_walk_second_page", list_req(ws, direction="all", limit=2, after=2, until=5,
+                                                    generation=gen), prior=world,
+                   condition="Following pages send `until` and `generation` and are cut at `until`."))
+    cs.append(case("all_walk_last_page", list_req(ws, direction="all", limit=2, after=4, until=5,
+                                                  generation=gen), prior=world,
+                   condition="The last page: `next` null, `generation` and `until` still echoed."))
+    cs.append(case("all_walk_cut_at_until", list_req(ws, direction="all", after=2, until=5, generation=gen),
+                   prior=world, ops=[{"op": "claim", "object_id": oid["d"], "workspace_id": ws}],
+                   condition="The inbox item was claimed during the walk (n 6 > until 5): it leaves this "
+                             "walk's range and is in the next walk from `until`."))
+    cs.append(case("all_walk_follow_up", list_req(ws, direction="all", after=5, generation=gen),
+                   prior=world, ops=[{"op": "claim", "object_id": oid["d"], "workspace_id": ws}],
+                   condition="The next walk from the stored `until` 5 has the object that changed meanwhile."))
+    cs.append(case("all_sees_retired_and_expired", list_req(ws, direction="all"),
+                   prior=world + [put_req(up("fx exp2", expires=NOW + 120_000))],
+                   ops=[{"op": "retire", "object_id": oid["b"]}, {"op": "clock", "now_ms": NOW + 120_000}],
+                   condition="A1 states in a W walk: retired and expired tombstones, descriptor null."))
+    cs.append(case("device_asking_all_is_not_eligible", list_req(lap, direction="all"), prior=world,
+                   condition="A device session asking for `all` (JUDGEMENT CALL: an authority refusal)."))
+    cs.append(case("refusal_409_generation_changed", list_req(lap, after=1, generation=stale), prior=world,
+                   condition="The request's generation is not the relay's: exactly this body, no other key; "
+                             "the client relists from the start."))
+    cs.append(case("refusal_409_generation_changed_on_a_continued_walk",
+                   list_req(ws, direction="all", after=2, until=5, generation=stale), prior=world))
+    cs.append(case("refusal_409_after_above_the_counter", list_req(lap, after=6), prior=world,
+                   condition="`after` above the relay's counter (5) cannot happen within one generation "
+                             "(a restore the start check could not see), whether or not `generation` is sent."))
+    cs.append(case("refusal_409_until_above_the_counter", list_req(ws, direction="all", after=0, until=9,
+                                                                    generation=gen), prior=world))
+    cs.append(case("refusal_400_until_without_generation", list_req(lap, until=5), prior=world))
+    cs.append(case("refusal_400_all_after_without_generation", list_req(ws, direction="all", after=2),
+                   prior=world))
+    cs.append(case("refusal_400_after_above_until", list_req(ws, direction="all", after=4, until=3,
+                                                              generation=gen), prior=world))
+    cs.append(case("refusal_400_generation_not_hex", list_req(lap, generation="A" * 32), prior=world))
     cs.append(case("after_the_last_position", list_req(lap, after=5), prior=world))
     cs.append(case("states", list_req(lap), prior=world + [put_req(up("fx exp", expires=NOW + 120_000))],
                    ops=[{"op": "retire", "object_id": oid["b"]}, {"op": "prune", "object_id": oid["e"]},

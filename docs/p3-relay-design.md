@@ -3743,12 +3743,12 @@ charges them exactly. A device's workspace upload bucket is charged at step 5, o
 workspace the head names (Opus R1: every later refusal, an exact retry and a creations 429 spend it; an ineligible
 request does not), a W session's at admission. The daily version-1 creation counters answer 429 `rate_limited` with `quota: "drop_creations"` and
 `Retry-After` to 00:00 UTC; their day rows are swept with the budget's (D39a2 part 2). `ORCH_RELAY_DROP_NOTICE` works
-only with `ORCH_RELAY_DROP=1`. D39a2's `n`-assigning sweepers run only when `ORCH_RELAY_DROP=1` (the state-check gate
-arrives with the list walks).
+only with `ORCH_RELAY_DROP=1`. D39a2's `n`-assigning sweepers run only when `ORCH_RELAY_DROP=1` (and, since part 4, behind the
+state-check gate).
 
 **D39a2 part 2 decisions (implementation, 16 Oct 2026; `drop_life.py`).** One sweep cycle every 600 s, only with
 `ORCH_RELAY_DROP=1` (with Drop off no sweeper task exists, `Life.run` returns at once and the start-up sweep stops
-after cleaning `tmp/`, so nothing assigns a position; PR 4 puts the state-check gate in front of the same entry
+after cleaning `tmp/`, so nothing assigns a position; part 4 put the state-check gate in front of the same entry
 points). Phases, each in transactions of at most 4 096 deleted rows (versions, cascaded wraps, audience rows; one
 object always completes): expiry (`expires_ms <= now`: `expired` tombstone with `tombstone_ms = expires_ms`, a
 file's version, wraps and usage released, audience rows deleted, new `n`), release of a retired document's versions,
@@ -3761,7 +3761,7 @@ began before midnight). A failing object is rolled back to its savepoint, logged
 is as the amendment A1 text above; the retire of a document counts it out at once (the creator's document share
 too) and leaves its versions to the sweeper. `rotation_required` is adopted: a `wk` wrap is refused with 409 and the
 current epoch while any `rotation_due` row of the workspace exists (after `stale_epoch`, in the commit again); an
-exact retry (step 7) and `wk`-less uploads are unaffected. N3: an error after the blob's rename removes the blob. A device counts as revoked only by its registered person's pair (`directory.revoked_sql`, P3-D30): a stranger's self-certified pair never removes its wraps (one helper for every access decision, pinned by a structural test). The sweeper loop logs and survives any exception; a cycle in which any object failed counts as failed (one summary line with the first traceback, the first at once, then at most one per 300 s). The structural guard over `revocations` is static: it scans the relay's SQL string literals and migrations against an exact allowlist, and does not see SQL assembled at run time. Notes: each sweep's candidate scan runs inside the global write lock (about 0.35 s for 300 000 device wraps; acceptable at P4 scale, drive it from `drop_wraps_target` if that changes); the sweeps use the wall clock like the reads; a device removed and re-added before the sweep ran gets its old device wraps back, after it they are gone (the host's MUST for re-added devices); the `rotation_required` body carries `epoch` on a Drop `PUT` only (the membership route's has none); PR 4's state check must land before Drop is switched on.
+exact retry (step 7) and `wk`-less uploads are unaffected. N3: an error after the blob's rename removes the blob. A device counts as revoked only by its registered person's pair (`directory.revoked_sql`, P3-D30): a stranger's self-certified pair never removes its wraps (one helper for every access decision, pinned by a structural test). The sweeper loop logs and survives any exception; a cycle in which any object failed counts as failed (one summary line with the first traceback, the first at once, then at most one per 300 s). The structural guard over `revocations` is static: it scans the relay's SQL string literals and migrations against an exact allowlist, and does not see SQL assembled at run time. Notes: each sweep's candidate scan runs inside the global write lock (about 0.35 s for 300 000 device wraps; acceptable at P4 scale, drive it from `drop_wraps_target` if that changes); the sweeps use the wall clock like the reads; a device removed and re-added before the sweep ran gets its old device wraps back, after it they are gone (the host's MUST for re-added devices); the `rotation_required` body carries `epoch` on a Drop `PUT` only (the membership route's has none); part 4's state check must be deployed (state directories created) before Drop is switched on.
 
 **D39a2 part 3 decisions (implementation, 16 Oct 2026; `drop.py`, `drop_quota.py`).** The decide-class authority is decided in step 5
 from the request alone (`Drop.decide_shape`: `file`, `inbox`, version 1, `If-Match: 0`) and the live `members` row, before any object
@@ -3777,6 +3777,27 @@ stream read (`Body.blob_in`) and gives back the unread rest, so a stream that ne
 commit-time `operate` to `decide` change charges the budget by the same upsert inside the commit (429 `rate_limited` with nothing stored
 and no charge). The visibility rule is one function (`Drop.visible`) for reads and `PUT`, and one SQL clause for the list, applied in the
 `WHERE` before the page `LIMIT`. List entries carry `claimed_ms` and `expires_ms` from `drop_objects`.
+
+**D39a2 part 4 decisions (implementation, 16 Oct 2026; `drop.py` `list_page`, `drop_state.py`, `app.py`).** The list reads the counter
+and the page in one read snapshot (`BEGIN` on the pooled query connection), so every `n <= until` is committed and in it; the `generation`
+and `after`/`until` checks (409, body exactly `{"error":"generation_changed"}` through the ordinary refusal path) follow the 400s and the
+403s of the check order. The page is `{"generation", "next", "objects", "until"}` in cj order; the byte cut keeps its own reserve
+(`LIST_RESERVE`) and the descriptor pages' is unchanged. `drop_state.py` owns the high-water state: `State.start()` runs in the lifespan
+after `db.migrate` and before the start-up sweep, in the item 14 order (directory checks with `realpath`, the lock when `serve` asked for it,
+then the generation check and the start write inside one `BEGIN IMMEDIATE`, so a failed write rolls the regenerated row back and fails the
+check; the leftover `.drop-hwm.*.tmp` files are removed only by a `serve` that holds the lock). `create_app(serve=True)` (the CLI's
+`serve` only) takes `drop-hwm.lock`; any other `create_app` (tests, tools) runs the check without the lock. The check runs when
+`ORCH_RELAY_STATE` is set, Drop is on, or the Drop tables are not empty (RF). JUDGEMENT CALLS: a missing or malformed high-water file
+regenerates always (the design text), also on an empty database; a malformed `drop_generation` row regenerates; the file is parsed
+strictly (exactly `generation` and `n`). A failed check (RH) is one flag, `State.ok`: the Drop endpoints raise the ordinary 404 while it is
+false (the routes are registered at import, the lifespan decides), and `Drop.may_assign()` (ok, or the counter is still 0) guards the
+start-up pruning and every `Life.run` cycle; nothing else assigns a position (versions, wraps, retire and claims are routes). The writer is
+an asyncio task that ticks once a second and writes when the counter differs and 60 s have passed since the last successful write (a retry
+at every tick after a failure, logged at most once a minute), and `shutdown()` writes once more, then releases the lock; clock, sleep and
+the lock wait are fields of `State`, replaced in the tests, never widened. Tests that set `drop_objects.n` by hand now keep the counter at
+or above it (`sync_counter`), since a list is cut at the counter. D40c owns the backup, restore and reset scripts; this part creates no
+deploy-day procedure. `provision.sh` (the dev kit) must create `/srv/orch-relay{,-int}/state` (`<svc>:<svc>`, 0700) and the units set
+`ORCH_RELAY_STATE` before Drop is switched on; until then a relay with Drop on and no state serves no Drop route.
 
 ### 14.5 Migration plan (0017, 0018, D39a2's)
 

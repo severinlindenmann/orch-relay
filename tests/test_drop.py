@@ -20,6 +20,7 @@ from drop_support import (
     put,
     rows,
     setup,
+    sync_counter,
     upload,
     usage,
     wrap,
@@ -61,6 +62,7 @@ def nothing_stored(c):
 def sql(c, statement, *args):
     with closing(db.connect(path_of(c))) as con, con:
         con.execute(statement, args)
+        sync_counter(con)
 
 
 def get(c, o_id, what, author=DEVICE, version=1):
@@ -609,9 +611,10 @@ def test_unclaimed_inbox_is_the_hosts_and_authors_only_until_the_claim(client):
     for what in ("descriptor", "wraps", "blob"):
         r = get(client, o_id, what, LAPTOP)
         assert (r.status_code, r.json()) == (403, hidden)
-    assert client.get(
-        f"/v2/drop/{o_id}/descriptors", headers=headers(LAPTOP, if_match=None)
-    ).json() == hidden
+    assert (
+        client.get(f"/v2/drop/{o_id}/descriptors", headers=headers(LAPTOP, if_match=None)).json()
+        == hidden
+    )
     assert listing(client, LAPTOP).json()["objects"] == []
     assert get(client, o_id, "descriptor").status_code == 200  # the author's read-back
     assert get(client, o_id, "wraps").json()["claimed_by"] is None
@@ -706,6 +709,7 @@ def test_list_positions_direction_states_and_cut(client, monkeypatch):
     page = listing(client, LAPTOP, after=1).json()
     assert [e["n"] for e in page["objects"]] == [3] and page["next"] is None
     # the host claims d (n 5): it enters the laptop's lists, with `claimed_ms`
+    sql(client, "UPDATE drop_counter SET n=5")  # a position is never above the counter
     sql(
         client,
         "UPDATE drop_objects SET claimed_by=?, claimed_ms=?, n=5 WHERE object_id=?",
@@ -717,6 +721,7 @@ def test_list_positions_direction_states_and_cut(client, monkeypatch):
     assert (claimed["object_id"], claimed["claimed_by"]) == (d["o"]["object_id"], WS)
     assert (claimed["claimed_ms"], claimed["expires_ms"]) == (NOW, NOW + 7 * DAY)
     # states: retired and expired tombstones, pruned
+    sql(client, "UPDATE drop_counter SET n=10")
     sql(
         client,
         "UPDATE drop_objects SET tombstone_ms=?, tombstone_kind='retired', n=10 WHERE object_id=?",
@@ -987,7 +992,8 @@ def test_tombstone_leaves_the_list_after_30_days(client):
     client.app.state.directory.clock = lambda: NOW + 30 * DAY - 1
     assert [e["state"] for e in listing(client, LAPTOP).json()["objects"]] == ["retired"]
     client.app.state.directory.clock = lambda: NOW + 30 * DAY
-    assert listing(client, LAPTOP).json() == {"objects": [], "next": None}
+    page = listing(client, LAPTOP).json()
+    assert (page["objects"], page["next"], page["until"]) == ([], None, 1)
 
 
 def test_commit_rechecks_the_object_state(client):

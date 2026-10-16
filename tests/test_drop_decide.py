@@ -9,7 +9,18 @@ from contextlib import closing
 
 import pytest
 from directory_support import DEVICE, NOW, WS
-from drop_support import DAY, LAPTOP, TOKENS, descriptor, frame, object_id, put, rows, setup
+from drop_support import (
+    DAY,
+    LAPTOP,
+    TOKENS,
+    descriptor,
+    frame,
+    object_id,
+    put,
+    rows,
+    setup,
+    sync_counter,
+)
 from drop_support import upload as plain_upload
 from fastapi.testclient import TestClient
 from test_drop_transfer import Harness
@@ -59,6 +70,7 @@ def scopes(c, device, value):
 def sql(c, statement, *args):
     with closing(db.connect(path_of(c))) as con, con:
         con.execute(statement, args)
+        sync_counter(con)
 
 
 def budget(path, device=DEVICE, day=TODAY):
