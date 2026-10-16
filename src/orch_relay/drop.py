@@ -18,7 +18,8 @@ a pooled read connection is never held while taking the lock. Quotas, reservatio
 buckets are drop_quota.py (D39a2 part 1: reserved at step 9, enforced in the commit); the sweepers
 beyond the start-up sweep and retire are drop_life.py (D39a2 part 2); decide-class uploads (the shape,
 the budget charged at admission, its give-back, the one slot) and the host-and-author-only visibility
-of an unclaimed inbox object are D39a2 part 3; list walks are part 4; claims and host re-wraps are D39b.
+of an unclaimed inbox object are D39a2 part 3; list walks, the `generation` and the high-water state
+(drop_state.py) are part 4; claims and host re-wraps are D39b.
 """
 
 import asyncio
@@ -37,6 +38,7 @@ from pathlib import Path
 import anyio
 import anyio.to_thread
 from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException
 from starlette.routing import Route
 
 from . import proto as P
@@ -58,6 +60,7 @@ from .drop_quota import (
     refuse_creations,
     usage_keys,
 )
+from .drop_state import State
 
 log = logging.getLogger(__name__)
 
@@ -249,6 +252,9 @@ class Drop:
         # runs, so a bad ORCH_RELAY_DROP_GLOBAL_* value cannot abort a start (D39a2 review L6).
         self.on = enabled(env)
         self.quotas = Quotas(env) if self.on else Quotas({})
+        self.state = State(
+            data, env, drop_on=self.on
+        )  # the high-water state, `generation` (part 4)
         self.life = Life(self)  # the sweeps and the retire (drop_life.py); idle with Drop off
         self.reserved = Reservations()  # in-flight upload reservations, event loop only
         self.limits = Limits()
@@ -293,6 +299,8 @@ class Drop:
                 entry.unlink()
         if not self.on:
             return  # the `n`-assigning part runs only with ORCH_RELAY_DROP=1 (D39a2 part 2)
+        if not self.may_assign():
+            return  # a failed state check with the counter above 0: nothing assigns a position
         with self.d.lock:
             con = self.bridge.connection("write")
             con.execute("BEGIN IMMEDIATE")
@@ -322,6 +330,14 @@ class Drop:
                         entry.unlink()
             with suppress(OSError):
                 folder.rmdir()  # only when empty
+
+    def may_assign(self):
+        """The state-check gate (D39a2 part 4, RH): code that assigns a change position runs only
+        when the state check passed or the counter is still 0 (nothing a client could hold)."""
+        if self.state.ok:
+            return True
+        with self.bridge.reading("query") as con:
+            return con.execute("SELECT n FROM drop_counter WHERE id=0").fetchone()[0] == 0
 
     @staticmethod
     def stored_rows(con, batch=1024):
@@ -1231,32 +1247,56 @@ class Drop:
         return splice(rows, more, "descriptors", PAGE_BYTES)
 
     def list_page(self, session, raw):
-        """POST /v2/drop/list (§14.2 item 7): by change position, the caller's visible objects,
-        spliced from stored cj text, cut by count and by bytes (at least one entry)."""
+        """POST /v2/drop/list (§14.2 items 7 and 14): by change position, the caller's visible
+        objects, spliced from stored cj text, cut by count and by bytes (at least one entry). A walk
+        (`until`, amendment A2) is bounded by the position the first page read, in the same snapshot
+        as the page; `generation` and `until` are echoed on every page."""
         try:
             body = P.parse_json(raw)
         except ValueError:
             fail("malformed")
         need(isinstance(body, dict) and {"workspace_id", "direction"} <= set(body))
-        need(set(body) <= {"workspace_id", "direction", "after", "limit"})
+        need(set(body) <= {"workspace_id", "direction", "after", "limit", "generation", "until"})
         ws = hex32(body["workspace_id"])
-        need(body["direction"] in ("received", "sending"))
+        direction = body["direction"]
+        need(direction in ("received", "sending", "all"))
         after = integer(body.get("after", 0))
         limit = integer(body.get("limit", LIST_LIMIT), 1, LIST_LIMIT)
+        generation = hex32(body["generation"]) if "generation" in body else None
+        until = None
+        if "until" in body:
+            need(generation is not None)  # a walk is pinned to one generation
+            until = integer(body["until"])
+            need(after <= until)
+        need(direction != "all" or "after" not in body or generation is not None)
         me = session["subject_id"]
         with self.bridge.reading("query") as con:
             con.execute("BEGIN")
             now = self.d.clock()
             need(self.sees_workspace(con, session, ws), "not_eligible", 403)
-            author = "o.head_author_id" + ("=?" if body["direction"] == "sending" else "<>?")
-            # An ended tombstone is gone (its row awaits the D39a2 sweep).
+            need(direction != "all" or session["kind"] == "workspace", "not_eligible", 403)
+            # The counter and the page come from one read snapshot: every n <= counter is committed.
+            counter = con.execute("SELECT n FROM drop_counter WHERE id=0").fetchone()[0]
+            current = self.state.generation
+            if (
+                (generation is not None and generation != current)
+                or after > counter
+                or (until is not None and until > counter)
+            ):
+                no("generation_changed", 409)  # a stale generation, or a restore that took n back
+            if until is None:
+                until = counter
             sql = (
                 "SELECT o.*, v.descriptor, v.descriptor_len, v.blob FROM drop_objects o "
                 "LEFT JOIN drop_versions v ON v.object_id=o.object_id AND v.version=o.current "
-                f"WHERE o.workspace_id=? AND o.n>? AND {author} AND coalesce(o.tombstone_ms, "
+                "WHERE o.workspace_id=? AND o.n>? AND o.n<=? AND coalesce(o.tombstone_ms, "
                 "CASE WHEN o.expires_ms<=? THEN o.expires_ms END, ?) + ? > ?"
             )
-            args = [ws, after, me, now, now, TOMBSTONE, now]
+            # An ended tombstone is gone (its row awaits the sweep).
+            args = [ws, after, until, now, now, TOMBSTONE, now]
+            if direction != "all":
+                sql += " AND o.head_author_id" + ("=?" if direction == "sending" else "<>?")
+                args.append(me)
             if session["kind"] == "device":
                 # §14.2 item 6 (amendment A2): the visibility filter, in SQL, before the page limit
                 # (no gaps, no leaks in a page's count): the space's, the claimed inbox's, the
@@ -1275,7 +1315,7 @@ class Drop:
                 if state == "live":
                     wraps = self.usable_wraps(con, session, row["object_id"], row["current"], ws)
                 entries.append((row["n"], entry(row, state, wraps, now)))
-        return splice_list(entries, len(rows) > limit)
+        return splice_list(entries, len(rows) > limit, current, until)
 
     def retire(self, session, headers, o_id, raw):
         """POST /v2/drop/{o}/retire (§14.2 item 5, amendment A1): W sessions only (a device
@@ -1851,10 +1891,11 @@ def entry(row, state, wraps, now):
 
 
 NEXT_RESERVE = len(b'{"next":,"objects":[]}') + 16
+LIST_RESERVE = len(b'{"generation":"","next":,"objects":[],"until":}') + 32 + 16 + 16
 
 
-def splice_list(entries, more):
-    out, size = [], NEXT_RESERVE
+def splice_list(entries, more, generation, until):
+    out, size = [], LIST_RESERVE
     for n, text in entries:
         if out and size + len(text) + 1 > LIST_BYTES:
             more = True
@@ -1862,7 +1903,17 @@ def splice_list(entries, more):
         out.append((n, text))
         size += len(text) + 1
     nxt = str(out[-1][0]).encode() if more and out else b"null"
-    return b'{"next":' + nxt + b',"objects":[' + b",".join(t for _, t in out) + b"]}"
+    return (
+        b'{"generation":"'
+        + generation.encode()
+        + b'","next":'
+        + nxt
+        + b',"objects":['
+        + b",".join(t for _, t in out)
+        + b'],"until":'
+        + str(until).encode()
+        + b"}"
+    )
 
 
 def splice(rows, more, field, cap):
@@ -1893,6 +1944,8 @@ class Endpoint:
         self.drop, self.route = drop, route
 
     async def __call__(self, scope, receive, send):
+        if not self.drop.state.ok:  # a failed state check: no Drop route, as if absent (RH)
+            raise HTTPException(404)
         await self.drop.endpoint(scope, receive, send, self.route)
 
 

@@ -27,6 +27,12 @@ FULL = ["look", "decide", "operate", "type"]
 DAY = 86_400_000
 
 
+def sync_counter(con):
+    """A position is never above the counter: tests that set `drop_objects.n` by hand keep the
+    relay-wide counter at or above the newest one (D39a2 part 4: lists are cut at the counter)."""
+    con.execute("UPDATE drop_counter SET n=max(n, (SELECT coalesce(max(n), 0) FROM drop_objects))")
+
+
 def object_id(label):
     return R.fake("drop object " + label)[:16].hex()
 
@@ -389,7 +395,13 @@ def production_conditions(client, relay, ident):
             full = relay["decide_budget"] == "creations_full"
             con.execute(
                 "INSERT INTO drop_decide_budget VALUES (?,?,?,?,?)",
-                (WS, ident, d.clock() // DAY, q.decide_creations if full else 0, 0 if full else q.decide_bytes),
+                (
+                    WS,
+                    ident,
+                    d.clock() // DAY,
+                    q.decide_creations if full else 0,
+                    0 if full else q.decide_bytes,
+                ),
             )
         if relay.get("creations") == "device_full":
             con.execute(

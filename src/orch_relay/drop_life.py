@@ -396,8 +396,9 @@ class Life:
 
     def run(self):
         """One cycle of every sweep. Nothing runs, and nothing assigns a position, unless
-        ORCH_RELAY_DROP=1 (returns None). Returns the workspaces whose `n` moved."""
-        if not self.on:
+        ORCH_RELAY_DROP=1 and, with the counter above 0, a passed state check (returns None).
+        Returns the workspaces whose `n` moved."""
+        if not self.on or not self.drop.may_assign():  # the state-check gate (part 4)
             return None
         changed = set()
         self.object_failures, self.first_failure, self.cycle_bad = 0, None, False

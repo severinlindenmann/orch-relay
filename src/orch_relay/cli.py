@@ -58,7 +58,11 @@ def main(argv: list[str] | None = None) -> int:
     import uvicorn
 
     uvicorn.run(
-        app_mod.create_app(), host=args.host, port=args.port, workers=1, proxy_headers=False
+        app_mod.create_app(serve=True),
+        host=args.host,
+        port=args.port,
+        workers=1,
+        proxy_headers=False,
     )
     return 0
 
