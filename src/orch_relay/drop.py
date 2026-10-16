@@ -219,7 +219,9 @@ class Plan:
         o = self.o
         self.inbox = o["recipients"] == "inbox"
         self.decide = False  # authorized by `decide` alone at admission (item 13): budget charged
-        self.charged = None  # (day, creations, bytes) taken at step 9, for the error path's give-back
+        self.charged = (
+            None  # (day, creations, bytes) taken at step 9, for the error path's give-back
+        )
         if self.inbox:
             self.audience, self.devices = "inbox", []
         elif o["space_id"] in o["recipients"]:
@@ -906,7 +908,13 @@ class Drop:
             refuse_creations(request_now)
         if decided and not plan.decide:
             charge_decide(
-                con, self.quotas, ws, o["author_id"], day_of(request_now), o["content_len"], request_now
+                con,
+                self.quotas,
+                ws,
+                o["author_id"],
+                day_of(request_now),
+                o["content_len"],
+                request_now,
             )
 
     # --- PUT: step 11 ----------------------------------------------------------------------------
