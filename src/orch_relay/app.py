@@ -33,6 +33,7 @@ def create_app(data_dir: Path | str | None = None, instance: str | None = None) 
             tasks.append(sweeper)
         if app.state.push.enabled:  # P3-D40: the stale and expired-certificate sweep
             tasks.append(asyncio.create_task(app.state.push.maintenance()))
+            tasks.append(asyncio.create_task(app.state.push.sender.run()))  # APNs delivery
         try:
             yield
         finally:

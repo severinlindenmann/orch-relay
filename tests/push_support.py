@@ -134,6 +134,27 @@ def rows(d, where="1", args=()):
 
 
 def long_sessions(d):
-    """Sessions that outlive a test's clock jumps."""
+    """Sessions and the holder lease that outlive a test's clock jumps."""
     with closing(db.connect(d.path)) as con, con:
         con.execute("UPDATE sessions SET expires_ms=?", (NOW + 10 * 86_400_000,))
+        con.execute("UPDATE holders SET lease_until_ms=?", (NOW + 10 * 86_400_000,))
+
+
+def outer(n=1, ws=WS, epoch=1, size=24):
+    return {"v": 2, "ws": ws, "epoch": epoch, "c": P.b64u(bytes([n % 250 + 1]) * size)}
+
+
+def send(
+    c,
+    targets,
+    o=None,
+    priority="high",
+    ttl_s=600,
+    holder="1",
+    session="FAKE-workspace",
+    ws=WS,
+    **over,
+):
+    body = {"targets": targets, "outer": o or outer(), "priority": priority, "ttl_s": ttl_s}
+    body.update(over)
+    return c.post(f"/v2/workspaces/{ws}/push", json=body, headers=auth(session, holder))

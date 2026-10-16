@@ -54,7 +54,7 @@ def test_disabled_push_is_404_on_every_route_before_authentication(tmp_path, mon
     clear(monkeypatch)
     with TestClient(create_app(tmp_path)) as client:
         assert not client.app.state.push.enabled
-        for path in ("/v2/push/register", "/v2/push/unregister"):
+        for path in ("/v2/push/register", "/v2/push/unregister", f"/v2/workspaces/{WS}/push"):
             r = client.post(path, json={})
             assert (r.status_code, r.json()) == (404, {"error": "not_found"}), path
             r = client.post(path, json={}, headers=auth("FAKE-device", "1"))

@@ -26,6 +26,8 @@ from . import proto as P
 from .bridge import refuse
 from .directory import DAY, HOUR, Refusal, fail
 from .push_config import load, mac
+from .push_send import SEND_CAP, attach
+from .push_send import send as send_route
 
 log = logging.getLogger(__name__)
 
@@ -69,7 +71,7 @@ async def read_body(request, cap):
 class Push:
     def __init__(self, directory, config):
         self.d, self.config = directory, config
-        self.sender = None  # push_send.Sender, set by push_send.install when enabled
+        self.outbox = self.sender = self.apns = None  # push_send.attach, when enabled
 
     @property
     def enabled(self):
@@ -233,6 +235,35 @@ class Push:
                         )
         return {"registration_id": rid, "registered": False}
 
+    # --- the send route and delivery (push_send.py) ------------------------------------------
+
+    def send(self, headers, ws, raw):
+        return send_route(self, headers, ws, raw)
+
+    def apply_result(self, send, result):
+        """APNs 410 and 400 BadDeviceToken / DeviceTokenNotForTopic delete registrations (item 3):
+        410 those with the token whose `last_seen_ms` is not after Apple's timestamp; 400 the token's
+        in that environment. Runs in a worker thread; logs carry the id's first 8 digits only."""
+        d = self.d
+        with d.lock:
+            con = d.connection("write")
+            con.execute("BEGIN IMMEDIATE")
+            with con:
+                if result.kind == "unregistered":
+                    stamp = result.timestamp_ms if result.timestamp_ms is not None else d.clock()
+                    gone = con.execute(
+                        "DELETE FROM push_subscriptions WHERE token_mac=? AND last_seen_ms<=?",
+                        (send.mac, stamp),
+                    ).rowcount
+                else:
+                    gone = con.execute(
+                        "DELETE FROM push_subscriptions WHERE token_mac=? AND env=?",
+                        (send.mac, send.env),
+                    ).rowcount
+        log.info(
+            "apns %s: %s, removed %d registration(s)", send.registration_id[:8], result.reason, gone
+        )
+
     # --- lifecycle (item 3) -------------------------------------------------------------------
 
     def sweep(self, now=None):
@@ -285,8 +316,9 @@ def install(app, env=None):
             if request.headers.get("content-type", "").split(";")[0].strip() != "application/json":
                 return JSONResponse({"error": "malformed"}, status_code=400)
             headers = dict(request.headers)
+            extra = (request.path_params["ws"],) if name == "send" else ()
             try:
-                result = await run_in_threadpool(getattr(push, name), headers, raw)
+                result = await run_in_threadpool(getattr(push, name), headers, *extra, raw)
             except Refusal as error:
                 return error_response(error)
             except (ValueError, TypeError, KeyError, AttributeError):
@@ -295,6 +327,9 @@ def install(app, env=None):
 
         return handle
 
+    if push.enabled:
+        attach(app, push, env)
     app.add_api_route("/v2/push/register", endpoint("register", REGISTER_CAP), methods=["POST"])
     app.add_api_route("/v2/push/unregister", endpoint("unregister", REGISTER_CAP), methods=["POST"])
+    app.add_api_route("/v2/workspaces/{ws}/push", endpoint("send", SEND_CAP), methods=["POST"])
     return push
