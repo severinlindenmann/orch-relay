@@ -212,6 +212,8 @@ def test_restore_evidence_creates_no_account_and_registers_no_device(tmp_path):
         assert (r.status_code, r.json()) == (403, {"error": "other_person"}), r.text
         # Nor may it own a workspace: a first card whose delegation and owner are the intruder.
         card = evidence_person_card(person)
+        # The card is for this relay (relay_url = its origin), so only the evidence guard refuses it.
+        client.app.state.directory.origin = card["o"]["relay_url"]
         r = client.put(f"/v2/workspaces/{card['o']['workspace_id']}/card", json={"card": card})
         assert (r.status_code, r.json()) == (403, {"error": "other_person"}), r.text
         # Nor join a list: membership certificates need a registered device of a usable account,
