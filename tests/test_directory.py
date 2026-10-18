@@ -889,3 +889,32 @@ def test_redeeming_evidence_only_person_never_associates_its_evidence_devices(tm
         laptop_cert = V["certs"]["signed"]["laptop"]
         again = c.put("/v2/devices/" + laptop, json={"cert": laptop_cert})
         assert (again.status_code, again.json()) == (403, {"error": "revoked"})
+
+
+def _card_for_relay(url):
+    card = copy.deepcopy(CARD)
+    card["o"]["relay_url"] = url
+    card["sig"] = sign("wsk_a.sig", P.L["sig_card_wsk"] + P.cj(card["o"]))
+    return card
+
+
+def test_card_for_another_relay_is_refused_for_new_and_known_workspace(tmp_path):
+    with TestClient(create_app(tmp_path)) as c:
+        d = c.app.state.directory
+        seed(d, card=False)
+        other = _card_for_relay("https://publish.example")
+        r = c.put("/v2/workspaces/" + WS + "/card", json={"card": other})
+        assert (r.status_code, r.json()) == (403, {"error": "other_relay"})
+        with closing(db.connect(d.path)) as con:
+            assert con.execute("SELECT count(*) FROM workspaces").fetchone()[0] == 0
+        # The card for this relay is accepted.
+        assert c.put("/v2/workspaces/" + WS + "/card", json={"card": CARD}).status_code == 200
+        # Known workspace, authenticated writer: a card for another relay is still refused.
+        headers = {"Authorization": "Bearer FAKE-workspace", "Orch-Holder": "1"}
+        with closing(db.connect(d.path)) as con, con:
+            con.execute("INSERT INTO holders VALUES (?,?,?,?,?)", (WS, 1, NOW + 40_000, 0, None))
+        r = c.put("/v2/workspaces/" + WS + "/card", json={"card": other}, headers=headers)
+        assert (r.status_code, r.json()) == (403, {"error": "other_relay"})
+        with closing(db.connect(d.path)) as con:
+            stored = con.execute("SELECT card FROM workspaces").fetchone()[0]
+        assert P.parse_json(stored)["o"]["relay_url"] == CARD["o"]["relay_url"]

@@ -145,6 +145,7 @@ STATUS = {
     "cert_conflict": 409,
     "fenced": 409,
     "other_workspace": 409,
+    "other_relay": 403,
     "wsk_changed": 409,
     "delegation_changed": 409,
     "stale_card": 409,
@@ -1082,6 +1083,10 @@ class Directory:
             self.fence(con, headers, ws, now)
         if not isinstance(card, dict) or not isinstance(card.get("o"), dict):
             fail("malformed")
+        # A card names the relay it is for (`relay_url`). One made for another service must not
+        # squat a workspace record here, for a new or a known workspace alike (fail closed).
+        if card["o"].get("relay_url") != self.origin:
+            fail("other_relay")
         owner = card["o"].get("owner_person_id")
         P.unhex(owner)
         account = usable_account(con, owner)
