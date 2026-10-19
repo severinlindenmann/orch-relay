@@ -743,3 +743,152 @@ def test_drop_off_with_the_state_set_and_an_empty_database_still_runs_check_and_
         st = c.app.state.drop.state
         assert st.required and st.ok and st.generation == meta(data)
         assert hwm(state) == {"generation": st.generation, "n": 0}
+
+
+# --- review follow-ups (Opus LOW-1, LOW-2, LOW-4 and the flush-reset mutant) -------------------------
+
+
+def test_the_mark_never_goes_down_when_a_stale_flush_races_the_shutdown(dirs, caplog):
+    data, state = dirs
+    with start(data) as c:
+        prep(c)
+        st, _t = writer(c)
+        s1, _w, b1 = upload("a")
+        assert put(c, s1, b1).status_code == 201
+        assert st.flush() is True and hwm(state)["n"] == 1
+        with closing(db.connect(data / db.DB_NAME)) as con:
+            con.execute("UPDATE drop_counter SET n=0")  # the database goes backwards while running
+            con.commit()
+        with caplog.at_level(logging.ERROR):
+            assert st.flush() is False
+        assert "below the written high-water mark" in caplog.text
+        assert st.ok is False and hwm(state)["n"] == 1  # the file kept the higher mark
+    assert hwm(state)["n"] == 1  # the shutdown flush is a no-op once ok is False
+
+
+def test_a_flush_never_writes_below_the_written_mark(dirs, monkeypatch):
+    data, state = dirs
+    with start(data) as c:
+        prep(c)
+        st, _t = writer(c)
+        s1, _w, b1 = upload("a")
+        assert put(c, s1, b1).status_code == 201
+        st.written_n = 5  # an earlier writer got further
+        monkeypatch.setattr(S.State, "counter", lambda self: 5)
+        assert st.flush() is True and hwm(state)["n"] == 5
+        assert st.written_n == 5
+
+
+def test_a_blob_generation_row_fails_the_check_and_the_process_stays_up(dirs, caplog):
+    data, _state = dirs
+    db.migrate(data / db.DB_NAME)
+    with closing(db.connect(data / db.DB_NAME)) as con:
+        con.execute("INSERT INTO meta(key, value) VALUES ('drop_generation', ?)", (b"\x00\x01",))
+        con.commit()
+    with caplog.at_level(logging.ERROR), start(data) as c:
+        assert c.get("/healthz").status_code == 200
+        assert c.app.state.drop.state.ok is False
+    assert "drop state check failed" in caplog.text
+
+
+def test_a_group_writable_state_directory_warns_once_at_start(dirs, caplog):
+    data, state = dirs
+    state.chmod(0o770)
+    with caplog.at_level(logging.WARNING), start(data):
+        pass
+    assert caplog.text.count("group/world-writable or not owned") == 1
+
+
+def test_a_private_state_directory_does_not_warn(dirs, caplog):
+    data, _state = dirs
+    with caplog.at_level(logging.WARNING), start(data):
+        pass
+    assert "group/world-writable" not in caplog.text
+
+
+def test_a_failure_is_logged_again_after_a_success_resets_the_log_timer(dirs, caplog):
+    data, state = dirs
+    with start(data) as c:
+        prep(c)
+        st, t = writer(c)
+        s1, _w, b1 = upload("a")
+        put(c, s1, b1)
+        state.chmod(0o500)
+        try:
+            t[0] = 100.0
+            with caplog.at_level(logging.ERROR):
+                st.flush()  # fails at T, logged
+            assert caplog.text.count("write failed") == 1
+        finally:
+            state.chmod(0o700)
+        t[0] = 101.0
+        assert st.flush() is True  # success at T+1 resets the timer
+        state.chmod(0o500)
+        try:
+            t[0] = 102.0
+            with caplog.at_level(logging.ERROR):
+                st.shutdown()  # a failed shutdown flush at T+2 must log
+            assert caplog.text.count("write failed") == 2
+        finally:
+            state.chmod(0o700)
+
+
+def test_one_change_costs_one_write(dirs, monkeypatch):
+    data, _state = dirs
+    with start(data) as c:
+        prep(c)
+        st, t = writer(c)
+        s1, _w, b1 = upload("a")
+        put(c, s1, b1)
+        writes = []
+        real = S.State.write
+        monkeypatch.setattr(
+            S.State, "write", lambda self, g, n: (writes.append(n), real(self, g, n))[1]
+        )
+        t[0] = 60.0
+        assert st.tick() is True
+        for i in range(1, 5):
+            t[0] = 60.0 + 61 * i
+            assert st.tick() is False
+        assert writes == [1]
+
+
+def test_two_concurrent_flushes_leave_the_higher_mark_in_the_file(dirs, monkeypatch):
+    import threading
+
+    data, state = dirs
+    with start(data) as c:
+        prep(c)
+        st, _t = writer(c)
+        b_done = threading.Event()
+        real_write = S.State.write
+
+        def counter_for_thread(self):
+            return 1 if threading.current_thread().name == "A" else 2
+
+        def slow_write(self, gen, n):
+            if threading.current_thread().name == "A":
+                b_done.wait(0.5)  # the older tick is delayed after it read its counter
+            real_write(self, gen, n)
+
+        monkeypatch.setattr(S.State, "counter", counter_for_thread)
+        monkeypatch.setattr(S.State, "write", slow_write)
+
+        def run(name):
+            def go():
+                st.flush()
+                if name == "B":
+                    b_done.set()
+
+            th = threading.Thread(target=go, name=name)
+            th.start()
+            return th
+
+        a = run("A")
+        while threading.current_thread() and not st.flush_lock.locked():
+            pass  # A holds the lock and is inside its write
+        b = run("B")
+        a.join()
+        b.join()
+        monkeypatch.undo()
+        assert hwm(state)["n"] == 2 and st.written_n == 2

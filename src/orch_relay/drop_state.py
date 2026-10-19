@@ -34,6 +34,7 @@ import re
 import secrets
 import sqlite3
 import tempfile
+import threading
 import time
 from contextlib import closing, suppress
 from pathlib import Path
@@ -72,6 +73,7 @@ class State:
         self.generation = None  # held in memory from the start check (Opus delta L1)
         self.written_n = self.written_at = self.last_logged = None
         self.failed_writes = 0
+        self.flush_lock = threading.Lock()  # one writer at a time: the mark never goes down
 
     # --- the start ---------------------------------------------------------------------------------
 
@@ -83,13 +85,14 @@ class State:
     def start(self):
         """The start check. Returns `ok`; a failure is logged at ERROR and lasts until the next
         start (no retry while the process runs)."""
-        self.required = self.drop_on or self.raw is not None or self.tables_nonempty()
-        if not self.required:
-            self.ok = True  # Drop off, nothing configured, nothing stored: nothing to guard
-            return True
         try:
+            self.required = self.drop_on or self.raw is not None or self.tables_nonempty()
+            if not self.required:
+                self.ok = True  # Drop off, nothing configured, nothing stored: nothing to guard
+                return True
             self.check()
-        except (StateError, OSError, sqlite3.Error) as exc:
+        except Exception as exc:  # noqa: BLE001  any failure is a failed check; the process stays up (Opus LOW-2)
+            self.required = True
             log.error(
                 "drop state check failed: %s (Drop routes are off%s; other routes keep serving)",
                 exc,
@@ -104,7 +107,7 @@ class State:
     def counter_above_zero(self):
         try:
             return self.counter() > 0
-        except sqlite3.Error:
+        except Exception:  # noqa: BLE001
             return True  # fail closed
 
     def counter(self):
@@ -123,6 +126,18 @@ class State:
         if not os.access(state, os.W_OK | os.X_OK):
             raise StateError(f"ORCH_RELAY_STATE {state} is not writable")
         self.dir = state
+        try:
+            st = state.stat()
+            if st.st_mode & 0o022 or st.st_uid != os.getuid():
+                log.warning(
+                    "ORCH_RELAY_STATE %s is group/world-writable or not owned by this user "
+                    "(mode %o, uid %d); it should be 0700 and owned by the relay user",
+                    state,
+                    st.st_mode & 0o7777,
+                    st.st_uid,
+                )
+        except OSError:
+            pass
         if self.hold_lock:
             self.take_lock()
             for leftover in self.dir.glob(".drop-hwm.*.tmp"):  # a crash between create and rename
@@ -230,8 +245,23 @@ class State:
     def flush(self):
         """Write the committed counter now; never raises (logged at ERROR, retried by the next tick)."""
         try:
-            n = self.counter()  # committed, from the database (never an in-memory next position)
-            self.write(self.generation, n)
+            with self.flush_lock:
+                n = (
+                    self.counter()
+                )  # committed, from the database (never an in-memory next position)
+                if self.written_n is not None and n < self.written_n:
+                    # the database went backwards under a running process (a swapped file)
+                    log.error(
+                        "drop counter %d is below the written high-water mark %d while running; "
+                        "Drop routes are off until the next start",
+                        n,
+                        self.written_n,
+                    )
+                    self.ok = False
+                    return False
+                n = max(n, self.written_n or 0)
+                self.write(self.generation, n)
+                self.written_n, self.written_at = n, self.monotonic()
         except (OSError, sqlite3.Error) as exc:
             self.failed_writes += 1
             now = self.monotonic()
@@ -243,7 +273,7 @@ class State:
                     self.failed_writes,
                 )
             return False
-        self.written_n, self.written_at, self.last_logged = n, self.monotonic(), None
+        self.last_logged = None
         return True
 
     def tick(self):

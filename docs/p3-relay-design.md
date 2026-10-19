@@ -3634,7 +3634,7 @@ stolen unlocked phone can already answer questions with `decide`, so the upload 
 
 **List walks (amendment A2).** `direction: "all"` is W-only (a device gets 403), so it widens nothing for
 devices. `generation` and `until` tell a caller only that the Drop dataset was replaced and the relay-wide
-position, which every entry's `n` already shows (R-D8). `generation` is unauthenticated: a hostile relay
+position, which every entry's `n` already shows (R-D8). A device's list pages also carry `until`, the relay-wide counter at the walk's start: it reveals the relay-wide rate of Drop changes across all workspaces (accepted, low: the same number every entry's `n` already leaks to a member of any busy workspace). `generation` is unauthenticated: a hostile relay
 could keep it across a restore and serve positions that go back, or change it to force full relists
 (availability only, bounded by item 7's pages); it can already withhold changes (above), so this adds nothing
 to that model, and clients let it reset only their list walk (P3-D39 item 14). An honest relay detects a
