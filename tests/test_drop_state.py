@@ -503,7 +503,9 @@ def test_a_failed_check_with_n_above_zero_runs_no_sweeper_cycle(dirs, monkeypatc
     monkeypatch.setenv("ORCH_RELAY_STATE", str(state))
     with start(data) as c:
         prep(c)
-        # the same sweep ran at this start, with the check passed
+        # the same sweep, with the check passed, now runs (a cycle called directly: the start's
+        # own periodic first cycle is an asyncio task whose timing is not the test's to assume)
+        assert c.app.state.drop.life.run() is not None
         assert rows(c.app.state.directory.path, "drop_objects")[0]["tombstone_kind"] == "expired"
 
 
