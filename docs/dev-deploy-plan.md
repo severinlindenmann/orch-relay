@@ -254,6 +254,7 @@ All of these are read once at start-up. The list is complete for `develop` `601c
 | Variable | Read in | Default | Dev value (public / int) | Why |
 |---|---|---|---|---|
 | `ORCH_RELAY_DATA` | `app.py` | `./data` | unit sets `/srv/orch-relay/data` / `/srv/orch-relay-int/data` | unchanged |
+| `ORCH_RELAY_STATE` | `drop_state.py` (D39a2 part 4) | unset | unit sets `/srv/orch-relay/state` / `/srv/orch-relay-int/state` (`<svc>:<svc>` 0700, created by `provision.sh` before the units set it: dev-kit PR #33) | required with `ORCH_RELAY_DROP=1`: without a valid one the Drop routes answer 404 and no change position is assigned (design §14.2 item 14). Never moved, copied or wiped by a backup, restore, rollback or reset (D40c owns those scripts) |
 | `ORCH_RELAY_PORT` | `cli.py` | 8101 | unit: 8101 / 8102 | unchanged |
 | `ORCH_RELAY_INSTANCE` | `app.py` | `public` | unset / unit sets `int` | unchanged |
 | `ORCH_RELAY_ORIGIN` | `directory.py` | `http://localhost:8101` | `https://relay.dev.severin.io` / `https://relay-internal.dev.severin.io` | **P1**: login binds the origin; it must also equal the cards' `relay_url` (§7.1 form, no trailing slash) |

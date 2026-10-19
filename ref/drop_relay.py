@@ -33,6 +33,9 @@ TOMBSTONE = 30 * DAY
 LIST_LIMIT, PAGE_LIMIT = 64, 256
 WRAP_LEN = {"wk": 64, "wxk": 113, "device": 113}
 HEX32 = re.compile(r"[0-9a-f]{32}")
+# The relay's `generation` in the fixtures (D39a2 part 4): the production replay pins its own to this
+# value; a real relay's is random. `state["generation"]` overrides it (a restored dataset).
+GENERATION = "3f9a0c4be17d2858a6c1b04e93d7f5aa"
 DECIMAL = re.compile(r"0|[1-9][0-9]{0,15}")
 
 
@@ -434,23 +437,39 @@ def state_of(obj, blob, now):
 
 
 def list_page(state, principal, body):
-    """POST /v2/drop/list (no byte cut in the model: fixtures stay far below 2 MiB)."""
+    """POST /v2/drop/list (§14.2 items 7 and 14; no byte cut in the model: fixtures stay far below
+    2 MiB). `generation` and `until` are echoed on every page; a walk is cut at `until`."""
     try:
         admit(state, principal, None, False)
         need(isinstance(body, dict) and {"workspace_id", "direction"} <= set(body)
-             <= {"workspace_id", "direction", "after", "limit"})
+             <= {"workspace_id", "direction", "after", "limit", "generation", "until"})
         ws = hex32(body["workspace_id"])
-        need(body["direction"] in ("received", "sending"))
+        direction = body["direction"]
+        need(direction in ("received", "sending", "all"))
         after = integer(body.get("after", 0))
         limit = integer(body.get("limit", LIST_LIMIT), 1, LIST_LIMIT)
+        generation = hex32(body["generation"]) if "generation" in body else None
+        until = None
+        if "until" in body:
+            need(generation is not None)
+            until = integer(body["until"])
+            need(after <= until)
+        need(direction != "all" or "after" not in body or generation is not None)
         need(sees_workspace(state, principal, ws), 403, "not_eligible")
+        need(direction != "all" or principal["kind"] == "workspace", 403, "not_eligible")
+        counter, current = state["counter"], state.get("generation", GENERATION)
+        if (generation is not None and generation != current) or after > counter or (
+                until is not None and until > counter):
+            no(409, "generation_changed")
+        until = counter if until is None else until
         now, me = state["now_ms"], principal["id"]
         rows = []
         for o_id, obj in state["objects"].items():
-            until = tombstone_until(obj, now)
-            if obj["workspace_id"] != ws or obj["n"] <= after or (until is not None and until <= now):
+            ends = tombstone_until(obj, now)
+            if (obj["workspace_id"] != ws or obj["n"] <= after or obj["n"] > until
+                    or (ends is not None and ends <= now)):
                 continue
-            if (obj["head_author_id"] == me) != (body["direction"] == "sending"):
+            if direction != "all" and (obj["head_author_id"] == me) != (direction == "sending"):
                 continue
             if not visible(state, principal, obj):
                 continue
@@ -470,7 +489,8 @@ def list_page(state, principal, body):
                 "expires_ms": obj["expires_ms"],
             })
         return {"status": 200, "json": {"objects": entries,
-                                        "next": entries[-1]["n"] if more and entries else None}}
+                                        "next": entries[-1]["n"] if more and entries else None,
+                                        "generation": current, "until": until}}
     except Refusal as refusal:
         return refusal.result
 

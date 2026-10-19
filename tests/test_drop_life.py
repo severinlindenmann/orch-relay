@@ -24,6 +24,7 @@ from drop_support import (
     put,
     rows,
     setup,
+    sync_counter,
     upload,
     usage,
 )
@@ -55,7 +56,9 @@ def life(c):
 
 def sql(c, statement, *args):
     with closing(db.connect(path_of(c))) as con, con:
-        return con.execute(statement, args).rowcount
+        count = con.execute(statement, args).rowcount
+        sync_counter(con)
+        return count
 
 
 def at(c, now):

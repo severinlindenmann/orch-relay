@@ -86,6 +86,7 @@ CONDITIONS = {
     "scope_exceeded": "Member scopes exceed its certificate's prefix or certificate is a scoped agent.",
     "stale_list": "Held member-list sequence is at least this sequence, and bytes differ from any committed publication retry.",
     "bad_epoch": "Proposed epoch is outside 1..2^16 for a first list, or below the held epoch, or above it by more than 2^16.",
+    "generation_changed": "The Drop dataset was replaced (a stale generation, or after/until above the relay's counter): relist from the start.",
     "rotation_required": "A device is removed but the submitted epoch is not above the held epoch.",
     "wk_commit_changed": "Held list has the same epoch and another wk_commit; one WK per epoch, ever (G2b).",
     "missing_grant": "Publication omits a proposed member's grant at its epoch.",

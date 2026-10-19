@@ -79,7 +79,8 @@ def test_list_outside_the_audience_has_no_entry_nor_wraps(c):
     lap = read(c, "list", "FAKE-laptop", None).json()["objects"]
     assert [e["object_id"] for e in lap] == [c.hidden]
     assert {w["target_id"] for w in lap[0]["wraps"]} == {LAPTOP}
-    assert read(c, "list", "FAKE-device", None).json() == {"objects": [], "next": None}
+    page = read(c, "list", "FAKE-device", None).json()
+    assert (page["objects"], page["next"]) == ([], None)
 
 
 @pytest.mark.parametrize("route", READS)

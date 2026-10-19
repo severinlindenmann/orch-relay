@@ -9,6 +9,7 @@ from orch_relay import db
 from orch_relay import proto as P
 from orch_relay.directory import token_hash
 from ref import orch_protocol_ref as R
+from ref.drop_relay import GENERATION
 
 S = R.SUITES[2]
 LAPTOP = V["ids"]["device_laptop"]
@@ -25,6 +26,12 @@ SIGNERS = {DEVICE: "phone.sig", LAPTOP: "laptop.sig", WS: "wsk_a.sig", PRIMARY: 
 TOKENS = {DEVICE: "FAKE-device", LAPTOP: "FAKE-laptop", WS: "FAKE-workspace", AGENT: "FAKE-agent"}
 FULL = ["look", "decide", "operate", "type"]
 DAY = 86_400_000
+
+
+def sync_counter(con):
+    """A position is never above the counter: tests that set `drop_objects.n` by hand keep the
+    relay-wide counter at or above the newest one (D39a2 part 4: lists are cut at the counter)."""
+    con.execute("UPDATE drop_counter SET n=max(n, (SELECT coalesce(max(n), 0) FROM drop_objects))")
 
 
 def object_id(label):
@@ -314,6 +321,7 @@ def prepare_fixture(client, case):
     `given.prior` requests, `given.ops` and `given.relay` conditions."""
     d, drop = client.app.state.directory, client.app.state.drop
     setup(d)
+    drop.state.generation = GENERATION  # the fixtures' relay generation (a real one is random)
     given = case["given"]
     for prior in given.get("prior", []):
         r = send_request(client, prior)
@@ -389,7 +397,13 @@ def production_conditions(client, relay, ident):
             full = relay["decide_budget"] == "creations_full"
             con.execute(
                 "INSERT INTO drop_decide_budget VALUES (?,?,?,?,?)",
-                (WS, ident, d.clock() // DAY, q.decide_creations if full else 0, 0 if full else q.decide_bytes),
+                (
+                    WS,
+                    ident,
+                    d.clock() // DAY,
+                    q.decide_creations if full else 0,
+                    0 if full else q.decide_bytes,
+                ),
             )
         if relay.get("creations") == "device_full":
             con.execute(

@@ -19,6 +19,7 @@ class Harness:
         self.drop = self.app.state.drop
         self.d = self.app.state.directory
         db.migrate(self.d.path)
+        assert self.drop.state.start()  # the lifespan's order: the state check, then the sweep
         self.drop.startup_sweep()
         setup(self.d)
         lim = self.drop.limits

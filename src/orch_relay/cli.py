@@ -60,7 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     from .push_config import PushConfigError
 
     try:
-        app = app_mod.create_app()
+        app = app_mod.create_app(serve=True)
     except PushConfigError as exc:  # P3-D40 item 9: a partial push configuration is loud
         print(f"orch-relay: refusing to start: {exc}", file=sys.stderr)
         return 2
