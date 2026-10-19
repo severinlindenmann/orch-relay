@@ -3433,7 +3433,7 @@ written as a method followed by a separate path span until the PR that implement
 fixtures and spells it as one span (`tests/test_http_fixtures.py` requires a fixture for every such route; D39a1
 adds an explicit list of planned routes to that test, so a forgotten re-spelling fails). D39a1 implements the `PUT`
 of versions, the list, the descriptor pages and the descriptor, wraps and blob reads; the re-wrap, claim (D39b),
-§19.10 rows stay planned; the retire (D39a2 part 2), the decide-class upload with its budget and slot, the host-and-author-only visibility of an unclaimed `inbox` object and the `claimed_ms` and `expires_ms` list fields (D39a2 part 3), and the W-session list walks (`direction: "all"`, `generation`, `until`, 409 `generation_changed`) with the high-water state that regenerates `generation` and gates the `n`-assigning code (D39a2 part 4) are implemented. A relay serves the Drop routes only when its operator enables them (P3 design §14.9 deploy gate); otherwise they answer 404 like any absent route.
+§19.10 rows stay planned except the §19.10 push routes, which are implemented (D40a, D40b); the retire (D39a2 part 2), the decide-class upload with its budget and slot, the host-and-author-only visibility of an unclaimed `inbox` object and the `claimed_ms` and `expires_ms` list fields (D39a2 part 3), and the W-session list walks (`direction: "all"`, `generation`, `until`, 409 `generation_changed`) with the high-water state that regenerates `generation` and gates the `n`-assigning code (D39a2 part 4) are implemented. A relay serves the Drop routes only when its operator enables them (P3 design §14.9 deploy gate); otherwise they answer 404 like any absent route.
 
 Design: P3 design §14.2 (revision 2, after the Opus and phone reviews; amendment A1 of 15 Oct 2026: the host retire covers files with an expected-head precondition, list entries carry a `state` and `tombstone_until_ms`, fenced writes re-check the holder inside their transaction; amendment A2 of 15 Oct 2026: decide-class inbox uploads, W-session list walks with `direction: "all"`, `generation` and `until`). Workspace spaces only
 (`space_kind: "workspace"`); `personal` and `shared` are 400 `malformed` until P6. Member ↔ own workspace only:
@@ -3657,9 +3657,9 @@ Design: P3 design §14.3 and §14.7. A relay without push configured answers 404
 
 | Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
 |---|---|---|---|---|---|
-| POST `/v2/push/register` | D(m) of `workspace_id` | `{workspace_id, registration_id, env, topic, token}` → `{registration_id, registered: true}` | `registration_id` 16 random bytes (hex), the device's (bound to it); `env` `sandbox` or `production` and configured on the relay; `topic` = the relay's configured topic (`io.severin.orch`); `token` b64u of 32..100 bytes; one registration per (device, workspace, env, topic): a new id retires the old; the same id and body → 200 (refreshes; free); the token moves from the person's other devices; ≤ 30 state changes per device per hour, ≤ 128 registrations per device; JSON cap 16 KiB | 400 `malformed`; 403 `not_eligible` (also a `drop:` device), `revoked`; 409 `registration_conflict` (the same id with another body, or another device's id); 429 | §9 |
-| POST `/v2/push/unregister` | D (membership not required) | `{workspace_id, registration_id}` (an id or `null` for all of the device's in that workspace) → `{registration_id, registered: false}` | idempotent, also for an absent id; JSON cap 16 KiB | 400; 403 `not_for_this_device` (another device's id), `revoked` | §9 |
-| POST `/v2/workspaces/{ws}/push` | W(g), fenced (`Orch-Holder`; missing or stale → 409 `fenced`, checked before any budget, dedup or queue effect and again against the live holder row just before queue admission) | `{targets, outer, priority, ttl_s}` → `{accepted}` | `targets`: 1..1 024 sorted unique device ids; non-members (and devices with a revoked or expired certificate) are skipped, not refused; `accepted` counts the accepted targets, not registrations; `outer`: §9's object, exact field set, `v` 2, `ws` = the path, `|cj(outer)| ≤ 3 072`; `priority` `high` or `normal`; `ttl_s` 0..86 400; an outer already sent to a device in the last 24 h is not sent to it again (in memory); budgets per (workspace, device) 20 / 2 per min, per device 60 / 6 per min (over budget: skipped), per workspace 120 / 20 per min (429); budgets ignore `priority`; queue all-or-nothing, 1 024 per workspace, 2 048 per account; JSON cap 64 KiB | 400 `malformed`; 409 `stale_epoch` (`epoch`: `outer.epoch` is not the current list epoch), `fenced`; 429 `rate_limited`; 503 `overloaded` (retryable after `Retry-After`) | §9 |
+| `POST /v2/push/register` | D(m) of `workspace_id` | `{workspace_id, registration_id, env, topic, token}` → `{registration_id, registered: true}` | `registration_id` 16 random bytes (hex), the device's (bound to it); `env` `sandbox` or `production` and configured on the relay; `topic` = the relay's configured topic (`io.severin.orch`); `token` b64u of 32..100 bytes; one registration per (device, workspace, env, topic): a new id retires the old; the same id and body → 200 (refreshes; free); the token moves from the person's other devices; ≤ 30 state changes per device per hour, ≤ 128 registrations per device; JSON cap 16 KiB | 400 `malformed`; 403 `not_eligible` (also a `drop:` device), `revoked`; 409 `registration_conflict` (the same id with another body, or another device's id); 429 | §9 |
+| `POST /v2/push/unregister` | D (membership not required) | `{workspace_id, registration_id}` (an id or `null` for all of the device's in that workspace) → `{registration_id, registered: false}` | idempotent, also for an absent id; JSON cap 16 KiB | 400; 403 `not_for_this_device` (another device's id), `revoked` | §9 |
+| `POST /v2/workspaces/{ws}/push` | W(g), fenced (`Orch-Holder`; missing or stale → 409 `fenced`, checked before any budget, dedup or queue effect and again against the live holder row just before queue admission) | `{targets, outer, priority, ttl_s}` → `{accepted}` | `targets`: 1..1 024 sorted unique device ids; non-members (and devices with a revoked or expired certificate) are skipped, not refused; `accepted` counts the accepted targets, not registrations; `outer`: §9's object, exact field set, `v` 2, `ws` = the path, `|cj(outer)| ≤ 3 072`; `priority` `high` or `normal`; `ttl_s` 0..86 400; an outer already sent to a device in the last 24 h is not sent to it again (in memory); budgets per (workspace, device) 20 / 2 per min, per device 60 / 6 per min (over budget: skipped), per workspace 120 / 20 per min (429); budgets ignore `priority`; queue all-or-nothing, 1 024 per workspace, 2 048 per account; JSON cap 64 KiB | 400 `malformed`; 409 `stale_epoch` (`epoch`: `outer.epoch` is not the current list epoch), `fenced`; 429 `rate_limited`; 503 `overloaded` (retryable after `Retry-After`) | §9 |
 
 **APNs request** (normative for the relay; the phone's NSE depends on the body). For each registration of each
 accepted target: HTTP/2 `POST /3/device/<hex token>` to `api.push.apple.com` (`production`) or
@@ -3681,3 +3681,34 @@ the same the NSE shows when it drops a payload. Delivery is best effort: no rece
 workspace's list (in the publication transaction), on the APNs answers above, when its certificate expires, and
 after 60 days without a refresh. Tokens are stored sealed under an instance secret; the APNs key and that secret
 are never stored in the database (P3 design §14.7).
+
+**Relay implementation notes (D40a, D40b; choices where the text above is silent).**
+- *Disabled push* answers `404 {"error":"not_found"}` on all three routes, before authentication, body or
+  query checks. Configuration is complete only with the team id, the topic, the token secret file and at
+  least one environment's key id and key file (runbook: `ORCH_RELAY_APNS_*`, `ORCH_RELAY_PUSH_TOKEN_KEY_FILE`);
+  any partial set makes the relay refuse to start (exit status 2).
+- *Check order (register, unregister):* body cap 413, query 400, `Content-Type: application/json` 400,
+  session 401 (revoked 403, expired certificate 400), the session's read bucket, a W session or (register) a
+  `drop:` device 403 `not_eligible`, the body 400, the membership of `workspace_id` 403 `not_eligible`
+  (register only), then the registration rules.
+- *Unregister* of an id the device holds in another workspace than `workspace_id` deletes nothing and answers
+  200; `registration_id` echoes the request (`null` for all).
+- *Send, check order:* body cap 413 (64 KiB), session 401, W session of this path 403 `not_eligible`, the fence
+  409 `fenced`, the session's read bucket, then the body 400, the request bucket 429, the list epoch 409
+  `stale_epoch` (`epoch` is 0 if the workspace has no list), then the targets, and under the directory lock the
+  live holder again (409 `fenced`) before the dedup, budgets, admission (503 `overloaded`, `Retry-After: 5`)
+  and enqueue. A rejected request charges no push bucket and leaves no LRU entry.
+- *Sends:* a target is accepted when it is a current member with an unrevoked, unexpired certificate; one APNs
+  send is queued per registration of an accepted target that the LRU and the budgets let through. A
+  send waits at most `min(ttl_s, 600)` seconds, and `ttl_s` 0 waits 5 s in the relay's own queue (APNs sees
+  `apns-expiration: 0`). While an environment is paused (a 403 or topic backoff) its queued sends wait and are
+  dropped at their deadline; the send that triggered a pause is dropped, not requeued.
+- *Answers:* any 403 is handled as the two named reasons (renew once and retry once, then pause); a 400
+  `BadDeviceToken` or `DeviceTokenNotForTopic` deletes that token's registrations in that environment; a 410
+  deletes those with the token whose `last_seen_ms` is not after Apple's `timestamp` (the relay clock if
+  absent); other answers are logged by status and reason and dropped.
+- *Retries* (500, 503, connection errors): after 0.5 s and 2 s, only while the next attempt starts before the
+  send's deadline.
+- *Budgets* are in-memory token buckets, overridable by `ORCH_RELAY_THROTTLE_PUSH_WS_DEVICE`,
+  `..._PUSH_DEVICE` and `..._PUSH_WS` (`burst/per-minute`). Registration limits are 30 state changes per hour
+  (fixed window) and 128 per device (`quota_exceeded`, `Retry-After: 60`).

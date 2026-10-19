@@ -39,9 +39,21 @@ CASES = [
 
 
 @pytest.mark.parametrize("name,case", CASES, ids=[f"{n}-{c['name']}" for n, c in CASES])
-def test_http_example(tmp_path, name, case):
-    with TestClient(create_app(tmp_path)) as client:
-        if name.startswith("drop_"):
+def test_http_example(tmp_path, monkeypatch, name, case):
+    if name.startswith("push_"):  # P3-D40: a relay with a throwaway key, or none (the 404 case)
+        from push_support import clear, configure, fixture_env
+
+        clear(monkeypatch)
+        if (envs := fixture_env(case)) is not None:
+            configure(monkeypatch, tmp_path, envs=envs)
+    with TestClient(
+        create_app(tmp_path / "data" if name.startswith("push_") else tmp_path)
+    ) as client:
+        if name.startswith("push_"):
+            from push_support import prepare_fixture as prepare_push
+
+            prepare_push(client, name, case)
+        elif name.startswith("drop_"):
             from drop_support import prepare_fixture as prepare_drop
 
             prepare_drop(client, case)

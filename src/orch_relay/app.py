@@ -41,6 +41,9 @@ def create_app(
             tasks.append(sweeper)
         if drop.state.ok and drop.state.required:
             tasks.append(asyncio.create_task(drop.state.maintenance()))
+        if app.state.push.enabled:  # P3-D40: the stale and expired-certificate sweep
+            tasks.append(asyncio.create_task(app.state.push.maintenance()))
+            tasks.append(asyncio.create_task(app.state.push.sender.run()))  # APNs delivery
         try:
             yield
         finally:
@@ -68,6 +71,9 @@ def create_app(
 
     install_drop(app)  # P3-D39 (D39a1)
     app.state.drop.state.hold_lock = serve
+    from .push import install as install_push
+
+    install_push(app)  # P3-D40 (D40a): raises PushConfigError on a partial configuration
 
     @app.get("/healthz")
     def healthz() -> dict:

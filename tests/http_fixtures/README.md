@@ -34,6 +34,11 @@ in-memory relay conditions (`device`: `drop_scoped`/`cert_expired`/`revoked`; fu
 the reference model's (`ref/drop_relay.py`). `host_poll.json` `drop_notice` shows `notices.drop` (only with
 `ORCH_RELAY_DROP_NOTICE=1`, until hosts accept the key).
 
+Push (P3-D40, `push_register.json`, `push_unregister.json`, `push_send.json`): ordinary JSON routes. `given.relay.envs`
+names the environments the relay has a key for; the 404 `not_found` of a relay without a complete push configuration
+is the `refusal_404_not_found` case of each. The exact APNs request the relay makes is the `push.apns_envelope` vector
+(`tests/vectors_v2.json`, suite 2): the outer object becomes the string `o` of a fixed body, at most 3,175 bytes.
+
 Regenerate after the vectors with:
 
 ```

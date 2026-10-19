@@ -24,9 +24,6 @@ S = R.SUITES[2]
 PLANNED = {
     ("PUT", "/v2/drop/{o}/versions/{v}/wraps"),  # D39b
     ("POST", "/v2/drop/{o}/claim"),  # D39b
-    ("POST", "/v2/push/register"),  # D40a
-    ("POST", "/v2/push/unregister"),  # D40a
-    ("POST", "/v2/workspaces/{ws}/push"),  # D40b
 }
 # Refusals a route's row names that its own PR does not produce yet (with the PR that adds them).
 DEFERRED: dict = {}  # emptied by D39a2 part 4 (`generation_changed`, amendment A2)

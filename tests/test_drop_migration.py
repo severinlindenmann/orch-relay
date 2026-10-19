@@ -49,7 +49,7 @@ def test_0019_upgrades_a_0017_database_and_keeps_its_rows(tmp_path):
     old.execute(OBJECT, ("a" * 32,))
     old.commit()
     old.close()
-    assert db.migrate(path) == ["0019_drop_a2"]  # 0018 is D40a's: absent here, order-free
+    assert db.migrate(path) == ["0018_push", "0019_drop_a2"]  # 0018 is D40a's push table
     con = sqlite3.connect(path)
     assert con.execute("SELECT object_id, claimed_ms FROM drop_objects").fetchall() == [
         ("a" * 32, None)
