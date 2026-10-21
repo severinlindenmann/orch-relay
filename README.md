@@ -80,6 +80,13 @@ is best effort over one HTTP/2 connection per environment (`httpx[http2]`). Test
 transport and a local h2 server; no test reaches Apple (`tests/conftest.py`). The deploy steps are in
 [dev-deploy-plan](docs/dev-deploy-plan.md) (R8).
 
+## Webhook doorbells (#81)
+
+`POST /h/<id>` answers 204 with no body for every id and state, reads no body and stores only the first ring time of a
+registered hook (`H(id)`, `hooks` table). The workspace host registers, revokes and fetches hooks with its W session
+(`/v2/workspaces/{ws}/hooks[/revoke|/fetch]`; protocol §19.11). `uv run pytest tests/test_hooks.py -x -q`; the
+known/unknown timing test is `slow`.
+
 ## License
 
 Licensed under the PolyForm Noncommercial License 1.0.0. Commercial use requires a separate license from the author. See [LICENSE](LICENSE).
