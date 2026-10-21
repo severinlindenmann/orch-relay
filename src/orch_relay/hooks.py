@@ -42,6 +42,7 @@ REQUEST_CAP = 32 * 1024  # host request bodies
 RING_BODY_CAP = 64 * 1024
 MAX_ID_BYTES = 128  # longer ids cannot be registered ids; they are hashed truncated, never refused
 MAX_LIFE_MS = 14 * DAY
+BODY_TIMEOUT_S = 10  # a chunked ring body that dawdles is answered like an oversized one
 PER_WORKSPACE = 256
 PER_REQUEST = 64
 REGISTER_PER_HOUR = 240
@@ -67,7 +68,9 @@ def hex64(value):
 class Hooks:
     def __init__(self, directory):
         self.d = directory
-        self.mutex = threading.Lock()  # buckets and queue; never held with Directory.lock
+        self.mutex = (
+            threading.Lock()
+        )  # buckets and queue; ring() never takes Directory.lock, drain() takes this inside it
         self.buckets = Buckets(directory.buckets.limit)
         self.queue = deque()
         self.dropped = 0
@@ -220,7 +223,8 @@ class Hooks:
                     if digest in held:
                         # an exact retry or an extension; a ring already recorded stays recorded
                         con.execute(
-                            "UPDATE hooks SET expires_ms=? WHERE hook_hash=?", (expires, digest)
+                            "UPDATE hooks SET expires_ms=min(?, created_ms+?) WHERE hook_hash=?",
+                            (expires, MAX_LIFE_MS, digest),
                         )
                     else:
                         con.execute(
@@ -306,8 +310,31 @@ class Hooks:
                 pass
 
 
+async def drain_body(request):
+    """True when the chunked body is within the cap; keeps nothing."""
+    seen = 0
+    async for chunk in request.stream():
+        seen += len(chunk)
+        if seen > RING_BODY_CAP:
+            return False
+    return True
+
+
+class HideHookIds(logging.Filter):
+    """uvicorn's access log would print `POST /h/<id>`: the id is a secret (FU12). Rewrite the path."""
+
+    def filter(self, record):
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3 and str(args[2]).startswith("/h/"):
+            record.args = (*args[:2], "/h/…", *args[3:])
+        return True
+
+
 def install(app):
     hooks = Hooks(app.state.directory)
+    access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, HideHookIds) for f in access.filters):
+        access.addFilter(HideHookIds())
     app.state.hooks = hooks
     d = app.state.directory
 
@@ -338,11 +365,11 @@ def install(app):
         if declared and declared.isdecimal() and int(declared) > RING_BODY_CAP:
             return Response(status_code=413)
         if declared is None and request.headers.get("transfer-encoding"):
-            seen = 0  # chunked: count up to the cap, keep nothing
-            async for chunk in request.stream():
-                seen += len(chunk)
-                if seen > RING_BODY_CAP:
+            try:
+                if not await asyncio.wait_for(drain_body(request), BODY_TIMEOUT_S):
                     return Response(status_code=413)
+            except TimeoutError:
+                return Response(status_code=413)  # a slow sender gets the oversize answer
         address = d.client_address(request.client.host if request.client else "", request.headers)
         try:
             hooks.ring(hook_id, address)

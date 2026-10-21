@@ -31,6 +31,7 @@ from .push_send import send as send_route
 
 log = logging.getLogger(__name__)
 
+BODY_TIMEOUT_S = 10
 REGISTER_CAP = 16 * 1024
 STATE_CHANGES_PER_HOUR = 30
 PER_DEVICE = 128
@@ -61,10 +62,19 @@ async def read_body(request, cap):
     if declared and declared.isdecimal() and int(declared) > cap:
         return None
     raw = bytearray()
-    async for chunk in request.stream():
-        if len(raw) + len(chunk) > cap:
+
+    async def collect():
+        async for chunk in request.stream():
+            if len(raw) + len(chunk) > cap:
+                return False
+            raw.extend(chunk)
+        return True
+
+    try:
+        if not await asyncio.wait_for(collect(), BODY_TIMEOUT_S):
             return None
-        raw.extend(chunk)
+    except TimeoutError:
+        return None  # a slow sender is refused like an oversized body
     return bytes(raw)
 
 

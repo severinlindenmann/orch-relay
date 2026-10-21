@@ -404,3 +404,47 @@ def test_timing_parity_between_known_and_unknown_ids(c, monkeypatch):
         abs(p(samples["known"]) - p(samples["unknown"]))
         <= 0.5 * max(p(samples["known"]), p(samples["unknown"])) + 0.001
     )
+
+
+def test_access_log_never_prints_a_hook_id(c):
+    import logging
+
+    seen = []
+
+    class Grab(logging.Handler):
+        def emit(self, record):
+            seen.append(record.getMessage())
+
+    log = logging.getLogger("uvicorn.access")
+    log.setLevel(logging.INFO)
+    grab = Grab()
+    log.addHandler(grab)
+    try:
+        log.info('%s - "%s %s HTTP/%s" %d', "1.2.3.4:5", "POST", f"/h/{hid(1)}", "1.1", 204)
+        log.info('%s - "%s %s HTTP/%s" %d', "1.2.3.4:5", "POST", "/healthz", "1.1", 200)
+    finally:
+        log.removeHandler(grab)
+    assert hid(1) not in "".join(seen) and "/h/…" in seen[0] and "/healthz" in seen[1]
+
+
+def test_a_stalled_chunked_body_gets_the_oversize_answer(c, monkeypatch):
+    import asyncio
+
+    async def stalled(request):
+        await asyncio.sleep(5)
+
+    monkeypatch.setattr(hooks, "BODY_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(hooks, "drain_body", stalled)
+    r = c.post(f"/h/{hid(1)}", content=iter([b"x"]))  # sent chunked
+    assert (r.status_code, r.content) == (413, b"")
+
+
+def test_reregistering_cannot_extend_past_14_days_from_creation(c):
+    register(c, 1, expires=NOW + hooks.MAX_LIFE_MS)
+    c.d.clock = lambda: NOW + 10 * DAY
+    with closing(db.connect(c.d.path)) as con, con:
+        con.execute("UPDATE sessions SET expires_ms=?", (NOW + 30 * DAY,))
+        con.execute("UPDATE holders SET lease_until_ms=?", (NOW + 30 * DAY,))
+    assert register(c, 1, expires=NOW + 10 * DAY + 14 * DAY).status_code == 200
+    (row,) = table(c.d)
+    assert row["expires_ms"] == NOW + hooks.MAX_LIFE_MS
