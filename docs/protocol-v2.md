@@ -3712,3 +3712,27 @@ are never stored in the database (P3 design §14.7).
 - *Budgets* are in-memory token buckets, overridable by `ORCH_RELAY_THROTTLE_PUSH_WS_DEVICE`,
   `..._PUSH_DEVICE` and `..._PUSH_WS` (`burst/per-minute`). Registration limits are 30 state changes per hour
   (fixed window) and 128 per device (`quota_exceeded`, `Retry-After: 60`).
+
+### 19.11 Webhook doorbells (orch-relay #81; orch follow-up design FU11-FU13)
+
+A hook is an id the workspace host picked (`hk_` + 128 random bits). The relay stores only
+`H(id) = SHA-256("orch/v2/hook|" || id)` (lower-case hex), the workspace, the expiry and the time of the first
+ring. It never stores a body, a header or the id. Always on (no configuration). The routes are spelled as a method and a path in separate spans because they have no
+HTTP transcript fixtures yet (`ref/_http_fixtures.py`; a follow-up); `tests/test_hooks.py` covers them.
+
+| Method, path | Auth | Request → response | Limits | Refusals |
+|---|---|---|---|---|
+| `POST` `/v2/workspaces/{ws}/hooks` | W(g), fenced | `{hooks: [{hook_hash, expires_ms}]}` (1..64) → `{registered: n}` | `expires_ms` in (now, now + 14 d]; a retry of a held hash updates its expiry and keeps a recorded ring; a hash held by another workspace is skipped and answered like a new one (no oracle); ≤ 256 hooks per workspace (expired ones are dropped first); ≤ 240 registrations per workspace per hour; JSON cap 32 KiB | 400 `malformed`; 403 `not_eligible`; 409 `fenced`; 429 `quota_exceeded`, `rate_limited` |
+| `POST` `/v2/workspaces/{ws}/hooks/revoke` | W(g), fenced | `{hook_hashes: [..]}` (1..64) → `{revoked: n}` | idempotent; only the workspace's own hooks | as above |
+| `POST` `/v2/workspaces/{ws}/hooks/fetch` | W(g), fenced | `{ack: [hook_hash..]}` → `{rings: [{hook_hash, rung_ms}]}` | `ack` first clears the ring of the named hooks (the hook stays registered); at most 256 rings, oldest first, unexpired hooks only | as above |
+| `POST` `/h/{id}` | none | any → `204`, no body | see below | `413` (declared length over 64 KiB), `429` (per address) |
+
+**The doorbell.** The answer is `204` with an empty body and the same headers for every id (registered, unknown,
+revoked, expired, malformed) and every state. The handler stores no body and does no database work (a chunked body is counted up to the cap and discarded; over it, or a declared length over 64 KiB, is `413` for every id): it hashes the
+id (the first 128 bytes), charges the limits and queues the hash; a background task records, for a hook registered before the ring arrived,
+unexpired and not yet rung, the relay's receive time (`rung_ms`); later rings change nothing. The ring is
+a fact about a hash, never about a payload: a sender's signature header is not forwarded (v1 has no HMAC). Limits
+(token buckets, burst / per minute): per canonical source address 30 / 30 (`429` with `Retry-After`, independent of
+the id), per hook hash 3 / 1 and per workspace 64 / 30 (a ring over either is dropped, still `204`, so the answer
+never tells a known id from an unknown one); the queue holds 4 096 rings (more are dropped). An expiry sweep runs
+hourly. The workspace id is not encoded in the hook id.
