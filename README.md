@@ -112,3 +112,13 @@ known/unknown timing test is `slow`.
 ## License
 
 Licensed under the PolyForm Noncommercial License 1.0.0. Commercial use requires a separate license from the author. See [LICENSE](LICENSE).
+
+## A phone reads its channel mailbox (E5, orch-core#864)
+
+`GET /v2/hub-channels/{hub}/{ch}/mailbox` (list), `GET`/`DELETE` `.../mailbox/{id}`: signed by the channel key, with the
+hub's `hub.channel_cert` in `Orch-Channel-Cert` (contract §10.8.4; checks in the contract's order, each `Orch-Channel-*`
+header exactly once). The hub's signed `DELETE /v2/hubs/{hub}/mailbox/{ch}` (§10.8.1) also records the channel as revoked
+for that hub, permanently (`hub_revoked_channels`), and the channel is refused with `403 channel_revoked` from then on
+(only to the holder of the key: the check follows the signature). Reads are limited to 600 held nonces per channel in the
+240 s window (`429 quota_exceeded`). Not yet in the signed bytes: the relay's own origin (L2B-10, awaiting the contract).
+`uv run pytest tests/test_hub_channel*.py -x -q`.

@@ -259,7 +259,7 @@ STATE_CASES = [x for x in VECTORS["cases"] if x["check"] == "cutover"]
 
 
 def test_vectors_present():
-    assert len(CASES) == 8 and len(STATE_CASES) == 12
+    assert len(CASES) == 8 and len(STATE_CASES) == 14
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda x: x["name"])
@@ -295,9 +295,12 @@ def test_state_vectors(c, case):  # noqa: F811
             ),
         )
     body = bytes.fromhex(a["body_hex"])
-    for hub in (json.loads(body).get("hub_id") if body.startswith(b"{") else None,):
+    # `registered_hubs` (vectors, §10.8.3): the hubs that have an account at this relay; a case without it names a hub
+    # the relay never saw and expects it to exist, so it gets a stub row (the check is existence only).
+    named = json.loads(body).get("hub_id") if body.startswith(b"{") else None
+    stubs = a.get("registered_hubs", [named])
+    for hub in stubs:
         if hub and not sql(c, "SELECT 1 FROM hub_accounts WHERE hub_id=?", (hub,)):
-            # the vectors rename to a hub this relay never saw: register a stub row (the check is existence only)
             sql(
                 c,
                 "INSERT INTO hub_accounts VALUES (?,?,?,?,?,?,?,?,?,?)",

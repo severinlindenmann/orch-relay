@@ -9,7 +9,7 @@ recorded last), so a route and its body are only looked at for a request the hub
   PUT    /v2/hubs/{hub}/mailbox/{ch}/{id}          {v, c, ttl_s}                idempotent by id
   GET    /v2/hubs/{hub}/mailbox/{ch}/{id}          empty
   DELETE /v2/hubs/{hub}/mailbox/{ch}/{id}          empty                        idempotent
-  DELETE /v2/hubs/{hub}/mailbox/{ch}               empty                        purge a channel
+  DELETE /v2/hubs/{hub}/mailbox/{ch}               empty                        purge a channel + mark it revoked (permanent, E5)
 
 The relay never learns what a push or a mailbox message says (ciphertext only) and does not know which channels
 exist: that is the hub's business. A relay without a complete push configuration answers 404 `not_found` on every
@@ -349,6 +349,11 @@ class HubPhone:
             con = d.connection("write")
             con.execute("BEGIN IMMEDIATE")
             with con:
+                # The hub's signed revocation notice (§10.8.1, §10.8.4): permanent, in the same transaction as the purge.
+                con.execute(
+                    "INSERT OR IGNORE INTO hub_revoked_channels VALUES (?,?,?)",
+                    (hub, ch, d.clock()),
+                )
                 con.execute(
                     "DELETE FROM hub_mailbox WHERE hub_id=? AND channel_id=? AND expires_ms<=?",
                     (hub, ch, d.clock()),
