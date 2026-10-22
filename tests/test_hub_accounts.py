@@ -213,12 +213,8 @@ def test_revocation(c):
     assert revoke(c, ROOT, "aa" * 16).status_code == 200  # idempotent
     assert c.get(f"/v2/hubs/{HID}").json()["revoked"] is True
     err(put(c, card1(card_seq=2)), 403, "revoked")
-    with closing(db.connect(c.app.state.directory.path)) as con:
-        assert H.HubAccounts.current(c.app.state.hub_accounts, con, HID) is None
     # the rotation to a fresh op cert re-opens the account
     assert put(c, card2()).status_code == 200
-    with closing(db.connect(c.app.state.directory.path)) as con:
-        assert H.HubAccounts.current(c.app.state.hub_accounts, con, HID)["o"]["card_seq"] == 1
     assert c.get(f"/v2/hubs/{HID}").json()["revoked"] is False
 
 
@@ -259,18 +255,6 @@ def test_revocation_for_unadmitted_root_is_refused_and_stores_nothing(tmp_path, 
                 break
         client.app.state.directory.windows.clear()
         err(revoke(client, ROOT, "ff" * 16), 429, "quota_exceeded")
-
-
-def test_current_checks_expiry_revocation_and_dev_at_use(c):
-    put(c, card1())
-    hubs, d = c.app.state.hub_accounts, c.app.state.directory
-    with closing(db.connect(d.path)) as con:
-        assert hubs.current(con, HID) is not None
-        d.clock = lambda: NOW + 10**9  # op cert expires_ms = NOW + 10**9
-        assert hubs.current(con, HID) is None
-        d.clock = lambda: NOW
-        hubs.dev_mode = False  # the relay changed mode under a stored dev card
-        assert hubs.current(con, HID) is None
 
 
 def test_revocation_before_registration_and_dev_marker_not_checked(real):

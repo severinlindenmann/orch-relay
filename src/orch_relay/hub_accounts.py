@@ -16,9 +16,8 @@ Rules (all fail closed, no secret is stored or logged, ciphertext-only relay rul
   `cert_id`, is `stale_op_cert` whatever its `card_seq`), `card_seq` only within one op cert (`stale_card`).
   Another `hk_root_pub` under a held `hub_id` cannot occur (the id is derived from the root); it is
   `other_hub` if it ever does. A higher `op_seq` replaces the held card.
-- A revocation is permanent. A card whose op cert is revoked is refused (`revoked`); `current()` hides a
-  stored card whose op cert was revoked afterwards, so a later authentication step never relies on
-  having re-verified the card.
+- A revocation is permanent. A card whose op cert is revoked is refused (`revoked`); `authenticate` verifies the
+  stored card again at every use, so a later authentication step never relies on an old check.
 
 Hub -> relay requests (contract §10.8): every request below `/v2/hubs/<hub_id>/` is signed by the hub's `HK_op`
 over `orch/v2/hub-relay-req|` ...; `HubAccounts.authenticate` rebuilds the bytes from the request it received, checks
@@ -465,19 +464,6 @@ class HubAccounts:
                         (o["hub_id"], o["cert_id"], o["revoked_ms"], now),
                     )
         return {"hub_id": o["hub_id"], "cert_id": o["cert_id"], "revoked": True}
-
-    def current(self, con, hid):
-        """The stored card of a hub, only if it may be used now (check at use, contract §5): the op cert
-        is not revoked, not expired (`now >= expires_ms`), and the card's dev marker matches this
-        relay. Else None. The caller supplies a connection (read or write)."""
-        row = con.execute(
-            "SELECT card, op_cert_id, dev, expires_ms FROM hub_accounts WHERE hub_id=?", (hid,)
-        ).fetchone()
-        if row is None or row[1] in self.revoked_set(con, hid):
-            return None
-        if self.d.clock() >= row[3] or bool(row[2]) != self.dev_mode:
-            return None
-        return P.parse_json(row[0].encode())
 
     def authenticate(self, method, target, headers, body):
         """Contract §10.8, in order. `headers` is a case-insensitive mapping; `body` the exact request bytes.

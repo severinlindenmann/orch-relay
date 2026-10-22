@@ -11,7 +11,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 from push_support import clear
-from test_hub_accounts import HID, NOW, OP1, ROOT, card1, revocation
+from test_hub_accounts import HID, NOW, OP1, ROGUE, ROOT, Key, card1, make_card, op_cert, revocation
 
 from orch_relay import hub_accounts as H
 from orch_relay import proto as P
@@ -94,7 +94,7 @@ def run_vector(relay, a):
 
 
 def test_vectors_present():
-    assert len(CASES) == 22
+    assert len(CASES) == 24
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c["name"])
@@ -172,11 +172,34 @@ def test_valid_request_is_accepted_once(http):
     assert len(http.calls) == 1
 
 
-def test_replayed_nonce_expires_with_the_window(http):
+def test_old_timestamp_is_refused_outside_the_window(http):
     h = signed_headers(OP1)
     assert post(http, h).status_code == 200
     http.app.state.clock[0] = NOW + 240_000
     err(post(http, h), 401, "stale_timestamp")  # outside the window the ts check refuses first
+
+
+def test_window_boundary_is_exactly_120_seconds(http):
+    for i, (delta, ok) in enumerate(
+        [(-120_000, True), (120_000, True), (-120_001, False), (120_001, False)]
+    ):
+        h = signed_headers(OP1, ts=NOW + delta, nonce=bytes([0x40 + i]) * 16)
+        if ok:
+            assert post(http, h).status_code == 200
+        else:
+            err(post(http, h), 401, "stale_timestamp")
+
+
+def test_same_nonce_is_accepted_for_two_hubs(http):
+    other_op = Key("hk_op_rogue")
+    card = make_card(ROGUE, other_op, op_cert(ROGUE, other_op, 1, "cc"))
+    insert_account(http, card)
+    other = card["o"]["hub_id"]
+    nonce = b"\x77" * 16
+    assert post(http, signed_headers(OP1, nonce=nonce)).status_code == 200
+    h = signed_headers(other_op, hub=other, cert="cc" * 16, nonce=nonce)
+    assert post(http, h, target=f"/v2/hubs/{other}/push").status_code == 200
+    err(post(http, h, target=f"/v2/hubs/{other}/push"), 401, "replay")  # still once per hub
 
 
 def test_nonce_recorded_only_after_signature(http):
@@ -281,3 +304,13 @@ def test_nonces_are_pruned(http):
     d = http.app.state.directory
     with d.reader("query") as con:
         assert con.execute("SELECT count(*) FROM hub_request_nonces").fetchone()[0] == 1
+
+
+def test_real_card_on_dev_relay(relay):
+    client = relay(dev=True)
+    insert_account(client, card1(dev=False))  # a real card that sits on a dev relay
+    with pytest.raises(Refusal) as e:
+        client.app.state.hub_accounts.authenticate(
+            "POST", f"/v2/hubs/{HID}/push", signed_headers(OP1), b"{}"
+        )
+    assert (e.value.code, e.value.status) == ("unknown_hub", 401)
