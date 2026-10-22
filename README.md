@@ -80,6 +80,21 @@ is best effort over one HTTP/2 connection per environment (`httpx[http2]`). Test
 transport and a local h2 server; no test reaches Apple (`tests/conftest.py`). The deploy steps are in
 [dev-deploy-plan](docs/dev-deploy-plan.md) (R8).
 
+## Cut-over to a hub (E3, orch-core#896)
+
+A workspace keeps its direct (per-workspace) relay path until it is cut over to a hub; nothing changes for it before
+that. The switch is one row per workspace (`workspace_cutover`, migration 0024): `pending` (the workspace named its hub)
+then `cut_over`. After `cut_over` the relay answers 403 `cut_over` (`drain_until_ms`, `drained`) to the workspace's bridge
+and pairing POSTs, push registrations and push sends; the bridge mailbox and host hold/poll stay readable for the drain
+window (`ORCH_RELAY_CUTOVER_DRAIN_S`, default 7 days), then the bridge messages, replay digests and push registrations of
+the workspace are purged and every direct route is refused. Push unregistration stays allowed.
+
+Routes (proposed; they need a contract entry): the workspace's own session (WSK) does `PUT`/`GET`/`DELETE`
+`/v2/workspaces/{ws}/cutover` (`PUT {v:2, hub_id, state:"pending"|"cut_over"}`; `DELETE` reverses and only the workspace
+can); the hub (§10.8 signed, behind `hub_request_auth`) does `PUT`/`GET` `/v2/hubs/{hub}/workspaces/{ws}/cutover` and can
+only confirm `pending` -> `cut_over` for a workspace that named exactly that hub (otherwise `other_hub`); a hub `DELETE` is
+always 403 `not_allowed`. `uv run pytest tests/test_cutover.py -x -q`.
+
 ## Webhook doorbells (#81)
 
 `POST /h/<id>` answers 204 with no body for every id and state, reads no body and stores only the first ring time of a

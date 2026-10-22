@@ -17,6 +17,8 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import proto as P
+from .cutover import gate as cutover_gate
+from .cutover import purge_due as cutover_purge
 from .directory import (
     Refusal,
     check_response_budget,
@@ -79,6 +81,9 @@ def collect(con, now):
         (now,),
     )
     con.execute("DELETE FROM cert_requests WHERE expires_ms+60000<=?", (now,))
+    cutover_purge(
+        con, now
+    )  # E3: the direct-path data of a cut-over workspace whose drain window ended
 
 
 EMPTY_NOTICES = {
@@ -620,6 +625,12 @@ class Bridge:
                         and (method == "POST" or route == "host_poll")
                     ):
                         d.fence(con, headers, ws, now)
+                if (
+                    ws is not None
+                ):  # E3: a cut-over workspace takes no new direct envelopes; reads drain
+                    cutover_gate(
+                        con, ws, now, write=method == "POST" and route in ("bridge", "pair")
+                    )
                 if route == "pair":
                     if not con.execute(
                         "SELECT 1 FROM workspaces WHERE workspace_id=?", (ws,)

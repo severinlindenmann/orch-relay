@@ -24,6 +24,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import proto as P
 from .bridge import refuse
+from .cutover import gate as cutover_gate
 from .directory import DAY, HOUR, Refusal, fail
 from .push_config import load, mac
 from .push_send import SEND_CAP, attach
@@ -160,6 +161,7 @@ class Push:
                     ).fetchone()
                 ):
                     fail("not_eligible")
+                cutover_gate(con, ws, now, write=True)  # E3: no new direct push registrations
                 held = con.execute(
                     "SELECT * FROM push_subscriptions WHERE registration_id=?", (rid,)
                 ).fetchone()
