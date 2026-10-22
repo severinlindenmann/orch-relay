@@ -84,6 +84,12 @@ def create_app(
 
     install_hub_accounts(app)  # E1: hub accounts by hub card (ORCH_RELAY_DEV = dev relay)
 
+    from .hub_phone import install as install_hub_phone
+
+    install_hub_phone(
+        app
+    )  # E2: hub push targets, push send and channel mailboxes (signed by HK_op)
+
     @app.get("/healthz")
     def healthz() -> dict:
         return {"ok": True, "version": __version__, "instance": name}

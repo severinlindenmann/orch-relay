@@ -265,9 +265,17 @@ class Push:
                         "DELETE FROM push_subscriptions WHERE token_mac=? AND last_seen_ms<=?",
                         (send.mac, stamp),
                     ).rowcount
+                    gone += con.execute(  # E2: the hub's channel targets, same rule
+                        "DELETE FROM hub_push_targets WHERE token_mac=? AND updated_ms<=?",
+                        (send.mac, stamp),
+                    ).rowcount
                 else:
                     gone = con.execute(
                         "DELETE FROM push_subscriptions WHERE token_mac=? AND env=?",
+                        (send.mac, send.env),
+                    ).rowcount
+                    gone += con.execute(
+                        "DELETE FROM hub_push_targets WHERE token_mac=? AND env=?",
                         (send.mac, send.env),
                     ).rowcount
         log.info(
@@ -292,7 +300,10 @@ class Push:
                     "devices WHERE expires_ms IS NOT NULL AND expires_ms<=?)",
                     (now,),
                 ).rowcount
-        return a + b
+                # E2: expired hub mailbox messages (hub push targets are kept until the hub deletes them or APNs
+                # reports the token gone: a hub does not re-register a stable target)
+                c = con.execute("DELETE FROM hub_mailbox WHERE expires_ms<=?", (now,)).rowcount
+        return a + b + c
 
     async def maintenance(self):
         while True:
