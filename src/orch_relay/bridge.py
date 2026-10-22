@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import proto as P
-from .cutover import gate as cutover_gate
+from .cutover import guard as cutover_guard
 from .cutover import purge_due as cutover_purge
 from .directory import (
     Refusal,
@@ -625,11 +625,18 @@ class Bridge:
                         and (method == "POST" or route == "host_poll")
                     ):
                         d.fence(con, headers, ws, now)
-                if (
-                    ws is not None
-                ):  # E3: a cut-over workspace takes no new direct envelopes; reads drain
-                    cutover_gate(
-                        con, ws, now, write=method == "POST" and route in ("bridge", "pair")
+                if ws is not None:  # E3: the one cut-over gate (cutover.guard)
+                    cutover_guard(
+                        con,
+                        ws,
+                        now,
+                        {
+                            "bridge": f"bridge_{method.lower()}",
+                            "pair": f"pair_{method.lower()}",
+                            "hold": "host_hold",
+                            "host_poll": "host_poll",
+                        }[route],
+                        anonymous=session is None,
                     )
                 if route == "pair":
                     if not con.execute(

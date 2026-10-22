@@ -31,6 +31,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import proto as P
+from .cutover import guard as cutover_guard
 from .directory import DAY, HOUR, Buckets, Refusal, fail
 from .push import error_response, read_body
 
@@ -137,7 +138,7 @@ class Hooks:
 
     # --- the host routes ----------------------------------------------------------------------
 
-    def admit(self, headers, ws):
+    def admit(self, headers, ws, name):
         """Step 1 of the push send route: W session of this workspace, the fence, the bucket."""
         d = self.d
         try:
@@ -152,6 +153,7 @@ class Hooks:
                 if session["kind"] != "workspace" or session["subject_id"] != ws:
                     fail("not_eligible")
                 d.fence(con, headers, ws, now)
+                cutover_guard(con, ws, now, name)  # E3 (L2-E3-2): hooks are a direct route
             except Refusal:
                 d.throttle(session, now)
                 raise
@@ -167,7 +169,7 @@ class Hooks:
             fail("malformed")
         return body
 
-    def locked(self, headers, ws):
+    def locked(self, headers, ws, name):
         """Open the write transaction and re-check session and fence inside it."""
         d = self.d
         con = d.connection("write")
@@ -177,11 +179,12 @@ class Hooks:
         if session["kind"] != "workspace" or session["subject_id"] != ws:
             fail("not_eligible")
         d.fence(con, headers, ws, now)
+        cutover_guard(con, ws, now, name)
         return con, now
 
     def register(self, headers, ws, raw):
         d = self.d
-        self.admit(headers, ws)
+        self.admit(headers, ws, "hooks_register")
         body = self.body(raw, ("hooks",))
         items = body["hooks"]
         if not isinstance(items, list) or not 1 <= len(items) <= PER_REQUEST:
@@ -195,7 +198,7 @@ class Hooks:
                 fail("malformed")
             parsed[hex64(item["hook_hash"])] = expires
         with d.lock:
-            con, now = self.locked(headers, ws)
+            con, now = self.locked(headers, ws, "hooks_register")
             with con:
                 for expires in parsed.values():
                     if not now < expires <= now + MAX_LIFE_MS:
@@ -234,14 +237,14 @@ class Hooks:
 
     def revoke(self, headers, ws, raw):
         d = self.d
-        self.admit(headers, ws)
+        self.admit(headers, ws, "hooks_revoke")
         body = self.body(raw, ("hook_hashes",))
         items = body["hook_hashes"]
         if not isinstance(items, list) or not 1 <= len(items) <= PER_REQUEST:
             fail("malformed")
         digests = [hex64(x) for x in items]
         with d.lock:
-            con, _now = self.locked(headers, ws)
+            con, _now = self.locked(headers, ws, "hooks_revoke")
             with con:
                 gone = 0
                 for digest in digests:
@@ -254,14 +257,14 @@ class Hooks:
         """The rings of this workspace's hooks (first ring only, oldest first). `ack` first clears
         the ring of the named hooks (the hook stays registered until revoked or expired)."""
         d = self.d
-        self.admit(headers, ws)
+        self.admit(headers, ws, "hooks_fetch")
         body = self.body(raw, ("ack",))
         items = body["ack"]
         if not isinstance(items, list) or len(items) > RINGS_MAX:
             fail("malformed")
         acks = [hex64(x) for x in items]
         with d.lock:
-            con, now = self.locked(headers, ws)
+            con, now = self.locked(headers, ws, "hooks_fetch")
             with con:
                 for digest in acks:
                     con.execute(

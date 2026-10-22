@@ -53,22 +53,27 @@ def hub_url(hub=HID, ws=WS):
     return f"/v2/hubs/{hub}/workspaces/{ws}/cutover"
 
 
-def hub_call(c, method="PUT", hub=HID, ws=WS, key=OP1, cert="aa" * 16):
+HUB_BODY = b'{"state":"cut_over","v":2}'  # contract 10.8.3: the signed bytes name the act
+
+
+def hub_call(c, method="PUT", hub=HID, ws=WS, key=OP1, cert="aa" * 16, body=None):
     target = hub_url(hub, ws)
+    body = (HUB_BODY if method == "PUT" else b"") if body is None else body
     headers = signed_headers(
         key,
         hub=hub,
         cert=cert,
         method=method,
         target=target,
-        body=b"",
+        body=body,
         nonce=next(nonces).to_bytes(16, "big"),
+        ts=c.d.clock(),
     )
-    return c.request(method, target, headers=headers, content=b"")
+    return c.request(method, target, headers=headers, content=body)
 
 
 def name(c, hub=HID, state="pending", session="FAKE-workspace"):
-    return c.put(url(), json={"v": 2, "hub_id": hub, "state": state}, headers=auth(session))
+    return c.put(url(), json={"v": 2, "hub_id": hub, "state": state}, headers=auth(session, "1"))
 
 
 def post_request(c):
@@ -149,12 +154,13 @@ def test_cutover_refuses_direct_requests_and_the_mailbox_drains(c):
         code(r, 403, "cut_over")
         assert r.json()["drained"] is False
     code(send(c, ["a" * 32]), 403, "cut_over")
+    # an anonymous pairing request learns nothing: it is answered as for an unknown workspace (L2-E3-5)
     code(
         c.post(
             f"/v2/workspaces/{WS}/pair/{'0' * 32}/{RID}", content=b"x" * 200, headers=DEVICE_AUTH
         ),
-        403,
-        "cut_over",
+        401,
+        "unknown_workspace",
     )
     # but what is already in the mailbox is still readable, and push cleanup still works
     r = read_response(c)
@@ -254,17 +260,18 @@ def test_workspace_reverses_the_cutover_by_its_own_signature(c):
     code(c.delete(url(), headers=auth("FAKE-device")), 403, "not_eligible")
     code(name(c, state="cut_over", session="FAKE-device"), 403, "not_eligible")
     assert c.get(url(), headers=auth("FAKE-workspace")).json()["state"] == "cut_over"
-    r = c.delete(url(), headers=auth("FAKE-workspace"))
+    r = c.delete(url(), headers=auth("FAKE-workspace", "1"))
     assert (r.status_code, r.json()) == (200, {"state": "direct"})
     assert post_request(c).status_code == 202
     assert register(c).status_code == 200
-    assert c.delete(url(), headers=auth("FAKE-workspace")).status_code == 200  # idempotent
+    assert c.delete(url(), headers=auth("FAKE-workspace", "1")).status_code == 200  # idempotent
     code(hub_call(c), 403, "other_hub")  # the hub's old confirm no longer works
 
 
 def test_naming_a_hub_never_weakens_a_cutover(c):
     cut_over(c)
-    code(name(c, hub=OTHER, state="pending"), 400, "malformed")
+    r = name(c, hub=OTHER, state="pending")
+    code(r, 403, "cut_over")  # contract 10.8.3
     assert c.get(url(), headers=auth("FAKE-workspace")).json()["state"] == "cut_over"
 
 
@@ -276,8 +283,8 @@ def test_requests_are_strict(c):
         {"v": 1, "hub_id": HID, "state": "pending"},
         {"v": 2, "hub_id": HID, "state": "pending", "extra": 1},
     ):
-        code(c.put(url(), json=body, headers=auth("FAKE-workspace")), 400, "malformed")
-    assert c.put(url(), content=b"[]", headers=auth("FAKE-workspace")).status_code == 400
+        code(c.put(url(), json=body, headers=auth("FAKE-workspace", "1")), 400, "malformed")
+    assert c.put(url(), content=b"[]", headers=auth("FAKE-workspace", "1")).status_code == 400
     code(c.get(url() + "?x=1", headers=auth("FAKE-workspace")), 400, "malformed")
     assert c.get(url()).status_code == 401  # no session
     assert sql(c, "SELECT count(*) FROM workspace_cutover")[0][0] == 0
