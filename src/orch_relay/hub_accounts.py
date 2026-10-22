@@ -20,8 +20,11 @@ Rules (all fail closed, no secret is stored or logged, ciphertext-only relay rul
   stored card whose op cert was revoked afterwards, so a later authentication step never relies on
   having re-verified the card.
 
-Hub -> relay request authentication is NOT here: the contract has no signing label for it (reported as a
-contract gap in the E1 PR). This module only registers, rotates and revokes.
+Hub -> relay requests (contract §10.8): every request below `/v2/hubs/<hub_id>/` is signed by the hub's `HK_op`
+over `orch/v2/hub-relay-req|` ...; `HubAccounts.authenticate` rebuilds the bytes from the request it received, checks
+in the contract's order (syntax and canonical target, other hub, timestamp, the held card verified again, op cert,
+signature, then the nonce store) and records the nonce in the same transaction. Registration, revocation and the
+public card read need no transport signature.
 
 The verification is an independent port of the contract's reference verifier (`orch_hub.contract.hub`),
 checked against the shared vectors (`tests/vectors/vectors_hub.json`, V3-D8).
@@ -31,6 +34,7 @@ import hashlib
 import os
 import re
 import sqlite3
+import struct
 import threading
 from pathlib import Path
 
@@ -49,6 +53,24 @@ L_OP_CERT = b"orch/v2/hub-op-cert|"
 L_OP_REVOKED = b"orch/v2/hub-op-revoked|"
 L_CARD = b"orch/v2/hub-card|"
 L_HUB_ID = b"orch/v2/id/hub|"
+L_RELAY_REQ = b"orch/v2/hub-relay-req|"
+RELAY_WINDOW_MS = 120_000
+RELAY_NONCE_RETENTION_MS = 240_000
+RELAY_METHODS = ("GET", "HEAD", "POST", "PUT", "DELETE")
+RELAY_TARGET_MAX = 2048
+RELAY_BODY_CAP = 1024 * 1024
+_SEG = re.compile(r"[A-Za-z0-9._~-]+")
+_TS = re.compile(r"0|[1-9][0-9]{0,15}")
+# HTTP statuses of the request check (§10.8, §14): not the registration statuses of STATUS above.
+REQUEST_STATUS = {
+    "malformed": 400,
+    "other_hub": 403,
+    "stale_timestamp": 401,
+    "unknown_hub": 401,
+    "stale_op_cert": 401,
+    "bad_hub_signature": 401,
+    "replay": 401,
+}
 REGISTER_PER_HOUR = 60  # per canonical client address
 READ_PER_HOUR = 600
 MAX_ACCOUNTS = 1000  # ORCH_RELAY_HUB_ACCOUNTS
@@ -76,6 +98,61 @@ def refuse(code, retry=None):
     error = Refusal(code, retry)
     error.status = STATUS.get(code, error.status)
     raise error
+
+
+def request_refuse(code, **details):
+    error = Refusal(code)
+    error.status = REQUEST_STATUS[code]
+    error.details = details
+    raise error
+
+
+def parse_target(target, hub):
+    """Canonical target (§10.8): ASCII, at most 2048 bytes, `/v2/hubs/<hub_id>` or below, every segment non-empty
+    and unreserved characters only (never `.` or `..`), an optional query of unique `key=value` pairs of
+    unreserved characters. Anything else is `malformed`; another hub's account is `other_hub`."""
+    if type(target) is not str or not target.isascii() or len(target) > RELAY_TARGET_MAX:
+        request_refuse("malformed")
+    path, sep, query = target.partition("?")
+    segs = path.split("/")
+    if segs[0] != "" or len(segs) < 4 or segs[1:3] != ["v2", "hubs"]:
+        request_refuse("malformed")
+    for seg in segs[1:]:
+        if not _SEG.fullmatch(seg) or seg in (".", ".."):
+            request_refuse("malformed")
+    if not re.fullmatch(r"[0-9a-f]{32}", segs[3]):
+        request_refuse("malformed")
+    if sep:
+        keys = []
+        for part in query.split("&"):
+            key, eq, value = part.partition("=")
+            if not eq or not _SEG.fullmatch(key) or not _SEG.fullmatch(value):
+                request_refuse("malformed")
+            keys.append(key)
+        if len(keys) != len(set(keys)):
+            request_refuse("malformed")
+    if segs[3] != hub:
+        request_refuse("other_hub")
+
+
+def _lp16(raw):
+    return struct.pack(">H", len(raw)) + raw
+
+
+def request_bytes(hub, op_cert_id, ts_ms, nonce, method, target, body):
+    """`"orch/v2/hub-relay-req|" || suite || hub_id || op_cert_id || u64(ts_ms) || nonce || lp16(METHOD) ||
+    lp16(target) || H(body)` (§10.8)."""
+    return (
+        L_RELAY_REQ
+        + b"\x02"
+        + P.unhex(hub, 16)
+        + P.unhex(op_cert_id, 16)
+        + struct.pack(">Q", ts_ms)
+        + nonce
+        + _lp16(method.encode("ascii"))
+        + _lp16(target.encode("ascii"))
+        + hashlib.sha256(body).digest()
+    )
 
 
 def hub_id(root_pub):
@@ -402,6 +479,63 @@ class HubAccounts:
             return None
         return P.parse_json(row[0].encode())
 
+    def authenticate(self, method, target, headers, body):
+        """Contract §10.8, in order. `headers` is a case-insensitive mapping; `body` the exact request bytes.
+        Returns the hub_id. The held card is verified again here (op cert valid, unexpired, not revoked, dev marker
+        of this relay); the nonce is recorded last, in the same write transaction, after every signature check."""
+        h = {str(k).lower(): v for k, v in headers.items()}
+        try:
+            hub = h["orch-hub"]
+            P.unhex(hub, 16)
+            op_id = h["orch-hub-op-cert"]
+            P.unhex(op_id, 16)
+            if not _TS.fullmatch(h["orch-hub-ts"]):
+                raise ValueError("ts")
+            ts = int(h["orch-hub-ts"])
+            nonce = P.unhex(h["orch-hub-nonce"], 16)
+            sig = P.unb64u(h["orch-hub-signature"], 64)
+            if method not in RELAY_METHODS or type(body) is not bytes or ts >= 1 << 64:
+                raise ValueError("request")
+        except (KeyError, ValueError, TypeError):
+            request_refuse("malformed")
+        parse_target(target, hub)
+        message = request_bytes(hub, op_id, ts, nonce, method, target, body)
+        d = self.d
+        with d.lock:
+            con = d.connection("write")
+            con.execute("BEGIN IMMEDIATE")
+            with con:
+                now = d.clock()
+                if abs(now - ts) > RELAY_WINDOW_MS:
+                    request_refuse("stale_timestamp", server_ms=now)
+                row = con.execute("SELECT card FROM hub_accounts WHERE hub_id=?", (hub,)).fetchone()
+                if row is None:
+                    request_refuse("unknown_hub")
+                try:
+                    _o, op, _root = verify_card(
+                        P.parse_json(row[0].encode()),
+                        now,
+                        self.dev_mode,
+                        self.revoked_set(con, hub),
+                    )
+                except (Refusal, ValueError):
+                    request_refuse("unknown_hub")
+                if op_id != op["cert_id"]:
+                    request_refuse("stale_op_cert")
+                if not P.SUITE.verify(P.unb64u(op["hk_op_pub"], 65), sig, message):
+                    request_refuse("bad_hub_signature")
+                con.execute(
+                    "DELETE FROM hub_request_nonces WHERE ts_ms <= ?",
+                    (now - RELAY_NONCE_RETENTION_MS,),
+                )
+                try:
+                    con.execute(
+                        "INSERT INTO hub_request_nonces VALUES (?,?,?)", (hub, nonce.hex(), ts)
+                    )
+                except sqlite3.IntegrityError:
+                    request_refuse("replay")
+        return hub
+
     def show(self, hid, address):
         P.unhex(hid, 16)
         self.charge("hub-read", address, READ_PER_HOUR)
@@ -466,6 +600,23 @@ def install(app):
             return JSONResponse({"error": "malformed"}, status_code=400)
         return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
+    async def authenticate_request(request: Request):
+        """For the routes below `/v2/hubs/{hub_id}/` (E1+): every one starts here. Returns (hub_id, body) or raises
+        Refusal (answer it with push.error_response). The target is the raw, undecoded request target."""
+        raw = await read_body(request, RELAY_BODY_CAP)
+        if raw is None:
+            request_refuse("malformed")
+        target = (request.scope.get("raw_path") or request.url.path.encode()).decode(
+            "ascii", "replace"
+        )
+        if request.scope.get("query_string"):
+            target += "?" + request.scope["query_string"].decode("ascii", "replace")
+        hub = await run_in_threadpool(
+            hubs.authenticate, request.method, target, request.headers, bytes(raw)
+        )
+        return hub, bytes(raw)
+
+    app.state.hub_request_auth = authenticate_request
     app.add_api_route("/v2/hubs", endpoint("register"), methods=["POST"])
     app.add_api_route("/v2/hubs/op-revoked", endpoint("revoke"), methods=["POST"])
     app.add_api_route("/v2/hubs/{hub_id_text}", show, methods=["GET"])
