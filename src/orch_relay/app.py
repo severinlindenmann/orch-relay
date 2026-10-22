@@ -89,6 +89,12 @@ def create_app(
     # E3: per-workspace cut-over to a hub. Before any `/v2/hubs/{hub}/{tail:path}` catch-all (first match wins).
     install_cutover(app)
 
+    from .hub_phone import install as install_hub_phone
+
+    install_hub_phone(
+        app
+    )  # E2: hub push targets, push send and channel mailboxes (signed by HK_op)
+
     @app.get("/healthz")
     def healthz() -> dict:
         return {"ok": True, "version": __version__, "instance": name}

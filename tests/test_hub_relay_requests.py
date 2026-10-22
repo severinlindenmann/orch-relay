@@ -151,6 +151,8 @@ def http(relay):
         return JSONResponse({"ok": True})
 
     client.app.add_api_route("/v2/hubs/{hub_id_text}/{tail}", route, methods=["POST", "GET"])
+    # E2 installs the real catch-all below /v2/hubs/{hub}/; this test-only route must be matched first
+    client.app.router.routes.insert(0, client.app.router.routes.pop())
     assert client.post("/v2/hubs", json=card1()).status_code == 200
     client.calls = calls
     return client
