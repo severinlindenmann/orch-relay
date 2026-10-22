@@ -1986,10 +1986,10 @@ Every answer to an epoch-0 request, refusals included, also carries `wsk_pub`.
 | 401 | `bad_signature`, `stale_timestamp` (`server_ms`), `unknown_workspace`, `replay`, `unknown_challenge`, `expired`, `unauthenticated` (P3-D2) |
 | 403 | `revoked`, `other_person`, `scope_exceeded`, `not_eligible`, `not_for_this_device`, `cert_expired` (membership publication, P3-D7) |
 | 404 | `not_found` (P3-D1) |
-| 409 | `cursor_ahead` (P3-D31: a position above the relay's newest §19.5 cursor; restart from the beginning), `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version`, `stale_list`, `bad_epoch`, `rotation_required`, `wk_commit_changed` (G2b), `missing_grant`, `already_claimed` (`claimed_by`), `version_conflict` (`current`), `account_exists`, `cert_conflict`, `grant_conflict`, `wrap_conflict` (G0a review 10), `rid_conflict`, `retry_exhausted`, `chunk_conflict`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed` (P3-D3/D5/D7–D11/D22/D27), `no_genesis`, `genesis_mismatch` (P3-D18), `chain_diverged`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation` (`devices`: sorted device IDs; P3-D13/D24), `staging_conflict`, `staging_incomplete` (P3-D20), `checkpoint_time` (P3-D25), `registration_conflict` (P3-D40, §19.10); Drop `PUT` also answers `stale_epoch` (`epoch`), `bad_wxk_version` and (if adopted) `rotation_required` for its wraps, and the re-wrap route `wrap_conflict` (P3-D39, §19.9) |
+| 409 | `cursor_ahead` (P3-D31: a position above the relay's newest §19.5 cursor; restart from the beginning), `other_workspace`, `wsk_changed`, `delegation_changed`, `stale_card`, `wxk_changed_without_version`, `bad_wxk_version`, `stale_list`, `bad_epoch`, `rotation_required` (`epoch` only on a Drop `PUT`'s answer: one code, two body shapes; the membership route's has no extra field), `wk_commit_changed` (G2b), `missing_grant`, `already_claimed` (`claimed_by`), `version_conflict` (`current`; on a Drop retire also `state`), `account_exists`, `cert_conflict`, `grant_conflict`, `wrap_conflict` (G0a review 10), `rid_conflict`, `retry_exhausted`, `chunk_conflict`, `stale_epoch` (`epoch`, unsigned hint), `holder_conflict`, `fenced`, `request_open`, `replayed`, `already_signed` (P3-D3/D5/D7–D11/D22/D27), `no_genesis`, `genesis_mismatch` (P3-D18), `chain_diverged`, `restore_invalid`, `restore_not_owner`, `restore_source_mismatch`, `restore_reused`, `restore_missing_revocation` (`devices`: sorted device IDs; P3-D13/D24), `staging_conflict`, `staging_incomplete` (P3-D20), `checkpoint_time` (P3-D25), `registration_conflict` (P3-D40, §19.10), `generation_changed` (P3-D39 amendment A2, §19.9: the Drop dataset was replaced; relist from the beginning); Drop `PUT` also answers `stale_epoch` (`epoch`), `bad_wxk_version` and `rotation_required` (a workspace-key wrap while a revocation's rotation is still open) for its wraps, and the re-wrap route `wrap_conflict` (P3-D39, §19.9) |
 | 413 | `too_large` for JSON routes (G0a review 2); before parsing |
-| 410 | `checkpoint_gone` (P3-D19/D20; a previously stored endpoint expired), `expired` (P3-D11; unknown/expired response rid, G0a review 8; P3-D39: an expired, retired or tombstoned Drop object, a pruned superseded blob) |
-| 429 | `rate_limited`, `quota_exceeded` (P3-D5/D17; `Retry-After`) |
+| 410 | `checkpoint_gone` (P3-D19/D20; a previously stored endpoint expired), `expired` (P3-D11; unknown/expired response rid, G0a review 8; P3-D39: an expired, retired (file or document) or tombstoned Drop object, a pruned blob) |
+| 429 | `rate_limited`, `quota_exceeded` (P3-D5/D17; `Retry-After`; on a Drop `PUT`, `rate_limited` may carry an optional `quota` naming the decide-class budget or, for the daily new-object counters, `drop_creations`, and its `Retry-After` may be up to 86,400, §19.9) |
 | 503 | `overloaded` (P3-D17; `Retry-After`) |
 | 428 | `precondition_required` |
 
@@ -2065,7 +2065,7 @@ are FAKE (`SHA-256("FAKE orch v2 test vector: " || label)`), and so is every "ra
 | `cert_request` | 10 primary cases, the challenge and its code, the certificate, a second signature refused, the attack challenge (§8.4) |
 | `enroll`, `webauthn`, `question_hash`, `decisions` | §6.4, §8.7, §13 |
 | `push` | §9: valid, unknown workspace or epoch, 24 h edge, changed epoch, unknown kind, extra field, forged by a member device, replays; P3-D40 (planned, D40b): `push.apns_envelope` (outer → APNs body bytes, the 3 072-byte edge) |
-| `drop` | content blob (3 chunks, empty), metadata, every wrap kind and moved wraps, descriptors, claims (with version and epoch checks), documents, chains and forks; P3-D39 (planned, D39a1): `drop.upload_frame`, `drop.relay_put` (a PUT chain against one relay state) |
+| `drop` | content blob (3 chunks, empty), metadata, every wrap kind and moved wraps, descriptors, claims (with version and epoch checks), documents, chains and forks; P3-D39 (planned, D39a1): `drop.upload_frame`, `drop.relay_put` (a PUT chain against one relay state); (planned, D39a2): `drop.relay_retire` (retire precondition, idempotent retry, takeover race) |
 | `ws_envelopes` | layout, both co-signatures and five WebAuthn negatives, refusal envelopes, reply consumption, ids per sender |
 | `publish`, `relay_auth` | §12, including challenge reuse, expiry, another origin, another kind, another key |
 | `reader_decl` | H12d (P3-D38): `decls`, the declaration checks (`verify_reader_decl`: a valid pairing declaration; the wrong workspace, `device_id`, `dk_hash`, offer, attempt or `who`; `reader: 0`; a higher unknown level 7 with `kat["1"]` only; a missing or wrong `kat["1"]`; a signature by another key or under another label; form and the 2 KiB cap); `pair_meta`, the meta v2 at the bridge (§8.3) and the host's gate; `request_meta`, `rd` (§8.6). `kat` digests are FAKE stand-ins; `depends_on_core` marks a digest comparison (core owns `reader_kat_1`) |
@@ -3431,9 +3431,11 @@ rules and must be confirmed before G4 ships:
 **Planned routes.** §19.9 and §19.10 are designed ahead of their PRs (P3 design §14.9). Their routes are
 written as a method followed by a separate path span until the PR that implements each one adds its HTTP
 fixtures and spells it as one span (`tests/test_http_fixtures.py` requires a fixture for every such route; D39a1
-adds an explicit list of planned routes to that test, so a forgotten re-spelling fails).
+adds an explicit list of planned routes to that test, so a forgotten re-spelling fails). D39a1 implements the `PUT`
+of versions, the list, the descriptor pages and the descriptor, wraps and blob reads; the re-wrap, claim (D39b),
+§19.10 rows stay planned except the §19.10 push routes, which are implemented (D40a, D40b); the retire (D39a2 part 2), the decide-class upload with its budget and slot, the host-and-author-only visibility of an unclaimed `inbox` object and the `claimed_ms` and `expires_ms` list fields (D39a2 part 3), and the W-session list walks (`direction: "all"`, `generation`, `until`, 409 `generation_changed`) with the high-water state that regenerates `generation` and gates the `n`-assigning code (D39a2 part 4) are implemented. A relay serves the Drop routes only when its operator enables them (P3 design §14.9 deploy gate); otherwise they answer 404 like any absent route.
 
-Design: P3 design §14.2 (revision 2, after the Opus and phone reviews). Workspace spaces only
+Design: P3 design §14.2 (revision 2, after the Opus and phone reviews; amendment A1 of 15 Oct 2026: the host retire covers files with an expected-head precondition, list entries carry a `state` and `tombstone_until_ms`, fenced writes re-check the holder inside their transaction; amendment A2 of 15 Oct 2026: decide-class inbox uploads, W-session list walks with `direction: "all"`, `generation` and `until`). Workspace spaces only
 (`space_kind: "workspace"`); `personal` and `shared` are 400 `malformed` until P6. Member ↔ own workspace only:
 every `wxk` target and every workspace id in `recipients` is `space_id` (cross-workspace addressing is P6). A
 `drop:` scoped device (§6.4) gets 403 `not_eligible` on every route until P6. The lease (§10.6) has no route in
@@ -3470,23 +3472,147 @@ version absent → 404.
 
 | Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
 |---|---|---|---|---|---|
-| PUT `/v2/drop/{o}/versions` | D(m) with `operate` in `space_id`, author = the device; or W(g) of `space_id` (fenced), author = the workspace | `If-Match: N`; frame → 201 `{version}`, `ETag` | an expired or tombstoned object → 410 first; then an exact retry (stored version with the same descriptor `cj(o)`) → 200 `{version}` before the CAS and without reading the blob; blob ≤ `ORCH_RELAY_DROP_MAX_BLOB_BYTES` (default 26 MiB); whole body ≤ 8 + 512 KiB + that, declared and streamed; file `expires_ms` in `(now, now + 7 d + 300 s]`; document `expires_ms` null; `inbox` only for a `file`; ≤ 1 024 wraps, each ≤ 512 B; device wraps with `key_version` 0; an `inbox` object carries one `wxk` wrap to the space and optionally the author's own `device` wrap, never `wk`; ≤ 1 024 versions per document, ≤ 256 documents per workspace (64 per device); ≤ 1 000 new objects per workspace per day (250 per device); quotas below; the W fence is checked before any slot or bucket; upload slots: 2 per device, 3 per person, 4 per workspace, 16 relay-wide; minimum average rate 64 KiB/s after the head (a 26 MiB body may take about 7 minutes), 30 s idle, 10 minutes at most; upload buckets | 400 `malformed` (frame, `Content-Length`, field set, caps, space kind, expiry above the window, a document expiry, an `inbox` document, a `file` above version 1, a foreign `wxk` or `recipients` id, a `wk` wrap on an `inbox` object, short or long blob, a non-ORD2 header, `content_hash` mismatch, wrap shape, `sk` wraps); 401 `bad_signature`; 403 `not_eligible` (author ≠ session, no write scope, `drop:` device, an object of another space, a claimed object, a `device` wrap to a non-member); 409 `version_conflict` (`current`), `stale_epoch` (`epoch`: a `wk` wrap not at the current list epoch), `bad_wxk_version` (refresh the card, rewrap the same `DEK`), `rotation_required` (only if adopted: an open `rotation_due`; body `{error, epoch}`), `fenced` (a stale host); 410 `expired` (a tombstoned id, or `expires_ms` ≤ now); 413 `too_large`; 428 `precondition_required`; 429 `quota_exceeded`, `rate_limited`; 503 `overloaded` | §10.4, §10.6 |
-| POST `/v2/drop/list` | D(m) with `look` in `workspace_id`, or W of `workspace_id` | `{workspace_id, direction, after?, limit?}` → `{objects: [{n, descriptor, wraps, claimed_by}], next}` | `direction` `received` (author ≠ caller) or `sending`; one entry per visible object at its newest version and its change position `n` (raised by every version, wrap change, claim and retire of the object); unclaimed `inbox` objects are listed for member devices; expired or retired objects leave without an entry; `claimed_by` in every entry; ascending `n`, `after` exclusive, `next` the last `n` or null when done; limit ≤ 64 (default 64) and the page stops before 2 MiB (at least one entry); ≤ 2 such reads per device, 4 per person, 8 relay-wide, each held until the body is sent; request JSON cap 16 KiB | 400; 403 `not_eligible`; 429; 503 | §10 |
-| GET `/v2/drop/{o}/descriptors?after=&limit=` | as list, the object visible | → `{descriptors: [signed drop_object], next}` ascending by version | limit ≤ 256 (default 256) and the page stops before 1 MiB (at least one entry); counted with the list reads | 400; 403; 404; 410 `expired`; 429; 503 | §10.6 |
-| GET `/v2/drop/{o}/versions/{v}/descriptor` | as list | → `{descriptor}`, `ETag: "<v>"` | | 403; 404 (absent object or version); 410 | §10.4 |
-| GET `/v2/drop/{o}/versions/{v}/wraps` | as list | → `{wraps, claimed_by}` | only the caller's usable wraps: a W session its workspace's `wk` and `wxk` wraps, a device its workspace's `wk` wraps and its own `device` wraps (never `wxk`); `claimed_by` null when unclaimed | 403; 404; 410 | §10.3 |
-| GET `/v2/drop/{o}/versions/{v}/blob` | as list, and an `inbox` object claimed | → the ORD2 bytes, `Content-Length: content_len`, `ETag: "<v>"`, `Cache-Control: no-store` | streamed; no `Range`; download slots: 4 per device, 8 per person, 32 relay-wide; the same minimum rate, idle and duration limits as uploads; download buckets by MiB | 403 `not_eligible` (an unclaimed inbox); 404; 410 `expired` (expired object or a pruned superseded blob); 429; 503 | §10.2 |
-| PUT `/v2/drop/{o}/versions/{v}/wraps` | W(g), the version addressed to the workspace (its space; claimed by it if `inbox`) | `{wraps: [wrap]}` (exactly one) → `{}` | the host's `drop_rewrap` (§7.5): `target_kind` `wk`, `target_id` the workspace, `key_version` its current epoch; the same record → 200 no-op; JSON cap 16 KiB | 400 `malformed`; 403 `not_eligible` (an unclaimed inbox, not addressed); 409 `stale_epoch`, `wrap_conflict` (other bytes for the same target and key version; the body carries the stored `wrap` and the version's `dek_commit`), `fenced`; 410 | §10.3, §7.5 |
-| POST `/v2/drop/{o}/claim` | W(g) of the object's workspace | §10.5 `{o, sig}` → `{claimed_by}` | §10.5 unchanged, one transaction; the object must be an unexpired `inbox` `file`; JSON cap 16 KiB | §10.5 codes; 403 `not_eligible` (not inbox, another workspace); 409 `already_claimed` (`claimed_by`), `fenced`; 410 | §10.5 |
-| POST `/v2/drop/{o}/retire` | W(g) of the space | `{}` → `{}` | fence checked first; tombstones a `document` at once (every read 410; blobs, wraps and head bytes freed by the sweeper); a retired object → 200 again while its tombstone lives; JSON cap 16 KiB | 403 `not_eligible` (a `file`, another space); 404; 409 `fenced` | §10.6 |
+| `PUT /v2/drop/{o}/versions` | D(m) with `operate` in `space_id`, or with `decide` in `space_id` for a decide-class upload (a new `file`, version 1, `If-Match: 0`, `recipients: "inbox"`; amendment A2), author = the device; or W(g) of `space_id` (fenced), author = the workspace | `If-Match: N`; frame → 201 `{version}`, `ETag` | for a device session, an object whose stored audience is device-only and excludes the device, or another author's unclaimed `inbox` object (amendment A2), → 403 first (live or tombstoned); then an expired or tombstoned object → 410; then an exact retry (stored version with the same descriptor `cj(o)`) → 200 `{version}` before the CAS and without reading the blob; blob ≤ `ORCH_RELAY_DROP_MAX_BLOB_BYTES` (default 26 MiB); whole body ≤ 8 + 512 KiB + that, declared and streamed; file `expires_ms` in `(now, now + 7 d + 300 s]`, and for a new file (checked after the exact retry) at least `now + 60 s`; `recipients` a non-empty list or `"inbox"`; document `expires_ms` null; `inbox` only for a `file`; ≤ 1 024 wraps, each ≤ 512 B; device wraps with `key_version` 0; an `inbox` object carries one `wxk` wrap to the space and optionally the author's own `device` wrap, never `wk`; ≤ 1 024 versions per document, ≤ 256 documents per workspace (64 per device); ≤ 1 000 new objects per workspace per day (250 per device; 429 `rate_limited` with `quota` `drop_creations` and `Retry-After` = seconds to 00:00 UTC; the author's own share is named before the workspace, account and global caps when several apply); an upload authorized by `decide` alone also spends the decide-class budget (50 new objects and 64 MiB of `content_len` per device and workspace per UTC day of the request's `now`; charged after the exact retry and before the quota reservation, refunded only for a refusal before the first blob byte and for a commit-time exact retry (a concurrent identical upload committed first: its 200), a failed stream charged a creation and its received bytes; 429 `rate_limited` with optional `quota` `drop_decide_creations` or `drop_decide_bytes` and `Retry-After` = seconds to 00:00 UTC, 1 to 86,400) and holds the device's single decide-class upload slot (a second concurrent one 429 `quota_exceeded`, `quota` `slot`); the device's scope is re-checked on the live member list inside the commit transaction; quotas below; the W fence is checked before any slot or bucket and again inside the commit transaction (a takeover during the transfer → 409 `fenced`, nothing stored); upload slots: 2 per device, 3 per person, 4 per workspace, 16 relay-wide; minimum average rate 64 KiB/s after the head (a 26 MiB body may take about 7 minutes), 30 s idle, 10 minutes at most; upload buckets | 400 `malformed` (frame, `Content-Length`, field set, caps, space kind, expiry above the window, a document expiry, an `inbox` document, a `file` above version 1, a foreign `wxk` or `recipients` id, a `wk` wrap on an `inbox` object, short or long blob, a non-ORD2 header, `content_hash` mismatch, wrap shape, `sk` wraps); 401 `bad_signature`; 403 `not_eligible` (author ≠ session, no write scope, a decide-only device with any other shape than a decide-class upload, another author's unclaimed `inbox` object, `drop:` device, an object of another space, a device outside an object's device-only audience, a claimed object, a `device` wrap to a non-member); 409 `version_conflict` (`current`), `stale_epoch` (`epoch`: a `wk` wrap not at the current list epoch), `bad_wxk_version` (refresh the card, rewrap the same `DEK`), `rotation_required` (a workspace-key wrap while a revocation's rotation is still open; body `{error, epoch}`; D39a2, owner question 6), `fenced` (a stale host); 410 `expired` (a tombstoned id, or `expires_ms` ≤ now); 413 `too_large`; 428 `precondition_required`; 429 `quota_exceeded`, `rate_limited`; 503 `overloaded` | §10.4, §10.6 |
+| `POST /v2/drop/list` | D(m) with `look` in `workspace_id`, or W of `workspace_id` | `{workspace_id, direction, after?, limit?, generation?, until?}` → `{objects: [{n, object_id, version, state, tombstone_until_ms, descriptor, wraps, claimed_by, claimed_ms, expires_ms}], next, generation, until}` | `direction` `received` (author ≠ caller) or `sending`, by the newest version's author, or `all` (W sessions only; amendment A2); `generation` and `until` in every page; a walk's first page (no `until`) fixes `until` and later pages pass it and are cut at it; `generation` required with `until`, and with `after` for `all` (below); one entry per visible object at its newest version and its change position `n` (raised by every version, wrap change, claim and state change of the object: a retire, the expiry sweep, the start-up pruning of the listed version); `state` `live`, `pruned`, `expired` or `retired` (below); expired and retired objects stay listed as tombstones (`descriptor` null, `wraps` empty) until `tombstone_until_ms` (the end of the 30-day tombstone), then leave without a new `n`; a client whose last complete list is older than 30 days minus the sweep period relists in full (29 days recommended); unclaimed `inbox` objects and their tombstones are listed only for the W session and their author device (amendment A2; other member devices see them once claimed); `claimed_by` in every entry; ascending `n`, `after` exclusive, `next` the last `n` or null when nothing remains up to `until`; limit ≤ 64 (default 64) and the page stops before 2 MiB (at least one entry); ≤ 2 such reads per device, 4 per person, 8 relay-wide, each held until the body is sent; request JSON cap 16 KiB | 400 `malformed` (fields, `until` without `generation`, `all` with `after` without `generation`, `after` > `until`); 403 `not_eligible` (not a `look` member, a device asking for `all`); 409 `generation_changed` (a stale `generation`, or `after` or `until` above the relay's counter); 429; 503 | §10 |
+| `GET /v2/drop/{o}/descriptors?after=&limit=` | as list, the object visible | → `{descriptors: [signed drop_object], next}` ascending by version | limit ≤ 256 (default 256) and the page stops before 1 MiB (at least one entry); counted with the list reads | 400; 403; 404; 410 `expired`; 429; 503 | §10.6 |
+| `GET /v2/drop/{o}/versions/{v}/descriptor` | as list | → `{descriptor}`, `ETag: "<v>"` | | 403; 404 (absent object or version); 410 | §10.4 |
+| `GET /v2/drop/{o}/versions/{v}/wraps` | as list | → `{wraps, claimed_by}` | only the caller's usable wraps: a W session its workspace's `wk` and `wxk` wraps, a device its workspace's `wk` wraps and its own `device` wraps (never `wxk`); `claimed_by` null when unclaimed | 403; 404; 410 | §10.3 |
+| `GET /v2/drop/{o}/versions/{v}/blob` | as list, and an `inbox` object claimed | → the ORD2 bytes, `Content-Length: content_len`, `ETag: "<v>"`, `Cache-Control: no-store` | streamed; no `Range`; download slots: 4 per device, 8 per person, 32 relay-wide; the same minimum rate, idle and duration limits as uploads; download buckets by MiB | 403 `not_eligible` (an unclaimed inbox, also for its author; another author's unclaimed inbox is invisible, 403 by the answer order); 404; 410 `expired` (expired object or a pruned superseded blob); 429; 503 | §10.2 |
+| PUT `/v2/drop/{o}/versions/{v}/wraps` | W(g), the version addressed to the workspace (its space; claimed by it if `inbox`) | `{wraps: [wrap]}` (exactly one) → `{}` | the host's `drop_rewrap` (§7.5): `target_kind` `wk`, `target_id` the workspace, `key_version` its current epoch; the same record → 200 no-op; JSON cap 16 KiB | 400 `malformed`; 403 `not_eligible` (an unclaimed inbox, not addressed); 409 `stale_epoch`, `wrap_conflict` (other bytes for the same target and key version; the body carries the stored `wrap` and the version's `dek_commit`), `fenced` (at admission or inside the transaction); 410 | §10.3, §7.5 |
+| POST `/v2/drop/{o}/claim` | W(g) of the object's workspace | §10.5 `{o, sig}` → `{claimed_by}` | §10.5 unchanged, one transaction, the fence re-checked inside it; the object must be an unexpired `inbox` `file`; JSON cap 16 KiB | §10.5 codes; 403 `not_eligible` (not inbox, another workspace); 409 `already_claimed` (`claimed_by`), `fenced`; 410 | §10.5 |
+| `POST /v2/drop/{o}/retire` | W(g) of the space | `{expect_version, expect_head}` → `{state}` | both fields required (`expect_version` the newest version the host saw, `expect_head` its `H("orch/v2/drop-parent|" \|\| cj(o))` as canonical unpadded b64u of exactly 32 bytes, `expect_version` a JSON integer; otherwise 400); fence checked first and again inside the write transaction (a takeover between admission and commit → 409 `fenced`, nothing changed); in that transaction the object row again (deleted meanwhile → 404), then the precondition: `current` or the head hash differs → 409 `version_conflict` (`current`, `state`), the object untouched; else tombstones a `file` or a `document` at once with a new `n` (every read 410 `expired`, a `PUT` of the id 410, list `state` `retired`); a file's version, wraps, blob bytes, head bytes and live-version count are released in the same transaction, a document's by the batched sweeper; any member's upload, claimed or unclaimed `inbox` files included; an object already tombstoned (retired, or a file past `expires_ms`) with a matching precondition → 200 with its stored `state`, nothing changed (idempotent only while the tombstone lives; never replayed after it); devices have no delete route (host-mediated delete only); JSON cap 16 KiB | 400 `malformed` (missing or extra fields, non-canonical `expect_head`, a non-integer `expect_version`); 403 `not_eligible` (another space, or a device session: only the host retires); 404 (no such id, or its tombstone has ended); 409 `fenced`, `version_conflict` | §10.6 |
 
 **Reads.** A W session sees the objects of its workspace. A device sees an object when it is a current member
-with `look` of the object's workspace and `recipients` does not exclude it; unclaimed `inbox` objects are
-listed and their descriptors readable (no wrap a device can open exists before the claim), only their blob waits
-for the claim (403). An expired or
-retired object answers 410 `expired` for 30 days (its tombstone; a `PUT` of the id too), then 404. Superseded
+with `look` of the object's workspace and `recipients` does not exclude it. An unclaimed `inbox` object is
+visible only to the W session and to its author device (amendment A2; this replaces A1's rule that every member
+device lists it): its author lists it under `sending` and reads its descriptor and its own `device` wrap, but
+its own descriptor read-back works, and only its blob waits for the claim (403); every other member device gets no list entry and 403 on reads and on a
+`PUT`, live or tombstoned, with the same body as every other 403 `not_eligible` (`{"error": "not_eligible"}`, no extra key). Once claimed, it is visible to every `look` member (the claim raises `n`). An expired or
+retired object answers 410 `expired` for 30 days to callers that still see it (its tombstone; a `PUT` of the id
+too), then 404. An expired device-only file loses its audience rows at the expiry sweep: before the sweep its
+audience (author included) gets 410, after it every device gets 403 on reads and `PUT`, and only the W session
+still sees the tombstone (410, listed) until it ends. Superseded
 document blobs are kept while among the newest 8 versions or younger than 30 days; a pruned blob is 410, its
-descriptor stays.
+descriptor stays. A device sees a tombstone exactly when it saw the object (member with `look`, not excluded by a
+device-only `recipients` list, not another author's unclaimed `inbox` object), except an expired device-only file after the sweep, which only the W session
+sees; a W session sees every object of its workspace in every state.
+
+**Existence oracle and restricted tickets (amendment A1).** The read answer order is an existence oracle: any
+authenticated caller that knows or guesses an object id tells 403 (the id exists, live or as a tombstone, and is
+hidden from it) from 404 (no such id, or its tombstone has ended), across workspaces and within one (a member
+device outside a device-only `recipients` list), and a `PUT` answers 403 for another space's id. The `PUT` checks a
+device's exclusion from a device-only audience before its 410, exact retry, CAS and claim answers, so nothing
+else leaks on any route: not the workspace, kind, version, state, claim status or recipients, and no list entry. Ids are 128-bit random, so the
+oracle answers only for ids learned elsewhere. The audience is the newest version's `recipients` kind (space,
+inbox, or device-only); a device-only audience also includes that version's device author, changes only with a
+new version, and is never widened by membership removal or revocation (a removed device that is still listed
+sees nothing while it is not a member). Relay membership and `recipients` are not ticket authorization:
+the relay knows no tickets. For an object about a restricted ticket the host MUST use `device` wraps and a
+device-only `recipients` list for exactly the allowed devices (no `wk` wrap, no `inbox`), MUST filter whatever it
+passes on from its own (unfiltered) W listings by ticket visibility, and keeps restricted ids out of content a
+wider audience reads (P3 design §14.2 P3-D39 items 4 and 6, R-D10).
+
+**List entry state (amendment A1).** Every list entry carries `object_id`, `version` (the newest), `claimed_by`, `claimed_ms` (amendment A2: the relay's time of the claim, set once, null while unclaimed and for non-inbox objects), `expires_ms` (amendment A2: the object's expiry, null for a document, also on tombstones), `state` and `tombstone_until_ms` (null unless the entry is a tombstone; otherwise the end of its retention, `tombstone_ms + 30 d`, which for an expired file is `expires_ms + 30 d` before and after the sweep): `object_id` and `version` have exactly the same encodings on every entry, tombstones included (`object_id` the lower-case hex id, `version` an integer), so one strict parser covers live entries and tombstones (orch-f1, Q-F10). A client treats an unknown `state` as not live.
+
+| `state` | Meaning | `descriptor` | `wraps` |
+|---|---|---|---|
+| `live` | the version and its blob are readable | the signed descriptor | the caller's usable wraps |
+| `pruned` | the object is live but this version's blob is pruned (descriptor kept, blob 410); in P4 only after a relay restore without its blob files, because the listed newest version is never pruned by retention | the signed descriptor | `[]` |
+| `expired` | a file at or past `expires_ms` (computed at read time; the expiry sweep, within 10 minutes, raises `n`) | `null` | `[]` |
+| `retired` | retired by the host | `null` | `[]` |
+
+Every state change (retired, expired by the sweep, pruned by the start-up sweep) raises the object's change
+position, so an incremental list (`after` its last `n`) sees it and the host `drop` notice fires. An expiry
+reaches incremental lists and the notice only with the sweep, up to about 10 minutes after `expires_ms` (reads
+are 410 at once). A tombstone is listed until `tombstone_until_ms`; its deletion then raises no `n`, so a client
+drops a tombstone it holds at that time, and treats a file as expired at its descriptor's `expires_ms` on its
+own. A client **MUST relist in full** (`after` omitted, replacing its whole set for the workspace) when the gap
+since its last complete list exceeds the retention less the sweep period (30 days minus 10 minutes; 29 days
+recommended), since a state change in the gap may have lost its tombstone. A device-only file's expired
+tombstone keeps no audience rows after the sweep, so only the W session lists it from then on. A full relist omits ended tombstones. Paging is unchanged:
+ascending `n`, `after` exclusive, `next` the last `n` or null when done. Example entries (values shortened):
+
+```json
+{"n": 4182, "object_id": "9f2c…", "version": 3, "state": "live", "tombstone_until_ms": null,
+ "descriptor": {"o": {"kind": "drop_object", "object_id": "9f2c…", "version": 3, "…": "…"}, "sig": "…"},
+ "wraps": [{"target_kind": "wk", "target_id": "5a1e…", "key_version": 7, "…": "…"}], "claimed_by": null,
+ "claimed_ms": null, "expires_ms": null}
+{"n": 4190, "object_id": "c07d…", "version": 1, "state": "retired", "tombstone_until_ms": 1763208000000,
+ "descriptor": null, "wraps": [], "claimed_by": "5a1e…", "claimed_ms": 1760600000000,
+ "expires_ms": 1761200000000}
+```
+
+Retire is host-only: a W(g) session of the object's space may retire any file or document in it; a device
+cannot delete or retire, not even its own upload, and asks its host instead (P4).
+
+**Host contract for retire (amendment A1, orch-52).** Every fenced Drop write (`PUT` versions, `PUT .../wraps`,
+claim, retire) checks the holder generation and lease at admission and again inside its write transaction, so a
+write admitted before a takeover never commits after it (409 `fenced`, nothing changed). The host sends
+`{expect_version, expect_head}` of the head it decided about; 409 `version_conflict` means the head moved (a
+member's newer version): the object is untouched and the host decides again. The retire is idempotent only while
+the tombstone lives: a retire whose answer was lost is retried with the same body within 29 days of the earlier
+of its first attempt and, for a file, its `expires_ms` (a day of clock margin). After that the host **never replays it**: the id may have been reused, a 404 proves nothing, and the
+host reconciles by a full relist instead. The host also relists in full after a listing gap longer than 29
+days, a state restore or a takeover.
+
+**Decide-class uploads (amendment A2).** A device with `decide` but without `operate` in `space_id` (a phone:
+`look` and `decide` only) may `PUT` exactly one shape: a new `file` (`version: 1`, `parent: 0`, `parent_hash:
+null`, `If-Match: 0`) with `recipients: "inbox"` and the inbox wraps (one `wxk` to the space, optionally its own
+`device` wrap, never `wk`; so never `stale_epoch` or `rotation_required`, but `bad_wxk_version` applies). Any
+other shape from it (a document, a second version, a `space`-addressed or device-only object) is 403
+`not_eligible` at the step where write scope is checked, before any object state is consulted, so it reveals
+nothing about the object; re-wraps, claims and retires stay W-only. The scope is read from the current member
+list and re-checked inside the commit transaction (removed during the transfer → 403, nothing stored); the
+authority at the commit wins. An exact retry answers 200 before the budget is consulted. Such an upload holds
+the device's single decide-class upload slot and spends the decide-class budget: 50 new objects and 64 MiB of
+`content_len` per device and workspace per UTC day of the request's `now`, charged at admission (an upsert whose
+conflict branch is conditional, so the day's first upload is charged and concurrent uploads cannot both take
+the last unit), refunded only when the request is refused before
+the relay reads its first blob byte; a stream that fails or aborts after that is charged one creation and the
+bytes received (the give-back of unreceived bytes is best effort: if it is lost, the full `content_len` stays
+charged). Exceeding it is 429 `rate_limited` with `{"error": "rate_limited", "quota":
+"drop_decide_creations" | "drop_decide_bytes"}` (`quota` optional in the general registry) and a **MUST**
+`Retry-After` = the integer seconds from the relay's clock to the next 00:00 UTC (1 to 86,400); the client
+derives "tomorrow" from it, not from its own clock, and sends no decide-class `PUT` before then. The 429 is an
+early answer (bounded drain; the connection may close; a client treats a disconnect as unknown and reads back).
+The budget bounds the bytes stored and hashed; network ingress stays bounded by the upload buckets. Before the
+claim the object is visible only to the W session and its author device (Reads, above); a host claims a
+person's own upload without a gesture only while its author device is a current member device of that person
+(not revoked), and releases another person's upload only after a hand-off at its terminal; any record the host
+keeps of such claims (claim time, author device) is its own, and the relay lists `claimed_ms` and `expires_ms`
+only until the tombstone is deleted (P3 design §14.2 P3-D39 item 13, §14.9 Q-H9).
+
+**List walks (amendment A2).** Every list page carries `generation` (32 lower-case hex characters: a random id
+that the relay changes only when its Drop dataset is restored or replaced) and `until` (the walk's
+high-watermark position). A request without `until` starts a walk: the relay returns its current newest change
+position as `until` and the entries with `after < n ≤ until`; the following pages pass that `until` (and the
+`generation`) and are cut at it; every page of the walk, the last one (`next` null) included, echoes
+`generation` and `until`, and a non-null `next` is above the request's `after` and at most `until`; `next` null ends the walk, and the client then stores `(generation, until)` and
+starts its next walk with `after = until`. An object that changes during a walk gets an `n` above `until` and is
+listed by the next walk, so a walk ends and never lists an object twice; a client concludes that an object is
+gone only if it is absent from a full walk and from the follow-up walk from its `until`. A request whose
+`generation` differs from the relay's, or whose `after` or `until` is above the relay's current position, is
+409 `generation_changed`, exactly `{"error": "generation_changed"}` with no other key (the wraps and claim answers
+gain no new keys): relist from the beginning (no `after`, `until` or `generation`) and replace the whole
+set. `generation` is required with `until`, and with `after` for `direction: "all"`; `after` > `until` is 400.
+`direction: "all"` lists both authors' objects and is for W sessions only (a device gets 403 `not_eligible`).
+The relay regenerates `generation` when its Drop dataset was restored or replaced, detected at start before
+any pruning (a high-water mark kept in a state directory outside the data directory, which no backup, restore,
+rollback or reset moves; backup copies carry no `generation`), and serves it from
+memory. `generation` is an unauthenticated hint: a client lets it reset only its list walk, never its chain
+heads, anti-rollback state, uploads or re-wraps, and never re-sends a confirmed upload because of it. Clients
+send `generation` on every list with `after`, pin `generation` and `until` from a walk's first page, purge
+local entries only after a complete walk, and send the new request fields only to a relay that implements
+them (P3 design §14.2 P3-D39 item 14). Example (W session, values shortened):
+
+```json
+{"workspace_id": "5a1e…", "direction": "all", "after": 4100, "generation": "3f9a0c…"}
+{"objects": [{"n": 4182, "object_id": "9f2c…", "version": 3, "state": "live", "…": "…"}],
+ "next": 4182, "generation": "3f9a0c…", "until": 4231}
+{"workspace_id": "5a1e…", "direction": "all", "after": 4182, "until": 4231, "generation": "3f9a0c…"}
+{"objects": [{"n": 4190, "object_id": "c07d…", "version": 1, "state": "retired", "…": "…"}],
+ "next": null, "generation": "3f9a0c…", "until": 4231}
+```
 
 **Wraps on `PUT`.** `wk`: `target_id` = `space_id`, `key_version` = the current list epoch (409 `stale_epoch`
 with `epoch` otherwise; the hint rules of P3-D8 apply; the client rewraps the same `DEK` under the new epoch and
@@ -3507,9 +3633,10 @@ sweep, for a global ceiling), all transient; a stored-bytes `quota_exceeded` car
 not transient, and its body names the cap: `quota` is one of `drop_ws`, `drop_head_ws`, `drop_account`,
 `drop_versions`, `drop_documents`, `drop_device`, `drop_device_head`, `drop_device_versions`,
 `drop_device_documents`, `drop_doc_versions` (a slot cap's 429 says `slot` and is transient). Per-device shares
-of the workspace counters: 256 MiB blob bytes, 8 MiB head bytes, 1 024 live versions, 64 documents. Buckets (one
+of the workspace counters: 256 MiB blob bytes, 8 MiB head bytes, 1 024 live versions, 64 documents; a
+decide-only device's uploads also spend the decide-class budget above (amendment A2). Buckets (one
 token per started MiB): upload per device 64 / 32 per min, per workspace 256 / 128 per min; download per device
-256 / 256 per min, per person twice that (`ORCH_RELAY_THROTTLE_DROP_UP`, `ORCH_RELAY_THROTTLE_DROP_DOWN`).
+256 / 256 per min, per person 512 / 512 per min (`ORCH_RELAY_THROTTLE_DROP_UP`, `..._DROP_UP_WORKSPACE`, `..._DROP_DOWN`, `..._DROP_DOWN_PERSON`, each "burst/per-minute"). A device's workspace bucket is charged as soon as the device is eligible to write there (step 5), so every later refusal and the exact retry spend it; it is never refunded. With Drop on, the relay refuses to start when a burst is below the tokens of a maximal body; an upload whose cost exceeds a bucket's burst is 413 `too_large`.
 
 **Deployment.** A proxy in front of the relay must allow request bodies up to the whole-body maximum on the
 upload path only (slightly above the relay's maximum, so the relay answers its own 413), with timeouts above the
@@ -3517,7 +3644,11 @@ upload path only (slightly above the relay's maximum, so the relay answers its o
 byte Caddy cap needs this exception before Drop ships).
 
 **Host notice.** The host poll's `notices` gains `drop`: the newest change position of the workspace (0 if
-none). Like every notice it readies a poll once per change (§19.6). Because `notices` is an exact key set, hosts
+none). Like every notice it readies a poll once per change (§19.6); every version, wrap change, claim and state
+change (retired, expired, pruned) raises it. The value can drop when the newest object's tombstone ends (or after a relay
+restore); a host treats only a value above its stored position as news, and lists incrementally with its stored
+`generation` at once when the value falls below it (amendment A2: a restore then answers 409
+`generation_changed`). Because `notices` is an exact key set, hosts
 must accept `drop` **before** a relay emits it (rollout order). *Pending orch-52 (P3 design §14.9 Q-H1).*
 
 ### 19.10 Push registration and sending (P3-D40)
@@ -3526,9 +3657,9 @@ Design: P3 design §14.3 and §14.7. A relay without push configured answers 404
 
 | Method, path | Auth | Request → response | Idempotency, limits | Refusals | Proto |
 |---|---|---|---|---|---|
-| POST `/v2/push/register` | D(m) of `workspace_id` | `{workspace_id, registration_id, env, topic, token}` → `{registration_id, registered: true}` | `registration_id` 16 random bytes (hex), the device's (bound to it); `env` `sandbox` or `production` and configured on the relay; `topic` = the relay's configured topic (`io.severin.orch`); `token` b64u of 32..100 bytes; one registration per (device, workspace, env, topic): a new id retires the old; the same id and body → 200 (refreshes; free); the token moves from the person's other devices; ≤ 30 state changes per device per hour, ≤ 128 registrations per device; JSON cap 16 KiB | 400 `malformed`; 403 `not_eligible` (also a `drop:` device), `revoked`; 409 `registration_conflict` (the same id with another body, or another device's id); 429 | §9 |
-| POST `/v2/push/unregister` | D (membership not required) | `{workspace_id, registration_id}` (an id or `null` for all of the device's in that workspace) → `{registration_id, registered: false}` | idempotent, also for an absent id; JSON cap 16 KiB | 400; 403 `not_for_this_device` (another device's id), `revoked` | §9 |
-| POST `/v2/workspaces/{ws}/push` | W(g), fenced (`Orch-Holder`; missing or stale → 409 `fenced`, checked before any budget, dedup or queue effect) | `{targets, outer, priority, ttl_s}` → `{accepted}` | `targets`: 1..1 024 sorted unique device ids; non-members (and devices with a revoked or expired certificate) are skipped, not refused; `accepted` counts the accepted targets, not registrations; `outer`: §9's object, exact field set, `v` 2, `ws` = the path, `|cj(outer)| ≤ 3 072`; `priority` `high` or `normal`; `ttl_s` 0..86 400; an outer already sent to a device in the last 24 h is not sent to it again (in memory); budgets per (workspace, device) 20 / 2 per min, per device 60 / 6 per min (over budget: skipped), per workspace 120 / 20 per min (429); budgets ignore `priority`; queue all-or-nothing, 1 024 per workspace, 2 048 per account; JSON cap 64 KiB | 400 `malformed`; 409 `stale_epoch` (`epoch`: `outer.epoch` is not the current list epoch), `fenced`; 429 `rate_limited`; 503 `overloaded` (retryable after `Retry-After`) | §9 |
+| `POST /v2/push/register` | D(m) of `workspace_id` | `{workspace_id, registration_id, env, topic, token}` → `{registration_id, registered: true}` | `registration_id` 16 random bytes (hex), the device's (bound to it); `env` `sandbox` or `production` and configured on the relay; `topic` = the relay's configured topic (`io.severin.orch`); `token` b64u of 32..100 bytes; one registration per (device, workspace, env, topic): a new id retires the old; the same id and body → 200 (refreshes; free); the token moves from the person's other devices; ≤ 30 state changes per device per hour, ≤ 128 registrations per device; JSON cap 16 KiB | 400 `malformed`; 403 `not_eligible` (also a `drop:` device), `revoked`; 409 `registration_conflict` (the same id with another body, or another device's id); 429 | §9 |
+| `POST /v2/push/unregister` | D (membership not required) | `{workspace_id, registration_id}` (an id or `null` for all of the device's in that workspace) → `{registration_id, registered: false}` | idempotent, also for an absent id; JSON cap 16 KiB | 400; 403 `not_for_this_device` (another device's id), `revoked` | §9 |
+| `POST /v2/workspaces/{ws}/push` | W(g), fenced (`Orch-Holder`; missing or stale → 409 `fenced`, checked before any budget, dedup or queue effect and again against the live holder row just before queue admission) | `{targets, outer, priority, ttl_s}` → `{accepted}` | `targets`: 1..1 024 sorted unique device ids; non-members (and devices with a revoked or expired certificate) are skipped, not refused; `accepted` counts the accepted targets, not registrations; `outer`: §9's object, exact field set, `v` 2, `ws` = the path, `|cj(outer)| ≤ 3 072`; `priority` `high` or `normal`; `ttl_s` 0..86 400; an outer already sent to a device in the last 24 h is not sent to it again (in memory); budgets per (workspace, device) 20 / 2 per min, per device 60 / 6 per min (over budget: skipped), per workspace 120 / 20 per min (429); budgets ignore `priority`; queue all-or-nothing, 1 024 per workspace, 2 048 per account; JSON cap 64 KiB | 400 `malformed`; 409 `stale_epoch` (`epoch`: `outer.epoch` is not the current list epoch), `fenced`; 429 `rate_limited`; 503 `overloaded` (retryable after `Retry-After`) | §9 |
 
 **APNs request** (normative for the relay; the phone's NSE depends on the body). For each registration of each
 accepted target: HTTP/2 `POST /3/device/<hex token>` to `api.push.apple.com` (`production`) or
@@ -3550,3 +3681,58 @@ the same the NSE shows when it drops a payload. Delivery is best effort: no rece
 workspace's list (in the publication transaction), on the APNs answers above, when its certificate expires, and
 after 60 days without a refresh. Tokens are stored sealed under an instance secret; the APNs key and that secret
 are never stored in the database (P3 design §14.7).
+
+**Relay implementation notes (D40a, D40b; choices where the text above is silent).**
+- *Disabled push* answers `404 {"error":"not_found"}` on all three routes, before authentication, body or
+  query checks. Configuration is complete only with the team id, the topic, the token secret file and at
+  least one environment's key id and key file (runbook: `ORCH_RELAY_APNS_*`, `ORCH_RELAY_PUSH_TOKEN_KEY_FILE`);
+  any partial set makes the relay refuse to start (exit status 2).
+- *Check order (register, unregister):* body cap 413, query 400, `Content-Type: application/json` 400,
+  session 401 (revoked 403, expired certificate 400), the session's read bucket, a W session or (register) a
+  `drop:` device 403 `not_eligible`, the body 400, the membership of `workspace_id` 403 `not_eligible`
+  (register only), then the registration rules.
+- *Unregister* of an id the device holds in another workspace than `workspace_id` deletes nothing and answers
+  200; `registration_id` echoes the request (`null` for all).
+- *Send, check order:* body cap 413 (64 KiB), session 401, W session of this path 403 `not_eligible`, the fence
+  409 `fenced`, the session's read bucket, then the body 400, the request bucket 429, the list epoch 409
+  `stale_epoch` (`epoch` is 0 if the workspace has no list), then the targets, and under the directory lock the
+  live holder again (409 `fenced`) before the dedup, budgets, admission (503 `overloaded`, `Retry-After: 5`)
+  and enqueue. A rejected request charges no push bucket and leaves no LRU entry.
+- *Sends:* a target is accepted when it is a current member with an unrevoked, unexpired certificate; one APNs
+  send is queued per registration of an accepted target that the LRU and the budgets let through. A
+  send waits at most `min(ttl_s, 600)` seconds, and `ttl_s` 0 waits 5 s in the relay's own queue (APNs sees
+  `apns-expiration: 0`). While an environment is paused (a 403 or topic backoff) its queued sends wait and are
+  dropped at their deadline; the send that triggered a pause is dropped, not requeued.
+- *Answers:* any 403 is handled as the two named reasons (renew once and retry once, then pause); a 400
+  `BadDeviceToken` or `DeviceTokenNotForTopic` deletes that token's registrations in that environment; a 410
+  deletes those with the token whose `last_seen_ms` is not after Apple's `timestamp` (the relay clock if
+  absent); other answers are logged by status and reason and dropped.
+- *Retries* (500, 503, connection errors): after 0.5 s and 2 s, only while the next attempt starts before the
+  send's deadline.
+- *Budgets* are in-memory token buckets, overridable by `ORCH_RELAY_THROTTLE_PUSH_WS_DEVICE`,
+  `..._PUSH_DEVICE` and `..._PUSH_WS` (`burst/per-minute`). Registration limits are 30 state changes per hour
+  (fixed window) and 128 per device (`quota_exceeded`, `Retry-After: 60`).
+
+### 19.11 Webhook doorbells (orch-relay #81; orch follow-up design FU11-FU13)
+
+A hook is an id the workspace host picked (`hk_` + 128 random bits). The relay stores only
+`H(id) = SHA-256("orch/v2/hook|" || id)` (lower-case hex), the workspace, the expiry and the time of the first
+ring. It never stores a body, a header or the id. Always on (no configuration). The routes are spelled as a method and a path in separate spans because they have no
+HTTP transcript fixtures yet (`ref/_http_fixtures.py`; a follow-up); `tests/test_hooks.py` covers them.
+
+| Method, path | Auth | Request → response | Limits | Refusals |
+|---|---|---|---|---|
+| `POST` `/v2/workspaces/{ws}/hooks` | W(g), fenced | `{hooks: [{hook_hash, expires_ms}]}` (1..64) → `{registered: n}` | `expires_ms` in (now, now + 14 d]; a retry of a held hash updates its expiry and keeps a recorded ring; a hash held by another workspace is skipped and answered like a new one (no oracle); ≤ 256 hooks per workspace (expired ones are dropped first); ≤ 240 registrations per workspace per hour; JSON cap 32 KiB | 400 `malformed`; 403 `not_eligible`; 409 `fenced`; 429 `quota_exceeded`, `rate_limited` |
+| `POST` `/v2/workspaces/{ws}/hooks/revoke` | W(g), fenced | `{hook_hashes: [..]}` (1..64) → `{revoked: n}` | idempotent; only the workspace's own hooks | as above |
+| `POST` `/v2/workspaces/{ws}/hooks/fetch` | W(g), fenced | `{ack: [hook_hash..]}` → `{rings: [{hook_hash, rung_ms}]}` | `ack` first clears the ring of the named hooks (the hook stays registered); at most 256 rings, oldest first, unexpired hooks only | as above |
+| `POST` `/h/{id}` | none | any → `204`, no body | see below | `413` (declared length over 64 KiB), `429` (per address) |
+
+**The doorbell.** The answer is `204` with an empty body and the same headers for every id (registered, unknown,
+revoked, expired, malformed) and every state. The handler stores no body and does no database work (a chunked body is counted up to the cap and discarded; over it, or a declared length over 64 KiB, is `413` for every id): it hashes the
+id (the first 128 bytes), charges the limits and queues the hash; a background task records, for a hook registered before the ring arrived,
+unexpired and not yet rung, the relay's receive time (`rung_ms`); later rings change nothing. The ring is
+a fact about a hash, never about a payload: a sender's signature header is not forwarded (v1 has no HMAC). Limits
+(token buckets, burst / per minute): per canonical source address 30 / 30 (`429` with `Retry-After`, independent of
+the id), per hook hash 3 / 1 and per workspace 64 / 30 (a ring over either is dropped, still `204`, so the answer
+never tells a known id from an unknown one); the queue holds 4 096 rings (more are dropped). An expiry sweep runs
+hourly. The workspace id is not encoded in the hook id.

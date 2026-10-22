@@ -90,6 +90,10 @@ def build() -> dict:
     add_unpublished(out)
     from ref._reader_vectors import add_reader
     add_reader(out)
+    from ref._drop_vectors import add_drop_relay
+    add_drop_relay(out)
+    from ref._push_vectors import add_push_relay
+    add_push_relay(out)
     return out
 
 

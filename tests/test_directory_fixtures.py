@@ -39,9 +39,25 @@ CASES = [
 
 
 @pytest.mark.parametrize("name,case", CASES, ids=[f"{n}-{c['name']}" for n, c in CASES])
-def test_http_example(tmp_path, name, case):
-    with TestClient(create_app(tmp_path)) as client:
-        if name in CHECKPOINT_FIXTURES:
+def test_http_example(tmp_path, monkeypatch, name, case):
+    if name.startswith("push_"):  # P3-D40: a relay with a throwaway key, or none (the 404 case)
+        from push_support import clear, configure, fixture_env
+
+        clear(monkeypatch)
+        if (envs := fixture_env(case)) is not None:
+            configure(monkeypatch, tmp_path, envs=envs)
+    with TestClient(
+        create_app(tmp_path / "data" if name.startswith("push_") else tmp_path)
+    ) as client:
+        if name.startswith("push_"):
+            from push_support import prepare_fixture as prepare_push
+
+            prepare_push(client, name, case)
+        elif name.startswith("drop_"):
+            from drop_support import prepare_fixture as prepare_drop
+
+            prepare_drop(client, case)
+        elif name in CHECKPOINT_FIXTURES:
             from checkpoint_support import prepare_fixture as prepare_checkpoint
 
             fixture = json.loads(Path(f"tests/http_fixtures/{name}.json").read_text())
@@ -58,6 +74,8 @@ def test_http_example(tmp_path, name, case):
         kwargs = {"headers": request["headers"], "params": request["query"]}
         if "body_b64u" in request:
             kwargs["content"] = P.unb64u(request["body_b64u"])
+        if "body_hex" in request:  # P3-D39: the ODU2 frame
+            kwargs["content"] = bytes.fromhex(request["body_hex"])
         if "json" in request:
             kwargs["content"] = P.cj(request["json"])
         if "body_recipe" in request:
@@ -73,6 +91,13 @@ def test_http_example(tmp_path, name, case):
         response = client.request(request["method"], request["path"], **kwargs)
         expected = case["response"]
         assert response.status_code == expected["status"], response.text
+        for header in ("ETag", "Retry-After", "Content-Length"):
+            if header in expected["headers"] and name.startswith("drop_"):
+                assert response.headers[header] == expected["headers"][header], header
+        if "body_hex" in expected:  # a Drop blob
+            assert response.headers["content-type"] == "application/octet-stream"
+            assert response.content == bytes.fromhex(expected["body_hex"])
+            return
         assert response.headers["content-type"] == "application/json"
         if "Cache-Control" in expected["headers"]:
             assert response.headers["cache-control"] == expected["headers"]["Cache-Control"]

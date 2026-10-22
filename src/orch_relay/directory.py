@@ -97,10 +97,17 @@ THROTTLES = {
     "page-workspace": (2 * PAGE_BURST, 1200),
     "staging": (STAGING_BURST, 600),
     "host-answer": (1200, 1200),
+    # P3-D39 item 8 (D39a2): Drop transfer buckets, one token per started MiB of body. Upload per
+    # device (ORCH_RELAY_THROTTLE_DROP_UP) and per workspace (..._DROP_UP_WORKSPACE); download per
+    # device and per person (twice the device's), taken before the blob is read.
+    "drop-up": (64, 32),
+    "drop-up-workspace": (256, 128),
+    "drop-down": (256, 256),
+    "drop-down-person": (512, 512),
 }
-# Buckets kept per key class (8 classes; ORCH_RELAY_THROTTLE_TABLE), evicting full buckets first.
+# Buckets kept per key class (12 classes; ORCH_RELAY_THROTTLE_TABLE), evicting full buckets first.
 # Only authenticated identities create entries (a flood of bad tokens adds none); about 470 B per
-# entry (measured), ~7.6 MB per full class, ~61 MB if every class were full.
+# entry (measured), ~7.6 MB per full class, ~91 MB if every class were full (the four Drop classes included).
 THROTTLE_TABLE = 16_384
 # P3-D35 item 4: the unauthenticated revocation-pair read per IPv6 /56 (as challenges and pairing).
 REVOCATION_READ_PARENT = 960
@@ -138,6 +145,7 @@ STATUS = {
     "cert_conflict": 409,
     "fenced": 409,
     "other_workspace": 409,
+    "other_relay": 403,
     "wsk_changed": 409,
     "delegation_changed": 409,
     "stale_card": 409,
@@ -270,6 +278,22 @@ def pair_revoked(con, device_id, person_id):
         ).fetchone()
         is not None
     )
+
+
+def revoked_sql(column):
+    """SQL for "this device is revoked" by the REGISTERED person's pair (P3-D30; `pair_revoked` in
+    SQL): the one fragment every relay query that lets a revocation remove a device's access must
+    use. A stranger's self-certified pair for the same device id never matches. `column` is the
+    device id expression."""
+    return (
+        "EXISTS (SELECT 1 FROM revocations rv JOIN devices dv ON dv.device_id=rv.device_id "
+        f"AND dv.person_id=rv.person_id WHERE rv.device_id={column})"
+    )
+
+
+def device_revoked_for_registered_person(con, device_id):
+    """Is the device revoked by its registered person's pair (never a stranger's)?"""
+    return con.execute(f"SELECT {revoked_sql('?')}", (device_id,)).fetchone()[0] == 1
 
 
 def chain_revoked(con, device_id):
@@ -512,6 +536,8 @@ class Directory:
                 keys = [("page-" + purpose, identity) for purpose, identity in keys]
         elif bucket in ("staging", "host-answer"):
             keys = [(bucket, ident)]
+        elif bucket == "keys":  # Drop transfer buckets: the caller names the keys (P3-D39 item 8)
+            keys = list(ident)
         else:
             raise ValueError(bucket)
         with self.budget:
@@ -1057,6 +1083,10 @@ class Directory:
             self.fence(con, headers, ws, now)
         if not isinstance(card, dict) or not isinstance(card.get("o"), dict):
             fail("malformed")
+        # A card names the relay it is for (`relay_url`). One made for another service must not
+        # squat a workspace record here, for a new or a known workspace alike (fail closed).
+        if card["o"].get("relay_url") != self.origin:
+            fail("other_relay")
         owner = card["o"].get("owner_person_id")
         P.unhex(owner)
         account = usable_account(con, owner)

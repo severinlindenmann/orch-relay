@@ -69,6 +69,24 @@ G1 implements §19.1. Membership publication, holder acquisition, bridge and pai
 routes remain the G2/G3 groups. Shared tables and integration rules are documented
 in [directory integration](docs/directory-integration.md).
 
+## Push (P3-D40)
+
+`POST /v2/push/register`, `/v2/push/unregister` and the host's `POST /v2/workspaces/{ws}/push` (protocol §19.10, design
+§14.3 and §14.7) exist only when push is configured; otherwise they answer 404 `not_found`. Configuration is
+`ORCH_RELAY_APNS_TEAM_ID`, `ORCH_RELAY_APNS_TOPIC`, `ORCH_RELAY_PUSH_TOKEN_KEY_FILE` (32 random bytes, mode 0600) and,
+per environment, `ORCH_RELAY_APNS_{SANDBOX,PRODUCTION}_KEY_ID` and `..._KEY_FILE` (the `.p8`, mode 0600). All or nothing: a
+partial set makes `serve` exit 2. Tokens are stored sealed; the key and the secret are never in the database. Delivery
+is best effort over one HTTP/2 connection per environment (`httpx[http2]`). Tests use a throwaway P-256 key, a fake
+transport and a local h2 server; no test reaches Apple (`tests/conftest.py`). The deploy steps are in
+[dev-deploy-plan](docs/dev-deploy-plan.md) (R8).
+
+## Webhook doorbells (#81)
+
+`POST /h/<id>` answers 204 with no body for every id and state, reads no body and stores only the first ring time of a
+registered hook (`H(id)`, `hooks` table). The workspace host registers, revokes and fetches hooks with its W session
+(`/v2/workspaces/{ws}/hooks[/revoke|/fetch]`; protocol §19.11). `uv run pytest tests/test_hooks.py -x -q`; the
+known/unknown timing test is `slow`.
+
 ## License
 
 Licensed under the PolyForm Noncommercial License 1.0.0. Commercial use requires a separate license from the author. See [LICENSE](LICENSE).
