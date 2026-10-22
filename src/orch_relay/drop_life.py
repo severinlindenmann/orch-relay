@@ -39,6 +39,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import proto as P
 from .bridge import refuse
+from .cutover import guard as cutover_guard
 from .directory import revoked_sql
 from .drop_quota import AUDIENCE_ROW, DAY_MS, day_of
 
@@ -385,7 +386,37 @@ class Life:
             ).rowcount
         return done, [], set()
 
+    def sweep_cutover(self, con, now, skip):
+        """E3: a workspace cut over to a hub and drained (or purged) keeps no Drop data. Versions are released in
+        batches (usage books and blob files as for a retire), then the object row itself."""
+        rows = con.execute(
+            "SELECT o.* FROM drop_objects o JOIN workspace_cutover c ON c.workspace_id=o.workspace_id "
+            "WHERE c.state='cut_over' AND (c.purged_ms IS NOT NULL OR c.drain_until_ms<=?) "
+            "ORDER BY o.object_id LIMIT ?",
+            (now, 1 + len(skip)),
+        ).fetchall()
+        for obj in rows:
+            if obj["object_id"] in skip:
+                continue
+
+            def end(obj=obj):
+                used, paths, more = self.free_versions(con, obj, BATCH)
+                if more:
+                    return used, paths
+                count = con.execute(
+                    "SELECT count(*) FROM drop_audience WHERE object_id=?", (obj["object_id"],)
+                ).fetchone()[0]
+                release_head(con, obj["workspace_id"], None, AUDIENCE_ROW * count)
+                con.execute("DELETE FROM drop_objects WHERE object_id=?", (obj["object_id"],))
+                return used + 1 + count, paths
+
+            result = self.guarded(con, skip, obj["object_id"], end)
+            if result is not None:
+                return result[0], result[1], set()
+        return 0, [], set()
+
     PHASES = (
+        "sweep_cutover",
         "sweep_expiry",
         "sweep_documents",
         "sweep_tombstones",
@@ -468,6 +499,7 @@ class Life:
                     refuse("not_eligible", 403)
                 ws = session["subject_id"]
                 d.fence(con, headers, ws, now)  # orch-52 change 0: the live holders row
+                cutover_guard(con, ws, now, "drop")  # E3 (L2-E3-2)
                 obj = con.execute(
                     "SELECT * FROM drop_objects WHERE object_id=?", (o_id,)
                 ).fetchone()
