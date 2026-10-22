@@ -2,6 +2,7 @@
 
 from . import proto as P
 from .bridge import refuse
+from .cutover import guard
 from .directory import check_suite, fail, fields
 
 
@@ -97,7 +98,9 @@ def dispatch(d, con, route, params, method, raw, headers, now):
                 "requests": [
                     P.parse_json(row[0])
                     for row in con.execute(
-                        "SELECT request FROM cert_requests WHERE person_id=? AND primary_device_id=? AND state='open' ORDER BY request_id",
+                        "SELECT request FROM cert_requests WHERE person_id=? AND primary_device_id=? AND state='open' "
+                        "AND workspace_id NOT IN (SELECT workspace_id FROM workspace_cutover WHERE state='cut_over') "
+                        "ORDER BY request_id",
                         (person, session["subject_id"]),
                     )
                 ]
@@ -106,6 +109,9 @@ def dispatch(d, con, route, params, method, raw, headers, now):
             fail("not_eligible")
         ws = session["subject_id"]
         d.fence(con, headers, ws, now)
+        guard(
+            con, ws, now, "cert_requests"
+        )  # L2-E3-2: no new-device enrollment into a cut-over workspace
         body = P.parse_json(raw)
         fields(body, "request")
         workspace = con.execute("SELECT * FROM workspaces WHERE workspace_id=?", (ws,)).fetchone()
@@ -188,6 +194,7 @@ def dispatch(d, con, route, params, method, raw, headers, now):
     if route == "cert_request":
         if session["kind"] != "workspace" or session["subject_id"] != row["workspace_id"]:
             fail("not_eligible")
+        guard(con, row["workspace_id"], now, "cert_request")
         return {
             "state": row["state"],
             **{
@@ -201,6 +208,12 @@ def dispatch(d, con, route, params, method, raw, headers, now):
         or session["subject_id"] != row["primary_device_id"]
     ):
         fail("not_eligible")
+    guard(
+        con,
+        row["workspace_id"],
+        now,
+        "cert_challenge" if route == "cert_challenge" else "cert_rejection",
+    )
     field = "challenge" if route == "cert_challenge" else "rejection"
     body = P.parse_json(raw)
     fields(body, field)

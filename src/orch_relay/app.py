@@ -84,6 +84,11 @@ def create_app(
 
     install_hub_accounts(app)  # E1: hub accounts by hub card (ORCH_RELAY_DEV = dev relay)
 
+    from .cutover import install as install_cutover
+
+    # E3: per-workspace cut-over to a hub. Before any `/v2/hubs/{hub}/{tail:path}` catch-all (first match wins).
+    install_cutover(app)
+
     from .hub_phone import install as install_hub_phone
 
     install_hub_phone(

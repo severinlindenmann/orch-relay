@@ -33,6 +33,7 @@ from starlette.concurrency import run_in_threadpool
 from . import proto as P
 from . import unpublished as U
 from .bridge import refuse
+from .cutover import guard as cutover_guard
 from .directory import PAGE_TOKEN_HEADS, Refusal, integer, staging_tokens
 
 log = logging.getLogger(__name__)
@@ -1860,11 +1861,13 @@ class Checkpoints:
         auth = ROUTES[route][2]
         if auth == "R" or (auth == "WD" and session["kind"] == "device"):
             d.workspace_access(con, session, ws)
+            cutover_guard(con, ws, now, "checkpoint")  # E3 (L2-E3-2)
             return session
         d.workspace_access(con, session, ws, write=True)
         if route == "checkpoint_put" and "orch-holder" not in headers:
             no("malformed", 400)  # the generation is required; no failure is recorded
         d.fence(con, headers, ws, now)
+        cutover_guard(con, ws, now, "checkpoint")
         return session
 
     def preauthorize(self, route, ws, headers, size=0):

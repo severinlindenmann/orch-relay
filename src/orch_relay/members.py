@@ -1,6 +1,7 @@
 """Atomic membership and key publication, protocol-v2 §19.2 and §19.7."""
 
 from . import proto as P
+from .cutover import guard as cutover_guard
 from .directory import (
     DAY,
     Refusal,
@@ -292,6 +293,7 @@ def dispatch(directory, con, route, ws, body, raw, query, headers, now, state=No
     directory.workspace_access(con, session, ws, write=write)
     if write:
         directory.fence(con, headers, ws, now)
+    cutover_guard(con, ws, now, route)  # E3 (L2-E3-2): membership and card keys are direct routes
     if route in {"grants", "card_key"} and session["kind"] != "device":
         fail("not_eligible")
     directory.authorized(state)  # P3-D32: a pre-check stops here

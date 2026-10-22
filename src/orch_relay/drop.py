@@ -43,6 +43,7 @@ from starlette.routing import Route
 
 from . import proto as P
 from .bridge import refuse
+from .cutover import guard as cutover_guard
 from .directory import DAY, Refusal, fail, pair_revoked
 from .drop_life import TOMBSTONE, Life, state_of, tombstone_until
 from .drop_quota import (
@@ -523,11 +524,19 @@ class Drop:
         ).fetchone()
         return P.parse_json(row[0]) if row else None
 
+    def cutover(self, con, ws):
+        """The one cut-over gate for Drop (cutover.guard); called once the caller is known to belong to `ws`."""
+        cutover_guard(con, ws, self.d.clock(), "drop")
+
     def sees_workspace(self, con, session, ws):
         if session["kind"] == "workspace":
-            return session["subject_id"] == ws
-        scopes = self.member(con, ws, session["subject_id"])
-        return scopes is not None and "look" in scopes
+            seen = session["subject_id"] == ws
+        else:
+            scopes = self.member(con, ws, session["subject_id"])
+            seen = scopes is not None and "look" in scopes
+        if seen:
+            self.cutover(con, ws)
+        return seen
 
     def visible(self, con, session, row):
         """§14.2 item 6: the caller may see this object (any state)."""
@@ -693,6 +702,7 @@ class Drop:
                 decide = "decide"
         else:
             need(ident == ws, "not_eligible", 403)
+        self.cutover(con, ws)  # E3 (L2-E3-2): authorized for this workspace, which is cut over
         if isinstance(o["recipients"], list):
             for target in o["recipients"]:
                 need(target == ws or self.member(con, ws, target) is not None)

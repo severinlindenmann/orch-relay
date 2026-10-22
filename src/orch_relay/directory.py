@@ -1081,6 +1081,9 @@ class Directory:
             session = self.authenticate(con, headers, now, state)
             self.workspace_access(con, session, ws, write=True)
             self.fence(con, headers, ws, now)
+            from .cutover import guard as cutover_guard  # lazy: cutover imports this module
+
+            cutover_guard(con, ws, now, "card_put")
         if not isinstance(card, dict) or not isinstance(card.get("o"), dict):
             fail("malformed")
         # A card names the relay it is for (`relay_url`). One made for another service must not
@@ -1218,6 +1221,9 @@ class Directory:
             if row is None:
                 fail("not_found")
             self.workspace_access(con, session, ident)
+            from .cutover import guard as cutover_guard  # lazy: cutover imports this module
+
+            cutover_guard(con, ident, now, "card_get")
             self.authorized(state)
             return {"card": P.parse_json(row["card"])}
         self.person_access(con, session, ident)
