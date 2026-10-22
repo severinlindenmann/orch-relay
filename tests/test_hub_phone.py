@@ -22,7 +22,12 @@ from orch_relay.app import create_app
 from orch_relay.directory import Refusal
 
 VECTORS = json.loads((Path(__file__).parent / "vectors/hub/vectors_hub.json").read_text())
-ROUTE_CASES = [c for c in VECTORS["cases"] if c["check"] == "relay_route"]
+ROUTE_CASES = [
+    c
+    for c in VECTORS["cases"]
+    if c["check"] == "relay_route"
+    and "cutover" not in c["name"]  # the cut-over cases: test_cutover_gate.py
+]
 ROUTES = VECTORS["phase4"]["relay_routes"]
 CARD = next(c for c in VECTORS["cases"] if c["check"] == "relay_request")["args"]["hub_card"]
 HUB = CARD["o"]["hub_id"]
@@ -36,7 +41,7 @@ MSG = "c8aa32bb1061a22d4186323aa01b2902"
 
 
 def test_vectors_present():
-    assert len(ROUTE_CASES) == 25 and set(ROUTES) == {
+    assert len(ROUTE_CASES) == 25 and set(ROUTES) - {"cutover_get", "cutover_put"} == {
         "mailbox_put",
         "push_put",
         "push_seal",
@@ -65,7 +70,9 @@ def test_route_vector(case):
     }
 
 
-@pytest.mark.parametrize("name", ["push_put", "push_send", "mailbox_put"])
+@pytest.mark.parametrize(
+    "name", ["push_put", "push_send", "mailbox_put", "cutover_put", "cutover_get"]
+)
 def test_signed_bytes_vector(name):
     v = ROUTES[name]
     raw = bytes.fromhex(v["signed_hex"])
