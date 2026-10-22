@@ -7,6 +7,7 @@ CREATE TABLE hub_accounts (
     hk_root_pub TEXT NOT NULL,
     op_cert_id TEXT NOT NULL CHECK (length(op_cert_id) = 32),
     op_seq INTEGER NOT NULL CHECK (op_seq >= 1),
+    expires_ms INTEGER NOT NULL,
     card_seq INTEGER NOT NULL CHECK (card_seq >= 1),
     dev INTEGER NOT NULL CHECK (dev IN (0, 1)),
     card TEXT NOT NULL,
@@ -15,7 +16,7 @@ CREATE TABLE hub_accounts (
 );
 -- Root-signed op-cert revocations (permanent: a row is never updated or deleted). A revocation may
 -- arrive before the hub registers; it is kept so that a card under that op cert is refused.
-CREATE TABLE hub_op_revocations (
+CREATE TABLE hub_op_revoked (
     hub_id TEXT NOT NULL CHECK (length(hub_id) = 32),
     cert_id TEXT NOT NULL CHECK (length(cert_id) = 32),
     revoked_ms INTEGER NOT NULL,

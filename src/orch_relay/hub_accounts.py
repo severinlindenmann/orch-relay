@@ -5,13 +5,13 @@ A hub registers one account by presenting its hub card (`hub.card`, signed by `H
 under `hub_id`, which is derived from `HK_root` and therefore cannot be claimed without that key.
 
   POST /v2/hubs              the hub card              register, or rotate to a newer card
-  POST /v2/hubs/revocations  {hk_root_pub, revocation} a root-signed `hub.op_revoked`
+  POST /v2/hubs/op-revoked   {hk_root_pub, revocation} a root-signed `hub.op_revoked`
   GET  /v2/hubs/{hub_id}     public: the stored card and whether its op cert is revoked
 
 Rules (all fail closed, no secret is stored or logged, ciphertext-only relay rule untouched):
 - The relay is real (default) or dev (`ORCH_RELAY_DEV=1`). A real relay refuses `dev: true` objects
   (`dev_refused`); a dev relay refuses `dev: false` (`dev_mismatch`). The marker is the relay's own
-  configuration, never a field of the card. Revocations are never refused for their marker (L2-8).
+  configuration, never a field of the card. An op-cert revocation is never refused for their marker (L2-8).
 - Order between cards is the root-signed `op_seq` first (a lower one, or the same one under another
   `cert_id`, is `stale_op_cert` whatever its `card_seq`), `card_seq` only within one op cert (`stale_card`).
   Another `hk_root_pub` under a held `hub_id` cannot occur (the id is derived from the root); it is
@@ -32,6 +32,7 @@ import os
 import re
 import sqlite3
 import threading
+from pathlib import Path
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -52,7 +53,6 @@ REGISTER_PER_HOUR = 60  # per canonical client address
 READ_PER_HOUR = 600
 MAX_ACCOUNTS = 1000  # ORCH_RELAY_HUB_ACCOUNTS
 MAX_REVOCATIONS_PER_HUB = 64
-MAX_PENDING_REVOCATIONS = 4096  # revocations of hubs that hold no account here
 
 STATUS = {
     "bad_signature": 401,
@@ -63,6 +63,7 @@ STATUS = {
     "stale_op_cert": 409,
     "stale_card": 409,
     "unknown_hub": 404,
+    "not_allowed": 403,
     "quota_exceeded": 429,
 }
 
@@ -256,17 +257,27 @@ def verify_card(card, now, dev_mode, revoked=frozenset(), held=None):
 
 
 class HubAccounts:
-    def __init__(self, directory, dev_mode=False, max_accounts=MAX_ACCOUNTS):
+    def __init__(self, directory, dev_mode=False, max_accounts=MAX_ACCOUNTS, allowlist=None):
         self.d = directory
+        # Operator allowlist of hk_root_pub (one b64u key per line, `#` comments): the only roots that
+        # may CREATE an account. Unset or unreadable = nobody (fail closed). Rotation of an existing
+        # account needs no entry.
+        self.allowlist = allowlist
         self.dev_mode = dev_mode
         self.max_accounts = max_accounts
         self.mutex = threading.Lock()
 
     def revoked_set(self, con, hid):
         return frozenset(
-            r[0]
-            for r in con.execute("SELECT cert_id FROM hub_op_revocations WHERE hub_id=?", (hid,))
+            r[0] for r in con.execute("SELECT cert_id FROM hub_op_revoked WHERE hub_id=?", (hid,))
         )
+
+    def allowed(self, root_text):
+        try:
+            lines = Path(self.allowlist).read_text().splitlines() if self.allowlist else []
+        except (OSError, UnicodeError):
+            return False
+        return any(line.split("#")[0].strip() == root_text for line in lines)
 
     def charge(self, purpose, address, cap):
         now = self.d.clock()
@@ -296,16 +307,19 @@ class HubAccounts:
                 hid = o["hub_id"]
                 text = P.cj(card).decode()
                 if row is None:
+                    if not self.allowed(o["hk_root_pub"]):
+                        refuse("not_allowed")
                     (count,) = con.execute("SELECT count(*) FROM hub_accounts").fetchone()
                     if count >= self.max_accounts:
                         refuse("quota_exceeded", 60)
                     con.execute(
-                        "INSERT INTO hub_accounts VALUES (?,?,?,?,?,?,?,?,?)",
+                        "INSERT INTO hub_accounts VALUES (?,?,?,?,?,?,?,?,?,?)",
                         (
                             hid,
                             o["hk_root_pub"],
                             op["cert_id"],
                             op["op_seq"],
+                            op["expires_ms"],
                             o["card_seq"],
                             int(o["dev"]),
                             text,
@@ -316,9 +330,18 @@ class HubAccounts:
                     created = True
                 else:
                     con.execute(
-                        "UPDATE hub_accounts SET op_cert_id=?, op_seq=?, card_seq=?, dev=?, "
+                        "UPDATE hub_accounts SET op_cert_id=?, op_seq=?, expires_ms=?, card_seq=?, dev=?, "
                         "card=?, updated_ms=? WHERE hub_id=?",
-                        (op["cert_id"], op["op_seq"], o["card_seq"], int(o["dev"]), text, now, hid),
+                        (
+                            op["cert_id"],
+                            op["op_seq"],
+                            op["expires_ms"],
+                            o["card_seq"],
+                            int(o["dev"]),
+                            text,
+                            now,
+                            hid,
+                        ),
                     )
                     created = False
         return {
@@ -346,35 +369,39 @@ class HubAccounts:
                     "SELECT 1 FROM hub_accounts WHERE hub_id=?", (o["hub_id"],)
                 ).fetchone()
                 have = con.execute(
-                    "SELECT 1 FROM hub_op_revocations WHERE hub_id=? AND cert_id=?",
+                    "SELECT 1 FROM hub_op_revoked WHERE hub_id=? AND cert_id=?",
                     (o["hub_id"], o["cert_id"]),
                 ).fetchone()
+                if known is None and not self.allowed(body["hk_root_pub"]):
+                    # accepted and ignored: stores nothing for a root the operator never admitted
+                    return {
+                        "hub_id": o["hub_id"],
+                        "cert_id": o["cert_id"],
+                        "revoked": False,
+                        "ignored": "unknown_hub",
+                    }
                 if have is None:  # permanent: a repeated revocation changes nothing
                     (per_hub,) = con.execute(
-                        "SELECT count(*) FROM hub_op_revocations WHERE hub_id=?", (o["hub_id"],)
+                        "SELECT count(*) FROM hub_op_revoked WHERE hub_id=?", (o["hub_id"],)
                     ).fetchone()
                     if per_hub >= MAX_REVOCATIONS_PER_HUB:
                         refuse("quota_exceeded", 60)
-                    if known is None:
-                        (pending,) = con.execute(
-                            "SELECT count(*) FROM hub_op_revocations WHERE hub_id NOT IN "
-                            "(SELECT hub_id FROM hub_accounts)"
-                        ).fetchone()
-                        if pending >= MAX_PENDING_REVOCATIONS:
-                            refuse("quota_exceeded", 60)
                     con.execute(
-                        "INSERT INTO hub_op_revocations VALUES (?,?,?,?)",
+                        "INSERT INTO hub_op_revoked VALUES (?,?,?,?)",
                         (o["hub_id"], o["cert_id"], o["revoked_ms"], now),
                     )
         return {"hub_id": o["hub_id"], "cert_id": o["cert_id"], "revoked": True}
 
     def current(self, con, hid):
-        """The stored card of a hub if its op cert is not revoked (check at use, contract §5), else
-        None. The caller supplies a connection (read or write)."""
+        """The stored card of a hub, only if it may be used now (check at use, contract §5): the op cert
+        is not revoked, not expired (`now >= expires_ms`), and the card's dev marker matches this
+        relay. Else None. The caller supplies a connection (read or write)."""
         row = con.execute(
-            "SELECT card, op_cert_id, dev FROM hub_accounts WHERE hub_id=?", (hid,)
+            "SELECT card, op_cert_id, dev, expires_ms FROM hub_accounts WHERE hub_id=?", (hid,)
         ).fetchone()
         if row is None or row[1] in self.revoked_set(con, hid):
+            return None
+        if self.d.clock() >= row[3] or bool(row[2]) != self.dev_mode:
             return None
         return P.parse_json(row[0].encode())
 
@@ -406,7 +433,7 @@ def dev_from_env(env=os.environ):
 def install(app):
     d = app.state.directory
     cap = int(os.environ.get("ORCH_RELAY_HUB_ACCOUNTS", MAX_ACCOUNTS))
-    hubs = HubAccounts(d, dev_from_env(), cap)
+    hubs = HubAccounts(d, dev_from_env(), cap, os.environ.get("ORCH_RELAY_HUB_ALLOWLIST"))
     app.state.hub_accounts = hubs
 
     def address_of(request):
@@ -443,7 +470,7 @@ def install(app):
         return JSONResponse(result, headers={"Cache-Control": "no-store"})
 
     app.add_api_route("/v2/hubs", endpoint("register"), methods=["POST"])
-    app.add_api_route("/v2/hubs/revocations", endpoint("revoke"), methods=["POST"])
+    app.add_api_route("/v2/hubs/op-revoked", endpoint("revoke"), methods=["POST"])
     app.add_api_route("/v2/hubs/{hub_id_text}", show, methods=["GET"])
     return hubs
 

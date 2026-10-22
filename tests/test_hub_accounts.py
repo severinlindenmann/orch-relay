@@ -98,8 +98,11 @@ def card2(card_seq=1, dev=True, **kw):
     return make_card(ROOT, OP2, op_cert(ROOT, OP2, 2, "bb", dev), card_seq, dev=dev, **kw)
 
 
-def make_client(tmp_path, monkeypatch, dev):
+def make_client(tmp_path, monkeypatch, dev, allow=(ROOT, ROGUE)):
     clear(monkeypatch)
+    listing = tmp_path / "hub-allowlist.txt"
+    listing.write_text("# operator allowlist\n" + "".join(f"{k.text}  # fake\n" for k in allow))
+    monkeypatch.setenv("ORCH_RELAY_HUB_ALLOWLIST", str(listing))
     if dev:
         monkeypatch.setenv("ORCH_RELAY_DEV", "1")
     else:
@@ -130,7 +133,7 @@ def put(client, card):
 
 def revoke(client, root, cert_id, signer=None, dev=True):
     body = {"hk_root_pub": root.text, "revocation": revocation(signer or root, cert_id, dev)}
-    return client.post("/v2/hubs/revocations", json=body)
+    return client.post("/v2/hubs/op-revoked", json=body)
 
 
 def err(r, status, code):
@@ -219,6 +222,53 @@ def test_revocation(c):
     assert c.get(f"/v2/hubs/{HID}").json()["revoked"] is False
 
 
+def test_not_allowlisted_root_cannot_create_but_listed_can_rotate(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch, dev=True, allow=(ROOT,))
+    with client:
+        rogue = make_card(ROGUE, Key("hk_op_rogue"), op_cert(ROGUE, Key("hk_op_rogue")))
+        err(put(client, rogue), 403, "not_allowed")
+        assert put(client, card1()).status_code == 200
+        # removing the entry later does not strand an existing account's rotation
+        (tmp_path / "hub-allowlist.txt").write_text("")
+        assert put(client, card2()).status_code == 200
+        err(
+            put(client, make_card(ROGUE, Key("hk_op_rogue"), op_cert(ROGUE, Key("hk_op_rogue")))),
+            403,
+            "not_allowed",
+        )
+        (tmp_path / "hub-allowlist.txt").unlink()  # unreadable list = nobody
+        err(put(client, rogue), 403, "not_allowed")
+    client.__exit__(None, None, None) if False else None
+
+
+def test_revocation_for_unadmitted_root_is_ignored_and_stores_nothing(tmp_path, monkeypatch):
+    client = make_client(tmp_path, monkeypatch, dev=True, allow=(ROOT,))
+    with client:
+        r = revoke(client, ROGUE, "aa" * 16)
+        assert (
+            r.status_code == 200
+            and r.json()["ignored"] == "unknown_hub"
+            and r.json()["revoked"] is False
+        )
+        with closing(db.connect(client.app.state.directory.path)) as con:
+            assert con.execute("SELECT count(*) FROM hub_op_revoked").fetchone() == (0,)
+        assert (
+            revoke(client, ROOT, "aa" * 16).json()["revoked"] is True
+        )  # allowlisted, before registration
+
+
+def test_current_checks_expiry_revocation_and_dev_at_use(c):
+    put(c, card1())
+    hubs, d = c.app.state.hub_accounts, c.app.state.directory
+    with closing(db.connect(d.path)) as con:
+        assert hubs.current(con, HID) is not None
+        d.clock = lambda: NOW + 10**9  # op cert expires_ms = NOW + 10**9
+        assert hubs.current(con, HID) is None
+        d.clock = lambda: NOW
+        hubs.dev_mode = False  # the relay changed mode under a stored dev card
+        assert hubs.current(con, HID) is None
+
+
 def test_revocation_before_registration_and_dev_marker_not_checked(real):
     # L2-8: a root-signed revocation is accepted whatever its dev marker (here dev:true at a real relay)
     assert revoke(real, ROOT, "aa" * 16, dev=True).status_code == 200
@@ -236,7 +286,7 @@ def test_malformed_bodies(c):
     assert (
         c.post("/v2/hubs", content=b"{}", headers={"content-type": "text/plain"}).status_code == 400
     )
-    err(c.post("/v2/hubs/revocations", json={"hk_root_pub": ROOT.text}), 400, "malformed")
+    err(c.post("/v2/hubs/op-revoked", json={"hk_root_pub": ROOT.text}), 400, "malformed")
     assert c.get("/v2/hubs/NOT-HEX").status_code == 400
 
 
@@ -255,6 +305,7 @@ def test_account_cap_and_rate_limit(c):
 
 def test_per_workspace_accounts_unaffected(tmp_path, monkeypatch):
     clear(monkeypatch)
+    monkeypatch.delenv("ORCH_RELAY_HUB_ALLOWLIST", raising=False)
     with TestClient(create_app(tmp_path / "data")) as client:
         d = client.app.state.directory
         seed_push(d)
@@ -270,8 +321,8 @@ def test_per_workspace_accounts_unaffected(tmp_path, monkeypatch):
 
         before = snapshot()
         assert before["accounts"] and before["workspaces"]
-        # a real relay refuses the dev card, a hub card on it changes no workspace/person account
-        assert put(client, card1(dev=False)).status_code == 200
+        # no allowlist: no hub account is created, and no workspace/person account changes
+        err(put(client, card1(dev=False)), 403, "not_allowed")
         assert snapshot() == before
         with closing(db.connect(d.path)) as con:
-            assert con.execute("SELECT count(*) FROM hub_accounts").fetchone() == (1,)
+            assert con.execute("SELECT count(*) FROM hub_accounts").fetchone() == (0,)
