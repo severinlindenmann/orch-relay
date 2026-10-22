@@ -241,20 +241,24 @@ def test_not_allowlisted_root_cannot_create_but_listed_can_rotate(tmp_path, monk
     client.__exit__(None, None, None) if False else None
 
 
-def test_revocation_for_unadmitted_root_is_ignored_and_stores_nothing(tmp_path, monkeypatch):
+def test_revocation_for_unadmitted_root_is_refused_and_stores_nothing(tmp_path, monkeypatch):
     client = make_client(tmp_path, monkeypatch, dev=True, allow=(ROOT,))
     with client:
-        r = revoke(client, ROGUE, "aa" * 16)
-        assert (
-            r.status_code == 200
-            and r.json()["ignored"] == "unknown_hub"
-            and r.json()["revoked"] is False
-        )
+        err(revoke(client, ROGUE, "aa" * 16), 403, "unknown_hub")
         with closing(db.connect(client.app.state.directory.path)) as con:
             assert con.execute("SELECT count(*) FROM hub_op_revoked").fetchone() == (0,)
-        assert (
-            revoke(client, ROOT, "aa" * 16).json()["revoked"] is True
-        )  # allowlisted, before registration
+        # allowlisted root, no account yet: stored, and applied when the hub registers
+        assert revoke(client, ROOT, "aa" * 16).json()["revoked"] is True
+        err(put(client, card1()), 403, "revoked")
+        assert put(client, card2()).status_code == 200  # a fresh op cert is fine
+        # storage bound per hub
+        for n in range(H.MAX_REVOCATIONS_PER_HUB):
+            client.app.state.directory.windows.clear()
+            r = revoke(client, ROOT, f"{n + 16:032x}")
+            if r.status_code != 200:
+                break
+        client.app.state.directory.windows.clear()
+        err(revoke(client, ROOT, "ff" * 16), 429, "quota_exceeded")
 
 
 def test_current_checks_expiry_revocation_and_dev_at_use(c):

@@ -373,13 +373,10 @@ class HubAccounts:
                     (o["hub_id"], o["cert_id"]),
                 ).fetchone()
                 if known is None and not self.allowed(body["hk_root_pub"]):
-                    # accepted and ignored: stores nothing for a root the operator never admitted
-                    return {
-                        "hub_id": o["hub_id"],
-                        "cert_id": o["cert_id"],
-                        "revoked": False,
-                        "ignored": "unknown_hub",
-                    }
+                    # explicit refusal: such a root can never register here, its revocation is moot
+                    error = Refusal("unknown_hub")
+                    error.status = 403
+                    raise error
                 if have is None:  # permanent: a repeated revocation changes nothing
                     (per_hub,) = con.execute(
                         "SELECT count(*) FROM hub_op_revoked WHERE hub_id=?", (o["hub_id"],)
