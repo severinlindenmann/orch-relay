@@ -80,6 +80,10 @@ def create_app(
 
     install_hooks(app)  # orch-relay #81: webhook doorbells for follow-ups
 
+    from .hub_accounts import install as install_hub_accounts
+
+    install_hub_accounts(app)  # E1: hub accounts by hub card (ORCH_RELAY_DEV = dev relay)
+
     @app.get("/healthz")
     def healthz() -> dict:
         return {"ok": True, "version": __version__, "instance": name}
