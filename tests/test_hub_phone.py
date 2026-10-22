@@ -579,3 +579,78 @@ def test_target_cap_comes_from_the_environment(tmp_path, monkeypatch):
         err(h.push_put(ch=rid(3)), 429, "quota_exceeded")
     finally:
         client.__exit__(None, None, None)
+
+
+_OK_PUT = json.dumps({"v": 2, "env": "sandbox", "topic": "t", "token": "A" * 43}).encode()
+
+
+@pytest.mark.parametrize(
+    ("method", "tail", "query", "body", "code"),
+    [
+        # (1) a query is refused before anything else, even on an unknown path or a bad {ch}
+        ("GET", f"/mailbox/{CH}/{MSG}", "after=1", b"", "malformed"),
+        ("GET", "/settings", "x=1", b"", "malformed"),
+        ("GET", "/push/zz", "x=1", b"", "malformed"),
+        # (2) under mailbox/ with one or two further segments a bad {ch} is malformed, whatever the method
+        ("PUT", "/mailbox/zz", "", b"", "malformed"),
+        ("GET", "/mailbox/zz", "", b"", "malformed"),
+        ("POST", "/mailbox/zz", "", b"", "malformed"),
+        ("GET", f"/mailbox/{'A' * 32}/{MSG}", "", b"", "malformed"),
+        ("PATCH", "/mailbox/zz/" + MSG, "", b"", "malformed"),
+        ("GET", "/mailbox/zz/nothex", "", b"", "malformed"),  # (2) beats the bad {id} of (3)
+        # (3) shapes and methods not in the table are not_found
+        ("PUT", f"/mailbox/{CH}", "", b"", "not_found"),
+        ("GET", f"/mailbox/{CH}/nothex", "", b"", "not_found"),
+        ("PUT", f"/mailbox/{CH}/nothex", "", b"junk", "not_found"),  # (3) beats the body of (4)
+        ("GET", f"/mailbox/{CH}/{MSG}/more", "", b"", "not_found"),
+        ("GET", "/mailbox/zz/a/b", "", b"", "not_found"),  # three further segments: no shape
+        (
+            "GET",
+            "/push/zz",
+            "",
+            b"",
+            "not_found",
+        ),  # push: a method the table lacks, even with a bad {ch}
+        ("POST", "/push/zz", "", b"", "not_found"),
+        ("POST", "/push/zz/other", "", b"", "not_found"),
+        ("GET", "/push/zz/send", "", b"", "not_found"),
+        ("POST", f"/push/{CH}/send/x", "", b"", "not_found"),
+        ("PUT", "/nothing", "", b"", "not_found"),
+        ("PUT", "/", "", b"", "not_found"),
+        # (4) the body, then {ch} (push/, for a path and method that are in the table)
+        ("PUT", "/push/zz", "", b"junk", "malformed"),
+        ("PUT", "/push/zz", "", _OK_PUT, "malformed"),  # good body, bad {ch}
+        ("DELETE", "/push/zz", "", b"", "malformed"),
+        ("DELETE", f"/push/{CH}", "", b"{}", "malformed"),
+        ("POST", "/push/zz/send", "", b"", "malformed"),
+        # 413 is found only when {ch} is valid: a bad {ch} stays malformed
+        ("PUT", f"/mailbox/zz/{MSG}", "", b"", "malformed"),
+    ],
+)
+def test_order_of_refusals_matches_the_spec_text(method, tail, query, body, code):
+    """§10.8.1 order of refusals, item by item, with the mixed cases (model: orch-hub
+    `test_order_of_refusals_matches_the_spec_text`)."""
+    with pytest.raises(Refusal) as e:
+        HP.match(method, f"/v2/hubs/{HUB}{tail}", query, HUB, body)
+    assert e.value.code == code
+
+
+def test_too_large_is_found_only_when_the_channel_is_valid(hub):
+    base = hub.base()
+    big = {"v": 2, "c": "A" * 30_000, "ttl_s": 60}
+    err(hub.call("PUT", f"{base}/mailbox/{CH}/{MSG}", big), 413, "too_large")
+    err(hub.call("PUT", f"{base}/mailbox/{'z' * 32}/{MSG}", big), 400, "malformed")
+    outer = hub.outer(MSG)
+    outer = {**outer, "c": "A" * 4000}
+    body = {"v": 2, "outer": outer, "priority": "high", "ttl_s": 1}
+    err(hub.call("POST", f"{base}/push/{CH}/send", body), 413, "too_large")
+    err(hub.call("POST", f"{base}/push/{'z' * 32}/send", body), 400, "malformed")
+
+
+def test_mixed_refusals_over_http(hub):
+    base = hub.base()
+    err(hub.call("GET", f"{base}/push/zz"), 404, "not_found")  # bad {ch} but no such method
+    err(hub.call("DELETE", f"{base}/push/zz"), 400, "malformed")
+    err(hub.call("GET", f"{base}/mailbox/zz/nothex"), 400, "malformed")
+    err(hub.call("GET", f"{base}/mailbox/{CH}/nothex"), 404, "not_found")
+    err(hub.call("GET", f"{base}/push/zz?x=1"), 400, "malformed")

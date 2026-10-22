@@ -17,7 +17,7 @@ route (after authentication), as for v2 push. Tokens are sealed at rest like the
 send hands a `push_send.Send` to the existing outbox/sender, with the hub as workspace/account and the channel as
 device, so budgets, the 24 h dedup LRU, queue admission and APNs delivery are the v2 ones.
 
-Quotas (§10.8.1): ORCH_RELAY_HUB_PUSH_TARGETS targets per hub (default 4096), 256 messages and 4 MiB per (hub, channel) mailbox, 16 KiB per message.
+Quotas (§10.8.1): ORCH_RELAY_HUB_PUSH_TARGETS (the spec's relay config `max_push_targets_per_hub`) targets per hub (default 4096), 256 messages and 4 MiB per (hub, channel) mailbox, 16 KiB per message.
 """
 
 import hashlib
@@ -37,9 +37,7 @@ from .directory import Refusal, fail
 from .push import error_response
 from .push_send import MAX_OUTER, MAX_TTL_S, WAIT_MAX_S, WAIT_MIN_S, Send
 
-MAX_TARGETS_PER_HUB = (
-    4096  # default of ORCH_RELAY_HUB_PUSH_TARGETS (orchestrator D10-1: 64 was too low)
-)
+MAX_TARGETS_PER_HUB = 4096  # default of ORCH_RELAY_HUB_PUSH_TARGETS, which is the spec's `max_push_targets_per_hub` (§10.8.1)
 MAX_MESSAGES = 256
 MAX_MAILBOX_BYTES = 4 * 1024 * 1024
 MAX_MESSAGE = 16 * 1024
@@ -372,6 +370,7 @@ class HubPhone:
 
 def install(app):
     d, push = app.state.directory, app.state.push
+    # ORCH_RELAY_HUB_PUSH_TARGETS is the spec's relay config `max_push_targets_per_hub` (§10.8.1, default 4096).
     phone = HubPhone(
         d, push, int(os.environ.get("ORCH_RELAY_HUB_PUSH_TARGETS", MAX_TARGETS_PER_HUB))
     )
