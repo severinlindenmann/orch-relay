@@ -1,9 +1,11 @@
 # vectors_hub.json
 
 Verbatim copy of `vectors/vectors_hub.json` of orch-hub (contract `orch.hub/0`, `docs/protocol.md` §15),
-sha256 `ffb6b2b8f43c8faaf03ca9ad43329d5490a631a95d8a0470c30784400d38b4ac`, orch-hub `develop` at `28f46b5`
-(PR #22 merged, follow-up `29bf048`: phase-4 contract, 584 vectors, `relay_request` cases of §10.8). One shared
+sha256 `5360cf45b4c1f980dbfbe728a414fdfaf7302aa3183327a8464d38e919f2d506`, orch-hub branch `v3-d10-relay-client` at `1081994`
+(PR orch-hub#27, not merged yet: adds the 25 `relay_route` cases and `phase4.relay_routes` of §10.8.1/§10.8.2 on top of the
+phase-4 contract of PR #22; refresh from `develop` once #27 merges). One shared
 file across repos (V3-D8): do not edit here, re-copy from orch-hub. All keys are FAKE and test-only.
 The relay runs the `card`, `card_text`, `op_cert` and `op_revoked` cases (`tests/test_hub_accounts_vectors.py`;
 cases with a `pinned_root` are skipped: the relay pins no root, a hub account is keyed by `hub_id`, which is derived
-from the root) and the 24 `relay_request` cases (`tests/test_hub_relay_requests.py`).
+from the root) the 24 `relay_request` cases (`tests/test_hub_relay_requests.py`) and the 25 `relay_route` cases plus the signed
+requests of `phase4.relay_routes` (`tests/test_hub_phone.py`).
