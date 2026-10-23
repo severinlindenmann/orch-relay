@@ -32,6 +32,7 @@ from starlette.concurrency import run_in_threadpool
 from . import proto as P
 from .apns import MAX_STREAMS, Apns, HttpxTransport, apns_body
 from .bridge import refuse
+from .cutover import guard as cutover_guard
 from .directory import Buckets, Refusal, fail, revoked_sql
 
 log = logging.getLogger(__name__)
@@ -338,6 +339,9 @@ def send(push, headers, ws, raw):
             if session["kind"] != "workspace" or session["subject_id"] != ws:
                 fail("not_eligible")
             d.fence(con, headers, ws, now)
+            cutover_guard(
+                con, ws, now, "push_send"
+            )  # E3: a cut-over workspace sends no direct push
         except Refusal:
             d.throttle(session, now)
             raise

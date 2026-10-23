@@ -80,6 +80,25 @@ def create_app(
 
     install_hooks(app)  # orch-relay #81: webhook doorbells for follow-ups
 
+    from .hub_accounts import install as install_hub_accounts
+
+    install_hub_accounts(app)  # E1: hub accounts by hub card (ORCH_RELAY_DEV = dev relay)
+
+    from .cutover import install as install_cutover
+
+    # E3: per-workspace cut-over to a hub. Before any `/v2/hubs/{hub}/{tail:path}` catch-all (first match wins).
+    install_cutover(app)
+
+    from .hub_phone import install as install_hub_phone
+
+    install_hub_phone(
+        app
+    )  # E2: hub push targets, push send and channel mailboxes (signed by HK_op)
+
+    from .hub_channels import install as install_hub_channels
+
+    install_hub_channels(app)  # E5: a phone reads its own channel mailbox (§10.8.4)
+
     @app.get("/healthz")
     def healthz() -> dict:
         return {"ok": True, "version": __version__, "instance": name}
