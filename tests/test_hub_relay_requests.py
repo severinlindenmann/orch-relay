@@ -16,8 +16,7 @@ from test_hub_accounts import HID, NOW, OP1, ROGUE, ROOT, Key, card1, make_card,
 from orch_relay import hub_accounts as H
 from orch_relay import proto as P
 from orch_relay.app import create_app
-from orch_relay.directory import Refusal
-from orch_relay.push import error_response
+from orch_relay.common import Refusal, error_response
 
 VECTORS = json.loads((Path(__file__).parent / "vectors/hub/vectors_hub.json").read_text())
 CASES = [c for c in VECTORS["cases"] if c["check"] == "relay_request"]
@@ -37,7 +36,7 @@ def relay(tmp_path, monkeypatch):
         client = TestClient(create_app(tmp_path / ("data-dev" if dev else "data-real")))
         client.__enter__()
         client.app.state.clock = [now]
-        client.app.state.directory.clock = lambda: client.app.state.clock[0]
+        client.app.state.core.clock = lambda: client.app.state.clock[0]
         made.append(client)
         return client
 
@@ -50,7 +49,7 @@ def relay(tmp_path, monkeypatch):
 def insert_account(client, card):
     """Store a card as the relay would hold it (bypassing registration so a dev card can sit on a real relay)."""
     o, op = card["o"], card["op_cert"]["o"]
-    d = client.app.state.directory
+    d = client.app.state.core
     with d.lock:
         con = d.connection("write")
         with con:
@@ -76,7 +75,7 @@ def run_vector(relay, a):
     card = a["hub_card"]
     if card["o"]["hub_id"] == a["hub_id"]:
         insert_account(client, card)
-    d = client.app.state.directory
+    d = client.app.state.core
     with d.lock:
         con = d.connection("write")
         with con:
@@ -303,7 +302,7 @@ def test_nonces_are_pruned(http):
     assert post(http, signed_headers(OP1)).status_code == 200
     http.app.state.clock[0] = NOW + 250_000
     assert post(http, signed_headers(OP1, ts=NOW + 250_000, nonce=b"\x09" * 16)).status_code == 200
-    d = http.app.state.directory
+    d = http.app.state.core
     with d.reader("query") as con:
         assert con.execute("SELECT count(*) FROM hub_request_nonces").fetchone()[0] == 1
 

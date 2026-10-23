@@ -19,7 +19,7 @@ from orch_relay import hub_accounts as H
 from orch_relay import hub_channels as HC
 from orch_relay import proto as P
 from orch_relay.app import create_app
-from orch_relay.directory import Refusal
+from orch_relay.common import Refusal
 
 VECTORS = json.loads((Path(__file__).parent / "vectors/hub/vectors_hub.json").read_text())
 REQUEST_CASES = [c for c in VECTORS["cases"] if c["check"] == "channel_request"]
@@ -48,7 +48,7 @@ def run_vector(tmp_path, monkeypatch, a):
     from fastapi.testclient import TestClient
 
     with TestClient(create_app(tmp_path / "data")) as client:
-        d = client.app.state.directory
+        d = client.app.state.core
         d.clock = lambda: a["now_ms"]
         card = a["hub_card"]
         if card["o"]["hub_id"] == a["hub_id"]:
@@ -281,7 +281,7 @@ def test_revocation_survives_a_restart(hub, phone, tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     with TestClient(create_app(tmp_path / "data")) as again:  # a fresh process on the same database
-        again.app.state.directory.clock = lambda: NOW
+        again.app.state.core.clock = lambda: NOW
         again.app.state.clock = [NOW]
         err(Phone(again).list(), 403, "channel_revoked")
 
