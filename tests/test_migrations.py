@@ -1,45 +1,61 @@
 import sqlite3
+import threading
 
 import pytest
 
 from orch_relay import db
 
+TABLES = {
+    "hub_accounts",
+    "hub_op_revoked",
+    "hub_request_nonces",
+    "hub_push_targets",
+    "hub_mailbox",
+    "hub_revoked_channels",
+    "hub_channel_nonces",
+}
 
-def test_migrate_creates_schema_and_wal(tmp_path):
+
+def test_a_fresh_database_gets_the_one_schema_in_wal(tmp_path):
     path = tmp_path / "relay.sqlite3"
-    applied = db.migrate(path)
-    assert applied and applied[0].startswith("0001")
+    assert db.init_schema(path) is True
     con = sqlite3.connect(path)
     assert con.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    assert con.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert {"schema_migrations", "meta"} <= names
-    rows = con.execute("SELECT version FROM schema_migrations").fetchall()
-    assert len(rows) == len(applied)
+    assert names == TABLES  # nothing of the per-workspace relay, no migration bookkeeping
 
 
-def test_migrate_is_idempotent(tmp_path):
+def test_init_is_idempotent(tmp_path):
     path = tmp_path / "relay.sqlite3"
-    db.migrate(path)
-    assert db.migrate(path) == []
+    db.init_schema(path)
+    assert db.init_schema(path) is False
 
 
-def test_migrate_applies_only_pending(tmp_path, monkeypatch):
-    mdir = tmp_path / "m"
-    mdir.mkdir()
-    (mdir / "0001_a.sql").write_text("CREATE TABLE a (x);")
-    path = tmp_path / "r.sqlite3"
-    assert db.migrate(path, mdir) == ["0001_a"]
-    (mdir / "0002_b.sql").write_text("CREATE TABLE b (x);")
-    assert db.migrate(path, mdir) == ["0002_b"]
-    assert db.migrate(path, mdir) == []
+def test_a_database_of_another_schema_is_refused_not_upgraded(tmp_path):
+    path = tmp_path / "relay.sqlite3"
+    con = sqlite3.connect(path)
+    con.execute("CREATE TABLE schema_migrations (version TEXT)")  # what the old 25 migrations left
+    con.commit()
+    con.close()
+    with pytest.raises(RuntimeError, match="another schema"):
+        db.init_schema(path)
+    con = sqlite3.connect(path)
+    names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    assert names == {"schema_migrations"}  # nothing was created or changed
 
 
-def test_concurrent_migrate_same_fresh_db(tmp_path):
-    import threading
+def test_a_newer_version_is_refused(tmp_path):
+    path = tmp_path / "relay.sqlite3"
+    db.init_schema(path)
+    con = sqlite3.connect(path)
+    con.execute(f"PRAGMA user_version={db.SCHEMA_VERSION + 1}")
+    con.close()
+    with pytest.raises(RuntimeError, match="another schema"):
+        db.init_schema(path)
 
-    mdir = tmp_path / "m"
-    mdir.mkdir()
-    (mdir / "0001_a.sql").write_text("CREATE TABLE a (x);\nALTER TABLE a ADD COLUMN y;")
+
+def test_concurrent_start_on_a_fresh_database(tmp_path):
     path = tmp_path / "r.sqlite3"
     results, errors = [], []
     barrier = threading.Barrier(4)
@@ -47,7 +63,7 @@ def test_concurrent_migrate_same_fresh_db(tmp_path):
     def run():
         barrier.wait()
         try:
-            results.append(db.migrate(path, mdir))
+            results.append(db.init_schema(path))
         except Exception as e:  # noqa: BLE001
             errors.append(e)
 
@@ -55,143 +71,4 @@ def test_concurrent_migrate_same_fresh_db(tmp_path):
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert not errors
-    assert sorted(len(r) for r in results) == [0, 0, 0, 1]
-
-
-def test_failed_migration_rolls_back(tmp_path):
-    import pytest
-
-    mdir = tmp_path / "m"
-    mdir.mkdir()
-    (mdir / "0001_bad.sql").write_text("CREATE TABLE a (x);\nINSERT INTO nope VALUES (1);")
-    path = tmp_path / "r.sqlite3"
-    with pytest.raises(sqlite3.OperationalError):
-        db.migrate(path, mdir)
-    con = sqlite3.connect(path)
-    names = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert "a" not in names
-
-
-def test_0010_rekeys_revocations_per_pair_and_keeps_rows(tmp_path):
-    """orch-core #397: 0010 rebuilds the 0002 revocations table keyed by (device_id, person_id),
-    keeping every existing row and its feed cursor, and without the foreign key to devices."""
-    import shutil
-    from importlib import resources
-
-    mdir = tmp_path / "m"
-    mdir.mkdir()
-    src = resources.files("orch_relay").joinpath("migrations")
-    for e in src.iterdir():
-        if e.name.endswith(".sql") and e.name < "0010":
-            shutil.copy(str(e), mdir / e.name)
-    path = tmp_path / "r.sqlite3"
-    db.migrate(path, mdir)
-    con = sqlite3.connect(path)
-    with con:
-        con.execute("INSERT INTO accounts VALUES ('p1','pk',0)")
-        con.execute("INSERT INTO devices VALUES ('d1','p1','{}','s','k','[]',NULL)")
-        con.execute("INSERT INTO revocations VALUES ('d1','p1','{}','lost',5,7)")
-    con.close()
-    shutil.copy(str(src.joinpath("0010_revocation_pairs.sql")), mdir / "0010_revocation_pairs.sql")
-    assert db.migrate(path, mdir) == ["0010_revocation_pairs"]
-    con = sqlite3.connect(path)
-    con.execute("PRAGMA foreign_keys=ON")
-    assert con.execute("SELECT * FROM revocations").fetchall() == [("d1", "p1", "{}", "lost", 5, 7)]
-    with con:  # another person's pair of the same id, for a device that is not registered at all
-        con.execute("INSERT INTO revocations VALUES ('d1','p2','{}','compromised',6,8)")
-        con.execute("INSERT INTO revocations VALUES ('d9','p2','{}','lost',6,9)")
-    with pytest.raises(sqlite3.IntegrityError):
-        con.execute("INSERT INTO revocations VALUES ('d1','p1','{}','lost',6,10)")
-    index = con.execute("SELECT sql FROM sqlite_master WHERE name='revocation_feed'").fetchone()
-    assert index and "person_id, cursor" in index[0]
-
-
-def test_0011_indexes_chain_revocations_by_device_and_keeps_rows(tmp_path):
-    """P3-D30: 0011 adds the checkpoint_revocations(device_id, person_id) index the registration
-    refusal and the per-pair revocation list use; rows are kept, it applies once and re-running its
-    SQL is harmless (IF NOT EXISTS)."""
-    import shutil
-    from importlib import resources
-
-    mdir = tmp_path / "m"
-    mdir.mkdir()
-    src = resources.files("orch_relay").joinpath("migrations")
-    for e in src.iterdir():
-        if e.name.endswith(".sql") and e.name < "0011":
-            shutil.copy(str(e), mdir / e.name)
-    path = tmp_path / "r.sqlite3"
-    db.migrate(path, mdir)
-    row = ("w", "d1", "p1", "lost", b"{}", b"{}", "pk", "r", "t")
-    con = sqlite3.connect(path)
-    with con:
-        con.execute("INSERT INTO checkpoint_revocations VALUES (?,?,?,?,?,?,?,?,?)", row)
-    con.close()
-    name = "0011_registration_lookup.sql"
-    shutil.copy(str(src.joinpath(name)), mdir / name)
-    assert db.migrate(path, mdir) == ["0011_registration_lookup"]
-    assert db.migrate(path, mdir) == []
-    con = sqlite3.connect(path)
-    assert con.execute("SELECT * FROM checkpoint_revocations").fetchall() == [row]
-    index = con.execute(
-        "SELECT sql FROM sqlite_master WHERE name='checkpoint_revocation_device'"
-    ).fetchone()
-    assert index and "(device_id, person_id)" in index[0]
-    plan = con.execute(
-        "EXPLAIN QUERY PLAN SELECT 1 FROM checkpoint_revocations WHERE device_id='d1' LIMIT 1"
-    ).fetchall()
-    assert any("checkpoint_revocation_device" in str(r) for r in plan)
-    with con:
-        con.execute(src.joinpath(name).read_text().split("\n")[-2])  # the CREATE, again: no-op
-
-
-def test_0012_drops_evidence_only_device_rows_and_keeps_revocations(tmp_path):
-    """P3-D30 round 2 (review R1): 0012 deletes device rows of evidence-only persons (and their
-    sessions); accounts, evidence_persons, other devices and every revocation stay."""
-    import shutil
-    from importlib import resources
-
-    mdir = tmp_path / "m"
-    mdir.mkdir()
-    src = resources.files("orch_relay").joinpath("migrations")
-    for e in src.iterdir():
-        if e.name.endswith(".sql") and e.name < "0012":
-            shutil.copy(str(e), mdir / e.name)
-    path = tmp_path / "r.sqlite3"
-    db.migrate(path, mdir)
-    con = sqlite3.connect(path)
-    with con:
-        con.execute("INSERT INTO accounts VALUES ('pe','pk',0),('pa','pk2',0)")
-        con.execute("INSERT INTO evidence_persons VALUES ('pe')")
-        con.execute("INSERT INTO devices VALUES ('de','pe','{}','s','k','[]',NULL)")
-        con.execute("INSERT INTO devices VALUES ('da','pa','{}','s','k','[]',NULL)")
-        con.execute("INSERT INTO sessions VALUES ('t1','device','de',9),('t2','device','da',9)")
-        con.execute("INSERT INTO revocations VALUES ('de','pe','{}','lost',5,7)")
-        # A registered AND revoked device of a real account (delta review S-a): it stays.
-        con.execute("INSERT INTO revocations VALUES ('da','pa','{}','lost',5,8)")
-        con.execute("INSERT INTO revocations VALUES ('da','pe','{}','compromised',5,9)")
-    con.close()
-    name = "0012_drop_evidence_devices.sql"
-    shutil.copy(str(src.joinpath(name)), mdir / name)
-    assert db.migrate(path, mdir) == ["0012_drop_evidence_devices"]
-    assert db.migrate(path, mdir) == []
-    con = sqlite3.connect(path)
-    assert con.execute("SELECT device_id FROM devices").fetchall() == [("da",)]
-    assert con.execute("SELECT token_hash FROM sessions").fetchall() == [("t2",)]
-    assert con.execute("SELECT person_id FROM evidence_persons").fetchall() == [("pe",)]
-    assert con.execute("SELECT COUNT(*) FROM accounts").fetchone()[0] == 2
-    assert con.execute("SELECT * FROM revocations ORDER BY cursor").fetchall() == [
-        ("de", "pe", "{}", "lost", 5, 7),
-        ("da", "pa", "{}", "lost", 5, 8),
-        ("da", "pe", "{}", "compromised", 5, 9),
-    ]
-
-
-def test_0013_adds_the_unpublished_ack_table_and_keeps_checkpoint_unpublished(tmp_path):
-    """P3-D31: the view is derived; only the host's high-water mark is stored. The old
-    checkpoint_unpublished table stays (no destructive migration) but is no longer written."""
-    path = tmp_path / "relay.sqlite3"
-    assert "0013_unpublished_acks" in db.migrate(path)
-    con = sqlite3.connect(path)
-    columns = [r[1] for r in con.execute("PRAGMA table_info(unpublished_acks)")]
-    assert columns == ["workspace_id", "cursor", "gen", "at_ms"]
-    assert con.execute("SELECT count(*) FROM checkpoint_unpublished").fetchone() == (0,)
+    assert sorted(results) == [False, False, False, True]

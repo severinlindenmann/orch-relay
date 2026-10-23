@@ -568,22 +568,6 @@ def test_the_workspace_routes_are_gone_and_the_hub_card_read_stays(hub):
     assert c.post("/v2/hubs/op-revoked", json={}).status_code == 400
 
 
-def test_migration_is_idempotent_and_ordered_after_0022(tmp_path):
-    from importlib import resources
-
-    from orch_relay import db
-
-    names = sorted(e.name for e in resources.files("orch_relay").joinpath("migrations").iterdir())
-    assert names.index("0023_hub_phone.sql") == names.index("0022_hub_request_nonces.sql") + 1
-    path = tmp_path / "relay.db"
-    first = db.migrate(path)
-    assert "0023" in "".join(first) and db.migrate(path) == []
-    sql = resources.files("orch_relay").joinpath("migrations/0023_hub_phone.sql").read_text()
-    con = db.connect(path)
-    con.executescript(sql)  # running the file again changes nothing and fails nowhere
-    con.close()
-
-
 def test_target_cap_comes_from_the_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("ORCH_RELAY_HUB_PUSH_TARGETS", "2")
     client = make(tmp_path, monkeypatch)

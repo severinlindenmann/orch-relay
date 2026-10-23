@@ -3,7 +3,8 @@
 # Deploy orch-relay to the dev VPS (ssh alias "orch-dev", user "deploy").
 # Run from the dev machine: infra/dev/deploy.sh
 # Refuses a dirty git tree unless ORCH_DEPLOY_ALLOW_DIRTY=1 (release is then named ...-dirty-<hash>).
-# Migrations run at `orch-relay serve` startup; a bad one fails the health check and rolls back.
+# The schema is created at `orch-relay serve` startup in a fresh database; a database from another schema makes the
+# start fail (health check fails, the deploy rolls back): wipe it first (stop the unit, delete relay.sqlite3* in the data dir).
 set -euo pipefail
 
 HOST="${ORCH_DEPLOY_HOST:-orch-dev}"

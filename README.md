@@ -17,7 +17,6 @@ shellcheck infra/dev/deploy.sh
 
 ```sh
 export ORCH_RELAY_DATA=./data      # DB: $ORCH_RELAY_DATA/relay.sqlite3 (SQLite, WAL)
-uv run orch-relay migrate          # apply pending migrations (serve also does this at startup)
 uv run orch-relay serve --host 127.0.0.1 --port 8101
 curl http://127.0.0.1:8101/healthz # {"ok":true,"version":"...","instance":"public"}
 ```
@@ -26,7 +25,7 @@ Environment: `ORCH_RELAY_DATA` (data dir), `ORCH_RELAY_PORT` (default port),
 `ORCH_RELAY_INSTANCE` (name reported by `/healthz`; default `public`; the int unit sets `int`).
 Several instances can run side by side with different data dirs and ports.
 
-Migrations run at `serve` startup (a bad migration shows up as a failed deploy health check, which rolls back). They are numbered `.sql` files in `src/orch_relay/migrations/`, tracked in `schema_migrations`.
+The schema is one file, `src/orch_relay/schema.sql`, created in a fresh database at `serve` startup (`PRAGMA user_version`). There are no migrations (V3-D36, no production data): a database from another schema is refused at start with a clear error; stop the relay and delete `relay.sqlite3*` in the data dir.
 
 ## Deploy (dev VPS)
 
