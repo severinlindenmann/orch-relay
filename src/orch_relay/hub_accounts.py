@@ -42,8 +42,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from . import proto as P
-from .directory import HOUR, Refusal
-from .push import error_response, read_body
+from .common import HOUR, Refusal, error_response, read_body
 
 HV = 0
 CLOCK_SKEW_MS = 300_000
@@ -559,7 +558,7 @@ def dev_from_env(env=os.environ):
 
 
 def install(app):
-    d = app.state.directory
+    d = app.state.core
     cap = int(os.environ.get("ORCH_RELAY_HUB_ACCOUNTS", MAX_ACCOUNTS))
     hubs = HubAccounts(d, dev_from_env(), cap, os.environ.get("ORCH_RELAY_HUB_ALLOWLIST"))
     app.state.hub_accounts = hubs

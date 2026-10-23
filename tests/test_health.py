@@ -38,7 +38,7 @@ def test_two_instances_have_separate_dbs(tmp_path):
     for d in (a, b):
         assert (d / "relay.sqlite3").exists()
     con = sqlite3.connect(a / "relay.sqlite3")
-    con.execute("INSERT INTO meta(key, value) VALUES ('x', '1')")
+    con.execute("INSERT INTO hub_request_nonces VALUES (?,?,?)", ("a" * 32, "b" * 32, 1))
     con.commit()
     other = sqlite3.connect(b / "relay.sqlite3")
-    assert other.execute("SELECT count(*) FROM meta WHERE key='x'").fetchone()[0] == 0
+    assert other.execute("SELECT count(*) FROM hub_request_nonces").fetchone()[0] == 0

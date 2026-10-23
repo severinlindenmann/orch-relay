@@ -1,19 +1,10 @@
-"""The host's push send route and APNs delivery (P3-D40b): protocol-v2 §19.10, P3 design §14.3 items 4-7.
+"""APNs delivery of the hub's push sends (D77): the in-memory outbox (budgets, dedup LRU, queue caps) and the sender.
 
-`POST /v2/workspaces/{ws}/push` (W(g), fenced) accepts sealed outer objects for member devices; the relay
-queues one APNs send per registration of each accepted, unbudgeted, not-yet-sent target and delivers them
-best effort (no durable queue, no receipts). Check order, each refusal stopping the request:
+`hub_phone` hands `Send` objects (common.py) to `Outbox.commit`, with the hub as workspace and account and the channel
+as device; the sender drains the per-environment queues to APNs best effort (no durable queue, no receipts).
 
- 1 session (401), W session of this workspace (403 `not_eligible`), the fence (409 `fenced`), then the
-   session's read-class bucket; nothing below has run, so a stale holder spends nobody's budget
- 2 body (400 `malformed`), the request bucket (429), the list epoch (409 `stale_epoch`)
- 3 targets: current members with an unrevoked, unexpired certificate; others are skipped, not refused
- 4 under Directory.lock: the live holders row again (409 `fenced`), then, under the outbox mutex: the
-   dedup LRU, the per-device budgets, the all-or-nothing queue admission (503 `overloaded`), and only
-   then the charges, the LRU entries and the enqueue
-
-Lock order: Directory.lock, then the outbox mutex (which also guards the budgets and the LRU; the
-event loop takes only the mutex, briefly). Delivery runs on the event loop: apns.py.
+Lock order: Core.lock, then the outbox mutex (which also guards the budgets and the LRU; the event loop takes only
+the mutex, briefly). Delivery runs on the event loop: apns.py.
 """
 
 import asyncio
@@ -23,35 +14,22 @@ import os
 import threading
 import time
 from collections import Counter, OrderedDict, deque
-from dataclasses import dataclass, field
-from itertools import pairwise
 
 from cryptography.exceptions import InvalidTag
 from starlette.concurrency import run_in_threadpool
 
-from . import proto as P
-from .apns import MAX_STREAMS, Apns, HttpxTransport, apns_body
-from .bridge import refuse
-from .cutover import guard as cutover_guard
-from .directory import Buckets, Refusal, fail, revoked_sql
+from .apns import MAX_STREAMS, Apns, HttpxTransport
+from .common import Buckets, Refusal, refuse
 
 log = logging.getLogger(__name__)
 
-SEND_CAP = 64 * 1024
-MAX_TARGETS = 1024
-MAX_OUTER = 3072
-MAX_TTL_S = 86_400
 LRU_ENTRIES = 65_536
 LRU_MS = 24 * 3_600_000
 QUEUE_TOTAL, QUEUE_WORKSPACE, QUEUE_ACCOUNT = 4096, 1024, 2048
-WAIT_MAX_S = 600  # a send waiting longer than min(ttl_s, 600 s) is dropped
-WAIT_MIN_S = 5  # ... but ttl_s 0 ("once, then drop" at APNs) still waits this long in our queue
 SENDS_PER_SECOND = 50
 OVERLOADED_RETRY_S = 5
 # P3-D40 item 7: (burst, per minute); ORCH_RELAY_THROTTLE_PUSH_* override as for the P3-D35 classes.
 THROTTLES = {"push-ws-device": (20, 2), "push-device": (60, 6), "push-ws": (120, 20)}
-OUTER_FIELDS = {"v", "ws", "epoch", "c"}
-EPOCH_MAX = 2**32 - 1
 
 
 def throttle_settings(env):
@@ -64,22 +42,6 @@ def throttle_settings(env):
                 raise ValueError(f"throttle {name} needs a positive burst/per-minute")
             out[name] = (burst, rate)
     return out
-
-
-@dataclass
-class Send:
-    registration_id: str
-    sealed: bytes
-    mac: bytes
-    env: str
-    ws: str
-    account: str
-    device: str
-    body: bytes
-    priority: int
-    expiration: int
-    deadline_ms: int
-    token: bytes = field(default=b"", repr=False)
 
 
 class Outbox:
@@ -280,153 +242,10 @@ class Sender:
             self.active[send.env] -= 1
 
 
-def outer_check(outer, ws):
-    if not isinstance(outer, dict) or set(outer) != OUTER_FIELDS:
-        fail("malformed")
-    if type(outer["v"]) is not int or outer["v"] != 2 or outer["ws"] != ws:
-        fail("malformed")
-    if type(outer["epoch"]) is not int or not 0 <= outer["epoch"] <= EPOCH_MAX:
-        fail("malformed")
-    if not isinstance(outer["c"], str) or not outer["c"]:
-        fail("malformed")
-    try:
-        P.unb64u(outer["c"])
-    except ValueError:
-        fail("malformed")
-    raw = P.cj(outer)
-    if len(raw) > MAX_OUTER:
-        fail("malformed")
-    return raw
-
-
-def parse_send(raw, ws):
-    try:
-        body = P.parse_json(raw)
-    except ValueError:
-        fail("malformed")
-    if not isinstance(body, dict) or set(body) != {"targets", "outer", "priority", "ttl_s"}:
-        fail("malformed")
-    targets = body["targets"]
-    if not isinstance(targets, list) or not 1 <= len(targets) <= MAX_TARGETS:
-        fail("malformed")
-    try:
-        for t in targets:
-            P.unhex(t)
-    except ValueError:
-        fail("malformed")
-    if any(a >= b for a, b in pairwise(targets)):  # sorted, unique
-        fail("malformed")
-    if body["priority"] not in ("high", "normal"):
-        fail("malformed")
-    ttl = body["ttl_s"]
-    if type(ttl) is not int or not 0 <= ttl <= MAX_TTL_S:
-        fail("malformed")
-    return targets, body["outer"], outer_check(body["outer"], ws), body["priority"], ttl
-
-
-def send(push, headers, ws, raw):
-    """POST /v2/workspaces/{ws}/push; returns {"accepted": n}."""
-    d, cfg, outbox = push.d, push.config, push.outbox
-    try:
-        P.unhex(ws)
-    except ValueError:
-        fail("malformed")
-    with d.reader("query") as con:  # step 1
-        con.execute("BEGIN")
-        now = d.clock()
-        session = d.authenticate(con, headers, now)
-        try:
-            if session["kind"] != "workspace" or session["subject_id"] != ws:
-                fail("not_eligible")
-            d.fence(con, headers, ws, now)
-            cutover_guard(
-                con, ws, now, "push_send"
-            )  # E3: a cut-over workspace sends no direct push
-        except Refusal:
-            d.throttle(session, now)
-            raise
-        d.throttle(session, now)
-    targets, outer, outer_raw, priority, ttl = parse_send(raw, ws)  # step 2
-    outbox.request_ok(ws, d.clock())
-    with d.reader("query") as con:  # step 3
-        con.execute("BEGIN")
-        now = d.clock()
-        row = con.execute(
-            "SELECT epoch FROM member_lists WHERE workspace_id=? ORDER BY list_seq DESC LIMIT 1",
-            (ws,),
-        ).fetchone()
-        if row is None or row[0] != outer["epoch"]:
-            refuse("stale_epoch", 409, epoch=row[0] if row else 0)
-        account = con.execute(
-            "SELECT owner_person_id FROM workspaces WHERE workspace_id=?", (ws,)
-        ).fetchone()
-        account = account[0] if account else ws
-        accepted = []
-        for start in range(0, len(targets), 256):
-            chunk = targets[start : start + 256]
-            marks = ",".join("?" * len(chunk))
-            accepted += [
-                r[0]
-                for r in con.execute(
-                    "SELECT m.device_id FROM members m JOIN devices v ON v.device_id=m.device_id "
-                    f"WHERE m.workspace_id=? AND m.device_id IN ({marks}) "
-                    "AND (v.expires_ms IS NULL OR v.expires_ms>?) AND NOT "
-                    + revoked_sql("m.device_id"),
-                    (ws, *chunk, now),
-                )
-            ]
-        accepted.sort()
-        regs = {}
-        for start in range(0, len(accepted), 256):
-            chunk = accepted[start : start + 256]
-            marks = ",".join("?" * len(chunk))
-            for r in con.execute(
-                "SELECT registration_id, device_id, env, topic, token_sealed, token_mac FROM "
-                f"push_subscriptions WHERE workspace_id=? AND device_id IN ({marks}) "
-                "ORDER BY registration_id",
-                (ws, *chunk),
-            ):
-                if r["env"] in cfg.keys and r["topic"] == cfg.topic:
-                    regs.setdefault(r["device_id"], []).append(r)
-    body = apns_body(outer_raw)
-    expiration = 0 if ttl == 0 else now // 1000 + ttl
-    wait_s = WAIT_MIN_S if ttl == 0 else min(ttl, WAIT_MAX_S)
-    deadline = now + 1000 * wait_s
-    plan = [
-        (
-            device,
-            [
-                Send(
-                    r["registration_id"],
-                    bytes(r["token_sealed"]),
-                    bytes(r["token_mac"]),
-                    r["env"],
-                    ws,
-                    account,
-                    device,
-                    body,
-                    10 if priority == "high" else 5,
-                    expiration,
-                    deadline,
-                )
-                for r in regs.get(device, ())
-            ],
-        )
-        for device in accepted
-    ]
-    outer_hash = hashlib.sha256(outer_raw).digest()
-    with d.lock:  # step 4
-        con = d.connection("write")
-        d.fence(con, headers, ws, d.clock())  # a read of the live holders row, no write transaction
-        outbox.commit(ws, account, outer_hash, plan, d.clock())
-    push.sender.notify()
-    return {"accepted": len(accepted)}
-
-
 def attach(app, push, env=None):
     """Create the outbox and the sender for an enabled push."""
     env = os.environ if env is None else env
-    outbox = Outbox(push.config.envs, throttle_settings(env), push.d.buckets.limit)
+    outbox = Outbox(push.config.envs, throttle_settings(env), push.d.table_limit)
     apns = Apns(push.config, clock_s=lambda: push.d.clock() / 1000)
     push.outbox, push.sender = outbox, Sender(push, outbox, apns)
     push.apns = apns

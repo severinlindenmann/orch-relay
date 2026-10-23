@@ -1,7 +1,7 @@
 [project]
 name = "orch-relay"
 version = "0.1.0"
-description = "orch-relay: directory, relay, drop and push for orch v2"
+description = "orch-relay: hub accounts, hub channels and hub phone push for orch V3"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
@@ -32,6 +32,3 @@ timeout = 120
 
 [tool.ruff]
 line-length = 100
-# ref/ and tests/test_vectors.py are the reviewed wire-contract files (PR #23), deliberately
-# unchanged in this PR; they have pre-existing lint findings to be fixed in a follow-up.
-extend-exclude = ["ref", "tests/test_vectors.py"]

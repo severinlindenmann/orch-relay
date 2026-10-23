@@ -19,7 +19,7 @@ from orch_relay import hub_accounts as H
 from orch_relay import hub_channels as HC
 from orch_relay import proto as P
 from orch_relay.app import create_app
-from orch_relay.directory import Refusal
+from orch_relay.common import Refusal
 
 VECTORS = json.loads((Path(__file__).parent / "vectors/hub/vectors_hub.json").read_text())
 REQUEST_CASES = [c for c in VECTORS["cases"] if c["check"] == "channel_request"]
@@ -48,7 +48,7 @@ def run_vector(tmp_path, monkeypatch, a):
     from fastapi.testclient import TestClient
 
     with TestClient(create_app(tmp_path / "data")) as client:
-        d = client.app.state.directory
+        d = client.app.state.core
         d.clock = lambda: a["now_ms"]
         card = a["hub_card"]
         if card["o"]["hub_id"] == a["hub_id"]:
@@ -281,7 +281,7 @@ def test_revocation_survives_a_restart(hub, phone, tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     with TestClient(create_app(tmp_path / "data")) as again:  # a fresh process on the same database
-        again.app.state.directory.clock = lambda: NOW
+        again.app.state.core.clock = lambda: NOW
         again.app.state.clock = [NOW]
         err(Phone(again).list(), 403, "channel_revoked")
 
@@ -443,20 +443,13 @@ def test_read_budget_per_channel(hub, phone, monkeypatch):
     assert phone.list().status_code == 200  # the window moved on
 
 
-# --- the migration ----------------------------------------------------------------------------------------------------
+# --- the schema -------------------------------------------------------------------------------------------------------
 
 
-def test_migration_is_idempotent(tmp_path):
+def test_a_revoked_channel_is_recorded_once_and_kept(tmp_path):
     path = tmp_path / "m.db"
-    first = db.migrate(path)
-    assert "0025_hub_channels" in first and first[-1] == "0025_hub_channels"
-    assert db.migrate(path) == []
-    sql = next(text for name, text in db._migration_files(None) if name == "0025_hub_channels")
+    db.init_schema(path)
     with closing(db.connect(path)) as con:
-        con.isolation_level = None
-        for _ in range(2):  # the script itself can be run again over an existing schema
-            for stmt in db._statements(sql):
-                con.execute(stmt)
         con.execute("INSERT INTO hub_revoked_channels VALUES (?,?,?)", ("a" * 32, "b" * 32, 1))
         con.execute(
             "INSERT OR IGNORE INTO hub_revoked_channels VALUES (?,?,?)", ("a" * 32, "b" * 32, 2)

@@ -1,4 +1,5 @@
-"""SQLite (WAL) setup and a tiny numbered-.sql migration runner."""
+"""SQLite (WAL) setup and the one fresh schema (V3-D36: no production data, no migrations; a database from an
+older schema is wiped, never upgraded)."""
 
 import sqlite3
 import threading
@@ -16,17 +17,6 @@ def connect(path: Path, **options) -> sqlite3.Connection:
     con = sqlite3.connect(path, timeout=5, **options)
     con.execute("PRAGMA busy_timeout=5000")
     _set_wal(con)
-    con.execute("PRAGMA synchronous=FULL")
-    con.execute("PRAGMA foreign_keys=ON")
-    return con
-
-
-def connect_existing(path: Path) -> sqlite3.Connection:
-    """An operator command's connection (P3-D36 round 2, review F2): the database must exist
-    (`mode=rw`: never created, no directory made), with the relay's pragmas but no journal-mode
-    change (the relay set WAL when it created it)."""
-    con = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=rw", uri=True, timeout=5)
-    con.execute("PRAGMA busy_timeout=5000")
     con.execute("PRAGMA synchronous=FULL")
     con.execute("PRAGMA foreign_keys=ON")
     return con
@@ -143,16 +133,11 @@ def _set_wal(con: sqlite3.Connection, deadline_s: float = 5.0) -> None:
             delay = min(delay * 2, 0.1)
 
 
-def _migration_files(mdir: Path | None) -> list[tuple[str, str]]:
-    if mdir is None:
-        entries = [
-            (e.name, e.read_text())
-            for e in resources.files("orch_relay").joinpath("migrations").iterdir()
-            if e.name.endswith(".sql")
-        ]
-    else:
-        entries = [(p.name, p.read_text()) for p in Path(mdir).glob("*.sql")]
-    return sorted((n.removesuffix(".sql"), sql) for n, sql in entries)
+SCHEMA_VERSION = 1  # PRAGMA user_version of a database created from schema.sql
+
+
+def schema_sql() -> str:
+    return resources.files("orch_relay").joinpath("schema.sql").read_text()
 
 
 def _statements(sql: str):
@@ -168,36 +153,34 @@ def _statements(sql: str):
         yield buf
 
 
-def migrate(path: Path, mdir: Path | None = None) -> list[str]:
-    """Apply pending migrations in order; return the versions applied.
+def init_schema(path: Path) -> bool:
+    """Create the schema in a fresh database; True when it was created, False when already current.
 
-    Each migration runs in its own write transaction (BEGIN IMMEDIATE) and the applied set is
-    re-read inside it, so concurrent runners serialise instead of re-applying a migration.
-    Migration files must not contain their own BEGIN/COMMIT.
-    """
+    One write transaction (BEGIN IMMEDIATE) re-reads the version inside it, so concurrent starters serialise.
+    A database that has tables but not this schema's version is refused: delete it (no data is kept across
+    schema changes)."""
     con = connect(path)
     con.isolation_level = None  # explicit transaction control
-    applied = []
     try:
-        for version, sql in _migration_files(mdir):
-            con.execute("BEGIN IMMEDIATE")
-            try:
-                con.execute(
-                    "CREATE TABLE IF NOT EXISTS schema_migrations ("
-                    "version TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        con.execute("BEGIN IMMEDIATE")
+        try:
+            (version,) = con.execute("PRAGMA user_version").fetchone()
+            if version == SCHEMA_VERSION:
+                created = False
+            elif version == 0 and not con.execute("SELECT 1 FROM sqlite_master").fetchone():
+                for stmt in _statements(schema_sql()):
+                    con.execute(stmt)
+                con.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+                created = True
+            else:
+                raise RuntimeError(
+                    f"{path}: database is from another schema (user_version {version}); "
+                    "delete it, orch-relay keeps no data across schema changes"
                 )
-                seen = con.execute(
-                    "SELECT 1 FROM schema_migrations WHERE version = ?", (version,)
-                ).fetchone()
-                if not seen:
-                    for stmt in _statements(sql):
-                        con.execute(stmt)
-                    con.execute("INSERT INTO schema_migrations(version) VALUES (?)", (version,))
-                    applied.append(version)
-                con.execute("COMMIT")
-            except BaseException:
-                con.execute("ROLLBACK")
-                raise
-        return applied
+            con.execute("COMMIT")
+        except BaseException:
+            con.execute("ROLLBACK")
+            raise
+        return created
     finally:
         con.close()

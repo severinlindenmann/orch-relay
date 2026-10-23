@@ -1,5 +1,7 @@
 from unittest import mock
 
+import pytest
+
 from orch_relay import cli
 
 
@@ -34,10 +36,7 @@ def test_serve_port_from_env(tmp_path, monkeypatch):
     assert run.call_args.kwargs["port"] == 9000
 
 
-def test_migrate_command(tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("ORCH_RELAY_DATA", str(tmp_path))
-    assert cli.main(["migrate"]) == 0
-    assert "0001_init" in capsys.readouterr().out
-    assert cli.main(["migrate"]) == 0
-    assert "(none)" in capsys.readouterr().out
-    assert (tmp_path / "relay.sqlite3").exists()
+def test_there_is_no_migrate_or_admin_command():
+    for argv in (["migrate"], ["invite", "create"], ["account-cap", "show", "x"]):
+        with pytest.raises(SystemExit):
+            cli.main(argv)
