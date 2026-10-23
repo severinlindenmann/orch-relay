@@ -3,29 +3,13 @@
 import asyncio
 
 import pytest
-from directory_support import DEVICE, WS
-from drop_support import LAPTOP
-from fake_apns import FakeApns, wait_for
-from fastapi.testclient import TestClient
+from fake_apns import FakeApns
 from h2_server import H2Server
-from push_support import (
-    KID,
-    TEAM,
-    TOKEN_A,
-    TOPIC,
-    configure,
-    outer,
-    push_env,
-    register,
-    rid,
-    seed_push,
-    send,
-)
+from push_support import KID, TEAM, TOKEN_A, TOPIC, push_env, rid
 
 from orch_relay import proto as P
-from orch_relay import push_send as PS
 from orch_relay.apns import Apns, HttpxTransport, apns_body
-from orch_relay.app import create_app
+from orch_relay.common import Send
 from orch_relay.push_config import load
 
 
@@ -36,10 +20,16 @@ def server():
     s.close()
 
 
+WS = "ab" * 16
+DEVICE = "cd" * 16
+
+
+def outer(n=1, ws=WS, epoch=1, size=24):
+    return {"v": 2, "ws": ws, "epoch": epoch, "c": P.b64u(bytes([n % 250 + 1]) * size)}
+
+
 def make_send(n=1, env="sandbox"):
-    send_ = PS.Send(
-        rid(n), b"", b"", env, WS, "A", DEVICE, apns_body(P.cj(outer(n))), 10, 123, 10**15
-    )
+    send_ = Send(rid(n), b"", b"", env, WS, "A", DEVICE, apns_body(P.cj(outer(n))), 10, 123, 10**15)
     send_.token = TOKEN_A
     return send_
 
@@ -163,25 +153,3 @@ def test_no_library_logs_the_token_or_the_jwt_even_at_debug(tmp_path, server, ca
     )
     seen = "\n".join(f"{r.name} {r.getMessage()} {r.__dict__}" for r in caplog.records)
     assert TOKEN_A.hex() not in seen and jwt not in seen and "bearer" not in seen
-
-
-def test_the_whole_relay_delivers_over_real_http2(tmp_path, monkeypatch, server):
-    keys = configure(monkeypatch, tmp_path)
-    with TestClient(create_app(tmp_path / "data")) as client:
-        seed_push(client.app.state.directory)
-        push = client.app.state.push
-        push.apns.transport = HttpxTransport({"sandbox": server.url, "production": server.url})
-        assert register(client, TOKEN_A, 1).status_code == 200
-        assert (
-            register(client, b"\x09" * 32, 2, session="FAKE-laptop", env="production").status_code
-            == 200
-        )
-        assert send(client, sorted([DEVICE, LAPTOP])).json() == {"accepted": 2}
-        assert wait_for(lambda: len(server.requests) == 2)
-        fake = FakeApns(keys, TEAM, TOPIC, KID)
-        for request in server.requests:
-            assert request["body"] == apns_body(P.cj(outer(1)))
-            env = "sandbox" if request["path"].endswith(TOKEN_A.hex()) else "production"
-            fake.check_jwt(env, request["headers"]["authorization"].removeprefix("bearer "))
-        assert fake.errors == []
-        assert wait_for(lambda: [r[1] for r in push.sender.results] == ["ok", "ok"])

@@ -8,8 +8,7 @@ import pytest
 
 from orch_relay import proto as P
 from orch_relay.apns import apns_body
-from orch_relay.directory import Refusal
-from orch_relay.push_send import MAX_OUTER, outer_check
+from orch_relay.common import MAX_OUTER
 
 VECTORS = json.loads(Path("tests/vectors_v2.json").read_text())["suites"]["2"]["push"]
 ENVELOPE = VECTORS["apns_envelope"]
@@ -26,13 +25,11 @@ def test_the_vector_states_the_caps():
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c["name"])
 def test_replay(case):
     outer = case["outer"]
-    if "refuse" in case["expect"]:
-        with pytest.raises(Refusal) as caught:
-            outer_check(outer, outer["ws"])
-        assert caught.value.code == case["expect"]["refuse"]
-        assert len(case["cj_outer"].encode()) == MAX_OUTER + 1
+    raw = P.cj(outer)
+    if "refuse" in case["expect"]:  # the hub path's outer_check (hub_phone) enforces the same edge
+        assert len(raw) == len(case["cj_outer"].encode()) == MAX_OUTER + 1
         return
-    raw = outer_check(outer, outer["ws"])
+    assert len(raw) <= MAX_OUTER
     assert raw.decode() == case["cj_outer"]
     body = apns_body(raw)
     assert body.decode("ascii") == case["body"] and len(body) == case["body_len"]

@@ -12,29 +12,43 @@ charged before the answer and never against a session bucket. `Cache-Control: no
 never serves an old level after a deploy.
 """
 
+import os
+import re
+
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from .checkpoints import AUTH_KINDS
-from .directory import MINUTE, Refusal, ipv6_parent
+from .common import MINUTE, Refusal, ipv6_parent
 
-# Level 1 = the restore-evidence parser (AUTH_KINDS) holds "convenience" (F1 §11.4 with the H5c amendment)
-# and refuses every unknown `auth` kind. A code constant, deliberately not a setting: an operator cannot
-# misreport it, and it changes only with the parser change it names.
+# A code constant, deliberately not a setting: an operator cannot misreport it.
 RELAY_READER_LEVEL = 1
-if RELAY_READER_LEVEL >= 1 and "convenience" not in AUTH_KINDS:
-    raise RuntimeError("RELAY_READER_LEVEL 1 requires 'convenience' in checkpoints.AUTH_KINDS")
+MAX_PUBLICATION = 16 * 1024 * 1024
+STAGE_CAP = 64 * 1024 * 1024
+
+
+def max_publication(env):
+    """ORCH_RELAY_MAX_PUBLICATION_BYTES: a decimal integer in 1..STAGE_CAP, validated at start-up."""
+    raw = env.get("ORCH_RELAY_MAX_PUBLICATION_BYTES", MAX_PUBLICATION)
+    if not (type(raw) is int or (isinstance(raw, str) and re.fullmatch(r"[0-9]+", raw))):
+        raise ValueError("ORCH_RELAY_MAX_PUBLICATION_BYTES must be a decimal integer")
+    value = int(raw)
+    if not 1 <= value <= STAGE_CAP:
+        raise ValueError(f"ORCH_RELAY_MAX_PUBLICATION_BYTES must be in 1..{STAGE_CAP}")
+    return value
+
+
 RELAY_INFO_READ = 60  # per canonical client address (/64 for IPv6) per minute
 RELAY_INFO_READ_PARENT = 960  # per IPv6 /56 per minute
 NO_STORE = {"Cache-Control": "no-store"}
 
 
-def answer(caps):
-    return {"v": 1, "reader": RELAY_READER_LEVEL, "max_publication_bytes": caps.max_publication}
+def answer(max_bytes):
+    return {"v": 1, "reader": RELAY_READER_LEVEL, "max_publication_bytes": max_bytes}
 
 
 def install(app):
-    directory, checkpoints = app.state.directory, app.state.checkpoints
+    directory = app.state.core
+    max_bytes = max_publication(os.environ)
 
     def relay_info(request: Request):  # sync: FastAPI runs it in the thread pool (Directory.budget)
         if request.query_params:
@@ -58,6 +72,6 @@ def install(app):
                 status_code=e.status,
                 headers={**NO_STORE, "Retry-After": str(e.retry or 1)},
             )
-        return JSONResponse(answer(checkpoints.caps), headers=NO_STORE)
+        return JSONResponse(answer(max_bytes), headers=NO_STORE)
 
     app.add_api_route("/v2/relay-info", relay_info, methods=["GET"])

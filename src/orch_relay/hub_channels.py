@@ -23,8 +23,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import hub_accounts as H
 from . import proto as P
-from .directory import Refusal
-from .push import error_response, read_body
+from .common import Refusal, error_response, read_body
 
 WINDOW_MS = 120_000
 NONCE_RETENTION_MS = 240_000
@@ -286,7 +285,7 @@ class HubChannels:
 
 
 def install(app):
-    chans = HubChannels(app.state.directory, app.state.hub_accounts.dev_mode)
+    chans = HubChannels(app.state.core, app.state.hub_accounts.dev_mode)
     app.state.hub_channels = chans
 
     async def read(hub_id_text: str, channel_text: str, request: Request, tail: str = ""):

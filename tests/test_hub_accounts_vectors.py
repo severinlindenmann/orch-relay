@@ -7,7 +7,7 @@ import pytest
 
 from orch_relay import hub_accounts as H
 from orch_relay import proto as P
-from orch_relay.directory import Refusal
+from orch_relay.common import Refusal
 
 VECTORS = json.loads((Path(__file__).parent / "vectors/hub/vectors_hub.json").read_text())
 CHECKS = ("card", "card_text", "op_cert", "op_revoked")

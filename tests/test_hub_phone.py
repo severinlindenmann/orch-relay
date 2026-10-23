@@ -19,7 +19,7 @@ from orch_relay import hub_accounts as H
 from orch_relay import hub_phone as HP
 from orch_relay import proto as P
 from orch_relay.app import create_app
-from orch_relay.directory import Refusal
+from orch_relay.common import Refusal
 
 VECTORS = json.loads((Path(__file__).parent / "vectors/hub/vectors_hub.json").read_text())
 ROUTE_CASES = [
@@ -169,7 +169,7 @@ def make(tmp_path, monkeypatch, configured=True):
     client = TestClient(create_app(tmp_path / "data"))
     client.__enter__()
     client.app.state.clock = [NOW]
-    d = client.app.state.directory
+    d = client.app.state.core
     d.clock = lambda: client.app.state.clock[0]
     client.keys = keys
     if keys:
@@ -205,7 +205,7 @@ def settle(hub, n):
 
 
 def rows(hub, table="hub_push_targets", where="1", args=()):
-    d = hub.client.app.state.directory
+    d = hub.client.app.state.core
     with d.reader("query") as con:
         con.execute("BEGIN")
         return [dict(r) for r in con.execute(f"SELECT * FROM {table} WHERE {where}", args)]
@@ -558,13 +558,13 @@ def test_without_push_configuration_every_route_but_the_purge_is_not_found_after
         client.__exit__(None, None, None)
 
 
-def test_per_workspace_and_hub_account_routes_still_work(hub):
+def test_the_workspace_routes_are_gone_and_the_hub_card_read_stays(hub):
     c = hub.client
     assert (
         c.get(f"/v2/hubs/{HUB}").json()["card"]["o"]["hub_id"] == HUB
     )  # the public card read stays unsigned
-    assert c.post("/v2/push/register", json={}).status_code == 401  # v2 push is not shadowed
-    assert c.post(f"/v2/workspaces/{'ab' * 16}/push", json={}).status_code == 401
+    assert c.post("/v2/push/register", json={}).status_code == 404  # V3-D36: no per-workspace push
+    assert c.post(f"/v2/workspaces/{'ab' * 16}/push", json={}).status_code == 404
     assert c.post("/v2/hubs/op-revoked", json={}).status_code == 400
 
 

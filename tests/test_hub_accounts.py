@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from push_support import clear, long_sessions, seed_push
+from push_support import clear
 
 from orch_relay import db
 from orch_relay import hub_accounts as H
@@ -109,7 +109,7 @@ def make_client(tmp_path, monkeypatch, dev, allow=(ROOT, ROGUE)):
         monkeypatch.delenv("ORCH_RELAY_DEV", raising=False)
     client = TestClient(create_app(tmp_path / "data"))
     client.__enter__()
-    client.app.state.directory.clock = lambda: NOW
+    client.app.state.core.clock = lambda: NOW
     return client
 
 
@@ -241,7 +241,7 @@ def test_revocation_for_unadmitted_root_is_refused_and_stores_nothing(tmp_path, 
     client = make_client(tmp_path, monkeypatch, dev=True, allow=(ROOT,))
     with client:
         err(revoke(client, ROGUE, "aa" * 16), 403, "unknown_hub")
-        with closing(db.connect(client.app.state.directory.path)) as con:
+        with closing(db.connect(client.app.state.core.path)) as con:
             assert con.execute("SELECT count(*) FROM hub_op_revoked").fetchone() == (0,)
         # allowlisted root, no account yet: stored, and applied when the hub registers
         assert revoke(client, ROOT, "aa" * 16).json()["revoked"] is True
@@ -249,11 +249,11 @@ def test_revocation_for_unadmitted_root_is_refused_and_stores_nothing(tmp_path, 
         assert put(client, card2()).status_code == 200  # a fresh op cert is fine
         # storage bound per hub
         for n in range(H.MAX_REVOCATIONS_PER_HUB):
-            client.app.state.directory.windows.clear()
+            client.app.state.core.windows.clear()
             r = revoke(client, ROOT, f"{n + 16:032x}")
             if r.status_code != 200:
                 break
-        client.app.state.directory.windows.clear()
+        client.app.state.core.windows.clear()
         err(revoke(client, ROOT, "ff" * 16), 429, "quota_exceeded")
 
 
@@ -285,32 +285,7 @@ def test_account_cap_and_rate_limit(c):
     err(put(c, rogue), 429, "quota_exceeded")
     assert put(c, card2()).status_code == 200  # a rotation is not a new account
     c.app.state.hub_accounts.max_accounts = 1000
-    c.app.state.directory.windows.clear()
+    c.app.state.core.windows.clear()
     for _ in range(H.REGISTER_PER_HOUR):
         c.post("/v2/hubs", json={})
     err(c.post("/v2/hubs", json={}), 429, "rate_limited")
-
-
-def test_per_workspace_accounts_unaffected(tmp_path, monkeypatch):
-    clear(monkeypatch)
-    monkeypatch.delenv("ORCH_RELAY_HUB_ALLOWLIST", raising=False)
-    with TestClient(create_app(tmp_path / "data")) as client:
-        d = client.app.state.directory
-        seed_push(d)
-        long_sessions(d)
-        d.clock = lambda: NOW
-
-        def snapshot():
-            with closing(db.connect(d.path)) as con:
-                return {
-                    t: con.execute(f"SELECT * FROM {t} ORDER BY 1,2").fetchall()
-                    for t in ("accounts", "devices", "workspaces", "sessions", "members")
-                }
-
-        before = snapshot()
-        assert before["accounts"] and before["workspaces"]
-        # no allowlist: no hub account is created, and no workspace/person account changes
-        err(put(client, card1(dev=False)), 403, "not_allowed")
-        assert snapshot() == before
-        with closing(db.connect(d.path)) as con:
-            assert con.execute("SELECT count(*) FROM hub_accounts").fetchone() == (0,)
