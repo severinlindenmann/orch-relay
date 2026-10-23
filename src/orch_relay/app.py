@@ -22,7 +22,7 @@ def create_app(data_dir: Path | str | None = None, instance: str | None = None) 
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        await run_in_threadpool(db.migrate, data / db.DB_NAME)
+        await run_in_threadpool(db.init_schema, data / db.DB_NAME)
         tasks = []
         if app.state.push.enabled:  # the expired-mailbox sweep and APNs delivery
             tasks.append(asyncio.create_task(app.state.push.maintenance()))

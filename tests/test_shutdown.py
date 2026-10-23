@@ -52,7 +52,7 @@ SCRIPT = textwrap.dedent(
 
 
 def test_shutdown_while_a_sweep_waits_on_the_lock_does_not_crash(tmp_path):
-    db.migrate(tmp_path / db.DB_NAME)
+    db.init_schema(tmp_path / db.DB_NAME)
     env, _keys = push_env(tmp_path)  # the sweep runs only on a relay with push configured
     r = subprocess.run(
         [sys.executable, "-X", "faulthandler", "-c", SCRIPT, str(tmp_path)],

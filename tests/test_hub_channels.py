@@ -443,20 +443,13 @@ def test_read_budget_per_channel(hub, phone, monkeypatch):
     assert phone.list().status_code == 200  # the window moved on
 
 
-# --- the migration ----------------------------------------------------------------------------------------------------
+# --- the schema -------------------------------------------------------------------------------------------------------
 
 
-def test_migration_is_idempotent(tmp_path):
+def test_a_revoked_channel_is_recorded_once_and_kept(tmp_path):
     path = tmp_path / "m.db"
-    first = db.migrate(path)
-    assert "0025_hub_channels" in first and first[-1] == "0025_hub_channels"
-    assert db.migrate(path) == []
-    sql = next(text for name, text in db._migration_files(None) if name == "0025_hub_channels")
+    db.init_schema(path)
     with closing(db.connect(path)) as con:
-        con.isolation_level = None
-        for _ in range(2):  # the script itself can be run again over an existing schema
-            for stmt in db._statements(sql):
-                con.execute(stmt)
         con.execute("INSERT INTO hub_revoked_channels VALUES (?,?,?)", ("a" * 32, "b" * 32, 1))
         con.execute(
             "INSERT OR IGNORE INTO hub_revoked_channels VALUES (?,?,?)", ("a" * 32, "b" * 32, 2)
