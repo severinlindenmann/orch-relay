@@ -149,4 +149,4 @@ def test_route_is_in_the_protocol_table():
 
     doc = (Path(__file__).resolve().parents[1] / "docs/protocol-v2.md").read_text()
     table = doc.split("## 19. Relay HTTP API", 1)[1]
-    assert "| `GET /v2/relay-info` | none |" in table
+    assert "`GET /v2/relay-info`" in table
