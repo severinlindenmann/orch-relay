@@ -99,6 +99,14 @@ def outer_check(outer, hub, channel):
     return raw
 
 
+def push_exempt(method, path):
+    """§10.8.1 (E5R-1): the hub's mailbox purge is its revocation notice (§10.8.4) and is not subject to the
+    push-configuration 404: the revocation record never depends on push. Decided by method and path shape only
+    (`DELETE`, exactly `/v2/hubs/<hub>/mailbox/<one segment>`); `match` then applies the ordinary refusals."""
+    segs = path.split("/")[4:]
+    return method == "DELETE" and len(segs) == 2 and segs[0] == "mailbox"
+
+
 def match(method, path, query, hub, raw):
     """Match an authenticated, canonical request and check its body. Returns (route, channel, id, parsed body).
     An unknown path or method is `not_found`; a body that is not exactly the route's shape `malformed`
@@ -384,11 +392,11 @@ def install(app):
     async def route(hub_id_text: str, tail: str, request: Request):
         try:
             hub, raw = await app.state.hub_request_auth(request)
-            if not push.enabled:
-                fail("not_found")
             path = (request.scope.get("raw_path") or request.url.path.encode()).decode(
                 "ascii", "replace"
             )
+            if not push.enabled and not push_exempt(request.method, path):
+                fail("not_found")  # E5R-1: the purge (revocation record) never depends on push
             query = request.scope.get("query_string", b"").decode("ascii", "replace")
             result = await run_in_threadpool(phone.handle, hub, request.method, path, query, raw)
         except Refusal as error:
@@ -403,4 +411,4 @@ def install(app):
     return phone
 
 
-__all__ = ["HubPhone", "install", "match"]
+__all__ = ["HubPhone", "install", "match", "push_exempt"]

@@ -41,7 +41,7 @@ MSG = "c8aa32bb1061a22d4186323aa01b2902"
 
 
 def test_vectors_present():
-    assert len(ROUTE_CASES) == 25 and set(ROUTES) - {"cutover_get", "cutover_put"} == {
+    assert len(ROUTE_CASES) == 36 and set(ROUTES) - {"cutover_get", "cutover_put"} == {
         "mailbox_put",
         "push_put",
         "push_seal",
@@ -57,6 +57,8 @@ def test_route_vector(case):
         H.parse_target(
             a["target"], a["hub_id"]
         )  # E1's canonical-target check (other_hub lives there)
+        if not a.get("push_configured", True) and not HP.push_exempt(a["method"], path):
+            raise Refusal("not_found")  # E5R-1: the install() gate of a relay without push
         route, ch, mid, _body = HP.match(
             a["method"], path, query, a["hub_id"], bytes.fromhex(a["body_hex"])
         )
@@ -534,14 +536,20 @@ def test_the_default_quotas_agree_with_the_contract():
     assert HP.MAX_MESSAGES * HP.MAX_MESSAGE == HP.MAX_MAILBOX_BYTES
 
 
-def test_without_push_configuration_every_route_is_not_found_after_authentication(
+def test_without_push_configuration_every_route_but_the_purge_is_not_found_after_authentication(
     tmp_path, monkeypatch
 ):
     client = make(tmp_path, monkeypatch, configured=False)
     try:
         h = Hub(client, OP1, HUB, CERT)
-        for call in all_routes(h).values():
-            err(call(), 404, "not_found")
+        for name, call in all_routes(h).items():
+            if name != "mailbox_purge":
+                err(call(), 404, "not_found")
+        r = h.mb_purge()  # E5R-1: the revocation record never depends on push (§10.8.1)
+        assert r.status_code == 200 and r.json() == {"channel_id": CH, "deleted": 0}, r.text
+        err(
+            client.get(f"/v2/hubs/{HUB}/mailbox/{CH}"), 400, "malformed"
+        )  # unsigned: still refused first
         err(
             client.request("PUT", f"/v2/hubs/{HUB}/push/{CH}", content=b"{}"), 400, "malformed"
         )  # still unauthenticated
