@@ -112,6 +112,9 @@ def test_refusals_before_authorization_take_no_lock_write_or_window(
         )
     if name == "expired_lease":
         sql(relay, "UPDATE holders SET lease_until_ms=? WHERE workspace_id=?", (NOW, WS))
+    # The bridge sweep runs every second on its own task and takes the lock and a write transaction: on a slow CI
+    # runner the 200 requests below outlast a tick and the spy would count it (orch-relay#91).
+    monkeypatch.setattr(relay.app.state.bridge, "sweep", lambda: None)
     spy = Spy(relay, monkeypatch)
     budget = relay.app.state.checkpoints.budget
     for _ in range(200):  # far beyond every window: refusals are never charged
