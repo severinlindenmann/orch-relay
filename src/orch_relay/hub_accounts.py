@@ -212,6 +212,17 @@ FIELDS = {
         "revoked_ms": _int_min(0),
         "dev": _bool,
     },
+    "hub.channel_cert": {
+        "hub_id": _hex16,
+        "op_cert_id": _hex16,
+        "channel_id": _hex16,
+        "user_id": _hex16,
+        "key_pub": _pub,
+        "factor": lambda x: x in ("se-unlocked", "passkey", "password+totp"),
+        "issued_ms": _int_min(0),
+        "expires_ms": _int_min(1),
+        "dev": _bool,
+    },
     "hub.card": {
         "hub_id": _hex16,
         "hk_root_pub": _pub,

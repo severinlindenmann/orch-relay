@@ -95,6 +95,10 @@ def create_app(
         app
     )  # E2: hub push targets, push send and channel mailboxes (signed by HK_op)
 
+    from .hub_channels import install as install_hub_channels
+
+    install_hub_channels(app)  # E5: a phone reads its own channel mailbox (§10.8.4)
+
     @app.get("/healthz")
     def healthz() -> dict:
         return {"ok": True, "version": __version__, "instance": name}

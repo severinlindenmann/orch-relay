@@ -154,6 +154,7 @@ EXEMPT_PREFIXES = (
     "/healthz",
     "/v2/relay-info",
     "/v2/hubs",  # hub accounts, E2 hub-phone routes: per hub, not per workspace
+    "/v2/hub-channels",  # E5: a channel's own mailbox read, per hub and channel
     "/v2/session/",
     "/v2/accounts",
     "/v2/devices/",

@@ -296,7 +296,7 @@ def test_requests_are_strict(c):
 def test_migration_is_idempotent_and_after_the_existing_ones(tmp_path):
     path = tmp_path / "m.sqlite3"
     first = db.migrate(path)
-    assert first[-1] == "0024_workspace_cutover"
+    assert "0024_workspace_cutover" in first
     assert first == sorted(first) and first.index("0024_workspace_cutover") > first.index(
         "0022_hub_request_nonces"
     )
