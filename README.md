@@ -51,8 +51,7 @@ partial set makes `serve` exit 2. Tokens are stored sealed; the key and the secr
 is best effort over one HTTP/2 connection per environment (`httpx[http2]`). Tests use a throwaway P-256 key, a fake
 transport and a local h2 server; no test reaches Apple (`tests/conftest.py`). Set `ORCH_RELAY_TRUSTED_PROXY` to a single
 trusted proxy IP when behind Caddy; otherwise forwarded addresses are ignored (the last X-Forwarded-For hop, IPv6 by /64).
-Run one worker per database (SQLite, WAL, `synchronous=FULL`; database work runs in the thread pool). The deploy steps are in
-[dev-deploy-plan](docs/dev-deploy-plan.md).
+Run one worker per database (SQLite, WAL, `synchronous=FULL`; database work runs in the thread pool).
 
 ## License
 
