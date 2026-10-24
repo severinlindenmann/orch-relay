@@ -13,7 +13,7 @@ Rules (all fail closed, no secret is stored or logged, ciphertext-only relay rul
   (`dev_refused`); a dev relay refuses `dev: false` (`dev_mismatch`). The marker is the relay's own
   configuration, never a field of the card. An op-cert revocation is never refused for their marker (L2-8).
 - Order between cards is the root-signed `op_seq` first (a lower one, or the same one under another
-  `cert_id`, is `stale_op_cert` whatever its `card_seq`), `card_seq` only within one op cert (`stale_card`).
+  `cert_id`, is `stale_op_cert` whatever its `card_seq`), `card_seq` only within one op cert (`stale_card`); after both, a lower signed `reader` is `reader_downgrade`.
   Another `hk_root_pub` under a held `hub_id` cannot occur (the id is derived from the root); it is
   `other_hub` if it ever does. A higher `op_seq` replaces the held card.
 - A revocation is permanent. A card whose op cert is revoked is refused (`revoked`); `authenticate` verifies the
@@ -82,6 +82,8 @@ STATUS = {
     "other_hub": 409,
     "stale_op_cert": 409,
     "stale_card": 409,
+    "reader_downgrade": 409,
+    "held_card_invalid": 409,
     "unknown_hub": 404,
     "not_allowed": 403,
     "quota_exceeded": 429,
@@ -187,6 +189,10 @@ def _int_min(lo):
     return lambda x: type(x) is int and x >= lo
 
 
+def _uint31(x):
+    return type(x) is int and 0 <= x <= 0x7FFFFFFF
+
+
 def _bool(x):
     return type(x) is bool
 
@@ -229,6 +235,7 @@ FIELDS = {
         "relay_url": _relay_url,
         "tls_spki_sha256": _b64u32,
         "card_seq": _int_min(1),
+        "reader": _uint31,
         "issued_ms": _int_min(0),
         "dev": _bool,
     },
@@ -324,7 +331,13 @@ def verify_card(card, now, dev_mode, revoked=frozenset(), held=None):
     if o["issued_ms"] > now + CLOCK_SKEW_MS:
         refuse("cert_invalid")
     if held is not None:
-        ho, hop = held["o"], held["op_cert"]["o"]
+        # A stored card that no longer has the current shape (e.g. signed before `reader`) is refused
+        # explicitly; there is no migration (nothing in production): the operator clears hub_accounts once.
+        try:
+            ho, hop = held["o"], held["op_cert"]["o"]
+            _fields(ho, "hub.card")
+        except (Refusal, KeyError, TypeError):
+            refuse("held_card_invalid")
         if o["hk_root_pub"] != ho["hk_root_pub"]:
             refuse("other_hub")
         if op["op_seq"] < hop["op_seq"] or (
@@ -336,6 +349,8 @@ def verify_card(card, now, dev_mode, revoked=frozenset(), held=None):
                 refuse("stale_card")
             if o["card_seq"] == ho["card_seq"] and P.cj(card) != P.cj(held):
                 refuse("stale_card")
+        if o["reader"] < ho["reader"]:
+            refuse("reader_downgrade")
     return o, op, root
 
 
