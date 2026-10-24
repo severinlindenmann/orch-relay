@@ -1906,7 +1906,10 @@ F1 `cj({contract, suite, workspace_id, log, event})` context remains the signatu
 - `question_id` of a ticket question is the F1-derived id: the first 16 bytes, in hex, of
   `H("orch/v2/question-id|" || cj({"workspace_id", "ticket", "question"}))` (ticket format F1 §5.6, row
   `h_question_id`). It is not random; a question of another origin may use 16 random bytes (hex).
-- `content_hash = b64u(H("orch/v2/question|" || cj({question_id, ticket, text, options})))`.
+- `content_hash = b64u(H("orch/v2/question|" || cj({question_id, ticket, text, options or [], spec})))`, where
+  `spec` is every key of the question except `id`, `to`, `blocking`, `text` and `options` (so `kind`, `why`,
+  `details`, `recommended` and `allow_other` are bound). `options` are the verbatim `{key, title, text}` objects,
+  not keys. The relay never computes this hash; it carries the field verbatim (orch-core ticket format F1 §5.6.1).
 - A decision is the bridge op
   `{"op":"decision", "decision_id": hex, "question_id": hex, "content_hash": b64u, "answer": <JSON>,
   "sig": b64u}`, with exactly these fields.
