@@ -57,7 +57,7 @@ def op_cert(root, op, seq=1, cert="aa", dev=True, issued=NOW - 1000, expires=NOW
     return root.sign(H.L_OP_CERT, o)
 
 
-def make_card(root, op, cert, card_seq=1, dev=True, relay_url=None, hub=None):
+def make_card(root, op, cert, card_seq=1, dev=True, relay_url=None, hub=None, reader=1, **extra):
     o = {
         **header("hub.card"),
         "hub_id": hub or H.hub_id(root.pub),
@@ -66,8 +66,10 @@ def make_card(root, op, cert, card_seq=1, dev=True, relay_url=None, hub=None):
         "relay_url": relay_url,
         "tls_spki_sha256": P.b64u(b"\x07" * 32),
         "card_seq": card_seq,
+        "reader": reader,
         "issued_ms": NOW - 1000,
         "dev": dev,
+        **extra,
     }
     card = op.sign(H.L_CARD, o)
     card["op_cert"] = cert
@@ -289,3 +291,13 @@ def test_account_cap_and_rate_limit(c):
     for _ in range(H.REGISTER_PER_HOUR):
         c.post("/v2/hubs", json={})
     err(c.post("/v2/hubs", json={}), 429, "rate_limited")
+
+
+def test_card_with_reader_registers_and_reader_downgrade_is_refused(c):
+    assert put(c, card1(reader=2)).status_code == 200
+    err(put(c, card1(card_seq=2, reader=1)), 409, "reader_downgrade")
+    assert put(c, card1(card_seq=2, reader=3)).status_code == 200
+
+
+def test_unknown_extra_card_field_is_still_malformed(c):
+    err(put(c, card1(extra_field=1)), 400, "malformed")
