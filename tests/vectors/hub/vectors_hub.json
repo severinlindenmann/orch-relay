@@ -43131,6 +43131,22 @@
    "args": {
     "action": {
      "log": "01J9ZP0000000000000000TKT1",
+     "type": "addon.enabled"
+    },
+    "role": "admin"
+   },
+   "check": "action",
+   "expect": {
+    "error": "not_custodial"
+   },
+   "name": "action_addon_enabled_not_custodial",
+   "note": "host type: the owner turns an installed add-on on (core #1237)",
+   "phase": 4
+  },
+  {
+   "args": {
+    "action": {
+     "log": "01J9ZP0000000000000000TKT1",
      "type": "restore"
     },
     "role": "admin"
@@ -43221,6 +43237,93 @@
    },
    "name": "action_github_synced_not_custodial",
    "note": "addon types are never custodial",
+   "phase": 4
+  },
+  {
+   "args": {
+    "action": {
+     "log": "workspace",
+     "off": true,
+     "type": "addon.granted"
+    },
+    "role": "admin"
+   },
+   "check": "action",
+   "expect": {
+    "error": "not_custodial"
+   },
+   "name": "action_addon_granted_off_true_not_custodial",
+   "note": "off: true is the only valid value, and the type is still the host's",
+   "phase": 4
+  },
+  {
+   "args": {
+    "action": {
+     "log": "workspace",
+     "off": false,
+     "type": "addon.granted"
+    },
+    "role": "admin"
+   },
+   "check": "action",
+   "expect": {
+    "error": "not_custodial"
+   },
+   "name": "action_addon_granted_off_false_not_custodial",
+   "note": "off: false is malformed on the host; the hub refuses the type before the fields",
+   "phase": 4
+  },
+  {
+   "args": {
+    "action": {
+     "log": "workspace",
+     "off": "true",
+     "type": "addon.granted"
+    },
+    "role": "admin"
+   },
+   "check": "action",
+   "expect": {
+    "error": "not_custodial"
+   },
+   "name": "action_addon_granted_off_string_not_custodial",
+   "note": "any other value is malformed on the host",
+   "phase": 4
+  },
+  {
+   "args": {
+    "action": {
+     "log": "workspace",
+     "off": null,
+     "type": "addon.granted"
+    },
+    "role": "admin"
+   },
+   "check": "action",
+   "expect": {
+    "error": "not_custodial"
+   },
+   "name": "action_addon_granted_off_null_not_custodial",
+   "note": "null is malformed on the host",
+   "phase": 4
+  },
+  {
+   "args": {
+    "action": {
+     "log": "workspace",
+     "name": "wiki",
+     "package_sha256": "sha256:3d3f5e93357cf4b89511c728d2d7995ebc233f435574ef9b95de0259f3247987",
+     "type": "addon.enabled",
+     "version": "1.0.0"
+    },
+    "role": "admin"
+   },
+   "check": "action",
+   "expect": {
+    "error": "not_custodial"
+   },
+   "name": "action_addon_enabled_fields_not_custodial",
+   "note": "addon.enabled {name, version, package_sha256} is core's event; the hub never builds it",
    "phase": 4
   },
   {
@@ -50013,6 +50116,280 @@
    },
    "name": "custodial_event_created_with_based_on",
    "note": "a new ticket's first event has based_on null",
+   "phase": 4
+  },
+  {
+   "args": {
+    "card": {
+     "o": {
+      "card_seq": 1,
+      "dev": true,
+      "hk_root_pub": "BI_UMykYqAqu1C9i1pPLsPGXktAHAqZlKB_EpiicGtikqSoV9hdFn8S3nWlSvAmzbCp1iQ79iiLjD9tWA1p39ik",
+      "hub_id": "38d8abed52ccfb538da401fd54e64bdc",
+      "hv": 0,
+      "hxk_pub": "BPL5BSYzK4pViSYlGYnw-Ow5FIY3-D1et4PP74_LVjLF1s_FvTIh8KJq3syjmkJN6B2VQoHH14tnC7fsxzTtuX0",
+      "issued_ms": 1789913600000,
+      "kind": "hub.card",
+      "reader": 1,
+      "relay_url": null,
+      "suite": 2,
+      "tls_spki_sha256": "19dzV-BWnXf27oDtjqrK-6FGcfYbFEPuMUYMTzOrlY4",
+      "v": 2
+     },
+     "op_cert": {
+      "o": {
+       "cert_id": "dd963f7365b19dba347a4ba580cc7c2b",
+       "dev": true,
+       "expires_ms": 1821536000000,
+       "hk_op_pub": "BGKyaYh6M5-PTj4pcMYwjvcmBflbTMCaHcCtr8J0vV4knajypjV15SXhIGpnZO404RAfMhkTi9R1g6_7JxV96s4",
+       "hub_id": "38d8abed52ccfb538da401fd54e64bdc",
+       "hv": 0,
+       "issued_ms": 1789913600000,
+       "kind": "hub.op_cert",
+       "op_seq": 1,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "IkiDO7ivIMFh9v4YZOITIZ4S2fsRo8hL5q7RBkafUZ5q3ZMpIXjeXU-g16p8YbpDLpjxC4N0eCWK-IRhCkW1bg"
+     },
+     "sig": "d0rBLWzgy0K4VFAnAQ8tNGP0wbe8qLVXs_OLHN6ynAnrAx09-gjRuC-nYdKl8CHFLYh0289CgvUU0B10fZShRA"
+    },
+    "dev_mode": true,
+    "event": {
+     "actor": {
+      "id": "u_a368bd380588e5dabee62a516031e21f",
+      "kind": "person",
+      "via": "a521208444bffafc2188fe6b5f1f286f"
+     },
+     "auth": "hub",
+     "based_on": "sha256:6b241bb0e70240694c042e752a2baed2457752ab1c036ec542334acec5cc5367",
+     "channel": "a521208444bffafc2188fe6b5f1f286f",
+     "channel_cert": {
+      "o": {
+       "channel_id": "a521208444bffafc2188fe6b5f1f286f",
+       "dev": true,
+       "expires_ms": 1792592000000,
+       "factor": "se-unlocked",
+       "hub_id": "38d8abed52ccfb538da401fd54e64bdc",
+       "hv": 0,
+       "issued_ms": 1789913600000,
+       "key_pub": "BJr__CqBPz4fbs0dWgg8yS6TooSjaMWMIuSL0S5Iw7-6F6d_sFz9ilNhI0j4GlX6G8rpZZ_QY9JnvaWLXb2cdZA",
+       "kind": "hub.channel_cert",
+       "op_cert_id": "dd963f7365b19dba347a4ba580cc7c2b",
+       "suite": 2,
+       "user_id": "a368bd380588e5dabee62a516031e21f",
+       "v": 2
+      },
+      "sig": "nqr1qA-e5yXPo9vSziaXYLCFqQPQxcr_Lzw73LtOVx8xFwrx8Cbi2NlvbF5Mb2Zqm8FY9xHPKxi7ubZJcx5Pbg"
+     },
+     "channel_factor": "se-unlocked",
+     "channel_proof": "sAmO8Syhp_34d6vgEHZ9PCbGz8r2gtCn2YAVOMzucfsIdbQ561nP0KwYyLcR9ej_fgcZNvNkf-yYm7hWN5IQjg",
+     "hash_v": 1,
+     "hub_id": "38d8abed52ccfb538da401fd54e64bdc",
+     "id": "01J9ZP0000000000000000EVT1",
+     "name": "wiki",
+     "package_sha256": "sha256:91dfce21c86c77a2bf53ec2c8bee8058cce133f6e53602029d47ccfafbf22bb9",
+     "roster_v": 4,
+     "sig": "PbnYoqgFgtxtK20ncEkvQk1dbht9K26Nw5s2twXzoM-ILUnN7oNa6IxJEvmXEex0_WV11_b23jqYEShzmx0W0A",
+     "snapshot_version": 3,
+     "type": "addon.enabled",
+     "uk_cert": {
+      "o": {
+       "dev": true,
+       "expires_ms": 1792592000000,
+       "hub_id": "38d8abed52ccfb538da401fd54e64bdc",
+       "hv": 0,
+       "issued_ms": 1789913600000,
+       "kind": "hub.uk_cert",
+       "op_cert_id": "dd963f7365b19dba347a4ba580cc7c2b",
+       "suite": 2,
+       "uk_pub": "BF4SFZF9XTgilhkgCN-Uo4rQowEfmNi-PdkCmealCT7KAUXMJ8qzUn2IDYvV0bD6DF-Hmifxb0OgibzvYNTGmMk",
+       "user_id": "a368bd380588e5dabee62a516031e21f",
+       "v": 2
+      },
+      "sig": "tDs-OR4_RgCKGi3w6hwJqr4HW1yTzwpGWXUOBij9wvO_czqiqO81yYCS5F1dHtZPgoZ448XXG_rSh0_7hpaYNw"
+     },
+     "v": 2,
+     "version": "1.0.0"
+    },
+    "log": "workspace",
+    "now_ms": 1790000000000,
+    "snapshot": {
+     "dev": true,
+     "generation": 0,
+     "hub_id": "38d8abed52ccfb538da401fd54e64bdc",
+     "hv": 0,
+     "issued_ms": 1789999940000,
+     "kind": "hub.snapshot",
+     "market_policy": {
+      "addons": {
+       "allow": null,
+       "block": []
+      },
+      "ceiling": null,
+      "markets": [
+       {
+        "class": "official",
+        "keys": [],
+        "url": "https://github.com/severinlindenmann/orch-marketplace"
+       }
+      ]
+     },
+     "op_cert_id": "dd963f7365b19dba347a4ba580cc7c2b",
+     "revoked_channels": [],
+     "roles": {
+      "a368bd380588e5dabee62a516031e21f": "admin"
+     },
+     "suite": 2,
+     "v": 2,
+     "version": 3,
+     "workspace_id": "336afd0fd4c349f575c2ec155d7258ad"
+    },
+    "workspace_id": "336afd0fd4c349f575c2ec155d7258ad"
+   },
+   "check": "custodial",
+   "expect": {
+    "error": "not_custodial"
+   },
+   "name": "custodial_event_addon_enabled_not_custodial",
+   "note": "addon.enabled is the owner's, never started through a channel",
+   "phase": 4
+  },
+  {
+   "args": {
+    "card": {
+     "o": {
+      "card_seq": 1,
+      "dev": true,
+      "hk_root_pub": "BI_UMykYqAqu1C9i1pPLsPGXktAHAqZlKB_EpiicGtikqSoV9hdFn8S3nWlSvAmzbCp1iQ79iiLjD9tWA1p39ik",
+      "hub_id": "38d8abed52ccfb538da401fd54e64bdc",
+      "hv": 0,
+      "hxk_pub": "BPL5BSYzK4pViSYlGYnw-Ow5FIY3-D1et4PP74_LVjLF1s_FvTIh8KJq3syjmkJN6B2VQoHH14tnC7fsxzTtuX0",
+      "issued_ms": 1789913600000,
+      "kind": "hub.card",
+      "reader": 1,
+      "relay_url": null,
+      "suite": 2,
+      "tls_spki_sha256": "19dzV-BWnXf27oDtjqrK-6FGcfYbFEPuMUYMTzOrlY4",
+      "v": 2
+     },
+     "op_cert": {
+      "o": {
+       "cert_id": "dd963f7365b19dba347a4ba580cc7c2b",
+       "dev": true,
+       "expires_ms": 1821536000000,
+       "hk_op_pub": "BGKyaYh6M5-PTj4pcMYwjvcmBflbTMCaHcCtr8J0vV4knajypjV15SXhIGpnZO404RAfMhkTi9R1g6_7JxV96s4",
+       "hub_id": "38d8abed52ccfb538da401fd54e64bdc",
+       "hv": 0,
+       "issued_ms": 1789913600000,
+       "kind": "hub.op_cert",
+       "op_seq": 1,
+       "suite": 2,
+       "v": 2
+      },
+      "sig": "IkiDO7ivIMFh9v4YZOITIZ4S2fsRo8hL5q7RBkafUZ5q3ZMpIXjeXU-g16p8YbpDLpjxC4N0eCWK-IRhCkW1bg"
+     },
+     "sig": "d0rBLWzgy0K4VFAnAQ8tNGP0wbe8qLVXs_OLHN6ynAnrAx09-gjRuC-nYdKl8CHFLYh0289CgvUU0B10fZShRA"
+    },
+    "dev_mode": true,
+    "event": {
+     "actor": {
+      "id": "u_a368bd380588e5dabee62a516031e21f",
+      "kind": "person",
+      "via": "a521208444bffafc2188fe6b5f1f286f"
+     },
+     "auth": "hub",
+     "based_on": "sha256:6b241bb0e70240694c042e752a2baed2457752ab1c036ec542334acec5cc5367",
+     "channel": "a521208444bffafc2188fe6b5f1f286f",
+     "channel_cert": {
+      "o": {
+       "channel_id": "a521208444bffafc2188fe6b5f1f286f",
+       "dev": true,
+       "expires_ms": 1792592000000,
+       "factor": "se-unlocked",
+       "hub_id": "38d8abed52ccfb538da401fd54e64bdc",
+       "hv": 0,
+       "issued_ms": 1789913600000,
+       "key_pub": "BJr__CqBPz4fbs0dWgg8yS6TooSjaMWMIuSL0S5Iw7-6F6d_sFz9ilNhI0j4GlX6G8rpZZ_QY9JnvaWLXb2cdZA",
+       "kind": "hub.channel_cert",
+       "op_cert_id": "dd963f7365b19dba347a4ba580cc7c2b",
+       "suite": 2,
+       "user_id": "a368bd380588e5dabee62a516031e21f",
+       "v": 2
+      },
+      "sig": "nqr1qA-e5yXPo9vSziaXYLCFqQPQxcr_Lzw73LtOVx8xFwrx8Cbi2NlvbF5Mb2Zqm8FY9xHPKxi7ubZJcx5Pbg"
+     },
+     "channel_factor": "se-unlocked",
+     "channel_proof": "Xl7RBK0hhr5FG3525bh-HGatCbPH0zyrj_CLpBPXmotoCeSVHpyctWlyOyJtbM6eHmFfUoElpR-4F-inUJdOLQ",
+     "hash_v": 1,
+     "hub_id": "38d8abed52ccfb538da401fd54e64bdc",
+     "id": "01J9ZP0000000000000000EVT1",
+     "name": "wiki",
+     "off": true,
+     "roster_v": 4,
+     "sig": "7JNdx4D7U_RWE-H9PZ-W8hhjdg1Ld6hpisbcB93-xDfu0qrHpTnlhGQLHSrxq5DufV5DCgfdsvsg4_fJ5U_1Ug",
+     "snapshot_version": 3,
+     "type": "addon.granted",
+     "uk_cert": {
+      "o": {
+       "dev": true,
+       "expires_ms": 1792592000000,
+       "hub_id": "38d8abed52ccfb538da401fd54e64bdc",
+       "hv": 0,
+       "issued_ms": 1789913600000,
+       "kind": "hub.uk_cert",
+       "op_cert_id": "dd963f7365b19dba347a4ba580cc7c2b",
+       "suite": 2,
+       "uk_pub": "BF4SFZF9XTgilhkgCN-Uo4rQowEfmNi-PdkCmealCT7KAUXMJ8qzUn2IDYvV0bD6DF-Hmifxb0OgibzvYNTGmMk",
+       "user_id": "a368bd380588e5dabee62a516031e21f",
+       "v": 2
+      },
+      "sig": "tDs-OR4_RgCKGi3w6hwJqr4HW1yTzwpGWXUOBij9wvO_czqiqO81yYCS5F1dHtZPgoZ448XXG_rSh0_7hpaYNw"
+     },
+     "v": 2,
+     "version": "1.0.0"
+    },
+    "log": "workspace",
+    "now_ms": 1790000000000,
+    "snapshot": {
+     "dev": true,
+     "generation": 0,
+     "hub_id": "38d8abed52ccfb538da401fd54e64bdc",
+     "hv": 0,
+     "issued_ms": 1789999940000,
+     "kind": "hub.snapshot",
+     "market_policy": {
+      "addons": {
+       "allow": null,
+       "block": []
+      },
+      "ceiling": null,
+      "markets": [
+       {
+        "class": "official",
+        "keys": [],
+        "url": "https://github.com/severinlindenmann/orch-marketplace"
+       }
+      ]
+     },
+     "op_cert_id": "dd963f7365b19dba347a4ba580cc7c2b",
+     "revoked_channels": [],
+     "roles": {
+      "a368bd380588e5dabee62a516031e21f": "admin"
+     },
+     "suite": 2,
+     "v": 2,
+     "version": 3,
+     "workspace_id": "336afd0fd4c349f575c2ec155d7258ad"
+    },
+    "workspace_id": "336afd0fd4c349f575c2ec155d7258ad"
+   },
+   "check": "custodial",
+   "expect": {
+    "error": "not_custodial"
+   },
+   "name": "custodial_event_addon_granted_off_not_custodial",
+   "note": "addon.granted (also with off: true) is the host's",
    "phase": 4
   },
   {
