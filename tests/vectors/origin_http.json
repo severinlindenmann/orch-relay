@@ -1,0 +1,5 @@
+{
+ "doc": "relay_url / stored-origin rule: plain http only for localhost, 127.0.0.1, private IPv4 (10/8, 172.16/12, 192.168/16) and CGNAT 100.64/10; https any host. Same file in core, hub, publish, relay.",
+ "accept": ["http://localhost", "http://127.0.0.1:8100", "http://10.1.2.3", "http://172.16.0.1:8101", "http://172.31.255.255", "http://192.168.1.10:80", "http://100.64.0.1", "http://100.71.14.98:8102", "http://100.127.255.254", "https://relay.example", "https://relay.example:8443"],
+ "refuse": ["http://8.8.8.8", "http://172.15.0.1", "http://172.32.0.1", "http://192.169.0.1", "http://100.63.0.1", "http://100.128.0.1", "http://10.0.0.256", "http://10.1.2", "http://10.0.0.1.example", "http://relay.example.com", "ftp://10.0.0.1", "http://10.0.0.1/path"]
+}
